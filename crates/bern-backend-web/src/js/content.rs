@@ -161,6 +161,12 @@ impl Generator<'_> {
                 ),
                 ("total", element.number("total").map(number)),
                 ("label", self.text_prop(element, "label")),
+                (
+                    "ring",
+                    (element.keyword("style") == Some("ring")).then(|| "true".to_string())
+                ),
+                ("width", self.length(element, "width")),
+                ("strokeWidth", element.number("stroke_width").map(number)),
             ])
         ));
     }

@@ -1170,3 +1170,28 @@ fn trace_commands_answer_from_the_runtime_and_join_the_ui_side() {
     );
     unsafe { bern_app_stop(app) };
 }
+
+#[test]
+fn a_platform_request_the_user_refused_says_so() {
+    extern "C" fn answering(
+        context: *mut c_void,
+        _: *const u8,
+        _: usize,
+        _: *const u8,
+        _: usize,
+        _: *const u8,
+        _: usize,
+    ) -> i32 {
+        context as i32
+    }
+    let answer = |status: usize| {
+        let host = HostPlatform {
+            context: status,
+            request: answering,
+        };
+        bern_command::platform::Services::request(&host, "save_image", "/tmp/a.png", "")
+    };
+    assert!(answer(0).is_ok());
+    assert_eq!(answer(2).unwrap_err().code, "refused");
+    assert_eq!(answer(1).unwrap_err().code, "platform_unavailable");
+}

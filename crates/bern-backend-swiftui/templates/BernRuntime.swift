@@ -913,7 +913,8 @@ private func bernOnMediaState(_ context: UnsafeMutableRawPointer?, _ bytes: Unsa
 }
 
 /// The engine's platform requests: `copy_text` puts the text on the
-/// clipboard, on the main thread.
+/// clipboard, on the main thread; `save_image` saves a picture to the photo
+/// library, answering 2 when the user does not allow it.
 private func bernPlatformRequest(
     _ context: UnsafeMutableRawPointer?, _ operation: UnsafePointer<UInt8>?, _ operationLength: Int,
     _ first: UnsafePointer<UInt8>?, _ firstLength: Int, _ second: UnsafePointer<UInt8>?, _ secondLength: Int
@@ -927,6 +928,8 @@ private func bernPlatformRequest(
         let copied = text(first, firstLength)
         DispatchQueue.main.async { BernClipboard.copy(copied) }
         return 0
+    case "save_image":
+        return BernPhotos.save(text(first, firstLength))
     default:
         return 1
     }

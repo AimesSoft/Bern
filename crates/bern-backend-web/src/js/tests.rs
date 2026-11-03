@@ -24,6 +24,7 @@ fn app() -> Application {
             files_folder: false,
             background_audio: false,
             overlays: false,
+            photos: false,
         },
         languages: Languages {
             supported: vec!["en".into()],

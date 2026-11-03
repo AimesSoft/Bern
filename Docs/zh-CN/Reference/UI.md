@@ -334,6 +334,23 @@ macOS 与 iOS 是 SwiftUI 的 `Table`，GTK 是 `GtkColumnView`，WinUI 3 是表
 Button(id: import, label: tr! { "zh-Hans" => "从剪贴板导入", "en" => "Import from the Clipboard" }, paste: draft.pasted) => app.import_links(draft.pasted)
 ```
 
+## 相册
+
+`[app].photos = true` 让引擎用 `bern::platform::save_image(path)` 把一张 PNG 或 JPEG 存到系统保存用户照片的地方，供其他应用选用。iOS 第一次会询问用户，原因按每种支持的语言写好；Android 10 及以上不需要权限。调用会等系统的回答，引擎应在工作线程上调用；`refused` 表示用户没有允许，其他平台回答 `platform_unavailable`。
+
+## 进度环
+
+`Progress(style: ring)` 把 `value` 占 `total` 的多少画成主题色的一段弧：从顶部顺时针，两头是圆的，直径 `width`（不写是 24），粗 `stroke_width`（不写是 3）；还没开始时是顶部的一个点。它不接收输入，所以可以在 `Stack` 里压在按钮上，圈住按钮自己的符号：
+
+```rust
+Stack {
+    IconButton(id: download, icon: "arrow.down.circle", font_size: 18, prominence: plain, label: tr! { "zh-Hans" => "下载", "en" => "Download" }) => app.download()
+    if app.downloading {
+        Progress(value: app.download_progress, label: tr! { "zh-Hans" => "下载进度", "en" => "Download Progress" }, style: ring, width: 19.3, stroke_width: 3)
+    }
+}
+```
+
 ## 其他接口
 
 动画 SVG 是按需使用的独立组件，接口、资源声明、平台依赖与生命周期见[专项文档](../Implementation/Animated-SVG.md)。视频播放器、查询、模块、主题及命令协议的完整语义继续见[设计文档](../Design.md)与对应实现记录。

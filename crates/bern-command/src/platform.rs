@@ -62,6 +62,16 @@ pub fn copy_text(text: &str) -> Result<(), CommandError> {
     request("copy_text", text, "").map(|_| ())
 }
 
+/// Save the picture at `path`, a PNG or a JPEG, where the system keeps the
+/// user's photos, for other apps to pick from: the photo library on iOS,
+/// which asks the user the first time (`[app].photos` says why), and the
+/// Pictures collection on Android 10 and later. `refused` when the user
+/// does not allow it, `platform_unavailable` where there is no such place.
+/// The call waits for the system's answer: make it on a worker thread.
+pub fn save_image(path: impl AsRef<Path>) -> Result<(), CommandError> {
+    request("save_image", path_text(path.as_ref())?, "").map(|_| ())
+}
+
 /// Open a local file or a `content://` document with another application.
 /// Android grants read access only to that file. Private directories must
 /// be exported with [`export_path`] before another application can browse them.

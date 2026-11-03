@@ -304,6 +304,19 @@ impl Generator<'_> {
 
     pub(super) fn progress(&self, out: &mut Out, element: &Element) {
         let label = self.text_prop(element, "label");
+        if element.keyword("style") == Some("ring")
+            && let Some(value) = element.expr("value")
+        {
+            out.line(format!(
+                "BernProgressRing(value: Double({}), total: {}, width: {}, lineWidth: {}, label: {})",
+                self.expr(value),
+                double(element.number("total").unwrap_or(1.0)),
+                self.length(element, "width").unwrap_or_else(|| "24.0".into()),
+                double(element.number("stroke_width").unwrap_or(3.0)),
+                label.unwrap_or_else(|| "nil".into())
+            ));
+            return;
+        }
         let head = match element.expr("value") {
             Some(value) => {
                 let total = double(element.number("total").unwrap_or(1.0));

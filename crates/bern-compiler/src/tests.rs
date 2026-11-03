@@ -2003,6 +2003,14 @@ fn image_and_progress_diagnostics() {
         ),
         (r#"Progress(total: 5)"#, "`total:` needs a `value:`"),
         (
+            r#"Progress(style: ring, width: 20)"#,
+            "`style: ring` draws how far `value:` is",
+        ),
+        (
+            r#"Progress(value: 0.5, stroke_width: 3)"#,
+            "`stroke_width:` sizes a ring",
+        ),
+        (
             r#"Grid(min_width: -4) { Spacer }"#,
             "`min_width` must be above zero",
         ),

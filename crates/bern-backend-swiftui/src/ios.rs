@@ -682,6 +682,8 @@ fn swiftc(
         "AVFoundation".into(),
         "-framework".into(),
         "AVKit".into(),
+        "-framework".into(),
+        "Photos".into(),
         "-module-cache-path".into(),
         path(&context.workspace_dir.join("target/bern-swift-module-cache")),
     ];

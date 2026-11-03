@@ -312,6 +312,15 @@ pub fn appear(app: &Application, name: &str) -> Option<String> {
     })
 }
 
+/// The edge the transition `name` moves its element in from or out to, its
+/// whole size away, as a sheet comes up.
+pub fn whole_move_edge(app: &Application, name: &str) -> Option<String> {
+    match &app.style.transition(name)?.kind {
+        bern_ir::style::TransitionKind::Move { edge } => Some(transition_edge(edge).to_string()),
+        _ => None,
+    }
+}
+
 pub fn transition(app: &Application, name: &str) -> Option<(String, String)> {
     use bern_ir::style::TransitionKind;
     let def = app.style.transition(name)?;

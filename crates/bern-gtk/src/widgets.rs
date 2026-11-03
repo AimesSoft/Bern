@@ -2336,12 +2336,21 @@ pub struct ProgressProps {
     pub value: Option<Get>,
     pub total: Option<f64>,
     pub label: Option<Str>,
+    /// `style: ring`, `width` across and `stroke_width` thick.
+    pub ring: bool,
+    pub width: Option<f64>,
+    pub stroke_width: Option<f64>,
 }
 
 /// A progress bar of `value` out of `total` under its label, or without a
 /// value a spinner beside it.
 #[allow(non_snake_case)]
 pub fn Progress(p: &Parent, ctx: &Ctx, props: ProgressProps) {
+    if props.ring
+        && let Some(value) = props.value.clone()
+    {
+        return progress_ring(p, ctx, value, &props);
+    }
     let label = props.label.as_ref().map(|text| {
         let label = gtk::Label::new(None);
         label.set_xalign(0.0);
@@ -2386,6 +2395,55 @@ pub fn Progress(p: &Parent, ctx: &Ctx, props: ProgressProps) {
         }
     };
     place(p, &container);
+}
+
+/// `Progress(style: ring)`: an arc in the accent from the top, clockwise,
+/// with round ends; at nothing yet, a dot at the top. It lies over what it
+/// rings and takes no input.
+fn progress_ring(p: &Parent, ctx: &Ctx, value: Get, props: &ProgressProps) {
+    let size = props.width.unwrap_or(24.0);
+    let stroke = props.stroke_width.unwrap_or(3.0);
+    let total = props.total.unwrap_or(1.0);
+    let area: gtk::DrawingArea = gtk::glib::Object::builder()
+        .property("accessible-role", gtk::AccessibleRole::ProgressBar)
+        .build();
+    area.set_content_width(size.round() as i32);
+    area.set_content_height(size.round() as i32);
+    area.set_halign(gtk::Align::Center);
+    area.set_valign(gtk::Align::Center);
+    area.set_can_target(false);
+    let fraction = Rc::new(Cell::new(0.0_f64));
+    let drawn = Rc::clone(&fraction);
+    area.set_draw_func(move |area, cr, width, height| {
+        let color = crate::theme::rgba(&crate::theme::Color::Role("accent"), area.upcast_ref());
+        cr.set_source_rgba(color.red().into(), color.green().into(), color.blue().into(), color.alpha().into());
+        cr.set_line_width(stroke);
+        cr.set_line_cap(gtk::cairo::LineCap::Round);
+        let (w, h) = (f64::from(width), f64::from(height));
+        let start = -std::f64::consts::FRAC_PI_2;
+        let sweep = drawn.get().max(0.0001) * std::f64::consts::TAU;
+        cr.arc(w / 2.0, h / 2.0, (w.min(h) - stroke) / 2.0, start, start + sweep);
+        let _ = cr.stroke();
+    });
+    let shown = area.clone();
+    let at = ctx.clone();
+    effect(move || {
+        crate::theme::track();
+        let current = if total > 0.0 { (as_f64(&value(&at)) / total).clamp(0.0, 1.0) } else { 0.0 };
+        fraction.set(current);
+        shown.update_property(&[
+            gtk::accessible::Property::ValueMin(0.0),
+            gtk::accessible::Property::ValueMax(1.0),
+            gtk::accessible::Property::ValueNow(current),
+        ]);
+        shown.queue_draw();
+    });
+    if let Some(label) = props.label.as_ref() {
+        let label = bound_text(ctx, label);
+        let named = area.clone();
+        effect(move || named.update_property(&[gtk::accessible::Property::Label(&label())]));
+    }
+    place(p, &area);
 }
 
 #[allow(non_snake_case)]

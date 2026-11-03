@@ -1,7 +1,7 @@
 //! Motion: transitions, shared elements, reflow and the other motion
 //! properties.
 
-use super::{Generator, Out};
+use super::{Generator, Out, Platform};
 use crate::names::{double, member, string};
 use bern_ir::{Element, Node, Prop};
 use bern_protocol::Type;
@@ -108,7 +108,7 @@ impl Generator<'_> {
                 None => ("nil".into(), "nil".into()),
             };
             let (insertion, insertion_motion) = part(&appear);
-            let (removal, removal_motion) = part(&disappear);
+            let (mut removal, removal_motion) = part(&disappear);
             let manual = element
                 .keyword("appear")
                 .and_then(|name| crate::style::appear(self.app, name))
@@ -121,8 +121,28 @@ impl Generator<'_> {
                 .or((on_appear || element.kind == "Modal").then_some(0.0))
                 .map(|delay| format!(", delay: {}", double(delay)))
                 .unwrap_or_default();
+            // A page moving across an iPhone's window, as a sheet comes up,
+            // fills the window under its bars while it moves (see
+            // `BernWholeWindow`), stops at the edge coming in and goes out
+            // past it (`BernMoveIn`, `BernMoveOut`). A layer under the bars
+            // fills the window already.
+            let edge = |key: &str| {
+                element
+                    .keyword(key)
+                    .and_then(|name| crate::style::whole_move_edge(self.app, name))
+            };
+            let page = self.platform == Platform::Ios
+                && (edge("appear").is_some() || edge("disappear").is_some())
+                && element.kind == "Stack"
+                && element.prop("width").is_none()
+                && element.prop("height").is_none()
+                && element.keyword("under_bars") != Some("true");
+            let (whole, whole_arg) = if page { (".bernWholeWindow()", ", whole: true") } else { ("", "") };
+            if let Some(edge) = edge("disappear").filter(|_| page) {
+                removal = format!("AnyTransition.bernMoveOut(edge: {edge})");
+            }
             return Some(format!(
-                ".bernTransition(insertion: {insertion}, insertionMotion: {insertion_motion}, removal: {removal}, removalMotion: {removal_motion}{manual}{delay})"
+                "{whole}.bernTransition(insertion: {insertion}, insertionMotion: {insertion_motion}, removal: {removal}, removalMotion: {removal_motion}{manual}{delay}{whole_arg})"
             ));
         }
         None

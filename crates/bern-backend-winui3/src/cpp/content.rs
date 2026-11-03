@@ -123,6 +123,12 @@ impl Generator<'_> {
                 ),
                 ("total", Self::number(element, "total")),
                 ("label", self.text_prop(element, "label")),
+                (
+                    "ring",
+                    (element.keyword("style") == Some("ring")).then(|| "true".to_string())
+                ),
+                ("width", Self::number(element, "width")),
+                ("strokeWidth", Self::number(element, "stroke_width")),
             ])
         ));
     }

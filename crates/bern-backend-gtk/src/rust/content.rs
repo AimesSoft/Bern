@@ -102,10 +102,13 @@ impl Generator<'_> {
 
     pub(super) fn progress(&self, out: &mut Out, element: &Element) {
         out.line(format!(
-            "b::Progress(p, c, b::ProgressProps {{ value: {}, total: {}, label: {} }});",
+            "b::Progress(p, c, b::ProgressProps {{ value: {}, total: {}, label: {}, ring: {}, width: {}, stroke_width: {} }});",
             some(element.expr("value").map(|value| self.getter(value))),
             Self::number(element, "total"),
             some(self.text_prop(element, "label")),
+            element.keyword("style") == Some("ring"),
+            Self::number(element, "width"),
+            Self::number(element, "stroke_width"),
         ));
     }
 

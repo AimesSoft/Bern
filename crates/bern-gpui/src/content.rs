@@ -5,7 +5,8 @@ use crate::El;
 use crate::ctx::Ctx;
 use crate::units::px;
 use gpui::{
-    FontWeight, IntoElement, ObjectFit, ParentElement, Styled, StyledImage, div, img, relative,
+    FontWeight, IntoElement, ObjectFit, ParentElement, PathBuilder, Styled, StyledImage, canvas,
+    div, img, point, relative,
 };
 
 /// `Text.style`, after the Web specification's type scale.
@@ -659,6 +660,47 @@ pub enum Fit {
     Cover,
     /// The frame, stretched.
     Fill,
+}
+
+/// `Progress(style: ring)`: `value` of `total` as an arc in the accent from
+/// the top, clockwise, with round ends, `width` across and `stroke` thick;
+/// at nothing yet, a dot at the top. It lies over what it rings and takes
+/// no input. The round ends are discs: the path's stroke has flat ends, and
+/// an arc cannot close on itself, so a whole ring stops just short.
+pub fn progress_ring(c: &Ctx, value: f64, total: f64, width: f32, stroke: f32) -> El {
+    let fraction = if total > 0.0 { (value / total).clamp(0.0, 1.0) as f32 } else { 0.0 };
+    let color = c.color("accent");
+    canvas(
+        |_, _, _| {},
+        move |bounds, _, window, _| {
+            let shown = fraction.clamp(0.0001, 0.9999);
+            let center = bounds.center();
+            let radius = (bounds.size.width.min(bounds.size.height) - px(stroke)) / 2.0;
+            let angle = shown * std::f32::consts::TAU;
+            let start = point(center.x, center.y - radius);
+            let end = point(center.x + radius * angle.sin(), center.y - radius * angle.cos());
+            let mut arc = PathBuilder::stroke(px(stroke));
+            arc.move_to(start);
+            arc.arc_to(point(radius, radius), px(0.0), shown > 0.5, true, end);
+            if let Ok(path) = arc.build() {
+                window.paint_path(path, color);
+            }
+            let cap = px(stroke / 2.0);
+            for at in [start, end] {
+                let mut disc = PathBuilder::fill();
+                disc.move_to(point(at.x - cap, at.y));
+                disc.arc_to(point(cap, cap), px(0.0), false, true, point(at.x + cap, at.y));
+                disc.arc_to(point(cap, cap), px(0.0), false, true, point(at.x - cap, at.y));
+                disc.close();
+                if let Ok(path) = disc.build() {
+                    window.paint_path(path, color);
+                }
+            }
+        },
+    )
+    .flex_none()
+    .size(px(width))
+    .into_any_element()
 }
 
 /// `Progress`: a bar filled by `value` of `total`, or an indeterminate one

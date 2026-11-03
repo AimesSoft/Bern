@@ -163,7 +163,10 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "aspect",
         ],
     ),
-    ("Progress", &["value", "total", "label"]),
+    (
+        "Progress",
+        &["value", "total", "label", "style", "width", "stroke_width"],
+    ),
     (
         "Button",
         &[
@@ -2421,6 +2424,22 @@ pub fn app() -> b::AppDef {{
                     self.optional_length(element, "width"),
                     self.optional_length(element, "height"),
                     self.optional_length(element, "corner"),
+                )
+            }
+            "Progress"
+                if element.keyword("style") == Some("ring")
+                    && let Some(value) = element.expr("value") =>
+            {
+                format!(
+                    "b::progress_ring(c, rt::as_f64(&{}), {}, {}, {})",
+                    self.expr(value, at),
+                    element
+                        .number("total")
+                        .map(|total| format!("{total:?}"))
+                        .unwrap_or_else(|| "1.0".into()),
+                    self.length_value(element, "width")
+                        .unwrap_or_else(|| "24.0".into()),
+                    float(element.number("stroke_width").unwrap_or(3.0)),
                 )
             }
             "Progress" => format!(

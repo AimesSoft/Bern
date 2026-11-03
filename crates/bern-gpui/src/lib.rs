@@ -57,7 +57,9 @@ pub use bern_ffi::protocol;
 pub use canvas::{
     Band, Fade, Op, PatternOp, SeriesOp, ShapeKind, ShapeOp, canvas_element as canvas,
 };
-pub use content::{Emphasis, Fit, TextProps, TextStyle, image, image_url, label, progress, text};
+pub use content::{
+    Emphasis, Fit, TextProps, TextStyle, image, image_url, label, progress, progress_ring, text,
+};
 pub use controls::{
     ButtonProps, IconButtonProps, InputKind, InputProps, PickerStyle, Prominence, Role,
     SwitchProps, SwitchStyle, button, button_with, drop_area, icon_button, language_picker, picker,

@@ -2869,8 +2869,31 @@ export function Image(p, ctx, { source, label, width, height, fit }) {
 }
 
 /// A progress bar of `value` out of `total`, or without a value an
-/// indeterminate spinner.
-export function Progress(p, ctx, { value, total, label }) {
+/// indeterminate spinner. `ring`: an arc in the accent from the top,
+/// clockwise, with round ends, `width` across and `strokeWidth` thick; at
+/// nothing yet, a dot at the top. It lies over what it rings and takes no
+/// input.
+export function Progress(p, ctx, { value, total, label, ring, width, strokeWidth }) {
+  if (ring && value) {
+    // A width that follows the engine is read once: a ring keeps its size.
+    const size = (typeof width === "function" ? width() : width) ?? 24, stroke = strokeWidth ?? 3, max = total ?? 1;
+    const svg = document.createElementNS(SVG, "svg");
+    for (const [attribute, v] of [["viewBox", `0 0 ${size} ${size}`], ["width", size], ["height", size],
+      ["class", "bern-progress-ring"], ["role", "progressbar"], ["aria-valuemin", "0"], ["aria-valuemax", String(max)]]) svg.setAttribute(attribute, v);
+    const arc = document.createElementNS(SVG, "circle");
+    for (const [attribute, v] of [["cx", size / 2], ["cy", size / 2], ["r", (size - stroke) / 2], ["fill", "none"],
+      ["stroke-width", stroke], ["stroke-linecap", "round"], ["pathLength", "100"],
+      ["transform", `rotate(-90 ${size / 2} ${size / 2})`]]) arc.setAttribute(attribute, v);
+    svg.append(arc);
+    if (label) bindAttr(svg, "aria-label", label);
+    effect(() => {
+      const current = Math.min(Math.max(Number(value()) || 0, 0), max);
+      arc.setAttribute("stroke-dasharray", `${Math.max((current / max) * 100, 0.01)} 100`);
+      svg.setAttribute("aria-valuenow", String(current));
+    });
+    p.append(svg);
+    return;
+  }
   const caption = label ? el("span", { class: "bern-progress-label" }) : null;
   if (label) bindText(caption, label);
   let indicator;

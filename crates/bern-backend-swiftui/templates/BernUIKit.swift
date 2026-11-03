@@ -11,6 +11,9 @@
 // background — is reported to the session runtime as a fact.
 
 import AVKit
+#if os(iOS)
+import Photos
+#endif
 import SwiftUI
 import UIKit
 import UIKit.UIGestureRecognizerSubclass
@@ -389,6 +392,7 @@ struct BernVirtualHost<Window: View>: View {
                 BernClosedPrimary()
             }
         }
+        .bernWindowInsetsRoot()
         .modifier(BernSheets(depth: 0, window: window))
         .modifier(BernSnapshotScheme())
         .task { host.openInitial(initial) }
@@ -1776,6 +1780,49 @@ struct BernIconChoice: ViewModifier {
     }
 }
 
+
+// MARK: - Photos
+
+#if os(iOS)
+/// The engine's `save_image`: a picture into the photo library, asking only
+/// to add to it. The engine asks from a worker thread and waits here for
+/// the user's answer and the library's; without `[app].photos` the
+/// Info.plist does not say why, and iOS would end the app for asking.
+enum BernPhotos {
+    private final class Answer: @unchecked Sendable {
+        var status: Int32 = 1
+    }
+
+    static func save(_ path: String) -> Int32 {
+        guard !Thread.isMainThread,
+              Bundle.main.object(forInfoDictionaryKey: "NSPhotoLibraryAddUsageDescription") != nil,
+              FileManager.default.fileExists(atPath: path)
+        else { return 1 }
+        let answer = Answer()
+        let done = DispatchSemaphore(value: 0)
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { access in
+            guard access == .authorized || access == .limited else {
+                answer.status = 2
+                done.signal()
+                return
+            }
+            PHPhotoLibrary.shared().performChanges {
+                _ = PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: URL(fileURLWithPath: path))
+            } completionHandler: { saved, _ in
+                answer.status = saved ? 0 : 1
+                done.signal()
+            }
+        }
+        done.wait()
+        return answer.status
+    }
+}
+#else
+/// tvOS keeps no photos for other apps.
+enum BernPhotos {
+    static func save(_ path: String) -> Int32 { 1 }
+}
+#endif
 
 // MARK: - Clipboard
 

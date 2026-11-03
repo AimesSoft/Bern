@@ -1772,14 +1772,16 @@ private func bernIndicator(_ color: Color, edge: Edge, width: Double) -> some Vi
 extension View {
     /// How the element appears and disappears, each moved by its spring;
     /// a short fade when motion is reduced.
+    /// A page across the whole window (`whole`) stops at its edge as it
+    /// comes in: see `BernMoveIn`.
     func bernTransition(
         insertion: AnyTransition?, insertionMotion: BernMotion?,
         removal: AnyTransition?, removalMotion: BernMotion?, appear: BernAppear? = nil,
-        delay: Double? = nil
+        delay: Double? = nil, whole: Bool = false
     ) -> some View {
         modifier(BernTransitionModifier(
             insertion: insertion, insertionMotion: insertionMotion,
-            removal: removal, removalMotion: removalMotion, appear: appear, delay: delay))
+            removal: removal, removalMotion: removalMotion, appear: appear, delay: delay, whole: whole))
     }
 
     /// One of the elements sharing `id` in a window: when one replaces
@@ -1842,6 +1844,154 @@ private struct BernScrollEntrance: ViewModifier {
     }
 }
 
+// MARK: - Progress ring
+
+/// `Progress(style: ring)`: how far `value` is of `total`, as an arc in the
+/// accent from the top, clockwise, with round ends, `width` across and
+/// `lineWidth` thick; at nothing yet, a dot at the top, so it is seen to
+/// have started. It lies over what it rings, such as a symbol's own
+/// circle, and takes no input.
+struct BernProgressRing: View {
+    let value: Double
+    let total: Double
+    let width: Double
+    let lineWidth: Double
+    let label: String?
+    @Environment(\.bernAccent) private var accent
+
+    var body: some View {
+        let fraction = total > 0 ? min(max(value / total, 0), 1) : 0
+        Circle()
+            .trim(from: 0, to: max(fraction, 0.0001))
+            .stroke(accent ?? .accentColor, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+            .rotationEffect(.degrees(-90))
+            .padding(lineWidth / 2)
+            .frame(width: width, height: width)
+            .animation(.easeOut(duration: 0.25), value: fraction)
+            .allowsHitTesting(false)
+            .accessibilityElement()
+            .accessibilityLabel(SwiftUI.Text(verbatim: label ?? ""))
+            .accessibilityValue(SwiftUI.Text(verbatim: "\(Int((fraction * 100).rounded()))%"))
+    }
+}
+
+// MARK: - Whole-window pages
+
+private struct BernWindowInsetsKey: EnvironmentKey {
+    static let defaultValue = EdgeInsets()
+}
+
+extension EnvironmentValues {
+    /// How far the window's bars reach in, such as a phone's status bar and
+    /// home indicator.
+    var bernWindowInsets: EdgeInsets {
+        get { self[BernWindowInsetsKey.self] }
+        set { self[BernWindowInsetsKey.self] = newValue }
+    }
+}
+
+extension View {
+    /// Where a window measures its bars, for the pages moving across it.
+    func bernWindowInsetsRoot() -> some View {
+        modifier(BernWindowInsetsRoot())
+    }
+
+    /// A page moving across the whole window: see `BernWholeWindow`.
+    func bernWholeWindow() -> some View {
+        modifier(BernWholeWindow())
+    }
+}
+
+/// The window's bars, measured on a layer under them that never moves.
+private struct BernWindowInsetsRoot: ViewModifier {
+    @State private var insets = EdgeInsets()
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.bernWindowInsets, insets)
+            .background {
+                Color.clear
+                    .ignoresSafeArea(.container)
+                    .onGeometryChange(for: EdgeInsets.self) { $0.safeAreaInsets } action: { insets = $0 }
+            }
+    }
+}
+
+/// A page that moves in or out across the window, as a sheet comes up,
+/// fills the window under its bars and keeps its content out from under
+/// them itself. Laid out within the bars, it would move only its own
+/// height, leaving what it draws under the bars on screen at the end; and
+/// what it draws there would come and go on the way, as whether it
+/// reaches the bars is decided where it stands at each moment.
+private struct BernWholeWindow: ViewModifier {
+    @Environment(\.bernWindowInsets) private var insets
+
+    func body(content: Content) -> some View {
+        content
+            .safeAreaPadding(insets)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .ignoresSafeArea(.container)
+    }
+}
+
+/// A page across the whole window coming in from `edge`: it stops at the
+/// edge, where a spring would carry it past, lifting it off the far edge
+/// and showing what lies behind for a moment.
+private struct BernMoveIn: AnimatableModifier {
+    let edge: Edge
+    nonisolated var progress: Double
+
+    nonisolated var animatableData: Double {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func body(content: Content) -> some View {
+        let away = 1 - min(progress, 1)
+        let edge = edge
+        return content.visualEffect { content, proxy in
+            content.offset(bernAway(edge, size: proxy.size, by: away))
+        }
+    }
+}
+
+/// A page across the whole window going out to `edge`: a tenth of its size
+/// past it, so the slow end of its spring passes off screen instead of
+/// keeping its last strip at the edge. A geometry effect, as SwiftUI's own
+/// move: a view on its way out is drawn on, not built again.
+private struct BernMoveOut: GeometryEffect {
+    let edge: Edge
+    nonisolated var progress: Double
+
+    nonisolated var animatableData: Double {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    nonisolated func effectValue(size: CGSize) -> ProjectionTransform {
+        let away = bernAway(edge, size: size, by: progress * 1.1)
+        return ProjectionTransform(CGAffineTransform(translationX: away.width, y: away.height))
+    }
+}
+
+/// `by` times `size` away beyond `edge`.
+nonisolated private func bernAway(_ edge: Edge, size: CGSize, by fraction: Double) -> CGSize {
+    switch edge {
+    case .top: CGSize(width: 0, height: -size.height * fraction)
+    case .bottom: CGSize(width: 0, height: size.height * fraction)
+    case .leading: CGSize(width: -size.width * fraction, height: 0)
+    case .trailing: CGSize(width: size.width * fraction, height: 0)
+    }
+}
+
+extension AnyTransition {
+    /// Out to beyond `edge`, for a page across the whole window: see
+    /// `BernMoveOut`.
+    static func bernMoveOut(edge: Edge) -> AnyTransition {
+        .modifier(active: BernMoveOut(edge: edge, progress: 1), identity: BernMoveOut(edge: edge, progress: 0))
+    }
+}
+
 private struct BernTransitionModifier: ViewModifier {
     let insertion: AnyTransition?
     let insertionMotion: BernMotion?
@@ -1850,13 +2000,14 @@ private struct BernTransitionModifier: ViewModifier {
     /// The appearing, for when a staggering container sets the turns.
     let appear: BernAppear?
     let delay: Double?
+    let whole: Bool
     @BernReducedMotion private var reduce
     @Environment(\.bernStagger) private var stagger
 
     func body(content: Content) -> some View {
         if let appear, stagger != nil || delay != nil || appear.entersItself {
             content
-                .modifier(BernEntrance(appear: appear, motion: insertionMotion, clock: stagger, delay: delay))
+                .modifier(BernEntrance(appear: appear, motion: insertionMotion, clock: stagger, delay: delay, whole: whole))
                 .transition(.asymmetric(
                     insertion: .identity,
                     removal: (removal ?? .identity).animation(removalMotion?.animation)))
@@ -3276,10 +3427,13 @@ extension AnyTransition {
 private struct BernEntranceLook: ViewModifier {
     let appear: BernAppear
     let shown: Bool
+    var whole = false
 
     @ViewBuilder func body(content: Content) -> some View {
         if case .grow(let edge) = appear {
             content.modifier(BernGrow(edge: edge, progress: shown ? 1 : 0))
+        } else if case .move(let edge) = appear, whole {
+            content.modifier(BernMoveIn(edge: edge, progress: shown ? 1 : 0))
         } else if case .move(let edge) = appear {
             let shown = shown
             content.visualEffect { content, proxy in
@@ -3382,6 +3536,7 @@ struct BernEntrance: ViewModifier {
     let motion: BernMotion?
     let clock: BernStaggerClock?
     let delay: Double?
+    var whole = false
     @Environment(BernWindowContext.self) private var window
     @BernReducedMotion private var reduce
     @Environment(\.layoutDirection) private var direction
@@ -3395,7 +3550,7 @@ struct BernEntrance: ViewModifier {
             .onGeometryChange(for: CGRect.self) { measuring ? $0.frame(in: .global) : .zero } action: {
                 if !shown { place.frame = $0 }
             }
-            .modifier(BernEntranceLook(appear: appear, shown: shown || reduce || bernForcedReduceMotion))
+            .modifier(BernEntranceLook(appear: appear, shown: shown || reduce || bernForcedReduceMotion, whole: whole))
             .task(id: window.settled) {
                 guard !shown else { return }
                 if reduce || bernForcedReduceMotion || (!window.settled && delay == nil && !appear.grows) {

@@ -204,6 +204,18 @@ impl Generator<'_> {
         let label = self
             .text_prop(element, "label")
             .unwrap_or_else(|| "null".into());
+        if element.keyword("style") == Some("ring")
+            && let Some(value) = element.expr("value")
+        {
+            out.line(format!(
+                "BernProgressRing(({}).toDouble(), {}, {}, {}, {label})",
+                self.expr(value),
+                double(element.number("total").unwrap_or(1.0)),
+                self.length(element, "width").unwrap_or_else(|| "24.dp".into()),
+                double(element.number("stroke_width").unwrap_or(3.0)),
+            ));
+            return;
+        }
         let value = element
             .expr("value")
             .map(|value| format!("({}).toDouble()", self.expr(value)))

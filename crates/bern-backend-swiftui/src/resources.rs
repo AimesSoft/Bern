@@ -160,17 +160,41 @@ pub fn check_declared(app: &Application, platform: Platform) -> Vec<Diagnostic> 
     diagnostics
 }
 
-/// `InfoPlist.strings` contents per language, localizing the app name.
+/// Why the application adds to the photo library (`[app].photos`), as iOS
+/// says it when it asks the user.
+const PHOTOS_USAGE: &[(&str, &str)] = &[
+    ("zh-Hans", "把图片存到你的相册。"),
+    ("zh-Hant", "把圖片存到你的相簿。"),
+    ("en", "Saves pictures to your photo library."),
+    ("ja", "画像を写真ライブラリに保存します。"),
+    ("ko", "이미지를 사진 보관함에 저장합니다."),
+    ("ru", "Сохраняет изображения в вашу медиатеку."),
+    ("de", "Speichert Bilder in deiner Fotomediathek."),
+    ("fr", "Enregistre des images dans votre photothèque."),
+    ("es", "Guarda imágenes en tu fototeca."),
+    ("pt-BR", "Salva imagens na sua fototeca."),
+    ("it", "Salva immagini nella tua libreria foto."),
+    ("tr", "Görüntüleri fotoğraf arşivinize kaydeder."),
+    ("vi", "Lưu ảnh vào thư viện ảnh của bạn."),
+    ("pl", "Zapisuje obrazy w bibliotece zdjęć."),
+    ("uk", "Зберігає зображення у вашу медіатеку."),
+    ("id", "Menyimpan gambar ke perpustakaan foto Anda."),
+];
+
+/// `InfoPlist.strings` contents per language, localizing the app name and,
+/// with `[app].photos`, why it adds to the photo library.
 pub fn info_plist_tables(app: &Application) -> BTreeMap<String, String> {
     app.languages
         .supported
         .iter()
         .map(|language| {
             let name = escape_strings(translation(&app.app.name, language, &app.languages.default));
-            (
-                language.clone(),
-                format!("CFBundleName = \"{name}\";\nCFBundleDisplayName = \"{name}\";\n"),
-            )
+            let mut table = format!("CFBundleName = \"{name}\";\nCFBundleDisplayName = \"{name}\";\n");
+            if app.app.photos {
+                let usage = escape_strings(framework(PHOTOS_USAGE, language));
+                table.push_str(&format!("NSPhotoLibraryAddUsageDescription = \"{usage}\";\n"));
+            }
+            (language.clone(), table)
         })
         .collect()
 }
@@ -500,7 +524,7 @@ pub fn info_plist_ios(app: &Application, executable: &str, minimum_ios: &str) ->
         <string>UIInterfaceOrientationPortraitUpsideDown</string>
         <string>UIInterfaceOrientationLandscapeLeft</string>
         <string>UIInterfaceOrientationLandscapeRight</string>
-    </array>{documents}{files}{audio}
+    </array>{documents}{files}{audio}{photos}
 </dict>
 </plist>
 "#,
@@ -515,6 +539,14 @@ pub fn info_plist_ios(app: &Application, executable: &str, minimum_ios: &str) ->
             "\n    <key>UIBackgroundModes</key>\n    <array>\n        <string>audio</string>\n    </array>"
         } else {
             ""
+        },
+        photos = if app.app.photos {
+            format!(
+                "\n    <key>NSPhotoLibraryAddUsageDescription</key>\n    <string>{}</string>",
+                xml(framework(PHOTOS_USAGE, &app.languages.default))
+            )
+        } else {
+            String::new()
         },
     )
 }
@@ -702,5 +734,25 @@ mod tests {
         let ios = info_plist_ios(&hello, "Hello", "17.0");
         assert!(ios.contains("<key>CFBundleDocumentTypes</key>"), "{ios}");
         assert!(ios.contains("<string>public.movie</string>"), "{ios}");
+    }
+
+    #[test]
+    fn an_app_that_saves_photos_says_why_in_each_language() {
+        let mut hello = app("hello");
+        let key = "NSPhotoLibraryAddUsageDescription";
+        assert!(!info_plist_ios(&hello, "Hello", "17.0").contains(key));
+        assert!(info_plist_tables(&hello).values().all(|table| !table.contains(key)));
+        hello.app.photos = true;
+        let plist = info_plist_ios(&hello, "Hello", "17.0");
+        let default = framework(PHOTOS_USAGE, &hello.languages.default);
+        assert!(plist.contains(&format!("<key>{key}</key>\n    <string>{default}</string>")), "{plist}");
+        for (language, table) in info_plist_tables(&hello) {
+            let usage = framework(PHOTOS_USAGE, &language);
+            assert!(table.contains(&format!("{key} = \"{usage}\";")), "{language}: {table}");
+        }
+        // Every language the runtimes speak has its own words.
+        for language in framework_languages() {
+            assert!(PHOTOS_USAGE.iter().any(|(candidate, _)| *candidate == language), "{language}");
+        }
     }
 }

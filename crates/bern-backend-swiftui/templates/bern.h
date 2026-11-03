@@ -28,8 +28,9 @@ typedef struct {
 } BernCallbacks;
 
 // Platform requests of the engine, such as `copy_text`: `request` gets the
-// operation and two texts (UTF-8) and answers 0 when done. Call before
-// `bern_app_start`; `request` may run on any thread.
+// operation and two texts (UTF-8) and answers 0 when done, 2 when the user
+// did not allow it. Call before `bern_app_start`; `request` may run on any
+// thread.
 void bern_platform_install(void *context, int32_t (*request)(void *context, const uint8_t *operation, size_t operation_len, const uint8_t *first, size_t first_len, const uint8_t *second, size_t second_len));
 // `resources`: UTF-8 path of the bundle directory holding the declared
 // resource files, or NULL with length 0.

@@ -2106,6 +2106,14 @@ struct BernIconChoice: ViewModifier {
 }
 
 
+// MARK: - Photos
+
+/// A Mac's pictures are files the user saves where they like; the engine's
+/// `save_image` is for phones.
+enum BernPhotos {
+    static func save(_ path: String) -> Int32 { 1 }
+}
+
 // MARK: - Clipboard
 
 /// The general pasteboard: `copy_text` of the engine, `paste:` of controls.

@@ -105,6 +105,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.unit.Constraints
@@ -1215,6 +1216,32 @@ fun BernLanguagePicker(label: String, target: String, labelHidden: Boolean = fal
 }
 
 // MARK: - Progress and pictures
+
+/// `Progress(style: ring)`: how far `value` is of `total`, as an arc in the
+/// accent from the top, clockwise, with round ends, `width` across and
+/// `strokeWidth` thick; at nothing yet, a dot at the top. It lies over what
+/// it rings and takes no input.
+@Composable
+fun BernProgressRing(value: Double, total: Double, width: androidx.compose.ui.unit.Dp, strokeWidth: Double, label: String?) {
+    val fraction = if (total > 0) (value / total).coerceIn(0.0, 1.0).toFloat() else 0f
+    val shown by androidx.compose.animation.core.animateFloatAsState(
+        fraction, androidx.compose.animation.core.tween(250), label = "ring")
+    val accent = MaterialTheme.colorScheme.primary
+    androidx.compose.foundation.Canvas(
+        Modifier.size(width).semantics {
+            progressBarRangeInfo = androidx.compose.ui.semantics.ProgressBarRangeInfo(fraction, 0f..1f)
+            if (label != null) contentDescription = label
+        }
+    ) {
+        val stroke = strokeWidth.dp.toPx()
+        drawArc(
+            accent, -90f, maxOf(shown * 360f, 0.01f), false,
+            topLeft = Offset(stroke / 2, stroke / 2),
+            size = androidx.compose.ui.geometry.Size(size.width - stroke, size.height - stroke),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round),
+        )
+    }
+}
 
 @Composable
 fun BernProgress(value: Double?, total: Double, label: String?) {

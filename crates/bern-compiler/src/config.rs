@@ -231,6 +231,9 @@ struct RawApp {
     /// The application draws text over other apps (`bern::overlay`).
     #[serde(default)]
     overlays: bool,
+    /// The application saves pictures to the user's photos.
+    #[serde(default)]
+    photos: bool,
 }
 
 /// `[app].icon`: one square PNG for every platform, or `[app.icon]` with
@@ -353,6 +356,8 @@ pub struct Config {
     pub background_audio: bool,
     /// `[app].overlays`.
     pub overlays: bool,
+    /// `[app].photos`.
+    pub photos: bool,
     pub languages: Vec<String>,
     pub default_language: String,
     pub strict: bool,
@@ -1505,6 +1510,7 @@ pub fn load_excluding(path: &Path, excluded: &[String]) -> Result<Config, Vec<Di
         files_folder: raw.app.files_folder,
         background_audio: raw.app.background_audio,
         overlays: raw.app.overlays,
+        photos: raw.app.photos,
         languages: raw.languages.supported,
         default_language: raw.languages.default,
         strict: raw.languages.strict,

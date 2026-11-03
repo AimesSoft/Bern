@@ -1096,6 +1096,16 @@ button:disabled {
   transition: width var(--bern-motion);
 }
 
+.bern-progress-ring {
+  flex: none;
+  pointer-events: none;
+  stroke: var(--bern-accent);
+}
+
+.bern-progress-ring circle {
+  transition: stroke-dasharray var(--bern-motion);
+}
+
 .bern-divider {
   align-self: stretch;
   margin: 0;

@@ -2815,12 +2815,60 @@ struct ProgressProps {
     Get value;
     std::optional<double> total;
     Str label;
+    /// `style: ring`, `width` across and `strokeWidth` thick.
+    bool ring = false;
+    std::optional<double> width;
+    std::optional<double> strokeWidth;
 };
+
+/// `Progress(style: ring)`: an arc in the accent from the top, clockwise,
+/// with round ends; at nothing yet, a dot at the top. It lies over what it
+/// rings and takes no input. An arc segment cannot close on itself, so a
+/// whole ring stops just short of its start, under its round end.
+inline void ProgressRingOf(Parent const& p, Ctx const& ctx, ProgressProps const& props, TextFn const& label) {
+    double size = props.width.value_or(24), stroke = props.strokeWidth.value_or(3), total = props.total.value_or(1);
+    double radius = (size - stroke) / 2, center = size / 2;
+    xaml::Shapes::Path path;
+    path.Width(size);
+    path.Height(size);
+    path.StrokeThickness(stroke);
+    path.StrokeStartLineCap(media::PenLineCap::Round);
+    path.StrokeEndLineCap(media::PenLineCap::Round);
+    path.IsHitTestVisible(false);
+    path.HorizontalAlignment(xaml::HorizontalAlignment::Center);
+    path.VerticalAlignment(xaml::VerticalAlignment::Center);
+    if (auto style = Styles::Themed(L"Path", {{L"Stroke", RoleKey("accent")}})) path.Style(style);
+    media::ArcSegment arc;
+    arc.Size(winrt::Windows::Foundation::Size{static_cast<float>(radius), static_cast<float>(radius)});
+    arc.SweepDirection(media::SweepDirection::Clockwise);
+    media::PathFigure figure;
+    figure.IsClosed(false);
+    figure.IsFilled(false);
+    figure.StartPoint(winrt::Windows::Foundation::Point{static_cast<float>(center), static_cast<float>(center - radius)});
+    figure.Segments().Append(arc);
+    media::PathGeometry geometry;
+    geometry.Figures().Append(figure);
+    path.Data(geometry);
+    Reactive::Run([arc, ctx, value = props.value, total, radius, center] {
+        double fraction = total > 0 ? (std::clamp)(R::AsDouble(value(ctx)) / total, 0.0, 1.0) : 0;
+        double shown = (std::clamp)(fraction, 0.0001, 0.9999);
+        double angle = shown * 2 * 3.14159265358979323846;
+        arc.Point(winrt::Windows::Foundation::Point{
+            static_cast<float>(center + radius * std::sin(angle)), static_cast<float>(center - radius * std::cos(angle))});
+        arc.IsLargeArc(shown > 0.5);
+    });
+    BindName(path, label);
+    Place(p, path);
+}
 
 /// A progress bar of `value` out of `total` under its label, or without a
 /// value a progress ring beside it.
 inline void Progress(Parent const& p, Ctx const& ctx, ProgressProps props) {
     auto label = Bound(ctx, props.label);
+    if (props.ring && props.value) {
+        ProgressRingOf(p, ctx, props, label);
+        return;
+    }
     if (props.value) {
         double total = props.total.value_or(1);
         controls::ProgressBar bar;

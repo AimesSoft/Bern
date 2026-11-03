@@ -954,6 +954,7 @@ class BernBridge(context: Context) {
                 ""
             }
             "open_path" -> onMain { openPath(first); "" }
+            "save_image" -> { saveImage(File(first)); "" }
             "now_playing" -> onMain { BernNowPlaying.update(application, first); "" }
             "overlay_allowed" -> if (BernOverlay.allowed(application)) "yes" else "no"
             "overlay_ask" -> onMain { BernOverlay.ask(application); "" }
@@ -1023,6 +1024,38 @@ class BernBridge(context: Context) {
         val task = java.util.concurrent.FutureTask<T> { action() }
         check(main.post(task)) { "The Android UI is unavailable" }
         return task.get()
+    }
+
+    /// The engine's `save_image`: a picture into the Pictures collection, in
+    /// a folder named after the app, where the gallery and other apps'
+    /// pickers find it. Android 10 and later let an app add its own
+    /// pictures there without asking; earlier versions need a permission
+    /// the app does not hold.
+    private fun saveImage(file: File) {
+        require(file.isFile) { "The picture no longer exists" }
+        check(android.os.Build.VERSION.SDK_INT >= 29) { "Saving pictures needs Android 10 or later" }
+        val media = android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        val type = if (file.extension.lowercase() in setOf("jpg", "jpeg")) "image/jpeg" else "image/png"
+        val folder = application.applicationInfo.loadLabel(application.packageManager).toString()
+            .filter { it.isLetterOrDigit() || it in " ._-" }.ifBlank { "Pictures" }
+        val values = android.content.ContentValues().apply {
+            put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, file.name)
+            put(android.provider.MediaStore.Images.Media.MIME_TYPE, type)
+            put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "${android.os.Environment.DIRECTORY_PICTURES}/$folder")
+            put(android.provider.MediaStore.Images.Media.IS_PENDING, 1)
+        }
+        val uri = checkNotNull(documents.insert(media, values)) { "The gallery did not take the picture" }
+        try {
+            checkNotNull(documents.openOutputStream(uri)) { "The gallery did not take the picture" }.use { output ->
+                file.inputStream().use { it.copyTo(output) }
+            }
+            documents.update(uri, android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Images.Media.IS_PENDING, 0)
+            }, null, null)
+        } catch (error: Exception) {
+            documents.delete(uri, null, null)
+            throw error
+        }
     }
 
     private fun openPath(value: String) {

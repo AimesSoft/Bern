@@ -1374,9 +1374,12 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             opt("value", PropKind::NumberValue),
             opt("total", PropKind::Number),
             opt("label", PropKind::DisplayText),
+            opt("style", PropKind::Keyword(&["bar", "ring"])),
+            opt("width", PropKind::Length),
+            opt("stroke_width", PropKind::Number),
         ],
         Children::None,
-        "Progress of `value` out of `total` (1 unless given) as a bar; without `value`, an indeterminate spinner",
+        "Progress of `value` out of `total` (1 unless given) as a bar; without `value`, an indeterminate spinner; `style: ring` draws it as an arc in the accent color from the top, clockwise, with round ends, `width` across and `stroke_width` thick, laid over what it rings",
     ),
     ComponentSpec {
         action: ActionRule::Required,
@@ -1863,6 +1866,23 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
             prop: Some("arrival".into()),
             message: "`arrival` nudges the item that setting `position` scrolls to; add `position: draft.x`".into(),
         });
+    }
+    if spec.name == "Progress" {
+        let ring = shape.keywords.contains(&("style", "ring"));
+        if ring && !shape.props.contains(&"value") {
+            errors.push(ShapeError {
+                prop: Some("style".into()),
+                message: "`style: ring` draws how far `value:` is; add `value:`".into(),
+            });
+        }
+        for prop in ["width", "stroke_width"] {
+            if !ring && shape.props.contains(&prop) {
+                errors.push(ShapeError {
+                    prop: Some(prop.into()),
+                    message: format!("`{prop}:` sizes a ring; add `style: ring` or leave it out"),
+                });
+            }
+        }
     }
     if spec.name == "Progress" && shape.props.contains(&"total") && !shape.props.contains(&"value")
     {

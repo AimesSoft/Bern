@@ -334,6 +334,23 @@ On macOS and iOS it is SwiftUI's `Table`, on GTK a `GtkColumnView`, on WinUI 3 a
 Button(id: import, label: tr! { "zh-Hans" => "从剪贴板导入", "en" => "Import from the Clipboard" }, paste: draft.pasted) => app.import_links(draft.pasted)
 ```
 
+## Photos
+
+`[app].photos = true` lets the engine save a picture where the system keeps the user's photos with `bern::platform::save_image(path)`, a PNG or a JPEG, for other apps to pick from. iOS asks the user the first time, with the reason in each supported language; Android 10 and later need no permission. The call waits for the system's answer, so the engine makes it on a worker thread; `refused` means the user did not allow it, and other platforms answer `platform_unavailable`.
+
+## Progress rings
+
+`Progress(style: ring)` draws how far `value` is of `total` as an arc in the accent from the top, clockwise, with round ends, `width` across (24 unless given) and `stroke_width` thick (3 unless given); at nothing yet it is a dot at the top. It takes no input, so it can lie over a button in a `Stack`, ringing the button's own symbol:
+
+```rust
+Stack {
+    IconButton(id: download, icon: "arrow.down.circle", font_size: 18, prominence: plain, label: tr! { "zh-Hans" => "下载", "en" => "Download" }) => app.download()
+    if app.downloading {
+        Progress(value: app.download_progress, label: tr! { "zh-Hans" => "下载进度", "en" => "Download Progress" }, style: ring, width: 19.3, stroke_width: 3)
+    }
+}
+```
+
 ## Other interfaces
 
 Animated SVG is a standalone component used on demand; for its interface, resource declarations, platform dependencies and lifecycle see the [dedicated document](../Implementation/Animated-SVG.md). For the full semantics of the video player, queries, modules, themes and the command protocol, continue to see the [design document](../Design.md) and the corresponding implementation notes.

@@ -385,6 +385,10 @@ pub struct AppInfo {
     /// (`bern::overlay`), which Android asks the user to allow.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub overlays: bool,
+    /// `[app].photos`: the application saves pictures to the user's photos
+    /// (`bern::platform::save_image`), which iOS asks the user to allow.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub photos: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

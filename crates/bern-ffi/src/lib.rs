@@ -1120,9 +1120,10 @@ pub unsafe extern "C" fn bern_bytes_free(ptr: *mut u8, len: usize) {
     }
 }
 
-/// A host's answer to the engine's platform requests (the clipboard):
-/// `request(context, operation, first, second)` with UTF-8 texts, 0 when
-/// done, another number when the platform cannot.
+/// A host's answer to the engine's platform requests (the clipboard, the
+/// photo library): `request(context, operation, first, second)` with UTF-8
+/// texts, 0 when done, 2 when the user did not allow it, another number
+/// when the platform cannot.
 pub type PlatformRequest =
     extern "C" fn(*mut c_void, *const u8, usize, *const u8, usize, *const u8, usize) -> i32;
 
@@ -1142,13 +1143,16 @@ impl bern_command::platform::Services for HostPlatform {
             second.as_ptr(),
             second.len(),
         );
-        if status == 0 {
-            Ok(String::new())
-        } else {
-            Err(CommandError::new(
+        match status {
+            0 => Ok(String::new()),
+            2 => Err(CommandError::new(
+                "refused",
+                format!("the user did not allow `{operation}`"),
+            )),
+            _ => Err(CommandError::new(
                 "platform_unavailable",
                 format!("the host cannot `{operation}`"),
-            ))
+            )),
         }
     }
 }
