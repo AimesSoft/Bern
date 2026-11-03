@@ -922,9 +922,16 @@ pub fn Toast(_p: &Parent, ctx: &Ctx, props: ToastProps) {
     let current = Rc::clone(&shown);
     let seconds = props.duration.unwrap_or(3.0).round().max(1.0) as u32;
     let icon = props.icon;
+    // The notice shows again only for a new key or text: the getters read
+    // state that may change for other reasons too.
+    let last: RefCell<Option<(Value, String)>> = RefCell::new(None);
     effect(move || {
-        (props.key)(&at);
+        let key = (props.key)(&at);
         let text = (props.content)(&at);
+        if last.borrow().as_ref().is_some_and(|(k, t)| *k == key && *t == text) {
+            return;
+        }
+        *last.borrow_mut() = Some((key, text.clone()));
         untrack(|| {
             if let Some(previous) = current.borrow_mut().take() {
                 previous.dismiss();

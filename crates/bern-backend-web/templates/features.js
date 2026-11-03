@@ -1976,9 +1976,14 @@ export function Toast(p, ctx, { content, icon: glyph, key, duration, motion }) {
     layer.y.to(16, [0.25, 1]);
     layer.opacity.to(0, [0.25, 1], () => node.remove());
   };
+  // The notice shows again only for a new key or text: the getters read
+  // state that may change for other reasons too.
+  let last = null;
   effect(() => {
-    key();
+    const now = key();
     const text = content();
+    if (last && eq(last[0], now) && last[1] === text) return;
+    last = [now, text];
     untrack(() => {
       clearTimeout(timer);
       if (shown) shown.remove();

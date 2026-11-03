@@ -222,6 +222,27 @@ test("a watch runs when rendered and when its value changes, not when it is set 
   assert.deepEqual(seen, ["a", "a,b"], "a removed watch runs no more");
 });
 
+test("a notice shows again for a new key or text, not when what it reads changes otherwise", () => {
+  const { F, B, Element, flushMicrotasks } = runtime();
+  const scope = new B.Scope();
+  const holder = new Element("div");
+  holder.querySelector = () => holder.children[0] ?? null;
+  const state = B.cell({ notice: "Installed", key: 1n, position: 0 });
+  B.within(scope, () => F.Toast(new Element("div"), { win: { element: holder } }, {
+    content: () => state.get().notice,
+    key: () => state.get().key,
+  }));
+  flushMicrotasks();
+  const shown = () => holder.children[0].children.length;
+  assert.equal(shown(), 1);
+  const first = holder.children[0].children[0];
+  state.set({ notice: "Installed", key: 1n, position: 1 }); flushMicrotasks();
+  assert.equal(holder.children[0].children[0], first, "the same notice stays as it is");
+  state.set({ notice: "Installed", key: 2n, position: 2 }); flushMicrotasks();
+  assert.notEqual(holder.children[0].children[0], first, "a new key shows it again");
+  scope.dispose();
+});
+
 test("a spinning element turns while its condition holds and stops where it is", () => {
   const { B, F, Element, flushMicrotasks } = runtime();
   const scope = new B.Scope();

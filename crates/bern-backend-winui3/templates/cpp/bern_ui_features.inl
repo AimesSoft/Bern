@@ -510,7 +510,23 @@ inline void LazyGrid(Parent const& p, Ctx const& ctx, GridProps props, EachProps
     Reactive::Run([grid, fromColumn, items = each.items, key = each.key, ctx = rowsCtx, animated, first = std::make_shared<bool>(true)] {
         auto list = R::AsList(items(ctx));
         // A list without rows takes no place, nor a gap, in its column.
-        if (fromColumn) grid->Visibility(list.empty() ? xaml::Visibility::Collapsed : xaml::Visibility::Visible);
+        if (fromColumn) {
+            auto wanted = list.empty() ? xaml::Visibility::Collapsed : xaml::Visibility::Visible;
+            if (grid->Visibility() != wanted) {
+                grid->Visibility(wanted);
+                // Collapsed, it was never measured, and its containers were
+                // laid out without it: measured again from the old, empty
+                // constraint it would stay zero wide, its rows built and out
+                // of sight, until the window changed size. They measure it
+                // again, up to the scroll view.
+                xaml::DependencyObject at = *grid;
+                while (at) {
+                    if (auto element = at.try_as<xaml::UIElement>()) element.InvalidateMeasure();
+                    if (at.try_as<controls::ScrollViewer>()) break;
+                    at = media::VisualTreeHelper::GetParent(at);
+                }
+            }
+        }
         Reactive::Untrack([&] {
             grid->values.assign(list.begin(), list.end());
             grid->keys.clear();
@@ -1363,9 +1379,14 @@ inline void Toast(Parent const& p, Ctx const& ctx, ToastProps props) {
     double duration = props.duration.value_or(3);
     auto motion = props.motion;
     std::string icon = props.icon ? props.icon : "";
-    Reactive::Run([ctx, content, key, shown, place, hide, generation, duration, motion, icon] {
-        if (key) key(ctx);
+    // The notice shows again only for a new key or text: the getters read
+    // the engine state they are part of, which changes far more often.
+    auto last = std::make_shared<std::optional<std::pair<Value, winrt::hstring>>>();
+    Reactive::Run([ctx, content, key, shown, place, hide, generation, duration, motion, icon, last] {
+        auto now = key ? key(ctx) : Value();
         auto text = content ? content(ctx) : winrt::hstring();
+        if (*last && (*last)->first == now && (*last)->second == text) return;
+        *last = std::pair{now, text};
         Reactive::Untrack([&] {
             if (*shown) {
                 uint32_t index;

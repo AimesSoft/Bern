@@ -545,12 +545,19 @@ fun BernShortcutInput(
 }
 
 /// A control's keyboard shortcut while it is composed; while `active` is
-/// false the keys go to the shortcuts composed before it.
+/// false the keys go to the shortcuts composed before it. On a phone or a
+/// tablet `escape` is the system's Back as well, its button or gesture:
+/// what closes on Escape elsewhere closes on Back, before Back leaves the
+/// app. A television's remote has its Back as `escape` already.
 @Composable
 fun BernShortcut(shortcut: String, active: () -> Boolean = { true }, action: () -> Unit) {
     val token = remember { Any() }
     SideEffect { BernShortcuts.register(token, shortcut, action, active) }
     DisposableEffect(token) { onDispose { BernShortcuts.remove(token) } }
+    if (shortcut == "escape" && !BernHost.television) {
+        val current by rememberUpdatedState(action)
+        androidx.activity.compose.BackHandler(enabled = active()) { current() }
+    }
 }
 
 // MARK: - Default focus
