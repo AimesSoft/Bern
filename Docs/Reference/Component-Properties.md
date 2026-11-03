@@ -1,169 +1,171 @@
-# 内置组件属性表
+**English** · [简体中文](../zh-CN/Reference/Component-Properties.md)
 
-更新：2026-10-27。本表从 [bern-ir::spec](../../crates/bern-ir/src/spec.rs) 的当前公共定义导出，共 78 个内置组件。**粗体属性必填**，其余可选；这些是声明规则，目标实现范围见[平台能力表](Platforms.md)，具体使用见[组件用法](UI.md)。
+# Built-in component property table
 
-## 属性类型
+Updated: 2026-10-27. This table is exported from the current public definitions in [bern-ir::spec](../../crates/bern-ir/src/spec.rs) and covers 78 built-in components. **Bold properties are required**, the rest are optional; these are declaration rules. For what each target implements see the [platform capability table](Platforms.md), and for concrete usage see [component usage](UI.md).
 
-| 类型 | 声明含义 |
+## Property types
+
+| Type | Declaration meaning |
 | --- | --- |
-| `Id` | 稳定标识符或字符串 |
-| `DisplayText` | tr! 文案或可显示的状态表达式 |
-| `LocalizedText` | tr! 静态本地化文案 |
-| `Icon` | 图标名称字符串（SF Symbols 命名）。Apple 目标可用任何 SF Symbol；其他目标把名字映射到平台自己的图标，至少都画 Bern 图标集（`bern_target_api::icon_set::NAMES`）中的名字，用到该目标没有的名字时检查报错 |
-| `ImageResource` | 图片资源；Image 也支持引擎图片状态 |
-| `SvgResource` | 已声明的随包 SVG 资源 |
-| `Number` | 构建期数字 |
-| `Length` | 逻辑长度数字或受限数值表达式 |
-| `NumberValue` | 只读数值表达式 |
-| `TextValue` | 只读文本表达式 |
-| `Bool` | 布尔表达式 |
-| `Flag` | 构建期 true / false |
-| `Shortcut` | 快捷键字符串字面量，或快捷键跟随的文本绑定 |
-| `FileKinds` | 文件种类字符串 |
-| `FileField` | 可写 MediaSource 会话字段 |
-| `PositionField` | 可写滚动位置会话字段 |
-| `TextField` | 可写文本会话字段 |
-| `KeysField` | 可写 `Vec<String>` 或 `Vec<i64>` 会话字段，存行的键 |
-| `BoolField` | 可写布尔会话字段 |
-| `NumberField` | 可写浮点会话字段 |
-| `PickerField` | 可写、变体带标签的枚举会话字段 |
-| `SelectionField` | 可写导航选择枚举字段 |
-| `SelectionValue` | 与导航选择字段匹配的枚举值 |
-| `Items` | 记录列表绑定 |
-| `KeyField` | 列表记录的稳定键字段名 |
-| `PathField` | 可写路由列表会话字段 |
-| `Route` | 类型化路由值 |
-| `WindowId` | 窗口种类标识符 |
-| `TypeName` | 生成的窗口句柄类型名 |
-| `SlotName` | 模块插槽名 |
-| `StyleVariant` | style! 样式变体名 |
-| `Transition` | 过渡声明或名称 |
-| `MotionToken` | 动效 token 名 |
-| `HeroName` | 共享元素静态名称 |
-| `KeyValue` | 只读文本、数值或枚举身份值 |
-| `Watched` | 只读的布尔、数值、文本或枚举，或它们的可选值与列表：`Watch` 跟随的值 |
-| `ColorRole` | 语义颜色角色 |
-| `NumberList` | 只读数值列表 |
-| `PatternName` | style! 图案名称 |
-| `MediaSource` | 媒体来源绑定，可选或非可选 |
-| `Player` | 应用播放器目录中的播放器 |
-| `Query` | 类型化查询调用 |
-| `Feature` | 所属功能契约中的入口 |
+| `Id` | Stable identifier or string |
+| `DisplayText` | tr! text or a displayable state expression |
+| `LocalizedText` | tr! static localized text |
+| `Icon` | Icon name string (SF Symbols naming). Apple targets can use any SF Symbol; other targets map the name to the platform's own icon, and all of them draw at least the names in the Bern icon set (`bern_target_api::icon_set::NAMES`); using a name the target does not have is reported as an error by the check |
+| `ImageResource` | Image resource; Image also supports engine image state |
+| `SvgResource` | Declared bundled SVG resource |
+| `Number` | Build-time number |
+| `Length` | Logical length number or constrained numeric expression |
+| `NumberValue` | Read-only numeric expression |
+| `TextValue` | Read-only text expression |
+| `Bool` | Boolean expression |
+| `Flag` | Build-time true / false |
+| `Shortcut` | Keyboard shortcut string literal, or a text binding that the shortcut follows |
+| `FileKinds` | File kind string |
+| `FileField` | Writable MediaSource session field |
+| `PositionField` | Writable scroll position session field |
+| `TextField` | Writable text session field |
+| `KeysField` | Writable `Vec<String>` or `Vec<i64>` session field that stores row keys |
+| `BoolField` | Writable boolean session field |
+| `NumberField` | Writable floating-point session field |
+| `PickerField` | Writable enum session field whose variants carry labels |
+| `SelectionField` | Writable navigation selection enum field |
+| `SelectionValue` | Enum value matching the navigation selection field |
+| `Items` | Record list binding |
+| `KeyField` | Name of the stable key field of list records |
+| `PathField` | Writable route list session field |
+| `Route` | Typed route value |
+| `WindowId` | Window kind identifier |
+| `TypeName` | Generated window handle type name |
+| `SlotName` | Module slot name |
+| `StyleVariant` | style! style variant name |
+| `Transition` | Transition declaration or name |
+| `MotionToken` | Motion token name |
+| `HeroName` | Static name of a shared element |
+| `KeyValue` | Read-only text, numeric or enum identity value |
+| `Watched` | Read-only boolean, number, text or enum, or optional values and lists of them: the value that `Watch` follows |
+| `ColorRole` | Semantic color role |
+| `NumberList` | Read-only number list |
+| `PatternName` | style! pattern name |
+| `MediaSource` | Media source binding, optional or non-optional |
+| `Player` | A player in the app's player catalog |
+| `Query` | Typed query call |
+| `Feature` | An entry point in the owning feature contract |
 
-固定枚举直接列出允许的关键字。表内没有逐一重复所有跨属性约束：Switch / Picker / Slider 必须二选一指定草稿来源或受控来源，受控来源还必须提供动作；`appear_delay` 必须配合 `appear`；具体错误由编译器检查。资源、语义颜色、本地化、功能覆盖与类型仍会进一步校验。
+Fixed enums list the allowed keywords directly. The table does not repeat every cross-property constraint: Switch / Picker / Slider must specify either a draft source or a controlled source, and a controlled source must also provide an action; `appear_delay` must be used together with `appear`; the specific errors are checked by the compiler. Resources, semantic colors, localization, feature coverage and types are validated further as well.
 
-## 组件
+## Components
 
-| 组件 | 属性（粗体必填） | 子内容、动作与位置 |
+| Component | Properties (bold = required) | Children, action and placement |
 | --- | --- | --- |
-| `WindowSet` | **`handle: TypeName`**<br>**`primary: WindowId`**<br>`accent: KeyValue`<br>`palette: KeyValue`<br>`appearance: KeyValue`<br>`icon: KeyValue` | 仅含 ["Window", "MenuBar", "StatusItem"]；无动作；仅根节点 |
-| `MenuBar` | 无 | 仅含 ["CommandMenu"]；无动作；直接位于 ["WindowSet"]，最多一个；只在 macOS 的菜单栏显示 |
-| `StatusItem` | **`label: LocalizedText`**<br>`icon: Icon`<br>`image: SvgResource`<br>`login_item: Flag` | 仅含 ["CommandItem", "CommandMenu", "Divider"]，可在 `if`、`match`、`ForEach` 中；无动作；直接位于 ["WindowSet"]，最多一个；菜单不读写草稿与窗口字段，菜单项不带 `pick`、`shortcut`；`icon` 与 `image` 二选一：`icon` 只在 macOS 显示，Windows 与 Linux 显示应用图标；`image` 是单色 SVG，三个桌面平台都按所在栏的明暗显示成白色或黑色；iOS、tvOS、Android 与网页不显示 |
-| `CommandMenu` | `label: LocalizedText`<br>`role: app / file / edit / view / window / help` | 仅含 ["CommandItem", "CommandMenu", "Divider"]，可在 `if`、`match`、`ForEach` 中；无动作；直接位于 ["MenuBar", "CommandMenu", "StatusItem"]；`label` 与 `role` 二选一，`role` 只用于菜单栏上的菜单 |
-| `CommandItem` | **`id: Id`**<br>**`label: DisplayText`**<br>`shortcut: Shortcut`<br>`enabled: Bool`<br>`checked: Bool`<br>`pick: FileField`<br>`files: FileKinds`<br>`paste: TextField` | 不含子节点；必须绑定动作；直接位于 ["CommandMenu", "StatusItem"]；菜单栏的项的草稿属于主窗口；`pick` 与 `paste` 二选一 |
-| `Window` | **`id: WindowId`**<br>**`title: LocalizedText`**<br>`initial: open / closed`<br>`presentation: auto / virtual / floating / native_required`<br>`role: standard / settings / dialog`<br>`width: Number`<br>`height: Number`<br>`min_width: Number`<br>`min_height: Number`<br>`confirm_close: Bool`<br>`close_message: LocalizedText`<br>`chrome: standard / unified`<br>`immersive: Bool`<br>`landscape: Bool`<br>`idle_after: Number`<br>`idle_enabled: Bool` | 恰好一个子节点；动作可选；直接位于 ["WindowSet"] |
-| `Column` | `variant: StyleVariant`<br>`gap: Length`<br>`padding: Length`<br>`padding_x: Length`<br>`padding_y: Length`<br>`width: Length`<br>`height: Length`<br>`align: leading / center / trailing` | 可含子内容；无动作 |
-| `FocusRegion` | 无 | 一个内容视图；文本编辑时首次区域外指针操作只失焦并消费整次点击，保留草稿；区域内控件和下一次点击正常 |
-| `Row` | `variant: StyleVariant`<br>`gap: Length`<br>`padding: Length`<br>`padding_x: Length`<br>`padding_y: Length`<br>`width: Length`<br>`height: Length`<br>`align: top / center / bottom / baseline` | 可含子内容；无动作 |
-| `Accordion` | **`count: NumberValue`**<br>**`selected: NumberValue`**<br>**`collapsed_width: Length`**<br>`height: Length`<br>`gap: Length`<br>`corner: Length` | 可含子内容；无动作；省略 height 时使用剩余可用高度 |
-| `Grid` | **`min_width: Length`**<br>`gap: Length`<br>`row_gap: Length`<br>`padding: Length`<br>`padding_x: Length`<br>`padding_y: Length`<br>`cell_ratio: Number`<br>`cell_extra: Length`<br>`masonry: Flag` | 可含子内容；无动作 |
-| `Stack` | `variant: StyleVariant`<br>`enabled: Bool`<br>`align: top_leading / top / top_trailing / leading / center / trailing / bottom_leading / bottom / bottom_trailing`<br>`width: Length`<br>`height: Length`<br>`under_bars: Flag` | 可含子内容；无动作 |
-| `Marquee` | **`duration: Length`**<br>`phase: Number`<br>`paused: Bool`<br>`opacity: NumberValue` | 可含子内容；无动作 |
-| `ScaleBox` | **`width: Length`**<br>**`height: Length`** | 可含子内容；无动作 |
-| `Positioned` | **`x: Length`**<br>**`y: Length`**<br>**`width: Length`**<br>**`height: Length`**<br>`bleed: Bool` | 可含子内容；无动作；`bleed` 让 `ScaleBox` 场景里的图层在到达的画布边上延伸到盒子边缘 |
-| `Modal` | `width: Length`<br>`height: Length`<br>`cover: compact` | 可含子内容；无动作；不写 `height` 时与内容一样高（其中的 `ScrollView` 与它滚动的内容一样高），窗口放不下时到窗口边缘为止 |
-| `Flow` | `gap: Length` | 可含子内容；无动作；每行的子项竖直居中，`Spacer` 占满所在行余下的宽度 |
-| `Timer` | **`interval: Number`**<br>`enabled: Bool` | 不含子节点；必须绑定动作 |
-| `Watch` | **`value: Watched`** | 不含子节点；必须绑定动作；挂载时与值变化时运行 |
-| `Shortcut` | **`key: Shortcut`**<br>`enabled: Bool` | 不含子节点；必须绑定动作 |
-| `PickerOption` | **`value: KeyValue`**<br>**`label: DisplayText`** | 不含子节点；无动作；直接位于 ["Picker"] |
-| `Rail` | `axis: horizontal / vertical`<br>`anchor: start / center / end`<br>`overhang: Length` | 可含子内容；无动作 |
-| `Spacer` | 无专有属性 | 不含子节点；无动作 |
-| `WindowButtons` | 无专有属性 | 不含子节点；无动作；macOS 上占出红绿灯的位置，其他平台不占位置 |
-| `Divider` | 无专有属性 | 不含子节点；无动作 |
-| `ScrollView` | `axis: vertical / horizontal`<br>`snap: start / center`<br>`position: PositionField`<br>`arrival: nudge`<br>`indicators: automatic / hidden / mouse`<br>`open_at: Number`<br>`open_center: NumberValue`<br>`anchor: Number`<br>`browsing: BoolField` | 可含子内容；无动作 |
-| `SplitView` | 无专有属性 | 仅含 ["Sidebar", "Detail"]；无动作 |
-| `Sidebar` | **`selection: SelectionField`**<br>`width: Length`<br>`id: Id`<br>`fallback: SelectionValue` | 仅含 ["Search", "Section", "SidebarItem", "Pages", "SidebarHeader", "SidebarFooter"]；无动作；直接位于 ["SplitView"] |
-| `SidebarHeader` | `role: content / title` | 可含子内容；无动作；直接位于 ["Sidebar"] |
-| `SidebarFooter` | 无专有属性 | 可含子内容；无动作；直接位于 ["Sidebar"] |
-| `Detail` | `titled: Bool` | 可含子内容；无动作；直接位于 ["SplitView"] |
-| `SidebarItem` | **`value: SelectionValue`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`badge: NumberValue`<br>`variant: StyleVariant` | 不含子节点；无动作；直接位于 ["Sidebar", "Section"] |
-| `Section` | `title: DisplayText`<br>`footer: DisplayText`<br>`style: grouped / plain`<br>`padding_x: Length`<br>`padding_y: Length` | 可含子内容；无动作 |
-| `Slot` | **`id: SlotName`** | 不含子节点；无动作 |
-| `Pages` | **`slot: SlotName`** | 不含子节点；无动作；直接位于 ["Sidebar", "Section", "Tabs"]。在 `Tabs` 里每个页面展开成一个 `Tab`，内容是该页面的组件 |
-| `PageContent` | **`slot: SlotName`**<br>**`selected: SelectionField`** | 不含子节点；无动作 |
-| `Form` | `title: DisplayText`<br>`variant: StyleVariant`<br>`gap: Length`<br>`row_height: Length`<br>`padding_x: Length`<br>`padding_y: Length` | 可含子内容；无动作 |
-| `Navigation` | **`path: PathField`**<br>`id: Id` | 可含子内容；无动作 |
-| `Destination` | 无专有属性 | 可含子内容；无动作；直接位于 ["Navigation"] |
-| `NavLink` | **`id: Id`**<br>**`route: Route`** | 可含子内容；无动作 |
-| `ControlGroup` | `label: DisplayText`<br>`height: Length` | 可含子内容；无动作 |
-| `Tabs` | **`selection: SelectionField`**<br>`id: Id`<br>`fallback: SelectionValue`<br>`bar: standard / floating` | 仅含 ["Tab", "Pages", "TabAccessory"]；无动作。选中的标签取应用强调色；`bar: floating` 让手机上的标签栏成为离开屏幕边缘的胶囊：iOS 26 起本来如此，Compose 画成浮起的胶囊（选中的一项另有一块胶囊底），`TabAccessory` 也是胶囊；GTK、WinUI 3 与 Web 保持各自的标签栏 |
-| `TabAccessory` | `shown: Bool` | 可含子内容；无动作；直接位于 ["Tabs"]，最多一个，不放在 `if` 或 `ForEach` 里。各页之上常驻的一条，例如正在播放的小播放器；`shown` 为假时收起 |
-| `Tab` | **`value: SelectionValue`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`display: title_and_icon / icon` | 可含子内容；无动作；直接位于 ["Tabs"]。`display: icon` 只显示图标（必须写 `icon`），`label` 仍是可访问名称 |
-| `SplitButton` | **`id: Id`**<br>**`label: DisplayText`**<br>`value: BoolField`<br>`checked: Bool`<br>`icon: Icon`<br>`shape: capsule`<br>`height: Length`<br>`more_label: DisplayText`<br>`shortcut: Shortcut` | 可含子内容；`value` 与 `checked` 二选一，`checked` 须有动作，切换时执行 |
-| `PopoverButton` | `panel_appearance: inherit / window / surface`<br>**`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`font_size: Number`<br>`prominence: standard / plain`<br>`presented: BoolField`<br>`open: Bool`<br>`shortcut: Shortcut` | 可含子内容；`open` 必须绑定动作，与 `presented` 互斥；未使用 `open` 时无动作 |
-| `Inspector` | **`presented: BoolField`**<br>`width: Number` | 可含子内容；无动作 |
-| `Toast` | **`content: DisplayText`**<br>`icon: Icon`<br>`key: KeyValue`<br>`duration: Number` | 不含子节点；无动作 |
-| `Pinch` | **`id: Id`**<br>**`label: DisplayText`**<br>**`value: NumberField`**<br>**`min: Number`**<br>**`max: Number`**<br>`feature: Feature` | 恰好一个子节点；动作可选 |
-| `Swipe` | **`id: Id`**<br>**`label: DisplayText`**<br>**`value: NumberField`**<br>**`min: Number`**<br>**`max: Number`**<br>`axis: vertical / horizontal`<br>`distance: Number`<br>`feature: Feature` | 恰好一个子节点；动作可选 |
-| `Drop` | **`id: Id`**<br>**`label: DisplayText`**<br>**`value: FileField`**<br>`files: FileKinds`<br>`over: BoolField`<br>`opens: Flag`<br>`feature: Feature` | 恰好一个子节点；必须绑定动作 |
-| `Toolbar` | 无专有属性 | 仅含 ["Button", "IconButton", "Picker", "Menu", "Search", "Switch", "SplitButton", "PopoverButton", "Divider", "Spacer", "Text"]；无动作 |
-| `Adaptive` | `id: Id` | 仅含 ["Layout"]；无动作 |
-| `Layout` | **`size: compact / medium / expanded / large / tv`** | 可含子内容；无动作；直接位于 ["Adaptive"] |
-| `Menu` | **`id: Id`**<br>**`label: DisplayText`**<br>`hide_disabled: Flag`<br>`icon: Icon`<br>`style: button / icon`<br>`shape: capsule`<br>`height: Length` | 仅含 ["MenuItem", "Divider"]；无动作 |
-| `MenuItem` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`role: normal / destructive`<br>`enabled: Bool`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`files: FileKinds`<br>`paste: TextField` | 不含子节点；必须绑定动作；直接位于 ["Menu", "TableMenu"]；`pick` 与 `paste` 二选一 |
-| `LanguagePicker` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag` | 不含子节点；无动作 |
-| `List` | `items: Items`<br>`key: KeyField` | 可含子内容；无动作 |
-| `ForEach` | **`items: Items`**<br>**`key: KeyField`** | 可含子内容；无动作 |
-| `Table` | **`id: Id`**<br>**`label: DisplayText`**<br>**`items: Items`**<br>**`key: KeyField`**<br>`selection: KeysField` | 仅含 ["TableColumn", "TableMenu"]，至少一个 `TableColumn`，最多一个 `TableMenu`；动作可选，是选中行的主操作（双击或 Enter，触屏上点一行）；`selection` 是 `Vec<String>` 或 `Vec<i64>` 草稿，按行的顺序存选中行的键。使用 `\|item\|` 行模板 |
-| `TableColumn` | **`title: DisplayText`**<br>`width: Number`<br>`sorted: Bool`<br>`descending: Bool` | 恰好一个子节点，是每行这一格的内容；动作可选，点表头时运行；直接位于 ["Table"]；`sorted`、`descending` 只显示排序标记，行的顺序由引擎决定 |
-| `TableMenu` | 无 | 仅含 ["MenuItem", "Divider"]；无动作；直接位于 ["Table"]；右键或长按一行时打开，该行不在选中行里时先只选中它 |
-| `ContextMenu` | 无 | 仅含 ["MenuItem", "Divider"]；无动作；直接位于 ["Button"]，每个按钮最多一个；不算按钮显示的内容；右键或长按按钮时打开 |
-| `PreviewList` | **`items: Items`**<br>**`key: KeyField`**<br>**`item_height: Number`**<br>`gap: Number`<br>`more_height: Number` | 按可用高度创建能完整放下的前几项；有剩余时为 `+N` 留位，默认高度 22；不滚动，也不创建隐藏项。使用 `\|item\|` 行模板 |
-| `Text` | **`content: DisplayText`**<br>`style: large_title / title / title2 / title3 / headline / subheadline / body / callout / footnote / caption / caption2 / control / code`<br>`emphasis: primary / secondary / tertiary`<br>`color: accent / status.success / status.warning / status.error`<br>`mark: ColorRole`<br>`lines: Number`<br>`font_size: Length`<br>`line_height: Length`<br>`markdown: Flag`<br>`bold: Bool` | 不含子节点；无动作；`color` 与 `emphasis` 二选一 |
-| `Canvas` | `width: Length`<br>`height: Length`<br>`label: DisplayText` | 仅含 ["Shape", "Series", "Pattern"]；无动作 |
-| `Shape` | **`kind: rect / rounded / capsule / ellipse`**<br>`x: Number`<br>`y: Number`<br>`width: Number`<br>`height: Number`<br>`corner: Number`<br>`fill: ColorRole`<br>`fill_from: ImageResource`<br>`fade: up / down / left / right`<br>`stroke: ColorRole`<br>`stroke_width: Number`<br>`dash: Number`<br>`dash_gap: Number`<br>`opacity: Number` | 不含子节点；无动作；直接位于 ["Canvas"] |
-| `Series` | **`values: NumberList`**<br>`kind: area / line`<br>`max: NumberValue`<br>`fill: ColorRole`<br>`stroke: ColorRole`<br>`stroke_width: Number`<br>`opacity: Number` | 不含子节点；无动作；直接位于 ["Canvas"] |
-| `Pattern` | **`name: PatternName`**<br>`opacity: Number` | 不含子节点；无动作；直接位于 ["Canvas"] |
-| `Label` | **`title: DisplayText`**<br>**`icon: Icon`**<br>`style: large_title / title / title2 / title3 / headline / subheadline / body / callout / footnote / caption / caption2 / control / code`<br>`font_size: Number`<br>`display: title_and_icon / icon` | 不含子节点；无动作 |
-| `Svg` | **`source: SvgResource`**<br>`static_source: SvgResource`<br>**`width: Length`**<br>**`height: Length`**<br>`label: DisplayText`<br>`fit: contain / cover / fill`<br>`playing: Bool`<br>`speed: NumberValue`<br>`restart: NumberValue`<br>`interactive: Flag`<br>`data: DisplayText`<br>`external_links: Flag` | 不含子节点；无动作 |
-| `Image` | **`source: ImageResource`**<br>`label: DisplayText`<br>`width: Length`<br>`height: Length`<br>`fit: contain / cover / fill`<br>`corner: Length`<br>`rendering: original / template`<br>`aspect: Number` | 不含子节点；无动作 |
-| `Progress` | `value: NumberValue`<br>`total: Number`<br>`label: DisplayText` | 不含子节点；无动作 |
-| `Button` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`shape: capsule / chip`<br>`height: Length`<br>`width: fill`<br>`role: normal / destructive / cancel`<br>`prominence: standard / prominent / plain`<br>`enabled: Bool`<br>`variant: StyleVariant`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`files: FileKinds`<br>`default_focus: Flag`<br>`clears: TextField`<br>`paste: TextField` | 可含子内容；必须绑定动作；`paste` 先把剪贴板里的文字放进该草稿，有文字时才运行动作；`pick` 与 `paste` 二选一 |
-| `IconButton` | **`id: Id`**<br>**`icon: Icon`**<br>`font_size: Number`<br>`height: Length`<br>**`label: DisplayText`**<br>`prominence: standard / prominent / plain`<br>`enabled: Bool`<br>`variant: StyleVariant`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`files: FileKinds`<br>`paste: TextField`<br>`default_focus: Flag` | 不含子节点；必须绑定动作；`pick` 与 `paste` 二选一 |
-| `TextInput` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag`<br>`value: TextField`<br>`current: TextValue`<br>`prompt: DisplayText`<br>`kind: plain / secure / multiline`<br>`submit: clear`<br>`clear_key: NumberValue`<br>`feature: Feature` | 不含子节点；动作可选；`value` 与 `current` 二选一；`value` 时动作在提交时运行，`submit: clear` 在动作后清空草稿、交出焦点；`current` 时每次编辑都运行动作，动作参数里同一表达式就是输入的文字，编辑中引擎的文字不覆盖用户的输入；SwiftUI 的 `clear_key` 在数值变化时清空，供异步成功回执使用 |
-| `Search` | **`id: Id`**<br>**`value: TextField`**<br>`prompt: DisplayText`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`style: automatic / palette`<br>`panel_prompt: DisplayText`<br>`width: Number`<br>`height: Number`<br>`font_size: Number`<br>`suggest: Flag` | 可含子内容；动作可选 |
-| `SearchItem` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`detail: DisplayText`<br>`hint: DisplayText`<br>`navigation: Bool`<br>`pick: FileField`<br>`files: FileKinds`<br>`feature: Feature` | 可含子内容；必须绑定动作 |
-| `Switch` | **`id: Id`**<br>**`label: DisplayText`**<br>`value: BoolField`<br>`checked: Bool`<br>`label_hidden: Flag`<br>`shape: capsule / chip`<br>`height: Length`<br>`style: switch / checkbox / button`<br>`icon: Icon`<br>`shortcut: Shortcut`<br>`login_item: Flag` | 不含子节点；动作可选；`login_item: true` 显示并改变系统的登录项，不写 `value`、`checked` 与动作 |
-| `ShortcutInput` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag`<br>**`current: Shortcut`**（状态，不可为字面量）<br>`prompt: DisplayText`<br>`empty: DisplayText`<br>`enabled: Bool`<br>`feature: Feature` | 不含子节点；必须绑定动作，动作中与 `current` 相同的表达式换成选中的快捷键 |
-| `Slider` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag`<br>`value: NumberField`<br>`current: NumberValue`<br>`continuous: Flag`（仅 `current`）<br>**`min: Number`**<br>**`max: Number`**<br>`step: Number`<br>`min_icon: Icon`<br>`max_icon: Icon`<br>`feature: Feature` | 不含子节点；动作可选 |
-| `Video` | **`id: Id`**<br>`source: MediaSource`<br>`player: Player`<br>`label: DisplayText`<br>`controls: standard / none`<br>`fit: contain / cover / fill`<br>`sizing: standard / fill`<br>`corner: Length` | 不含子节点；无动作。`controls: none` 的视频只显示画面，可以作为 `Button` 的内容。`sizing: fill` 让播放表面占满有明确大小的父容器，`fit` 只控制视频内容如何放进表面；内核弹幕可以使用黑边。默认 `standard` 保持原有布局。应用登记了媒体内核时由内核画进视图给它的表面，见[设计文档](../Design.md#应用自带的媒体内核) |
-| `Query` | **`id: Id`**<br>**`query: Query`**<br>`loading: DisplayText`<br>`empty: DisplayText`<br>`failed: DisplayText`<br>`icon: Icon` | 可含子内容；无动作 |
-| `Picker` | **`id: Id`**<br>**`label: DisplayText`**<br>`value: PickerField`<br>`selected: KeyValue`<br>`label_hidden: Flag`<br>`shape: capsule`<br>`height: Length`<br>`style: automatic / menu / segmented / radio / inline / chips` | 仅含 ["PickerOption"]；动作可选；`chips` 不接受 `shape` / `height` |
+| `WindowSet` | **`handle: TypeName`**<br>**`primary: WindowId`**<br>`accent: KeyValue`<br>`palette: KeyValue`<br>`appearance: KeyValue`<br>`icon: KeyValue` | Contains only ["Window", "MenuBar", "StatusItem"]; no action; root node only |
+| `MenuBar` | None | Contains only ["CommandMenu"]; no action; directly inside ["WindowSet"], at most one; shown only in the macOS menu bar |
+| `StatusItem` | **`label: LocalizedText`**<br>`icon: Icon`<br>`image: SvgResource`<br>`login_item: Flag` | Contains only ["CommandItem", "CommandMenu", "Divider"], which can be inside `if`, `match`, `ForEach`; no action; directly inside ["WindowSet"], at most one; the menu does not read or write drafts or window fields, and menu items do not take `pick` or `shortcut`; either `icon` or `image`: `icon` is shown only on macOS, while Windows and Linux show the app icon; `image` is a monochrome SVG that all three desktop platforms show in white or black according to the appearance of the bar it sits in; not shown on iOS, tvOS, Android or the Web |
+| `CommandMenu` | `label: LocalizedText`<br>`role: app / file / edit / view / window / help` | Contains only ["CommandItem", "CommandMenu", "Divider"], which can be inside `if`, `match`, `ForEach`; no action; directly inside ["MenuBar", "CommandMenu", "StatusItem"]; either `label` or `role`, and `role` is used only for menus on the menu bar |
+| `CommandItem` | **`id: Id`**<br>**`label: DisplayText`**<br>`shortcut: Shortcut`<br>`enabled: Bool`<br>`checked: Bool`<br>`pick: FileField`<br>`files: FileKinds`<br>`paste: TextField` | No children; must bind an action; directly inside ["CommandMenu", "StatusItem"]; the drafts of menu bar items belong to the primary window; either `pick` or `paste` |
+| `Window` | **`id: WindowId`**<br>**`title: LocalizedText`**<br>`initial: open / closed`<br>`presentation: auto / virtual / floating / native_required`<br>`role: standard / settings / dialog`<br>`width: Number`<br>`height: Number`<br>`min_width: Number`<br>`min_height: Number`<br>`confirm_close: Bool`<br>`close_message: LocalizedText`<br>`chrome: standard / unified`<br>`immersive: Bool`<br>`landscape: Bool`<br>`idle_after: Number`<br>`idle_enabled: Bool` | Exactly one child; action optional; directly inside ["WindowSet"] |
+| `Column` | `variant: StyleVariant`<br>`gap: Length`<br>`padding: Length`<br>`padding_x: Length`<br>`padding_y: Length`<br>`width: Length`<br>`height: Length`<br>`align: leading / center / trailing` | May contain children; no action |
+| `FocusRegion` | None | One content view; during text editing, the first pointer action outside the region only removes focus and consumes the whole click, keeping the draft; controls inside the region and the next click work normally |
+| `Row` | `variant: StyleVariant`<br>`gap: Length`<br>`padding: Length`<br>`padding_x: Length`<br>`padding_y: Length`<br>`width: Length`<br>`height: Length`<br>`align: top / center / bottom / baseline` | May contain children; no action |
+| `Accordion` | **`count: NumberValue`**<br>**`selected: NumberValue`**<br>**`collapsed_width: Length`**<br>`height: Length`<br>`gap: Length`<br>`corner: Length` | May contain children; no action; when height is omitted, it uses the remaining available height |
+| `Grid` | **`min_width: Length`**<br>`gap: Length`<br>`row_gap: Length`<br>`padding: Length`<br>`padding_x: Length`<br>`padding_y: Length`<br>`cell_ratio: Number`<br>`cell_extra: Length`<br>`masonry: Flag` | May contain children; no action |
+| `Stack` | `variant: StyleVariant`<br>`enabled: Bool`<br>`align: top_leading / top / top_trailing / leading / center / trailing / bottom_leading / bottom / bottom_trailing`<br>`width: Length`<br>`height: Length`<br>`under_bars: Flag` | May contain children; no action |
+| `Marquee` | **`duration: Length`**<br>`phase: Number`<br>`paused: Bool`<br>`opacity: NumberValue` | May contain children; no action |
+| `ScaleBox` | **`width: Length`**<br>**`height: Length`** | May contain children; no action |
+| `Positioned` | **`x: Length`**<br>**`y: Length`**<br>**`width: Length`**<br>**`height: Length`**<br>`bleed: Bool` | May contain children; no action; `bleed` lets a layer in a `ScaleBox` scene extend to the edge of the box on the canvas edges it reaches |
+| `Modal` | `width: Length`<br>`height: Length`<br>`cover: compact` | May contain children; no action; without `height` it is as tall as its content (a `ScrollView` inside it is as tall as the content it scrolls), and it stops at the window edge when the window cannot fit it |
+| `Flow` | `gap: Length` | May contain children; no action; the children in each line are vertically centered, and `Spacer` takes the rest of the width of its line |
+| `Timer` | **`interval: Number`**<br>`enabled: Bool` | No children; must bind an action |
+| `Watch` | **`value: Watched`** | No children; must bind an action; runs on mount and when the value changes |
+| `Shortcut` | **`key: Shortcut`**<br>`enabled: Bool` | No children; must bind an action |
+| `PickerOption` | **`value: KeyValue`**<br>**`label: DisplayText`** | No children; no action; directly inside ["Picker"] |
+| `Rail` | `axis: horizontal / vertical`<br>`anchor: start / center / end`<br>`overhang: Length` | May contain children; no action |
+| `Spacer` | No own properties | No children; no action |
+| `WindowButtons` | No own properties | No children; no action; on macOS it takes up the space of the traffic lights, and on other platforms it takes no space |
+| `Divider` | No own properties | No children; no action |
+| `ScrollView` | `axis: vertical / horizontal`<br>`snap: start / center`<br>`position: PositionField`<br>`arrival: nudge`<br>`indicators: automatic / hidden / mouse`<br>`open_at: Number`<br>`open_center: NumberValue`<br>`anchor: Number`<br>`browsing: BoolField` | May contain children; no action |
+| `SplitView` | No own properties | Contains only ["Sidebar", "Detail"]; no action |
+| `Sidebar` | **`selection: SelectionField`**<br>`width: Length`<br>`id: Id`<br>`fallback: SelectionValue` | Contains only ["Search", "Section", "SidebarItem", "Pages", "SidebarHeader", "SidebarFooter"]; no action; directly inside ["SplitView"] |
+| `SidebarHeader` | `role: content / title` | May contain children; no action; directly inside ["Sidebar"] |
+| `SidebarFooter` | No own properties | May contain children; no action; directly inside ["Sidebar"] |
+| `Detail` | `titled: Bool` | May contain children; no action; directly inside ["SplitView"] |
+| `SidebarItem` | **`value: SelectionValue`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`badge: NumberValue`<br>`variant: StyleVariant` | No children; no action; directly inside ["Sidebar", "Section"] |
+| `Section` | `title: DisplayText`<br>`footer: DisplayText`<br>`style: grouped / plain`<br>`padding_x: Length`<br>`padding_y: Length` | May contain children; no action |
+| `Slot` | **`id: SlotName`** | No children; no action |
+| `Pages` | **`slot: SlotName`** | No children; no action; directly inside ["Sidebar", "Section", "Tabs"]. Inside `Tabs`, each page expands into a `Tab` whose content is that page's component |
+| `PageContent` | **`slot: SlotName`**<br>**`selected: SelectionField`** | No children; no action |
+| `Form` | `title: DisplayText`<br>`variant: StyleVariant`<br>`gap: Length`<br>`row_height: Length`<br>`padding_x: Length`<br>`padding_y: Length` | May contain children; no action |
+| `Navigation` | **`path: PathField`**<br>`id: Id` | May contain children; no action |
+| `Destination` | No own properties | May contain children; no action; directly inside ["Navigation"] |
+| `NavLink` | **`id: Id`**<br>**`route: Route`** | May contain children; no action |
+| `ControlGroup` | `label: DisplayText`<br>`height: Length` | May contain children; no action |
+| `Tabs` | **`selection: SelectionField`**<br>`id: Id`<br>`fallback: SelectionValue`<br>`bar: standard / floating` | Contains only ["Tab", "Pages", "TabAccessory"]; no action. The selected tab takes the app's accent color; `bar: floating` makes the tab bar on phones a capsule clear of the screen edges: iOS 26 and later already do this, Compose draws a floating capsule (with a capsule of its own behind the selected item), and `TabAccessory` is a capsule too; GTK, WinUI 3 and the Web keep their own tab bars |
+| `TabAccessory` | `shown: Bool` | May contain children; no action; directly inside ["Tabs"], at most one, and not placed in `if` or `ForEach`. A persistent strip above all the pages, for example a mini player for what is playing; it collapses when `shown` is false |
+| `Tab` | **`value: SelectionValue`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`display: title_and_icon / icon` | May contain children; no action; directly inside ["Tabs"]. `display: icon` shows only the icon (`icon` must be written), and `label` is still the accessible name |
+| `SplitButton` | **`id: Id`**<br>**`label: DisplayText`**<br>`value: BoolField`<br>`checked: Bool`<br>`icon: Icon`<br>`shape: capsule`<br>`height: Length`<br>`more_label: DisplayText`<br>`shortcut: Shortcut` | May contain children; either `value` or `checked`; `checked` requires an action, which runs on toggle |
+| `PopoverButton` | `panel_appearance: inherit / window / surface`<br>**`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`font_size: Number`<br>`prominence: standard / plain`<br>`presented: BoolField`<br>`open: Bool`<br>`shortcut: Shortcut` | May contain children; `open` must bind an action and is mutually exclusive with `presented`; no action when `open` is not used |
+| `Inspector` | **`presented: BoolField`**<br>`width: Number` | May contain children; no action |
+| `Toast` | **`content: DisplayText`**<br>`icon: Icon`<br>`key: KeyValue`<br>`duration: Number` | No children; no action |
+| `Pinch` | **`id: Id`**<br>**`label: DisplayText`**<br>**`value: NumberField`**<br>**`min: Number`**<br>**`max: Number`**<br>`feature: Feature` | Exactly one child; action optional |
+| `Swipe` | **`id: Id`**<br>**`label: DisplayText`**<br>**`value: NumberField`**<br>**`min: Number`**<br>**`max: Number`**<br>`axis: vertical / horizontal`<br>`distance: Number`<br>`feature: Feature` | Exactly one child; action optional |
+| `Drop` | **`id: Id`**<br>**`label: DisplayText`**<br>**`value: FileField`**<br>`files: FileKinds`<br>`over: BoolField`<br>`opens: Flag`<br>`feature: Feature` | Exactly one child; must bind an action |
+| `Toolbar` | No own properties | Contains only ["Button", "IconButton", "Picker", "Menu", "Search", "Switch", "SplitButton", "PopoverButton", "Divider", "Spacer", "Text"]; no action |
+| `Adaptive` | `id: Id` | Contains only ["Layout"]; no action |
+| `Layout` | **`size: compact / medium / expanded / large / tv`** | May contain children; no action; directly inside ["Adaptive"] |
+| `Menu` | **`id: Id`**<br>**`label: DisplayText`**<br>`hide_disabled: Flag`<br>`icon: Icon`<br>`style: button / icon`<br>`shape: capsule`<br>`height: Length` | Contains only ["MenuItem", "Divider"]; no action |
+| `MenuItem` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`role: normal / destructive`<br>`enabled: Bool`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`files: FileKinds`<br>`paste: TextField` | No children; must bind an action; directly inside ["Menu", "TableMenu"]; either `pick` or `paste` |
+| `LanguagePicker` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag` | No children; no action |
+| `List` | `items: Items`<br>`key: KeyField` | May contain children; no action |
+| `ForEach` | **`items: Items`**<br>**`key: KeyField`** | May contain children; no action |
+| `Table` | **`id: Id`**<br>**`label: DisplayText`**<br>**`items: Items`**<br>**`key: KeyField`**<br>`selection: KeysField` | Contains only ["TableColumn", "TableMenu"], at least one `TableColumn` and at most one `TableMenu`; action optional, it is the primary action on the selected rows (double-click or Enter, or tapping a row on a touch screen); `selection` is a `Vec<String>` or `Vec<i64>` draft that stores the keys of the selected rows in row order. Uses the `\|item\|` row template |
+| `TableColumn` | **`title: DisplayText`**<br>`width: Number`<br>`sorted: Bool`<br>`descending: Bool` | Exactly one child, which is the content of this column's cell in each row; action optional, runs when the header is clicked; directly inside ["Table"]; `sorted` and `descending` only show the sort indicator, and the order of the rows is decided by the engine |
+| `TableMenu` | None | Contains only ["MenuItem", "Divider"]; no action; directly inside ["Table"]; opens on right-click or long press on a row, and if that row is not among the selected rows, it first selects only that row |
+| `ContextMenu` | None | Contains only ["MenuItem", "Divider"]; no action; directly inside ["Button"], at most one per button; not part of what the button shows; opens on right-click or long press on the button |
+| `PreviewList` | **`items: Items`**<br>**`key: KeyField`**<br>**`item_height: Number`**<br>`gap: Number`<br>`more_height: Number` | Creates the first few items that fit completely in the available height; when items remain, leaves room for `+N`, with a default height of 22; does not scroll and does not create hidden items. Uses the `\|item\|` row template |
+| `Text` | **`content: DisplayText`**<br>`style: large_title / title / title2 / title3 / headline / subheadline / body / callout / footnote / caption / caption2 / control / code`<br>`emphasis: primary / secondary / tertiary`<br>`color: accent / status.success / status.warning / status.error`<br>`mark: ColorRole`<br>`lines: Number`<br>`font_size: Length`<br>`line_height: Length`<br>`markdown: Flag`<br>`bold: Bool` | No children; no action; either `color` or `emphasis` |
+| `Canvas` | `width: Length`<br>`height: Length`<br>`label: DisplayText` | Contains only ["Shape", "Series", "Pattern"]; no action |
+| `Shape` | **`kind: rect / rounded / capsule / ellipse`**<br>`x: Number`<br>`y: Number`<br>`width: Number`<br>`height: Number`<br>`corner: Number`<br>`fill: ColorRole`<br>`fill_from: ImageResource`<br>`fade: up / down / left / right`<br>`stroke: ColorRole`<br>`stroke_width: Number`<br>`dash: Number`<br>`dash_gap: Number`<br>`opacity: Number` | No children; no action; directly inside ["Canvas"] |
+| `Series` | **`values: NumberList`**<br>`kind: area / line`<br>`max: NumberValue`<br>`fill: ColorRole`<br>`stroke: ColorRole`<br>`stroke_width: Number`<br>`opacity: Number` | No children; no action; directly inside ["Canvas"] |
+| `Pattern` | **`name: PatternName`**<br>`opacity: Number` | No children; no action; directly inside ["Canvas"] |
+| `Label` | **`title: DisplayText`**<br>**`icon: Icon`**<br>`style: large_title / title / title2 / title3 / headline / subheadline / body / callout / footnote / caption / caption2 / control / code`<br>`font_size: Number`<br>`display: title_and_icon / icon` | No children; no action |
+| `Svg` | **`source: SvgResource`**<br>`static_source: SvgResource`<br>**`width: Length`**<br>**`height: Length`**<br>`label: DisplayText`<br>`fit: contain / cover / fill`<br>`playing: Bool`<br>`speed: NumberValue`<br>`restart: NumberValue`<br>`interactive: Flag`<br>`data: DisplayText`<br>`external_links: Flag` | No children; no action |
+| `Image` | **`source: ImageResource`**<br>`label: DisplayText`<br>`width: Length`<br>`height: Length`<br>`fit: contain / cover / fill`<br>`corner: Length`<br>`rendering: original / template`<br>`aspect: Number` | No children; no action |
+| `Progress` | `value: NumberValue`<br>`total: Number`<br>`label: DisplayText` | No children; no action |
+| `Button` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`shape: capsule / chip`<br>`height: Length`<br>`width: fill`<br>`role: normal / destructive / cancel`<br>`prominence: standard / prominent / plain`<br>`enabled: Bool`<br>`variant: StyleVariant`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`files: FileKinds`<br>`default_focus: Flag`<br>`clears: TextField`<br>`paste: TextField` | May contain children; must bind an action; `paste` first puts the text on the clipboard into that draft, and the action runs only when there is text; either `pick` or `paste` |
+| `IconButton` | **`id: Id`**<br>**`icon: Icon`**<br>`font_size: Number`<br>`height: Length`<br>**`label: DisplayText`**<br>`prominence: standard / prominent / plain`<br>`enabled: Bool`<br>`variant: StyleVariant`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`files: FileKinds`<br>`paste: TextField`<br>`default_focus: Flag` | No children; must bind an action; either `pick` or `paste` |
+| `TextInput` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag`<br>`value: TextField`<br>`current: TextValue`<br>`prompt: DisplayText`<br>`kind: plain / secure / multiline`<br>`submit: clear`<br>`clear_key: NumberValue`<br>`feature: Feature` | No children; action optional; either `value` or `current`; with `value` the action runs on submit, and `submit: clear` clears the draft and gives up focus after the action; with `current` the action runs on every edit, the same expression in the action's arguments is the text typed, and while editing the engine's text does not overwrite the user's input; SwiftUI's `clear_key` clears when the number changes, for use with asynchronous success acknowledgements |
+| `Search` | **`id: Id`**<br>**`value: TextField`**<br>`prompt: DisplayText`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`style: automatic / palette`<br>`panel_prompt: DisplayText`<br>`width: Number`<br>`height: Number`<br>`font_size: Number`<br>`suggest: Flag` | May contain children; action optional |
+| `SearchItem` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`detail: DisplayText`<br>`hint: DisplayText`<br>`navigation: Bool`<br>`pick: FileField`<br>`files: FileKinds`<br>`feature: Feature` | May contain children; must bind an action |
+| `Switch` | **`id: Id`**<br>**`label: DisplayText`**<br>`value: BoolField`<br>`checked: Bool`<br>`label_hidden: Flag`<br>`shape: capsule / chip`<br>`height: Length`<br>`style: switch / checkbox / button`<br>`icon: Icon`<br>`shortcut: Shortcut`<br>`login_item: Flag` | No children; action optional; `login_item: true` shows and changes the system login item, and is written without `value`, `checked` or an action |
+| `ShortcutInput` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag`<br>**`current: Shortcut`** (state, cannot be a literal)<br>`prompt: DisplayText`<br>`empty: DisplayText`<br>`enabled: Bool`<br>`feature: Feature` | No children; must bind an action, and in the action the expression identical to `current` is replaced with the chosen shortcut |
+| `Slider` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag`<br>`value: NumberField`<br>`current: NumberValue`<br>`continuous: Flag` (only with `current`)<br>**`min: Number`**<br>**`max: Number`**<br>`step: Number`<br>`min_icon: Icon`<br>`max_icon: Icon`<br>`feature: Feature` | No children; action optional |
+| `Video` | **`id: Id`**<br>`source: MediaSource`<br>`player: Player`<br>`label: DisplayText`<br>`controls: standard / none`<br>`fit: contain / cover / fill`<br>`sizing: standard / fill`<br>`corner: Length` | No children; no action. A video with `controls: none` shows only the picture and can be the content of a `Button`. `sizing: fill` makes the playback surface fill a parent container that has a definite size, and `fit` only controls how the video content is placed in the surface; danmaku drawn by the media core can use the letterbox bars. The default `standard` keeps the original layout. When the app registers a media core, the core draws into the surface the view gives it; see the [design document](../Design.md#app-provided-media-cores) |
+| `Query` | **`id: Id`**<br>**`query: Query`**<br>`loading: DisplayText`<br>`empty: DisplayText`<br>`failed: DisplayText`<br>`icon: Icon` | May contain children; no action |
+| `Picker` | **`id: Id`**<br>**`label: DisplayText`**<br>`value: PickerField`<br>`selected: KeyValue`<br>`label_hidden: Flag`<br>`shape: capsule`<br>`height: Length`<br>`style: automatic / menu / segmented / radio / inline / chips` | Contains only ["PickerOption"]; action optional; `chips` does not accept `shape` / `height` |
 
-`Grid` 给出 `cell_ratio` 时每行一样高：列宽 ÷ `cell_ratio` + `cell_extra`（如海报 2 : 3 加两行字的高度：`cell_ratio: 0.6667, cell_extra: 54`），各项从格子顶部排，内容更高时伸进下方的行间距，与按最高一项定行高的默认方式不同。
+When `Grid` is given `cell_ratio`, every row has the same height: column width ÷ `cell_ratio` + `cell_extra` (for example a 2 : 3 poster plus the height of two lines of text: `cell_ratio: 0.6667, cell_extra: 54`); items are laid out from the top of their cell, and taller content extends into the row gap below, unlike the default, which sets the row height from the tallest item.
 
-`Grid` 加 `masonry` 时成为瀑布流：各项按自己的高度排，每一项放进目前最短的那一列（一样短时取最左边的），适合高度不一的卡片。SwiftUI 与 Compose 用自定义布局，Web 用一像素高的网格行让各项跨过自己的高度；GTK 与 Windows 暂按普通网格逐行排。
+With `masonry`, `Grid` becomes a masonry layout: items are laid out at their own heights, and each item goes into the column that is currently shortest (the leftmost one when columns are equally short), which suits cards of varying heights. SwiftUI and Compose use a custom layout, and the Web uses one-pixel-high grid rows so that each item spans its own height; GTK and Windows for now lay it out row by row as an ordinary grid.
 
-`Text(style: code)` 用平台自己的等宽字体，比正文略小，用于代码、命令和文件内容：SwiftUI 的 `.monospaced` 设计，Compose 的 `FontFamily.Monospace`，Web 的 `ui-monospace` 一族，GTK 的 `monospace` 样式类，Windows 的 Cascadia Mono（没有时 Consolas）。`style!` 的 `text` 块可以像其他样式一样给它定字号与字重。
+`Text(style: code)` uses the platform's own monospaced font, slightly smaller than body text, for code, commands and file contents: the `.monospaced` design in SwiftUI, `FontFamily.Monospace` in Compose, the `ui-monospace` family on the Web, the `monospace` style class in GTK, and Cascadia Mono on Windows (Consolas when it is not available). The `text` block of `style!` can set its font size and weight like any other style.
 
-`Svg` 的 `static_source` 是动画结束时的画面，没有 WebView 的构建直接显示它；`data` 是交给文档的一段文字，文档的脚本在 `window.bernSvg.update(state)` 的 `state.data` 中读到，变化时再交一次；`external_links: true` 时，文档里点开的 https 链接交给系统浏览器打开，文档本身始终不离开打包的资源。见[动画 SVG](../Implementation/Animated-SVG.md)。
+The `static_source` of `Svg` is the frame at the end of the animation, and builds without a WebView show it directly; `data` is a piece of text handed to the document, which the document's script reads in `state.data` of `window.bernSvg.update(state)`, and it is handed over again when it changes; with `external_links: true`, https links opened in the document are handed to the system browser, and the document itself never leaves the bundled resources. See [Animated SVG](../Implementation/Animated-SVG.md).
 
-`Text` 加 `markdown` 时，内容是行内 Markdown：`**粗体**`、`*斜体*` 或 `_斜体_`、`` `代码` ``、`~~删除线~~` 和 `[链接](地址)`，反斜杠让下一个标记照字面显示。SwiftUI 交给系统的 `AttributedString(markdown:)`，Compose 写成带样式与 `LinkAnnotation` 的 `AnnotatedString`，Web 生成元素（不当作 HTML，链接只接受网页和邮件地址），GTK 转成 Pango 标记；Windows 暂时去掉标记只显示文字。整篇文档（标题、列表、表格等）由应用自己分块，每块用这样的文字显示。
+With `markdown`, the content of `Text` is inline Markdown: `**bold**`, `*italic*` or `_italic_`, `` `code` ``, `~~strikethrough~~` and `[link](url)`, and a backslash makes the next marker display literally. SwiftUI hands it to the system's `AttributedString(markdown:)`, Compose writes it as an `AnnotatedString` with styles and `LinkAnnotation`, the Web generates elements (not treated as HTML; links accept only web and email addresses), and GTK converts it to Pango markup; Windows for now strips the markup and shows only the text. A whole document (headings, lists, tables and so on) is split into blocks by the app itself, and each block is shown as such text.
 
-`Search` 放在 `Toolbar` 或 `Sidebar` 里由它们接管；放在页面里是平台自己的搜索框（iOS 的 `UISearchTextField`、macOS 的 `NSSearchField`、网页的 `input[type=search]`），子内容是在框获得焦点或有文字时列在框下的结果，`width` / `height` / `font_size` 是框本身的尺寸与字号（工具栏里的搜索面板则是面板尺寸）。
+`Search` placed in a `Toolbar` or a `Sidebar` is taken over by them; placed in a page, it is the platform's own search field (`UISearchTextField` on iOS, `NSSearchField` on macOS, `input[type=search]` on the Web), its children are the results listed below the field when the field has focus or contains text, and `width` / `height` / `font_size` are the size and font size of the field itself (for the search panel in a toolbar, they are the panel's size).
 
-`Rail(overhang:)` 让刻度在轨道两端各伸出这么多点：比例 f 的子项站在 f × (长度 + 2 × overhang) − overhang，如 CSS 里负外边距的时间轴。`ScrollView(open_at:)` 是打开时的位置：内容中比例为 f 的点对齐到视图中同一比例处（0 起点，0.5 正中对正中，1 末尾）。`ScrollView(open_center:)` 也是打开时的位置：内容中比例为 f 的点停在视图正中；靠近两端放不到正中时滚到尽头为止，这一点仍在视图里。它可以绑定表达式，只在打开时读一次，之后值变了也不跟着滚，例如时间轴打开时让“现在”尽量居中。
+`Rail(overhang:)` makes the ticks extend this many points past each end of the track: a child at ratio f stands at f × (length + 2 × overhang) − overhang, like a timeline built with negative margins in CSS. `ScrollView(open_at:)` is the position on opening: the point at ratio f of the content is aligned to the same ratio of the view (0 the start, 0.5 center to center, 1 the end). `ScrollView(open_center:)` is also the position on opening: the point at ratio f of the content stops at the center of the view; near either end, where it cannot reach the center, the view scrolls as far as it can, and the point is still in view. It can bind an expression, which is read only once on opening, and the view does not scroll along when the value changes later; for example, it centers "now" as far as possible when a timeline opens.
 
-`Form` 的 `gap` 是分组之间的距离，`row_height` 是行的最小高度，`padding_x` / `padding_y` 是所有分组行的内边距（`Section` 自己的同名属性优先）；表单以 `Section(style: plain)` 开头时从页面顶部开始，这一组的行没有底色、边距和分隔线，作为随表单滚动的标题。表单给分组的行内边距不作用于 plain 分组，它只用自己的 `padding_x` / `padding_y`。打头的 plain 分组也可以来自插槽、组件或条件：表单在布局时看第一项是不是 plain 分组，条件变了跟着变，所以 `if window.compact { Section(style: plain) { … } }` 只在窄窗口里让表单贴顶。`style!` 里 `Form { background: 角色 }` 是行的底色，表单本身透出页面背景。
+The `gap` of `Form` is the distance between groups, `row_height` is the minimum row height, and `padding_x` / `padding_y` are the inner padding of the rows of all groups (a `Section`'s own properties of the same name take precedence); when a form begins with `Section(style: plain)`, it starts at the top of the page, and the rows of that group have no background, margins or separators, serving as a heading that scrolls with the form. The row padding the form gives groups does not apply to plain groups, which use only their own `padding_x` / `padding_y`. The leading plain group can also come from a slot, a component or a condition: during layout the form checks whether the first item is a plain group, and follows when the condition changes, so `if window.compact { Section(style: plain) { … } }` makes the form start at the top only in narrow windows. In `style!`, `Form { background: role }` is the background of the rows, and the form itself lets the page background show through.
 
-`Row` 的各项放得下时取各自的宽度，剩余空间由 `Spacer` 和撑满的项平分；放不下时其余项按各自宽度的比例收缩，不小于各自的最小宽度。`Spacer` 没有最小长度，放不下时先收到零，各目标相同。`Row` 里领头的文字后面紧跟 `Spacer` 时（没写宽度的 `Text`，或不写 `align`、`align: leading` 的 `Column`），由文字占去 `Spacer` 的位置：后面的控件保持自己的宽度，文字在剩下的宽度里换行，如系统列表行的标签；SwiftUI 与 Compose 这样排，其他目标按上面的一般规则。给定 `width` / `height` 而内容较小时，`Column` 从顶部开始、横向按 `align` 摆放，`Row` 从前缘开始、纵向按 `align` 摆放。`Column` 不写 `align` 时与 `leading` 相同：按钮等控件、内层的 `Column` 与 `Stack` 保持自己的宽度，输入框、分隔线、`Grid`、`List` 等横向填满的内容横跨整列，要让按钮横跨整列写 `Button(width: fill)`。直接写在窗口里、没写宽度的 `Column` 与窗口内容区同宽，从顶部开始、横向按 `align` 摆放；没写尺寸的 `Stack` 铺满内容区；比内容区小的其他正文从左上角排起。
+Items in a `Row` take their own widths when they fit, and the remaining space is shared equally by `Spacer`s and filling items; when they do not fit, the other items shrink in proportion to their own widths, but not below their own minimum widths. `Spacer` has no minimum length and is the first to shrink to zero when things do not fit, the same on every target. When leading text in a `Row` is immediately followed by a `Spacer` (a `Text` without a width, or a `Column` without `align` or with `align: leading`), the text takes the `Spacer`'s place: the controls after it keep their own widths, and the text wraps within the remaining width, like the label of a system list row; SwiftUI and Compose lay it out this way, and other targets follow the general rule above. When `width` / `height` is given and the content is smaller, `Column` starts from the top and is placed horizontally by `align`, and `Row` starts from the leading edge and is placed vertically by `align`. A `Column` without `align` is the same as `leading`: buttons and other controls, as well as inner `Column` and `Stack`, keep their own widths, while horizontally filling content such as input fields, dividers, `Grid` and `List` spans the whole column; to make a button span the whole column, write `Button(width: fill)`. A `Column` written directly in a window without a width is as wide as the window content area, starts from the top and is placed horizontally by `align`; a `Stack` without a size fills the content area; other body content smaller than the content area is laid out from the top-left corner.
 
-## 通用动效与轨道属性
+## Common motion and rail properties
 
-以下属性只对 `ComponentSpec::moves()` 为真的布局元素开放，不应加到 Window、导航结构、插槽等不接受动效的节点上。各后端可能另有 capability 限制。
+The following properties are open only to layout elements for which `ComponentSpec::moves()` is true, and should not be added to nodes that do not accept motion, such as Window, navigation structures and slots. Each backend may have further capability restrictions.
 
-| 属性 | 类型 |
+| Property | Type |
 | --- | --- |
 | `appear` | `Transition` |
 | `appear_delay` | `Number` |
@@ -174,7 +176,7 @@
 | `reveal` | `hover` |
 | `animate` | `MotionToken` |
 | `appearance` | `light / dark` |
-| `tint` | `ColorRole`：这部分界面的强调色改用该角色，里面的控件、选中态与链接随之着色 |
+| `tint` | `ColorRole`: the accent color of this part of the interface changes to that role, and the controls, selection states and links inside it are colored accordingly |
 | `scroll_scale` | `Number` |
 | `scroll_opacity` | `Number` |
 | `scroll_origin_x` | `Number` |
@@ -183,26 +185,26 @@
 | `nudge_key` | `KeyValue` |
 | `nudge_scale` | `Number` |
 | `reduce_motion` | `Bool` |
-| `spin` | `Bool`：成立时绕中心匀速转动，不成立时停在当时的角度 |
-| `spin_period` | `Number`：转一圈的秒数，默认 1，负数逆时针；需要 `spin` |
-| `glow` | `Number`：指针（鼠标悬停，或手指按住时）在元素范围内时跟着它的白光，半径为元素短边的这个倍数；上面叠着别的元素也亮 |
-| `glow_opacity` | `Number`：光中心的不透明度，大于 0、不超过 1，默认 0.4；需要 `glow` |
-| `blur` | `Length`：把元素的画面按这个半径（点）模糊，不越出元素的范围与圆角；可以跟随状态，配 `animate` 时按它的动效变化（`bound_blur`：六个目标都已实现） |
+| `spin` | `Bool`: when true, rotates at a constant speed around its center; when false, stops at the angle it has at that moment |
+| `spin_period` | `Number`: seconds per revolution, default 1, negative for counterclockwise; requires `spin` |
+| `glow` | `Number`: a white glow that follows the pointer (a hovering mouse, or a finger held down) while it is within the element, with a radius of this multiple of the element's shorter side; it lights up even with other elements on top |
+| `glow_opacity` | `Number`: the opacity at the center of the glow, greater than 0 and at most 1, default 0.4; requires `glow` |
+| `blur` | `Length`: blurs the element's picture by this radius (points), without going beyond the element's bounds and corner radius; can follow state, and with `animate` changes with its motion (`bound_blur`: implemented on all six targets) |
 | `stagger` | `Number` |
-| `idle_area` | `Number`：鼠标在此停住多少秒后窗口静置；有静置区时，鼠标停在别处不静置 |
+| `idle_area` | `Number`: the number of seconds the mouse must rest here before the window goes idle; when there are idle areas, the mouse resting elsewhere does not make the window idle |
 | `at` | `NumberValue` |
 | `from` | `NumberValue` |
 | `to` | `NumberValue` |
 
-不接受上述通用属性的当前组件：`WindowSet`、`Window`、`Detail`、`SidebarItem`、`Section`、`Slot`、`Pages`、`PageContent`、`Destination`、`Tab`、`Layout`、`MenuItem`。
+Current components that do not accept the common properties above: `WindowSet`, `Window`, `Detail`, `SidebarItem`, `Section`, `Slot`, `Pages`, `PageContent`, `Destination`, `Tab`, `Layout`, `MenuItem`.
 
-`scroll_origin_x`、`scroll_origin_y` 是 `scroll_scale` 放大时不动的那一点，按元素宽高的比例取 0 到 1，默认 0.5（正中），如 CSS 的 `transform-origin`。`at`、`from`、`to` 用于 Rail 中的定位；`stagger` 仅用于支持错峰的 Column、Row、Grid、Stack、ForEach、List。通用属性存在并不表示它在任意容器中都有意义。
+`scroll_origin_x` and `scroll_origin_y` are the point that stays still when `scroll_scale` enlarges the element, taken as a ratio of the element's width and height from 0 to 1, default 0.5 (the center), like CSS `transform-origin`. `at`, `from` and `to` are used for positioning in a Rail; `stagger` is used only in Column, Row, Grid, Stack, ForEach and List, which support staggering. The existence of a common property does not mean that it is meaningful in every container.
 
-## 浮层状态与消息输入
+## Popover state and message input
 
 
-`PopoverButton(panel_appearance: window)` 的气泡跟随窗口（应用明暗选择或系统），触发按钮仍保留所在区域的外观。省略时继承所在区域；气泡打开期间也响应明暗变化。`panel_appearance: surface` 根据当前平台样式选择：指定背景色时跟随窗口，原生材质气泡继承所在区域，以便视频上方的玻璃气泡保持深色和浅色文字。macOS 未指定背景色时保留系统气泡材质（支持的系统上为 Liquid Glass）。Windows 未指定背景色时是系统的应用内亚克力，同样继承所在区域的明暗，并限制在窗口内。所有目标都支持 `style! { PopoverButton { background: color(light: "#F2F2F2", dark: "#1E1E1E"), foreground: text.primary } }`，颜色作用于完整气泡表面及内容，不作用于触发按钮。
+The bubble of `PopoverButton(panel_appearance: window)` follows the window (the app's appearance choice or the system's), while the trigger button keeps the appearance of the region it is in. When omitted, the bubble inherits the region it is in; it also responds to appearance changes while it is open. `panel_appearance: surface` chooses according to the current platform style: with a specified background color it follows the window, and a native material bubble inherits the region it is in, so that a glass bubble above a video keeps its dark look and light text. On macOS without a specified background color, the system bubble material is kept (Liquid Glass on systems that support it). On Windows without a specified background color, it is the system's in-app acrylic, which likewise inherits the appearance of the region it is in and is confined to the window. All targets support `style! { PopoverButton { background: color(light: "#F2F2F2", dark: "#1E1E1E"), foreground: text.primary } }`; the colors apply to the entire bubble surface and its content, not to the trigger button.
 
-`PopoverButton(open: app.panel) { … } => app.set_panel(app.panel)` 将动作中相同的状态表达式替换为新的开关值；打开、点击外部收起和 Escape 关闭都走这个动作。省略 `open` 时可继续使用 `presented: draft.panel`，或让组件自行保存状态。
+`PopoverButton(open: app.panel) { … } => app.set_panel(app.panel)` replaces the identical state expression in the action with the new open/closed value; opening, dismissing by clicking outside and closing with Escape all go through this action. When `open` is omitted, `presented: draft.panel` can still be used, or the component can keep its own state.
 
-macOS 上，`TextInput` 点击外部时释放焦点、保留草稿，也不阻止所点击控件的正常动作。点击内部仍可定位光标和选中文字。`submit: clear` 在提交后立即清空并释放键盘；等待服务器确认的输入框应使用 `clear_key`，在成功后递增数值，失败时保留。`clear_key` 初次挂载不清空，目前仅 SwiftUI 后端实现其运行行为。
+On macOS, clicking outside a `TextInput` releases focus and keeps the draft, and does not block the normal action of the clicked control. Clicking inside still positions the cursor and selects text. `submit: clear` clears and releases the keyboard immediately after submitting; an input field that waits for server confirmation should use `clear_key` and increment the number on success, keeping the text on failure. `clear_key` does not clear on first mount; currently only the SwiftUI backend implements its runtime behavior.

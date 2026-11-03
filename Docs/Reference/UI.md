@@ -1,19 +1,21 @@
-# 当前组件用法
+**English** · [简体中文](../zh-CN/Reference/UI.md)
 
-更新：2026-10-28。本文说明当前可声明的接口；完整属性、必填项、子节点与动作规则见[组件属性表](Component-Properties.md)，各后端的接受范围见[平台能力表](Platforms.md)。可直接构建的工程在 `examples/hello`、`examples/showcase`、`examples/planner`、`examples/gallery`；下文片段省略所在组件、协议与状态定义。
+# Current component usage
 
-## 声明与数据来源
+Updated: 2026-10-28. This document describes the interfaces that can be declared today; for the complete properties, required items, child nodes and action rules see the [component property table](Component-Properties.md), and for what each backend accepts see the [platform capability table](Platforms.md). Projects that can be built directly are in `examples/hello`, `examples/showcase`, `examples/planner` and `examples/gallery`; the snippets below omit the enclosing component, protocol and state definitions.
 
-在 `#[component]` 函数内用 `ui!` 声明树。静态用户可见文案使用 `tr!`，引擎状态只读，`draft` 会话字段可由标准控件更新，业务修改通过 `=>` 绑定的类型化命令执行。`id` 是控制入口的稳定身份，`label` 同时用于可访问名称。`label_hidden: true` 隐藏可见文字，仍须提供 label；当前支持它的控件包括 TextInput、Switch、Slider、Picker。
+## Declarations and data sources
 
-长度通常使用逻辑单位，`Length` 接受数字或受限数值表达式。`Number` 只接受静态数字，`Flag` 只接受构建期布尔值。条件、列表和状态引用仍受编译器检查；目标不支持的组件特性由能力检查拒绝，不能只根据组件名称判断平台覆盖。
+Declare the tree with `ui!` inside a `#[component]` function. Static user-visible text uses `tr!`, engine state is read-only, `draft` session fields can be updated by standard controls, and business changes run through typed commands bound with `=>`. `id` is the stable identity for control entry points, and `label` also serves as the accessible name. `label_hidden: true` hides the visible text, but a label must still be given; the controls that currently support it are TextInput, Switch, Slider and Picker.
 
-## 文本、内容与格式化
+Lengths usually use logical units; `Length` accepts a number or a restricted numeric expression. `Number` accepts only static numbers, and `Flag` accepts only build-time booleans. Conditions, lists and state references are still checked by the compiler; component features a target does not support are rejected by the capability check, and platform coverage cannot be judged from the component name alone.
 
-界面上的每段文字，要么是 `tr!` 声明的文案，要么是声明为内容的数据，编译期区分二者：
+## Text, content and formatting
 
-- 协议与 UI 类型的文本字段、组件的文本参数写 `#[content]`，表示它是数据（标题、文件名、用户写的笔记）。只有它能直接显示（`Text(content: app.title)`），或作为 `tr!` 参数嵌进句子（`{title}`）。显示未标记的文本、给 `tr!` 参数写字面量，都报 B105：固定的字写进翻译。会话字段是用户输入的，算作内容。
-- 引擎不拼句子。它给出数字、`CalendarDate` 与枚举，由界面用 `tr!` 或带标签的枚举写成读者的语言。
+Every piece of text in the interface is either text declared with `tr!` or data declared as content, and the two are told apart at compile time:
+
+- Text fields of protocol and UI types and text parameters of components are marked `#[content]`, meaning they are data (titles, file names, notes the user wrote). Only such text can be shown directly (`Text(content: app.title)`) or embedded in a sentence as a `tr!` argument (`{title}`). Showing unmarked text, or writing a literal as a `tr!` argument, reports B105: fixed words go into the translation. Session fields are entered by the user and count as content.
+- The engine does not assemble sentences. It gives numbers, `CalendarDate` values and enums, and the interface writes them in the reader's language with `tr!` or labeled enums.
 
 ```rust
 #[value]
@@ -33,23 +35,23 @@ pub fn heading(#[content] title: String) -> impl View {
 }
 ```
 
-`tr!` 与枚举标签用同一种消息格式（ICU MessageFormat 的子集），各后端按同一语义、随会话当前语言写出：
+`tr!` and enum labels use the same message format (a subset of ICU MessageFormat), which every backend writes out with the same semantics in the session's current language:
 
-| 写法 | 写出 | 参数 |
+| Syntax | Writes out | Arguments |
 | --- | --- | --- |
-| `{name}` | 文本原样，数字按 Bern 的写法，枚举写它的标签 | `#[content]` 文本、整数、小数、带标签的枚举 |
-| `{n, plural, =0 {…} one {# 项} other {# 项}}` | 按数字在该语言里的复数类别选分支，`=N` 精确匹配优先；分支里的 `#` 是这个数 | 整数、小数 |
-| `{d, date, EEE, MMM d}` | 日期：`y`/`yy` 年，`M`/`MM` 月，`MMM`/`MMMM` 月名，`d`/`dd` 日，`EEE`/`EEEE` 星期；其他字符原样 | `CalendarDate` |
-| `{t, duration, m:ss}` | 秒数：`h`、`m`、`s`，双写补零；写出的最大单位容纳更大的部分（`m:ss` 下 125 秒是 `2:05`，3725 秒是 `62:05`） | 整数、小数 |
+| `{name}` | Text as is, numbers in Bern's notation, enums as their label | `#[content]` text, integers, decimals, labeled enums |
+| `{n, plural, =0 {…} one {# 项} other {# 项}}` | Picks the branch by the number's plural category in that language, with exact `=N` matches taking precedence; `#` in a branch is the number | Integers, decimals |
+| `{d, date, EEE, MMM d}` | Date: `y`/`yy` year, `M`/`MM` month, `MMM`/`MMMM` month name, `d`/`dd` day, `EEE`/`EEEE` weekday; other characters as is | `CalendarDate` |
+| `{t, duration, m:ss}` | Seconds: `h`, `m`, `s`, doubled letters pad with zeros; the largest unit written holds the larger parts (under `m:ss`, 125 seconds is `2:05` and 3725 seconds is `62:05`) | Integers, decimals |
 
-- `{{`、`}}` 是字面括号；复数分支里 `}` 总是结束分支。
-- 每种语言要写出自己用到的复数类别：中文、日文、韩文等只有 `other`，英文等需要 `one` 与 `other`；缺少分支报 B104。参数类型不符（复数给文本、日期给数字、`{d}` 直接写日期）也报 B104。
-- 枚举标签的占位符就是该变体的字段，不写 `; 名: 值`。文本字段须 `#[content]`；枚举字段的类型须每个变体都有标签。
-- 月名与星期名是框架文本，内置简体中文、繁体中文、英文、日文，其他语言用英文。
-- `CalendarDate { year, month, day }` 在 `bern::prelude` 中，只表示日期，不含时刻与时区。`Text(content: date)` 会被拒绝，须用 `tr!` 写出格式。
-- 这些格式与显示字段的标签由 SwiftUI、Web、GTK、Compose 与 WinUI 3 实现（目标功能 `text_formats`）：各后端的运行时按同一格式解析翻译文本，复数分支、日期与时长在当前语言下写出。
+- `{{` and `}}` are literal braces; inside a plural branch `}` always ends the branch.
+- Each language must write out the plural categories it uses: Chinese, Japanese, Korean and the like have only `other`, while English and others need `one` and `other`; a missing branch reports B104. A mismatched argument type (text for a plural, a number for a date, a date written directly as `{d}`) also reports B104.
+- The placeholders of an enum label are that variant's fields; do not write `; name: value`. Text fields must be `#[content]`; the type of an enum field must have a label on every variant.
+- Month and weekday names are framework text, built in for Simplified Chinese, Traditional Chinese, English and Japanese; other languages use English.
+- `CalendarDate { year, month, day }` is in `bern::prelude` and represents only a date, without time of day or time zone. `Text(content: date)` is rejected; the format must be written out with `tr!`.
+- These formats and the labels of displayed fields are implemented by SwiftUI, the Web, GTK, Compose and WinUI 3 (target feature `text_formats`): each backend's runtime parses translated text by the same format, and plural branches, dates and durations are written out in the current language.
 
-数据里的说明文字（插件的介绍、更新日志）常带行内 Markdown。`Text(markdown: true)` 把 `**粗体**`、`*斜体*`、`` `代码` ``、`~~删除线~~` 与 `[链接](地址)` 按平台的样式显示，反斜杠让下一个标记照字面显示；它只认行内标记，标题、列表、引用、代码块与表格由应用拆成块，每块用合适的组件显示。代码块用 `style: code`，即平台的等宽字体：
+Description text in data (a plugin's introduction, a changelog) often carries inline Markdown. `Text(markdown: true)` shows `**bold**`, `*italic*`, `` `code` ``, `~~strikethrough~~` and `[link](url)` in the platform's style, and a backslash makes the next marker show literally; it recognizes only inline markup, and headings, lists, quotes, code blocks and tables are split into blocks by the app, each shown with a suitable component. Code blocks use `style: code`, the platform's monospaced font:
 
 ```rust
 Column(gap: 10) {
@@ -58,15 +60,15 @@ Column(gap: 10) {
 }
 ```
 
-Windows 暂时去掉标记只显示文字；其他目标的实现见[属性表](Component-Properties.md)。
+Windows currently strips the markup and shows only the text; for the other targets' implementations see the [property table](Component-Properties.md).
 
-## 坐标场景与滚动内容
+## Coordinate scenes and scrolling content
 
-`ScaleBox(width:, height:)` 定义固定逻辑画布，在父容器给出的可用区域内等比缩放并居中，保留整个画布。父容器需要提供可用宽高。`Positioned(x:, y:, width:, height:)` 从场景左上角定位图层，坐标允许为负；位置和尺寸可绑定状态，配合 `animate` 平滑变化。`ScaleBox` 之外的内容会被裁切。
+`ScaleBox(width:, height:)` defines a fixed logical canvas that is scaled proportionally and centered within the available area the parent container gives, keeping the whole canvas visible. The parent container must provide an available width and height. `Positioned(x:, y:, width:, height:)` positions a layer from the top-left corner of the scene, and coordinates may be negative; position and size can be bound to state and change smoothly together with `animate`. Content outside the `ScaleBox` is clipped.
 
-区域与画布的比例不同时，画布两侧（或上下）会留出空白。`Positioned(bleed: true)` 的图层在它到达的每条画布边上继续延伸，铺满到 `ScaleBox` 的边缘：背景、铺满窗口的画面都写成到达画布边的图层并带 `bleed`，就不会在宽窗口里留出黑边；画布按设计尺寸显示时空白为零，与不写 `bleed` 完全相同。`bleed` 可绑定布尔表达式（例如只在画面铺满时延伸），延伸的边随图层的 `animate` 动效移入移出，窗口尺寸变化时立即跟随。它只对 `ScaleBox` 场景里的图层生效；图层里面的 `Positioned` 用它自己的坐标，不再延伸。实现：Web、SwiftUI（macOS、iOS、tvOS）、Compose、GTK 与 WinUI 3。
+When the area and the canvas have different aspect ratios, blank space is left on both sides of the canvas (or above and below it). A `Positioned(bleed: true)` layer keeps extending past every canvas edge it reaches, filling out to the edges of the `ScaleBox`: write backgrounds and window-filling pictures as layers that reach the canvas edges and carry `bleed`, and wide windows get no black bars; when the canvas is shown at its design size there is no blank space, exactly the same as without `bleed`. `bleed` can be bound to a boolean expression (for example extending only while the picture fills the window); the extended edges move in and out with the layer's `animate` motion and follow window size changes immediately. It only takes effect on layers in a `ScaleBox` scene; a `Positioned` inside a layer uses its own coordinates and does not extend further. Implemented by: Web, SwiftUI (macOS, iOS, tvOS), Compose, GTK and WinUI 3.
 
-`WindowButtons` 占出窗口自己的按钮在内容前端所占的位置：内容铺到标题栏下面时，macOS 的红绿灯与其后的间距共 84 点；网页、手机、平板、电视、Windows、Linux 的窗口在那里没有按钮，它不占位置，也不在所在行里产生间距。
+`WindowButtons` takes up the space that the window's own buttons occupy at the leading edge of the content: when the content extends under the title bar, the macOS traffic lights and the spacing after them take 84 points in total; windows on the web, phones, tablets, TVs, Windows and Linux have no buttons there, so it takes no space and produces no spacing in its row.
 
 ```rust
 ScaleBox(width: 1280, height: 720) {
@@ -81,13 +83,13 @@ ScaleBox(width: 1280, height: 720) {
 }
 ```
 
-`Marquee` 的 `duration` 是一轮从右向左经过内容区的秒数，当前运行时至少使用 1 秒；`phase` 是起始周期比例，建议 0–1，默认 0。`paused` 默认 false，`opacity` 默认 1 并限制到 0–1。时钟由呈现层管理，暂停后可以继续，减少动态效果时静态呈现。它只表达循环滚动内容，不提供逐帧回调、视频时钟同步或弹幕调度引擎。
+The `duration` of `Marquee` is the number of seconds one pass takes to cross the content area from right to left, and the current runtime uses at least 1 second; `phase` is the starting fraction of the cycle, recommended 0–1, default 0. `paused` defaults to false, and `opacity` defaults to 1 and is clamped to 0–1. The clock is managed by the presentation layer and can resume after pausing; under Reduce Motion the content is presented statically. It only expresses looping scrolling content and provides no per-frame callbacks, video clock synchronization or danmaku scheduling engine.
 
-这三个组件由 `scaled_scene` 能力提供，当前支持 SwiftUI 和 Web。SwiftUI 使用一次整体缩放；Web 通过 ResizeObserver 更新缩放并在卸载时解除观察。iOS 共用生成路径，本轮未做播放器设备交互验收。
+These three components are provided by the `scaled_scene` capability, currently supported by SwiftUI and the Web. SwiftUI applies one overall scale; the Web updates the scale through a ResizeObserver and stops observing on unmount. iOS shares the generation path; no player device interaction acceptance was done in this round.
 
-## 控件容器与尺寸
+## Control containers and sizes
 
-`ControlGroup(height: 40)` 将功能相近的控件放进一个共享胶囊，保留子控件各自的点击、菜单和浮层。高度默认 40；`label` 可选，Web 将其用作组的可访问名称，SwiftUI 当前保留子控件的可访问名称。SwiftUI 在 macOS / iOS 26 起使用交互式 Liquid Glass，旧系统使用系统材质胶囊；Web 使用自己的胶囊样式。
+`ControlGroup(height: 40)` puts controls with related functions into one shared capsule, keeping each child control's own clicks, menus and popovers. The height defaults to 40; `label` is optional, the Web uses it as the group's accessible name, and SwiftUI currently keeps the child controls' accessible names. SwiftUI uses interactive Liquid Glass from macOS / iOS 26 on and a system material capsule on older systems; the Web uses its own capsule style.
 
 ```rust
 ControlGroup(height: 40) {
@@ -98,20 +100,20 @@ ControlGroup(height: 40) {
 }
 ```
 
-独立控件可用 `Button`、`Menu`、`Picker`、`Switch`、`SplitButton` 的 `shape: capsule` 和 `height` 声明容器及高度。网页没有胶囊形按钮：在网页上它们是标准控件，取标准高度与 8 点圆角。`Button` 与 `Switch(style: button)` 另有 `shape: chip`，表示一枚标签：网页上是描边药丸（30 高，选中或 `prominence: prominent` 时反色），其他平台是 30 点高的胶囊，写了 `height` 时取所写高度。相邻菜单使用一致的 shape / height，相关操作可共享 ControlGroup；形状本身不会改变命令语义。`IconButton(prominence: plain)` 用于需要普通图标的独立按钮，`font_size` 调整图标字号；它不代替容器高度。`prominence: prominent` 表达强调按钮。
+Standalone controls can declare a container and its height with `shape: capsule` and `height` on `Button`, `Menu`, `Picker`, `Switch` and `SplitButton`. The web has no capsule-shaped buttons: on the web they are standard controls with the standard height and an 8-point corner radius. `Button` and `Switch(style: button)` also have `shape: chip`, which makes them a chip: on the web an outlined pill (30 high, inverted when selected or with `prominence: prominent`), on other platforms a 30-point-high capsule, or the written height when `height` is given. Adjacent menus use a consistent shape / height, and related actions can share a ControlGroup; the shape itself does not change the command's semantics. `IconButton(prominence: plain)` is for standalone buttons that need a plain icon, and `font_size` adjusts the icon size; it does not replace the container height. `prominence: prominent` expresses an emphasized button.
 
-带图标与文字的返回入口使用一个 `Button(icon:, label:)`，将两者作为同一控件进行布局与命中。容器大小属于声明，不能通过移除容器来回避内容溢出。普通控件的默认外观仍由目标平台决定。
+A back entry with an icon and text uses one `Button(icon:, label:)`, which lays out and hit-tests the two as one control. Container size belongs to the declaration; content overflow cannot be avoided by removing the container. The default appearance of ordinary controls is still decided by the target platform.
 
-## 引擎受控控件
+## Engine-controlled controls
 
-| 控件 | 会话草稿来源 | 引擎快照来源 | 命令接收到的值 |
+| Control | Session draft source | Engine snapshot source | Value the command receives |
 | --- | --- | --- | --- |
-| Switch | `value: draft.enabled` | `checked: app.enabled` | 用户刚选择的布尔值 |
-| Picker | `value: draft.appearance` | `selected: app.appearance` | 用户刚选择的枚举值 |
-| Slider | `value: draft.volume` | `current: app.volume` | 用户提交的数值 |
-| TextInput | `value: draft.name` | `current: app.name` | 用户刚改成的整段文字 |
+| Switch | `value: draft.enabled` | `checked: app.enabled` | The boolean the user just chose |
+| Picker | `value: draft.appearance` | `selected: app.appearance` | The enum value the user just chose |
+| Slider | `value: draft.volume` | `current: app.volume` | The number the user committed |
+| TextInput | `value: draft.name` | `current: app.name` | The whole text the user just changed it to |
 
-每个控件只能选择一列作为来源，不能两者都写或都不写。引擎来源必须提供动作；动作参数中与 `checked` / `selected` / `current` 完全相同的表达式被替换为用户的新值，不替换其子表达式或其他参数。Picker 的枚举变体必须具有标签。
+Each control can choose only one column as its source; it cannot write both or neither. An engine source must provide an action; in the action's arguments, an expression identical to `checked` / `selected` / `current` is replaced with the user's new value, while its subexpressions and other arguments are not replaced. The enum variants of a Picker must have labels.
 
 ```rust
 Slider(id: volume,
@@ -120,15 +122,15 @@ Slider(id: volume,
 ) => app.set_volume(app.volume)
 ```
 
-受控 `TextInput` 每次编辑都运行动作，不等 Enter：重命名、过滤条件这类随打随存的字段用它。字段有焦点时用户的文字留在框里，引擎的回应不会把光标挪走或吞掉刚打的字；焦点离开后显示引擎的文字。用 `value:` 时动作在提交时运行。
+A controlled `TextInput` runs its action on every edit, without waiting for Enter: use it for fields that save as you type, such as renaming and filter conditions. While the field has focus, the user's text stays in the box, and the engine's response does not move the cursor away or swallow what was just typed; once focus leaves, the engine's text is shown. With `value:`, the action runs on submit.
 
 ```rust
 TextInput(id: rename, label: tr! { "zh-Hans" => "名称", "en" => "Name" }, current: app.opened_name) => app.rename(app.opened, app.opened_name)
 ```
 
-受控 Slider 默认拖动中显示本地预览，拖动结束提交；`current:` 搭配 `continuous: true` 可在拖动中提交（适用于音量、透明度、字号等即时设置），Apple 平台合并到每秒最多 30 次，松手立即提交最后值；引擎快照不会在编辑中抢回滑块位置。`PickerOption(value:, label:)` 可显式声明选项并把实时计数插入 label。受控值由 SwiftUI 与 Web 的 `controlled_values` 支持，显式选项另由 `modal_flow_timer` 检查。
+A controlled Slider shows a local preview while dragging by default and commits when the drag ends; `current:` together with `continuous: true` commits during the drag (for immediate settings such as volume, opacity and font size), coalesced to at most 30 times per second on Apple platforms, with the last value committed immediately on release; engine snapshots do not take back the slider position during an edit. `PickerOption(value:, label:)` declares options explicitly and can insert live counts into the label. Controlled values are supported by SwiftUI and the Web through `controlled_values`, and explicit options are additionally checked under `modal_flow_timer`.
 
-`Picker(style: chips)` 每个选项一枚标签（chip），选中的一枚突出：Apple 平台是系统玻璃胶囊按钮（设计的 30 点 chip，选中项为主题色，26 之前是材质胶囊），Compose 是 Material `FilterChip`，WinUI 3 是 `ToggleButton`，GTK 是同组的 `GtkToggleButton`，Web 是描边药丸按钮（选中项反色）。没有可见标签（`label_hidden: true`）而直接放在 `Flow` 里时，每枚标签都是这个 Flow 的子项，窄的时候逐枚换行；其他位置它们在自己的一行里换行。下面是一条工具栏：分段控件靠左，标签靠右，放不下的标签换到下一行。
+`Picker(style: chips)` has one chip per option, with the selected one emphasized: on Apple platforms they are system glass capsule buttons (the design's 30-point chip, the selected one in the theme color, a material capsule before 26), on Compose Material `FilterChip`, on WinUI 3 `ToggleButton`, on GTK `GtkToggleButton`s in one group, and on the Web outlined pill buttons (the selected one inverted). When it has no visible label (`label_hidden: true`) and sits directly in a `Flow`, each chip is a child of that Flow and they wrap one by one when it is narrow; elsewhere they wrap within their own row. Below is a toolbar: the segmented control on the left, the chips on the right, and chips that do not fit wrap to the next line.
 
 ```rust
 Flow(gap: 10) {
@@ -138,74 +140,74 @@ Flow(gap: 10) {
 }
 ```
 
-## 图片、排版与共享元素
+## Images, typography and shared elements
 
-| 声明 | 用途与边界 |
+| Declaration | Purpose and limits |
 | --- | --- |
-| `Image(aspect: 0.6666666667, fit: cover)` | 随容器宽度保持 2:3，避免加载前后画框跳动；比例必须为正 |
-| `Image(corner:)` | 裁切图片圆角，可绑定长度；也可以写 `style!` 的具名圆角，例如 `corner: poster` |
-| `Image(rendering: template)` | 按当前前景色渲染模板图片；原始彩色图片使用 original |
-| `Grid(row_gap:)` | 独立设置行距；省略时沿用 gap |
-| `Grid(min_width: 300, gap: 12, masonry: true)` | 瀑布流：高度不一的卡片各按自己的高度，放进目前最短的一列；GTK 与 Windows 按普通网格逐行排 |
-| `Row { Text(…) Spacer Switch(…) }` | 领头的文字占去 `Spacer` 的位置，在剩下的宽度里换行，开关保持自己的宽度，如系统设置的一行；SwiftUI 与 Compose 这样排 |
-| `Text(font_size:, lines:)` | 字号可绑定长度，lines 指定行数上限；动态字号要求 scaled_scene |
-| `Row(align: baseline)` | 按第一行文字基线对齐 |
-| `padding_x` / `padding_y` | 支持的布局容器分别设置水平、垂直内边距；见属性表 |
+| `Image(aspect: 0.6666666667, fit: cover)` | Keeps 2:3 as the container width changes, so the frame does not jump before and after loading; the ratio must be positive |
+| `Image(corner:)` | Clips the image to rounded corners and can be bound to a length; a named corner radius from `style!` also works, for example `corner: poster` |
+| `Image(rendering: template)` | Renders a template image in the current foreground color; original color images use original |
+| `Grid(row_gap:)` | Sets the row spacing separately; when omitted, gap is used |
+| `Grid(min_width: 300, gap: 12, masonry: true)` | Masonry layout: cards of different heights each keep their own height and go into the currently shortest column; GTK and Windows lay them out row by row as an ordinary grid |
+| `Row { Text(…) Spacer Switch(…) }` | The leading text takes the place of the `Spacer` and wraps within the remaining width, while the switch keeps its own width, like a row in the system settings; SwiftUI and Compose lay it out this way |
+| `Text(font_size:, lines:)` | The font size can be bound to a length, and lines sets the maximum number of lines; a dynamic font size requires scaled_scene |
+| `Row(align: baseline)` | Aligns by the baseline of the first line of text |
+| `padding_x` / `padding_y` | Set horizontal and vertical padding separately on the layout containers that support them; see the property table |
 
-共享元素使用 `hero: poster, hero_key: item.id`：静态 hero 名称区分用途，动态 key 区分具体条目。两端须处于同一窗口且键一致；不要同时保留多个同键可见元素。`hero_key` 不替代 ForEach 的稳定 key。
+Shared elements use `hero: poster, hero_key: item.id`: the static hero name distinguishes the purpose, and the dynamic key distinguishes the specific item. Both ends must be in the same window with matching keys; do not keep several visible elements with the same key at once. `hero_key` does not replace the stable key of ForEach.
 
-macOS 的 Image 使用窗口上层像素覆盖层，Web 使用视口坐标的图片副本，处理跨侧栏与 ScaleBox 的坐标变化；临时画面不接受点击、不进入无障碍树，减少动态效果时不飞行。macOS / Web 已验收图片从舞台展开、缩到侧栏及恢复。iOS 和 macOS 的其他视图仍沿用匹配几何；Video 连续画面的跨分栏传递不在此次图片验收范围。
+On macOS, Image uses a pixel overlay above the window, and the Web uses a copy of the image in viewport coordinates, handling coordinate changes across the sidebar and ScaleBox; the temporary picture accepts no clicks, does not enter the accessibility tree, and does not fly under Reduce Motion. macOS / Web have passed acceptance for an image expanding from the stage, shrinking into the sidebar and restoring. Other views on iOS and macOS still use matched geometry; passing Video's continuous picture across split-view columns was outside the scope of this image acceptance.
 
-## 同窗口引导、侧栏与搜索
+## Same-window onboarding, sidebar and search
 
-SwiftUI 目标可在 `style!` 中用 `Sidebar { background: color(light: "#FAFAFA", dark: "#171717") }` 和 `Detail { background: color(light: "#F2F2F2", dark: "#1E1E1E") }` 设置分栏底色，规则加 `#[target(macos, ios, tvos)]`。背景直接绘制在原生分栏上并延伸到窗口栏后方，内容仍遵循标题栏的安全区域，不必额外包裹 `Stack`。侧栏列表的系统底色会隐藏，顶栏和底栏也使用同一背景。
+SwiftUI targets can set the split-view background colors in `style!` with `Sidebar { background: color(light: "#FAFAFA", dark: "#171717") }` and `Detail { background: color(light: "#F2F2F2", dark: "#1E1E1E") }`, adding `#[target(macos, ios, tvos)]` to the rules. The background is drawn directly on the native split view and extends behind the window bar, while the content still respects the title bar's safe area, with no need for an extra `Stack` wrapper. The system background of the sidebar list is hidden, and the top and bottom bars use the same background.
 
-| 接口 | 当前语义 |
+| Interface | Current semantics |
 | --- | --- |
-| `Modal(width:, height:)` | 窗口内居中面板，尺寸受可用窗口约束，背景遮罩；正文可滚动、页脚可单独放置。不写 `height` 时与内容一样高：正文的 `ScrollView` 取它滚动的内容的高度，超出窗口时面板停在窗口边缘、正文滚动。背景子树使用 `Stack(enabled: false)` 禁用 |
-| `Flow(gap:)` | 按内容固有尺寸从左到右换行；每行的子项竖直居中，`Spacer` 换行时不占宽度，排好后占满所在行余下的宽度 |
-| `Timer(interval:, enabled:) => command()` | 挂载且启用时定期提交命令；卸载、禁用时取消，间隔单位为秒。不能用来驱动逐帧绘制 |
-| `Watch(value:) => command()` | 挂载时运行一次动作，之后值每变一次运行一次，相等的新值不算变化。用来把只在界面里的草稿告诉引擎：表格选中的行、侧栏选中的页面、搜索框的文字。值是布尔、数值、文本、枚举，或它们的可选值与列表。写在 `if` 里时，条件成立的那一刻运行一次 |
-| `Text(color:)` | 用强调色或状态色画文字：`accent`、`status.success`、`status.warning`、`status.error`，各平台用自己的文字颜色；与 `emphasis` 二选一。`mark` 是文字下的底纹，不改变文字颜色 |
-| `Accordion(count:, selected:, collapsed_width:, height:, gap:, corner:)` | 一列展开，其余列固定折叠宽度；selected 从 0 开始，animate 驱动列宽及位置；height 可省略，此时填满父布局剩余高度，应放在有高度约束的容器中（如窗口内的 Column） |
-| `Sidebar(width:)` | 固定列宽。`SidebarHeader` 固定在列表上方，`SidebarFooter` 固定在下方。`SidebarHeader(role: title)` 表示头部只用应用的图标与名称给窗口命名：标题栏本身就显示应用名称的平台（Windows 的两种前端与 Linux GTK）不显示它，其他平台照常显示 |
-| `SidebarItem(badge:)` | 显示正数计数；模块页面清单的 badge 可绑定模块状态字段 |
-| `Search(style: palette)` | 从工具栏入口打开命令面板；`panel_prompt`、`width`、`height` 设置提示与面板尺寸 |
-| `SearchItem(id:, label:) => command()` | 面板结果，可带 icon、detail、hint 或自定义子内容；`navigation: false` 不参与方向键选择，仍可点击与 Tab 聚焦 |
+| `Modal(width:, height:)` | A centered in-window panel whose size is constrained by the available window area, with a background scrim; the body can scroll and the footer can be placed separately. Without `height` it is as tall as its content: the body's `ScrollView` takes the height of the content it scrolls, and when that exceeds the window the panel stops at the window edge and the body scrolls. The background subtree is disabled with `Stack(enabled: false)` |
+| `Flow(gap:)` | Wraps from left to right by the content's intrinsic size; the children in each row are centered vertically, and a `Spacer` takes no width when wrapping and, once laid out, fills the rest of its row |
+| `Timer(interval:, enabled:) => command()` | Submits the command periodically while mounted and enabled; cancelled when unmounted or disabled; the interval is in seconds. It cannot be used to drive per-frame drawing |
+| `Watch(value:) => command()` | Runs the action once when mounted, then once each time the value changes; an equal new value does not count as a change. Use it to tell the engine about drafts that live only in the interface: the selected rows of a table, the page selected in the sidebar, the text of a search box. The value is a boolean, number, text or enum, or an optional or list of them. Written inside an `if`, it runs once at the moment the condition becomes true |
+| `Text(color:)` | Draws text in the accent color or a status color: `accent`, `status.success`, `status.warning`, `status.error`, each platform using its own text colors; mutually exclusive with `emphasis`. `mark` is shading under the text and does not change the text color |
+| `Accordion(count:, selected:, collapsed_width:, height:, gap:, corner:)` | One column is expanded and the others keep a fixed collapsed width; selected starts at 0, and animate drives the column widths and positions; height can be omitted, in which case it fills the remaining height of the parent layout and should be placed in a container with a height constraint (such as a Column in a window) |
+| `Sidebar(width:)` | Fixed column width. `SidebarHeader` is pinned above the list and `SidebarFooter` below it. `SidebarHeader(role: title)` means the header only names the window with the app's icon and name: platforms whose title bar already shows the app name (both Windows frontends and Linux GTK) do not show it, and other platforms show it as usual |
+| `SidebarItem(badge:)` | Shows a positive count; the badge in a module's page list can be bound to a module state field |
+| `Search(style: palette)` | Opens a command palette from a toolbar entry; `panel_prompt`, `width` and `height` set the prompt and the panel size |
+| `SearchItem(id:, label:) => command()` | A panel result, which can carry an icon, detail, hint or custom child content; `navigation: false` excludes it from arrow-key selection, while it can still be clicked and focused with Tab |
 
-搜索面板支持方向键、Enter、Esc、外部点击及关闭后的焦点恢复，当前只在 macOS 和 Web 开放。其他表内扩展由 SwiftUI 和 Web 提供；应用的布局与平台选择仍须通过目标能力检查。
+The search panel supports arrow keys, Enter, Esc, outside clicks and focus restoration after closing, and is currently available only on macOS and the Web. The other extensions in the table are provided by SwiftUI and the Web; the app's layout and platform choices must still pass the target capability check.
 
-## 动效与空闲状态
+## Motion and the idle state
 
-- `appear` / `disappear` 控制结构变化；`animate` 控制支持的长度变化，`reflow` 让相邻元素让位。动效名称来自 `style!`。
-- `style!` 的 `corner { card: 22 }` 给圆角起名，`#[target(windows)] corner { card: 8 }` 给该平台另定取值；样式规则、`Image` / `Video` / `Shape` / `Accordion` 的 `corner` 与其中的 `if` 表达式都可写名字，构建时换成目标平台的数值。
-- `grow(edge: bottom, bouncy)` 固定某条边展开；`appear_delay` 必须配合 appear，延迟非负，可与 stagger 相加。普通状态更新不会重播入场，卸载取消等待。
-- `nudge` 响应布尔触发；`nudge_key` 让不同事件值触发提示，`nudge_scale` 指定幅度。容器的 `reduce_motion` 与系统减少动态效果偏好合并。
-- `spin` 成立时元素绕中心匀速转动，`spin_period` 秒一圈（默认 1，负数逆时针）；不成立时停在当时的角度，减少动态效果时不转。GPUI 只转资源里的 `Image`。
-- `glow: 倍数` 让指针所在处的元素亮起一团白光，半径为元素短边的这个倍数，中心不透明度为 `glow_opacity`（默认 0.4）；鼠标悬停时亮，触屏上手指按住时亮。看的是指针在不在元素的范围内，所以压在封面上的标题不会挡住光。`blur: 半径` 把元素的画面模糊，不越出它的范围与圆角。两者都不影响布局与点按；GPUI 不支持，检查时警告。
-- `Window(idle_after:, idle_enabled:, immersive:)` 控制空闲与沉浸。idle_after 单位为秒，`window.idle` 为只读会话状态。idle_enabled 默认 true；关闭后清除闲置并停用检测，开启后重新计时。SwiftUI 和 Web 已接入此开关（能力 `idle_control`）；其他目标当前未消费该属性，`bern check` 会对它们给出警告，空闲检测在那里始终开启。
+- `appear` / `disappear` control structural changes; `animate` controls supported length changes, and `reflow` makes neighboring elements give way. Motion names come from `style!`.
+- `corner { card: 22 }` in `style!` gives a corner radius a name, and `#[target(windows)] corner { card: 8 }` gives that platform its own value; style rules, the `corner` of `Image` / `Video` / `Shape` / `Accordion` and the `if` expressions in it can all use the name, which is replaced with the target platform's value at build time.
+- `grow(edge: bottom, bouncy)` expands with one edge fixed; `appear_delay` must go with appear, the delay is non-negative and can be added to stagger. Ordinary state updates do not replay the entrance, and unmounting cancels the wait.
+- `nudge` responds to a boolean trigger; `nudge_key` lets different event values trigger the hint, and `nudge_scale` sets the amplitude. A container's `reduce_motion` is combined with the system Reduce Motion preference.
+- While `spin` holds, the element rotates around its center at a constant speed, one turn every `spin_period` seconds (default 1, negative for counterclockwise); when it does not hold, the element stops at its current angle, and it does not turn under Reduce Motion. GPUI only rotates an `Image` from resources.
+- `glow: multiple` lights up a white glow where the pointer is on the element, with a radius of this multiple of the element's shorter side and a center opacity of `glow_opacity` (default 0.4); it lights up while the mouse hovers, and on touch screens while a finger is held down. It looks at whether the pointer is within the element's bounds, so a title laid over a cover does not block the glow. `blur: radius` blurs the element's picture without going beyond its bounds and corner radius. Neither affects layout or taps; GPUI does not support them, and the check warns.
+- `Window(idle_after:, idle_enabled:, immersive:)` controls the idle state and immersive mode. idle_after is in seconds, and `window.idle` is read-only session state. idle_enabled defaults to true; turning it off clears the idle state and stops detection, and turning it on restarts the timer. SwiftUI and the Web consume this switch (capability `idle_control`); other targets do not consume the property yet, `bern check` warns for them, and idle detection is always on there.
 
-macOS 编辑文字、菜单或子窗口交互时保留控制层；Web 仅在启用状态变化时重启计时器，播放进度快照更新不会阻止空闲隐藏。UIKit 共享启停逻辑，播放器设备交互尚未验收。
+macOS keeps the control layer while text is being edited or a menu or child window is in use; the Web restarts the timer only when the enabled state changes, and playback progress snapshot updates do not prevent idle hiding. UIKit shares the start/stop logic; player device interaction has not passed acceptance yet.
 
-## 持久化与本地预览
+## Persistence and local preview
 
-`bern::storage::Store::host()` 使用宿主安装的、按应用 bundle ID 隔离的小数据存储。macOS / iOS 使用 Application Support，Windows 使用 APPDATA，Linux 使用 XDG_CONFIG_HOME / ~/.config；Web app 使用同源 localStorage，WebUI 使用原生引擎宿主。key 限简单文件名；不存在的值与空值不同，读写失败返回错误。`Store::directory` 适用于指定目录的原生测试，没有宿主时的纯引擎测试不持久化。
+`bern::storage::Store::host()` uses a small data store installed by the host and isolated by the app's bundle ID. macOS / iOS use Application Support, Windows uses APPDATA, and Linux uses XDG_CONFIG_HOME / ~/.config; a Web app uses same-origin localStorage, and WebUI uses the native engine host. Keys are limited to simple file names; a missing value is different from an empty value, and read and write failures return errors. `Store::directory` is for native tests with a given directory; pure engine tests without a host do not persist anything.
 
 ```sh
 bern run --target web_app --port 4173
 ```
 
-目标名由项目 Bern.toml 定义。`--port` 只用于浏览器 app，范围 1–65535；省略时使用空闲端口。固定端口保持相同 origin，避免开发时端口改变而读到另一份 localStorage。浏览器权限、容量与清理站点数据会影响持久化。
+Target names are defined by the project's Bern.toml. `--port` is only for browser apps, in the range 1–65535; when omitted, a free port is used. A fixed port keeps the same origin, so that a port change during development does not read a different localStorage. Browser permissions, storage quotas and clearing site data affect persistence.
 
-## 电视、快捷键与起始焦点
+## TV, keyboard shortcuts and initial focus
 
-- `Layout(size: tv)` 是电视上的布局，`Adaptive` 里最多一个，不影响其他尺寸的必需与回退规则；表达式可读 `window.tv`。tvOS 在构建时只保留电视显示的部分，所以手机与桌面布局里电视没有的能力（如 `pick:`）不会让 tvOS 构建失败。
-- `Shortcut(key:, enabled:) => 动作` 是没有控件的快捷键，键的写法与控件的 `shortcut` 相同。电视上 `escape`、`space` 与方向键分别是遥控器的返回、播放/暂停与触控板方向（方向只在焦点无处可移时到达）。
-- `Button` / `IconButton` 的 `default_focus: true` 让界面出现时焦点从它开始；电视上每个页面都应给出一个。
-- `window.keyboard` 是否连着实体键盘：电脑上总是成立，手机与平板跟随键盘的连接与断开。只对键盘有用的内容（如快捷键设置）写在 `if window.keyboard { … }` 里，没接键盘的手机上就不出现。
-- macOS 窗口统一隐藏系统焦点框，包括按钮、输入框、滑块、工具栏和弹出面板；键盘焦点、文本编辑和快捷键仍正常工作。
-- `style!` 的 `text` 块可以给电视另定字号：`body: font(size: 13, tv: 16)`。
-- 元素自己写的长度也可以交给样式按平台给出，元素用 `variant` 选择：`Row`、`Column` 的 `gap`、`padding`、`padding_x`、`padding_y`、`width`、`height`，`Stack` 的 `width`、`height`，`Form` 的 `gap`、`padding_x`、`padding_y`、`row_height`，`IconButton` 的 `font_size`、`height`。`width: fit` 与 `height: fit` 去掉写下的尺寸，元素取内容的大小。构建某个平台时，适用于它的规则（不带 `#[target]` 的在前，带的在后）替换元素写下的值，所以设计在各平台尺寸不同的地方不需要在界面里判断平台：
+- `Layout(size: tv)` is the layout on TVs, at most one per `Adaptive`, and does not affect the required and fallback rules of the other sizes; expressions can read `window.tv`. tvOS keeps only what the TV shows at build time, so capabilities in the phone and desktop layouts that TVs lack (such as `pick:`) do not make the tvOS build fail.
+- `Shortcut(key:, enabled:) => action` is a keyboard shortcut without a control; keys are written the same way as a control's `shortcut`. On TVs, `escape`, `space` and the arrow keys are the remote's back, play/pause and touch surface directions (directions only arrive when focus has nowhere to move).
+- `default_focus: true` on `Button` / `IconButton` makes focus start from it when the interface appears; on TVs every page should give one.
+- `window.keyboard` is whether a physical keyboard is connected: always true on computers, and on phones and tablets it follows the keyboard being connected and disconnected. Content that is only useful with a keyboard (such as keyboard shortcut settings) is written inside `if window.keyboard { … }`, so it does not appear on phones without a keyboard.
+- macOS windows hide the system focus ring throughout, including on buttons, text fields, sliders, toolbars and popover panels; keyboard focus, text editing and keyboard shortcuts still work normally.
+- The `text` block of `style!` can give TVs their own font size: `body: font(size: 13, tv: 16)`.
+- Lengths that an element writes itself can also be left to styles to give per platform, with the element choosing a style through `variant`: `gap`, `padding`, `padding_x`, `padding_y`, `width`, `height` of `Row` and `Column`; `width`, `height` of `Stack`; `gap`, `padding_x`, `padding_y`, `row_height` of `Form`; and `font_size`, `height` of `IconButton`. `width: fit` and `height: fit` remove the written size, and the element takes the size of its content. When building for a platform, the rules that apply to it (those without `#[target]` first, those with it after) replace the values the element writes, so where the design has different sizes on different platforms, the interface does not need to check the platform:
 
 ```rust
 style! {
@@ -218,9 +220,9 @@ style! {
 }
 ```
 
-  元素没有这项长度时报错，例如 `Button.x { gap: 4 }`；长度不小于 0，`font_size` 大于 0。
-- 屏幕键盘一类的按键用文字会话动作：`=> draft.query.push_str("A")`、`=> draft.query.pop()`；搜索页想在输入前就列出结果时写 `Search(suggest: true)`。
-- `Tab(display: icon)` 让页签只显示图标，例如电视标签栏里只是放大镜的搜索页；必须写 `icon`，`label` 仍是读屏读出的名称（桌面上也是悬停提示）。关键词与 `Label(display:)` 相同，默认 `title_and_icon`。它不限于电视，六个目标都生成。
+  An element that does not have that length reports an error, for example `Button.x { gap: 4 }`; lengths are not less than 0, and `font_size` is greater than 0.
+- Keys such as those of an on-screen keyboard use text session actions: `=> draft.query.push_str("A")`, `=> draft.query.pop()`; a search page that wants to list results before anything is typed writes `Search(suggest: true)`.
+- `Tab(display: icon)` makes a tab show only its icon, for example a search page that is just a magnifying glass in a TV tab bar; `icon` is required, and `label` is still the name the screen reader reads (and the hover tooltip on desktops). The keywords are the same as for `Label(display:)`, defaulting to `title_and_icon`. It is not limited to TVs; all six targets generate it.
 
 ```rust
 Adaptive(id: shell) {
@@ -242,14 +244,14 @@ Tabs(id: tv_tabs, selection: draft.page) {
 }
 ```
 
-各目标的范围见[平台能力表](Platforms.md)，tvOS 的焦点、遥控与缩放场景见 [tvOS 实现记录](../Implementation/tvOS-SwiftUI.md)。
+For the scope of each target see the [platform capability table](Platforms.md); for tvOS focus, remote control and scaled scenes see the [tvOS implementation notes](../Implementation/tvOS-SwiftUI.md).
 
-## 菜单栏与可改的快捷键
+## Menu bar and rebindable keyboard shortcuts
 
-- `shortcut:` 与 `Shortcut(key:)` 可以绑定文本，快捷键跟随它：`shortcut: app.keys.open`。文本按快捷键的写法读取（`cmd+shift+o`），空文本或读不成快捷键时没有快捷键。引擎用 `bern::shortcut::parse_shortcut` 规范化用户选的键，用 `bern::shortcut::same_keys` 判断两段键是不是同一组按键。
-- `ShortcutInput(id:, label:, current: app.keys.x) => app.set_key(app.keys.x)` 是改键的按钮：显示当前快捷键（没有时显示 `empty`），按下后等待新的组合键（显示 `prompt`），Esc 保持原样，单独按 Delete 清空；等待时按键不触发其他快捷键。冲突、保存与恢复默认由应用的引擎处理。
-- `WindowSet` 里的 `MenuBar` 是应用的菜单：`CommandMenu(label:)` 是自己的菜单，`CommandMenu(role: file)` 等把项加进系统的同名菜单，嵌套的 `CommandMenu` 是子菜单，`Divider` 分组；`CommandItem` 有动作、`shortcut`、`enabled`（变灰）、`checked`（打勾）与 `pick`。菜单项读写的草稿属于主窗口，根组件用 `#[session]` 参数声明。
-- 只有 macOS 显示菜单栏；其他目标接受声明但不显示（能力 `menu_bar` 不适用，不警告）。`window.menu_bar` 在构建时已知，macOS 为真，用来只在 Mac 上显示菜单才有的设置。
+- `shortcut:` and `Shortcut(key:)` can be bound to text, and the keyboard shortcut follows it: `shortcut: app.keys.open`. The text is read in keyboard shortcut notation (`cmd+shift+o`); empty text, or text that cannot be read as a shortcut, means there is no shortcut. The engine normalizes the keys the user chose with `bern::shortcut::parse_shortcut`, and uses `bern::shortcut::same_keys` to tell whether two key strings are the same set of keys.
+- `ShortcutInput(id:, label:, current: app.keys.x) => app.set_key(app.keys.x)` is a button for rebinding: it shows the current shortcut (`empty` when there is none), and after it is pressed it waits for a new key combination (showing `prompt`); Esc leaves it unchanged and Delete pressed on its own clears it; while it is waiting, key presses do not trigger other shortcuts. Conflicts, saving and restoring defaults are handled by the app's engine.
+- `MenuBar` in a `WindowSet` is the app's menus: `CommandMenu(label:)` is a menu of the app's own, `CommandMenu(role: file)` and the like add items to the system menu of the same name, a nested `CommandMenu` is a submenu, and `Divider` groups items; a `CommandItem` has an action, `shortcut`, `enabled` (grayed out), `checked` (check mark) and `pick`. The drafts that menu items read and write belong to the main window and are declared with a `#[session]` parameter on the root component.
+- Only macOS shows the menu bar; other targets accept the declaration but do not show it (capability `menu_bar` not applicable, no warning). `window.menu_bar` is known at build time and is true on macOS; use it to show settings that only exist because of the menu only on the Mac.
 
 ```rust
 WindowSet(handle: AppWindows, primary: main) {
@@ -269,18 +271,18 @@ WindowSet(handle: AppWindows, primary: main) {
 }
 ```
 
-各目标的范围见[平台能力表](Platforms.md)，语义与实现进度见[设计文档的快捷键与菜单栏](../Design.md#菜单栏)。
+For the scope of each target see the [platform capability table](Platforms.md); for semantics and implementation progress see [keyboard shortcuts and the menu bar in the design document](../Design.md#menu-bar).
 
-## 状态栏项（托盘）
+## Status bar items (tray)
 
-`WindowSet` 里的 `StatusItem` 是应用在系统状态区域的一项：Windows 任务栏的通知区域、Linux 桌面的状态区与 macOS 菜单栏右侧。声明了它，关闭最后一个窗口时应用不退出，留在那里。
+A `StatusItem` in a `WindowSet` is the app's item in the system status area: the notification area of the Windows taskbar, the status area of Linux desktops and the right side of the macOS menu bar. When it is declared, closing the last window does not quit the app; the app stays there.
 
-- `label` 是提示文字与可访问名称。图标二选一：`icon` 是 Bern 图标名，只给 macOS，菜单栏按系统颜色画这个符号，Windows 与 Linux 显示应用图标；`image` 是 `[resources]` 里的单色 SVG（只看形状、不看颜色，镂空就是挖掉的部分），三个桌面平台都显示它，深色的栏上是白色、浅色的栏上是黑色，跟随系统切换。
-- 菜单第一项打开主窗口、最后一项退出，中间是声明的 `CommandItem`、`CommandMenu` 与 `Divider`，可以写在 `if`、`if let`、`match` 与 `ForEach` 里。Windows 与 Linux 上单击图标打开主窗口，右键是菜单；macOS 上点按就是菜单。
-- 菜单不属于任何窗口：只读引擎状态、执行命令与窗口动作，不读写草稿、不读窗口字段，菜单项不带 `pick` 与 `shortcut`。
-- `login_item: true` 在“退出”前加“登录时启动”：用户勾选后，登录时系统启动应用，只出现在状态区，不打开窗口。
-- 设置窗口里的同一开关写 `Switch(id:, label:, login_item: true)`：它显示并改变系统的登录项，与菜单里的“登录时启动”是同一项，不写 `value`、`checked` 与动作。没有登录项的平台（iOS、tvOS、Android、网页）不显示它（能力 `login_switch` 不适用）。
-- 手机、电视与网页没有这个位置，接受声明而不显示（能力 `status_item` 不适用）。
+- `label` is the tooltip and the accessible name. The icon is one of two: `icon` is a Bern icon name, for macOS only, where the menu bar draws this symbol in the system color, while Windows and Linux show the app icon; `image` is a monochrome SVG in `[resources]` (only its shape counts, not its color, and cut-outs are the hollowed-out parts), shown on all three desktop platforms, white on a dark bar and black on a light bar, following the system as it switches.
+- The first menu item opens the main window and the last one quits, with the declared `CommandItem`, `CommandMenu` and `Divider` in between, which can be written inside `if`, `if let`, `match` and `ForEach`. On Windows and Linux, clicking the icon opens the main window and right-clicking shows the menu; on macOS, clicking shows the menu.
+- The menu belongs to no window: it only reads engine state and runs commands and window actions, does not read or write drafts or read window fields, and its items carry no `pick` or `shortcut`.
+- `login_item: true` adds "Open at Login" before "Quit": once the user checks it, the system starts the app at login, and it appears only in the status area without opening a window.
+- The same switch in a settings window is written `Switch(id:, label:, login_item: true)`: it shows and changes the system login item and is the same item as "Open at Login" in the menu, with no `value`, `checked` or action. Platforms without login items (iOS, tvOS, Android, the web) do not show it (capability `login_switch` not applicable).
+- Phones, TVs and the web have no such place; they accept the declaration without showing it (capability `status_item` not applicable).
 
 ```rust
 StatusItem(icon: "sun.max.fill", label: tr! { "zh-Hans" => "显示器调节", "en" => "Monitor Dial" }, login_item: true) {
@@ -294,16 +296,16 @@ StatusItem(icon: "sun.max.fill", label: tr! { "zh-Hans" => "显示器调节", "e
 }
 ```
 
-语义与各平台的实现见[设计文档的状态栏项](../Design.md#状态栏项)。
+For semantics and each platform's implementation see [status bar items in the design document](../Design.md#status-bar-item).
 
-## 表格
+## Tables
 
-`Table` 把记录列表排成列，每项一行，`key` 是行的身份：行随状态增删、换序时保留各自的控件。每个 `TableColumn` 有表头 `title`，子节点是这一列每行的格子，用表格的行变量写。
+`Table` lays out a list of records in columns, one row per item, and `key` is the row's identity: as rows are added, removed and reordered with state, each keeps its own controls. Each `TableColumn` has a header `title`, and its children are this column's cell in each row, written with the table's row variable.
 
-- `selection: draft.chosen` 是 `Vec<String>` 或 `Vec<i64>` 草稿，按行的顺序存选中行的键。桌面上单击选一行，Shift 与平台的切换键（macOS 的 Command、其他平台的 Ctrl）选多行；Android 上每行前有勾选框，表头的勾选框全选或全不选。
-- 表格的动作是选中行的主操作：双击或 Enter；Android 上点一行就只选它并运行。
-- `TableColumn` 的动作在点表头时运行，用来让引擎换排序；`sorted` 与 `descending` 只显示表头上的排序标记，行的顺序就是 `items` 的顺序。
-- `TableMenu` 是行菜单，右键（键盘的菜单键或 Shift+F10）或长按一行时打开；那一行不在选中行里时先只选中它，所以菜单项读 `selection` 就是要处理的行。
+- `selection: draft.chosen` is a `Vec<String>` or `Vec<i64>` draft that stores the keys of the selected rows in row order. On desktops a click selects one row, and Shift and the platform's toggle key (Command on macOS, Ctrl on other platforms) select several; on Android every row has a checkbox in front, and the checkbox in the header selects all or none.
+- The table's action is the primary action for the selected rows: double-click or Enter; on Android, tapping a row selects only that row and runs the action.
+- A `TableColumn`'s action runs when its header is clicked, so the engine can change the sort order; `sorted` and `descending` only show the sort indicator on the header, and the order of the rows is the order of `items`.
+- `TableMenu` is the row menu, opened by right-clicking (the keyboard's Menu key or Shift+F10) or long-pressing a row; when that row is not among the selected rows, it first becomes the only selected row, so menu items that read `selection` get exactly the rows to act on.
 
 ```rust
 Table(id: servers, label: tr! { "zh-Hans" => "服务器", "en" => "Servers" }, items: app.servers, key: id, selection: draft.selected) |server| {
@@ -321,29 +323,29 @@ Table(id: servers, label: tr! { "zh-Hans" => "服务器", "en" => "Servers" }, i
 } => app.use_chosen(draft.selected)
 ```
 
-macOS 与 iOS 是 SwiftUI 的 `Table`，GTK 是 `GtkColumnView`，WinUI 3 是表头加 `ListView`（Windows 没有系统表格），网页是 `<table>`，Android 是 Material 数据表的样子；tvOS 没有表格，是一列行按钮。
+On macOS and iOS it is SwiftUI's `Table`, on GTK a `GtkColumnView`, on WinUI 3 a header plus a `ListView` (Windows has no system table), on the web a `<table>`, and on Android it looks like a Material data table; tvOS has no tables and shows a column of row buttons.
 
-## 剪贴板
+## Clipboard
 
-- `Button`、`IconButton`、`MenuItem` 与 `CommandItem` 的 `paste: draft.text` 先把剪贴板里的文字放进该草稿，再运行动作；剪贴板里没有文字时两者都不做。与 `pick` 二选一。
-- 引擎用 `bern::platform::copy_text(text)` 把文字放上剪贴板，在任何线程调用都可以，由界面线程完成。
+- `paste: draft.text` on `Button`, `IconButton`, `MenuItem` and `CommandItem` first puts the text from the clipboard into that draft and then runs the action; when the clipboard holds no text, it does neither. Mutually exclusive with `pick`.
+- The engine puts text on the clipboard with `bern::platform::copy_text(text)`; it can be called from any thread, and the UI thread completes it.
 
 ```rust
 Button(id: import, label: tr! { "zh-Hans" => "从剪贴板导入", "en" => "Import from the Clipboard" }, paste: draft.pasted) => app.import_links(draft.pasted)
 ```
 
-## 其他接口
+## Other interfaces
 
-动画 SVG 是按需使用的独立组件，接口、资源声明、平台依赖与生命周期见[专项文档](../Implementation/Animated-SVG.md)。视频播放器、查询、模块、主题及命令协议的完整语义继续见[设计文档](../Design.md)与对应实现记录。
+Animated SVG is a standalone component used on demand; for its interface, resource declarations, platform dependencies and lifecycle see the [dedicated document](../Implementation/Animated-SVG.md). For the full semantics of the video player, queries, modules, themes and the command protocol, continue to see the [design document](../Design.md) and the corresponding implementation notes.
 
-### 隐藏不可用的菜单项
+### Hiding unavailable menu items
 
-`Menu(hide_disabled: true)` 根据每个 `MenuItem` 的 `enabled` 条件隐藏不可用项，条件恢复时重新显示。省略此选项时仍显示灰色的禁用项。SwiftUI、Web、Compose、GTK 和 WinUI 3 都支持。
+`Menu(hide_disabled: true)` hides unavailable items according to each `MenuItem`'s `enabled` condition and shows them again when the condition is restored. When this option is omitted, disabled items are still shown grayed out. SwiftUI, the Web, Compose, GTK and WinUI 3 all support it.
 
 
-### 输入区域
+### Input region
 
-`FocusRegion` 包住一个内容视图（通常是输入框与发送按钮的 `Row`）。当其中的文本框正在编辑时，首次指针操作落在区域外，只取消编辑焦点，并消费这次按下及后续抬起，保留草稿且不提交。区域内按钮照常工作；下一次外部点击照常执行。键盘 Tab 切换不受影响。各平台后端负责事件处理，应用无需按控件 ID 或平台拦截。
+`FocusRegion` wraps a content view (usually a `Row` holding a text field and a send button). While a text field inside it is being edited, the first pointer action that lands outside the region only cancels the editing focus, consuming that press and the following release, keeping the draft and not submitting it. Buttons inside the region work as usual, and the next outside click works as usual. Keyboard Tab navigation is not affected. Each platform backend handles the events, so the app does not need to intercept them by control ID or by platform.
 
 ```rust
 FocusRegion {
@@ -354,6 +356,6 @@ FocusRegion {
 }
 ```
 
-### 运行时语义调色板
+### Runtime semantic palette
 
-`WindowSet(palette: app.palette)` 绑定一个文本字段，内容是从语义角色到浅色与深色 `#RRGGBB` 的 JSON 对象，例如 `{"accent":{"light":"#006A60","dark":"#4FDAC8"},"surface.canvas":{"light":"#F4FBF8","dark":"#101815"}}`。调色板可以在运行时更换，没写的角色保持平台默认。两种外观都要给出，前景与背景要成对可读。`accent` 这一对也给原生控件着色。SwiftUI（macOS、iOS、tvOS）、GTK 与 WinUI 3 支持 `runtime_palette`，其他目标用到这个属性时构建报错。不写调色板时，原有的 `accent:` 与 `appearance:` 照常有效。
+`WindowSet(palette: app.palette)` binds a text field whose content is a JSON object mapping semantic roles to light and dark `#RRGGBB` values, for example `{"accent":{"light":"#006A60","dark":"#4FDAC8"},"surface.canvas":{"light":"#F4FBF8","dark":"#101815"}}`. The palette can be replaced at runtime, and roles that are not written keep the platform default. Both appearances must be given, and foreground and background must be readable as pairs. The `accent` pair also tints native controls. SwiftUI (macOS, iOS, tvOS), GTK and WinUI 3 support `runtime_palette`; on other targets, using this property fails the build. Without a palette, the existing `accent:` and `appearance:` work as before.

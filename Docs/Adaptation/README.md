@@ -1,158 +1,160 @@
-# Bern UI 自适应适配规范
+**English** · [简体中文](../zh-CN/Adaptation/README.md)
 
-- 版本：v0.1
-- 官方资料核查日期：2026-10-09，Asia/Shanghai
-- 阶段：实现前的设计准备与验收依据
-- 关联：[Bern 架构设计 v0.11](../Design.md)
+# Bern UI adaptation guidelines
 
-Bern 的自适应以当前窗口空间、内容关系、输入能力和平台规则为依据。同一业务功能可以呈现为手机导航页、平板分栏、桌面窗口或电视焦点界面；命令、数据身份和资源所有权保持一致。设备型号只用于选择需要的能力探测与验证场景，不能代替实际布局条件。
+- Version: v0.1
+- Official sources checked on: 2026-10-09, Asia/Shanghai
+- Phase: design preparation before implementation, and the basis for acceptance
+- Related: [Bern architecture design v0.11](../Design.md)
 
-本目录整理官方指南，并将它们映射为 Bern 后端要求。文中明确区分官方事实与 Bern 设计决策；平台研究完成不代表后端实现、设备认证或真机验收已经完成。
+Bern's adaptation is based on the current window space, content relationships, input capabilities and platform rules. The same business feature can appear as a phone navigation page, a tablet split view, a desktop window or a TV focus interface; commands, data identity and resource ownership stay the same. The device model is only used to choose the capability probes and verification scenarios that are needed; it cannot replace the actual layout conditions.
 
-## 平台文档
+This directory collects the official guidelines and maps them to Bern backend requirements. The text clearly distinguishes official facts from Bern design decisions; completed platform research does not mean that the backend implementation, device certification or acceptance on real devices has been completed.
 
-| 用户要求的范围 | 适配文档 | 重点 |
+## Platform documents
+
+| Scope requested by the user | Adaptation document | Focus |
 | --- | --- | --- |
-| macOS | [Apple 平台](Apple.md#2-macos桌面窗口与键盘工作流) | SwiftUI / AppKit、独立窗口、菜单与键盘 |
-| Linux | [Windows 和 Linux](WindowsLinux.md) | GTK / GNOME 为默认路线，KDE 作为独立规范对照 |
-| Windows | [Windows 和 Linux](WindowsLinux.md) | WinUI 3、窗口逻辑尺寸、缩放、触控和高对比 |
-| Android | [Android](Android.md) | 当前窗口分类、系统边缘、返回、混合输入与生命周期 |
-| iOS 和 iPhone | [Apple 平台](Apple.md#3-ios--iphone触摸与导航连续性) | 触摸、尺寸类别、安全区域与导航连续性 |
-| Apple tvOS 和 Apple TV | [Apple 平台](Apple.md#5-tvos--apple-tv遥控焦点优先) | 遥控焦点、远距离观看、视频控制与电视安全区域 |
-| HarmonyOS 鸿蒙 | [HarmonyOS](HarmonyOS.md) | ArkUI 目标准备、窗口变化、折叠与设备能力 |
-| Android TV 和 Google TV | [Android](Android.md#8-android-tv--google-tv) | 遥控器、方向导航、播放按键与电视布局 |
-| iPhone Duo 折叠屏 | [Apple 平台](Apple.md#6-iphone-duo已公布设备的动态适配) | 内外屏、姿态区域、动态多场景能力 |
-| iPad 和 iPadOS | [Apple 平台](Apple.md#4-ipados--ipad可调整窗口与混合输入) | 可调整窗口、主辅布局、菜单及触摸键鼠并存 |
-| Web 浏览器 | [Web 视觉规范](Web.md) | Bern 自有的中性网页风格、主题角色与控件配方、页面与对话框呈现、浏览器托管边界 |
-| Emby 和 Jellyfin | [媒体客户端](MediaClients.md) | 官方客户端行为、品牌与协议边界、Bern 媒体界面契约 |
+| macOS | [Apple platforms](Apple.md#2-macos-desktop-windows-and-keyboard-workflows) | SwiftUI / AppKit, separate windows, menus and keyboard |
+| Linux | [Windows and Linux](WindowsLinux.md) | GTK / GNOME as the default route, KDE as a separate set of guidelines for comparison |
+| Windows | [Windows and Linux](WindowsLinux.md) | WinUI 3, logical window size, scaling, touch and high contrast |
+| Android | [Android](Android.md) | Current window classes, system edges, back, mixed input and lifecycle |
+| iOS and iPhone | [Apple platforms](Apple.md#3-ios--iphone-touch-and-navigation-continuity) | Touch, size classes, safe areas and navigation continuity |
+| Apple tvOS and Apple TV | [Apple platforms](Apple.md#5-tvos--apple-tv-remote-focus-first) | Remote focus, viewing from a distance, video controls and TV safe areas |
+| HarmonyOS | [HarmonyOS](HarmonyOS.md) | ArkUI target preparation, window changes, folding and device capabilities |
+| Android TV and Google TV | [Android](Android.md#8-android-tv--google-tv) | Remote control, directional navigation, playback keys and TV layout |
+| iPhone Duo foldable | [Apple platforms](Apple.md#6-iphone-duo-dynamic-adaptation-for-an-announced-device) | Inner and outer screens, posture regions, dynamic multi-scene capability |
+| iPad and iPadOS | [Apple platforms](Apple.md#4-ipados--ipad-resizable-windows-and-mixed-input) | Resizable windows, primary and secondary layout, menus, and touch alongside keyboard and mouse |
+| Web browsers | [Web design guidelines](Web.md) | Bern's own neutral web style, theme roles and control recipes, page and dialog presentation, the boundary of what the browser hosts |
+| Emby and Jellyfin | [Media clients](MediaClients.md) | Official client behavior, brand and protocol boundaries, Bern's media UI contract |
 
-上述链接按主题组织，避免为同一个系统的不同设备重复维护互相矛盾的规则。Android 折叠屏和双屏也纳入 Android 文档，不能用 iPhone Duo 规则替代其平台接口。
+The links above are organized by topic, to avoid maintaining mutually contradictory rules for different devices of the same system. Android foldables and dual screens are also covered in the Android document; iPhone Duo rules cannot stand in for its platform interfaces.
 
-iPhone Duo 已有 Apple 官方产品和开发指南。截至本次核查，官网列出的上市日期为 2026-10-23，因此可以准备适配，但不能写成已经通过上市设备实测。[Apple 产品页](https://www.apple.com/iphone-duo/)。
+iPhone Duo already has an official Apple product page and development guidance. As of this check, the release date listed on the official site is 2026-10-23, so adaptation can be prepared, but it cannot be described as already tested on a shipping device. [Apple product page](https://www.apple.com/iphone-duo/).
 
-## 官方依据与项目规则
+## Official basis and project rules
 
-| 内容类型 | 用途 | 使用规则 |
+| Content type | Use | Usage rule |
 | --- | --- | --- |
-| 官方 HIG 或设计指南 | 界面组织、交互习惯与可访问性方向 | 保留平台、设备和场景条件；建议不能擅自改写成系统硬限制 |
-| 官方 API 与开发指南 | 可用能力、生命周期与版本条件 | 同时核对运行 OS、SDK 和实际依赖，不按页面 URL 猜版本 |
-| 官方产品说明 | 确认设备及已发布特性 | 不代替 API 行为、性能或适配验收 |
-| 官方客户端与协议说明 | Emby/Jellyfin 的业务行为与互通 | 不当作跨操作系统通用视觉规范 |
-| Bern 映射与验收 | 决定框架如何实现用户要求 | 明确属于本项目设计，不能归为平台官方规定 |
-| 仅检索摘要或动态页面壳 | 发现来源和后续核对入口 | 不作为具体 API、硬性尺寸或版本要求的唯一证据 |
+| Official HIG or design guidelines | Interface organization, interaction conventions and accessibility direction | Keep the platform, device and scenario conditions; recommendations cannot be rewritten on our own authority into hard system limits |
+| Official APIs and development guides | Available capabilities, lifecycle and version conditions | Check the running OS, the SDK and the actual dependencies together; do not guess the version from the page URL |
+| Official product descriptions | Confirming devices and released features | Do not replace API behavior, performance or adaptation acceptance |
+| Official client and protocol documentation | Business behavior and interoperability of Emby/Jellyfin | Not treated as general visual guidelines across operating systems |
+| Bern mapping and acceptance | Deciding how the framework implements the user's requirements | Explicitly this project's design; cannot be attributed to official platform rules |
+| Search summaries only, or dynamic page shells | Discovering sources and entry points for later checking | Not the sole evidence for specific APIs, hard sizes or version requirements |
 
-平台设计推荐与 Bern 的命令、主题或图标按钮要求不一致时，需要逐项记录差异和验收结果。不能因为外观使用系统组件，就同时宣称其满足全部 Bern 契约。
+When a platform's design recommendations disagree with Bern's requirements for commands, themes or icon buttons, record each difference and its acceptance result item by item. Using system components for the appearance does not justify also claiming that all of Bern's contracts are met.
 
-本轮部分 Apple HIG 正文通过 Apple 官方页面数据或官方视频文字稿核验；HarmonyOS 的部分详细文档存在读取限制；Android TV 官方安全区例子有数值差异。各分册保留具体边界，不将来源不一致藏在一组通用常量中。
+In this round, some Apple HIG body text was verified through Apple's official page data or official video transcripts; some detailed HarmonyOS documents had reading restrictions; the official Android TV safe-area examples contain numeric discrepancies. Each per-platform document keeps its specific boundaries, rather than hiding inconsistencies between sources in one set of general constants.
 
-## 自适应环境模型
+## Adaptive environment model
 
-以下为 Bern 环境协议的设计输入，具体字段拼写和序列化形式待原型确认。环境属于窗口或呈现作用域，不属于全应用唯一的静态设备配置。
+The following is design input for Bern's environment protocol; the exact field spelling and serialization form are to be confirmed by the prototype. The environment belongs to a window or a presentation scope, not to a single static device configuration for the whole app.
 
-| 输入 | 必须表达的信息 | 不能替代为 |
+| Input | Information that must be expressed | Cannot be replaced by |
 | --- | --- | --- |
-| 内容区域 | 当前窗口或虚拟窗口可布局的逻辑宽高及坐标系 | 物理屏幕分辨率 |
-| 像素比例 | 布局单位到实际渲染像素的比例及变化 | 固定整数倍数 |
-| 字体环境 | 系统文字级别、字体度量、语言与书写方向 | 整页统一缩放 |
-| 边缘约束 | 系统栏、手势、窗口装饰、键盘及遮挡的语义 | 单个固定 padding |
-| 内部区域 | 遮挡、分隔、预留区域及各自用途 | 只记录四边安全区 |
-| 姿态 | 平展、部分折叠等已知状态及信息是否可用 | `isFoldable` 布尔值 |
-| 输入能力 | 触摸、精细指针、键盘、方向遥控、笔及当前焦点上下文 | 由操作系统永久指定一种输入 |
-| 观看场景 | 近距离桌面/手持、电视远距离等目标配置 | 单靠窗口宽度推断 TV |
-| 窗口能力 | 当前能否创建所需原生窗口、模态和恢复等操作 | `platform == desktop` |
-| 媒体能力 | 执行端、字幕与轨道、叠层、画中画及后台能力 | `Video` 组件存在即全部支持 |
-| 辅助功能 | 文字放大、提高对比、减少动态效果及辅助输入语义 | 一个深色模式布尔值 |
-| 变化身份 | 所属 session/window、实例代次与更新版本 | 无归属的全局屏幕事件 |
+| Content area | The logical width and height available for layout in the current window or virtual window, and its coordinate system | Physical screen resolution |
+| Pixel ratio | The ratio from layout units to actual rendered pixels, and its changes | A fixed integer multiple |
+| Font environment | System text size, font metrics, language and writing direction | Uniform whole-page scaling |
+| Edge constraints | Semantics of system bars, gestures, window decorations, the keyboard and occlusion | A single fixed padding |
+| Internal regions | Occlusions, separations, reserved regions and the use of each | Recording only the safe area on the four edges |
+| Posture | Known states such as flat and partially folded, and whether the information is available | An `isFoldable` boolean |
+| Input capabilities | Touch, fine pointer, keyboard, directional remote, pen, and the current focus context | One input permanently assigned by the operating system |
+| Viewing scenario | Target configurations such as close-range desktop/handheld and distant TV | Inferring TV from the window width alone |
+| Window capabilities | Whether operations such as creating the required native window, modals and restoration are currently possible | `platform == desktop` |
+| Media capabilities | Executor, subtitles and tracks, overlays, picture-in-picture and background capabilities | Everything counted as supported because a `Video` component exists |
+| Accessibility | Text enlargement, increased contrast, Reduce Motion and assistive input semantics | A single dark mode boolean |
+| Change identity | The owning session/window, instance generation and update version | Global screen events with no owner |
 
-未知能力必须能表达 unknown 或 not_available，不能根据产品名称补造事实。像素、pt、dp、vp 与 Windows effective pixels 属于不同平台的度量语境，后端负责转换；不得直接复制数值并宣称视觉或物理尺寸相同。
+Unknown capabilities must be expressible as unknown or not_available; facts cannot be made up from product names. Pixels, pt, dp, vp and Windows effective pixels belong to the measurement contexts of different platforms, and the backend is responsible for converting between them; values must not be copied directly with the claim that the visual or physical size is the same.
 
-## 布局选择与状态保持
+## Layout selection and state preservation
 
-以下顺序是 Bern 的设计决策，用于生成可分析、可复现的布局行为：
+The following order is a Bern design decision, used to produce analyzable, reproducible layout behavior:
 
-1. 确认当前宿主、窗口和必需能力可用，解析原生或虚拟呈现。
-2. 得到内容边界、系统约束和内部可用区域，避免重复扣除同一安全区。
-3. 确定输入和观看场景，选择手持、桌面或电视的交互配方。
-4. 根据内容关系及文字实际需求选择单栏、列表详情、主辅区域或网格。
-5. 在同一结构内计算宽度、换行、间距和内容最大宽度。
-6. 通过稳定身份保留选中项、草稿、滚动锚点、导航及播放器，提交同一批次的更新。
+1. Confirm that the current host, window and required capabilities are available, and resolve native or virtual presentation.
+2. Obtain the content bounds, system constraints and internal available regions, avoiding subtracting the same safe area twice.
+3. Determine the input and viewing scenario, and choose the handheld, desktop or TV interaction recipe.
+4. Choose a single column, list-detail, primary and secondary regions or a grid according to the content relationships and the actual needs of the text.
+5. Within the same structure, compute widths, wrapping, spacing and the maximum content width.
+6. Preserve the selected item, drafts, scroll anchor, navigation and player through stable identities, and commit the updates as one batch.
 
 ```mermaid
 flowchart LR
-    Env[窗口与平台环境] --> Regions[可用区域与输入能力]
-    Regions --> Policy[内容关系与适配规则]
-    Policy --> Layout[结构选择与组件布局]
-    Layout --> Target[目标 UI 呈现]
-    State[稳定状态和资源身份] --> Layout
+    Env[Window and platform environment] --> Regions[Available regions and input capabilities]
+    Regions --> Policy[Content relationships and adaptation rules]
+    Policy --> Layout[Structure selection and component layout]
+    Layout --> Target[Target UI presentation]
+    State[Stable state and resource identity] --> Layout
 ```
 
-系统尺寸、折叠与外观变化通过受信任事件更新环境。布局求值不能重新派发搜索、换源或播放业务命令；例如单栏详情展开成列表详情时，仍查看同一个实体，并保持同一个播放器。
+System size, folding and appearance changes update the environment through trusted events. Layout evaluation cannot re-dispatch search, source switching or playback business commands; for example, when a single-column detail expands into list-detail, it still shows the same entity and keeps the same player.
 
-首版架构的 compact/expanded 是声明分支名称，不是对所有 OS 尺寸类别的枚举承诺。Android 的当前五档宽度、Apple 的尺寸类别、Windows 的导航默认阈值及 GNOME 的内容断点分别由目标策略解释。扩展公共语义时必须补充 IR 与验收，不能在未知表达式中埋平台特例。
+The compact/expanded of the first-version architecture are names of declaration branches, not a promise to enumerate the size classes of every OS. Android's current five width classes, Apple's size classes, Windows' default navigation thresholds and GNOME's content breakpoints are each interpreted by the target's policy. Extending the common semantics requires adding to the IR and to acceptance; platform special cases cannot be buried in unknown expressions.
 
-## 共同适配契约
+## Common adaptation contract
 
-### 导航与功能完整性
+### Navigation and feature completeness
 
-应用声明顶层目的地、层级、列表详情和主辅关系；后端选择侧栏、标签栏、导航轨、页栈或电视内容入口。区域折叠时保留可发现的替代入口，并由 Feature Contract 检查必需功能。
+The app declares top-level destinations, hierarchy, list-detail and primary-secondary relationships; the backend chooses a sidebar, tab bar, navigation rail, page stack or TV content entry. When a region collapses, a discoverable alternative entry is kept, and the Feature Contract checks the required features.
 
-悬停、右键、长按和拖动均不能成为跨目标必需功能的唯一实现。文字变长或字体增大时，优先换行、重排和滚动，不缩小字体掩盖空间不足。
+Hover, right-click, long press and drag cannot be the only implementation of a feature required across targets. When text gets longer or the font gets larger, prefer wrapping, reflowing and scrolling; do not shrink the font to hide a lack of space.
 
-### 输入与命令
+### Input and commands
 
-鼠标点击、触摸、键盘激活、遥控确认和辅助技术激活绑定同一语义动作。原始手势预览可以在本地更新；提交动作执行一次命令，取消不改变已提交业务状态。
+Mouse clicks, touch, keyboard activation, remote confirmation and assistive technology activation are bound to the same semantic action. A raw gesture preview may update locally; a commit action runs the command once, and canceling does not change committed business state.
 
-Tab 顺序、方向焦点图和读屏顺序分别描述与验证。虚拟化列表按数据 key 恢复焦点；平台已经完成的系统焦点或窗口变化作为事实归并，不事后伪造命令。
+Tab order, the directional focus graph and screen reader order are described and verified separately. Virtualized lists restore focus by data key; system focus or window changes the platform has already made are merged as facts, without fabricating commands after the fact.
 
-### 多窗口与动态能力
+### Multiple windows and dynamic capabilities
 
-WindowSet 登记静态窗口种类，打开命令创建实例。auto 在当前目标内选择原生或虚拟呈现，不能暗中替换 UI 后端；无 UI 宿主时也不能自动启动界面。
+WindowSet registers static window kinds, and open commands create instances. auto chooses native or virtual presentation within the current target and cannot secretly replace the UI backend; when there is no UI host, it cannot launch an interface automatically either.
 
-原生创建能力可以随设备形态或系统状态变化，因此创建前检测和创建结果处理都必需。例如 iPhone Duo 的多场景能力需按实际内外屏环境判断，详见 [Apple 多场景规则](Apple.md#多场景与多显示边界)。
+Native creation capability can change with the device form or system state, so both checking before creation and handling the creation result are required. For example, the multi-scene capability of iPhone Duo must be judged from the actual inner or outer screen environment; see [Apple multi-scene rules](Apple.md#boundaries-of-multiple-scenes-and-multiple-displays).
 
-窄屏及电视虚拟窗口默认采用当前内容加可操作切换入口，保留其他窗口状态。虚拟窗口不模拟跨显示器、全局置顶或独立任务栏条目。普通关闭、脏草稿确认和最后窗口策略沿用主设计文档；平台强制终止不能保证可取消。
+On narrow screens and TVs, virtual windows by default show the current content plus an actionable switching entry, and keep the state of the other windows. Virtual windows do not simulate spanning displays, global always-on-top or separate taskbar entries. Ordinary close, confirmation of dirty drafts and the last-window policy follow the main design document; a forced termination by the platform cannot be guaranteed to be cancelable.
 
-### 主题与无障碍
+### Theme and accessibility
 
-Bern 控件默认跟随系统，缺少系统外观信号时沿用架构规定的浅色回退；应用可显式选择深色等外观。视频、封面和照片保持内容原色。系统高对比、文字缩放与减少动态效果独立处理。
+Bern controls follow the system by default; when there is no system appearance signal, they use the light fallback specified by the architecture; apps can explicitly choose an appearance such as dark. Videos, covers and photos keep the original colors of the content. System high contrast, text scaling and Reduce Motion are handled independently.
 
-颜色来源按主设计文档的“原生优先，算法兜底”：UI 框架具备完整深浅色体系的目标使用平台颜色、材料与标准控件样式，缺少该体系的目标（如 Web）和 Bern 自绘部分使用 Bern 主题算法。图标按钮须保留足够的点击区域、语义标签和明确焦点反馈，电视焦点不能依赖细微变色。
+Colors come from the sources set by the main design document's "native first, algorithm as fallback": targets whose UI framework has a complete light and dark mode system use platform colors, materials and standard control styles, and targets that lack such a system (such as the Web) and Bern's self-drawn parts use the Bern theme algorithm. Icon buttons must keep a sufficient hit area, a semantic label and clear focus feedback; TV focus cannot rely on subtle color changes.
 
-### 视频与媒体客户端
+### Video and media clients
 
-Video 始终表达播放语义，媒体后端和 UI 呈现分别验收。窗口、布局或折叠变化不暗中复制 player_id。字幕、控制条、弹幕和虚拟窗口与原生视频的合成必须真实测试。
+Video always expresses playback semantics, and the media backend and the UI presentation are accepted separately. Window, layout or fold changes do not secretly duplicate player_id. Compositing of subtitles, control bars, danmaku and virtual windows with native video must be tested for real.
 
-系统自带控制条只有在满足命令契约时才可作为标准实现；观察播放结果不等于事前派发命令。后台播放、系统媒体入口、网络权限和远程播放目标分别建模，不能用同一个“播放失败”隐藏原因。
+A system's built-in control bar can serve as the standard implementation only if it satisfies the command contract; observing a playback result is not the same as dispatching a command beforehand. Background playback, system media entry points, network permissions and remote playback targets are modeled separately; a single "playback failed" cannot be used to hide the cause.
 
-Emby/Jellyfin 用作实际应用场景。账号、媒体库、观看历史和服务协议属于应用适配器，窗口、导航、主题和播放器契约属于 Bern；见 [媒体客户端适配](MediaClients.md)。
+Emby/Jellyfin serve as real app scenarios. Accounts, media libraries, watch history and the server protocol belong to the app adapter; windows, navigation, theme and the player contract belong to Bern; see [media client adaptation](MediaClients.md).
 
-## 实施准备与验证矩阵
+## Implementation preparation and verification matrix
 
-每个目标组合先形成下面的支持记录，再承诺某个平台已受支持：
+For each target combination, first produce the support record below before committing to a platform being supported:
 
-| 记录维度 | 要记录的内容 |
+| Record dimension | What to record |
 | --- | --- |
-| 平台组合 | OS 与版本、UI 目标、SDK/依赖版本、设备或模拟环境 |
-| 尺寸环境 | 当前逻辑宽高、缩放、文字级别、安全区、内部区域、姿态 |
-| 输入环境 | 触摸/键鼠/遥控/辅助技术及焦点上下文 |
-| 原生能力 | 多窗口、关闭检查、媒体执行端与呈现组合 |
-| 场景与动作 | 初始 fixture、命令序列、环境变化序列和预期状态 |
-| 证据 | 编译结果、实际输入结果、观察状态、性能数据与来源版本 |
+| Platform combination | OS and version, UI target, SDK/dependency versions, device or simulated environment |
+| Size environment | Current logical width and height, scaling, text size, safe areas, internal regions, posture |
+| Input environment | Touch/keyboard and mouse/remote/assistive technology, and the focus context |
+| Native capabilities | Multiple windows, close checks, combinations of media executor and presentation |
+| Scenarios and actions | Initial fixture, command sequence, sequence of environment changes and expected state |
+| Evidence | Compile results, actual input results, observed state, performance data and source versions |
 
-最低场景集：
+Minimum scenario set:
 
-- [ ] 每个平台的关键尺寸边界两侧、边界本身、矮窗口和长文本。
-- [ ] 深浅色、高对比、文字放大、RTL 和减少动态效果。
-- [ ] 所有声明支持的输入方式完成同一组必需 Feature。
-- [ ] 折叠、旋转、分屏、跨显示器或窗口调整期间保持状态及资源身份。
-- [ ] 原生和虚拟窗口关闭、恢复、模态、旧引用及创建期间能力变化。
-- [ ] 视频嵌入、全窗口、覆盖层、后台限制和远端断连。
-- [ ] 同一引擎由 UI、CLI、JSON、MCP 驱动，结果与状态版本一致。
+- [ ] Both sides of each platform's key size boundaries, the boundary itself, short windows and long text.
+- [ ] Light and dark mode, high contrast, enlarged text, RTL and Reduce Motion.
+- [ ] Every input method declared as supported completes the same set of required Features.
+- [ ] State and resource identity are preserved during folding, rotation, split screen, moving across displays or window resizing.
+- [ ] Closing, restoring and modals of native and virtual windows, stale references, and capability changes during creation.
+- [ ] Embedded video, full window, overlays, background restrictions and remote disconnection.
+- [ ] The same engine driven by UI, CLI, JSON and MCP, with consistent results and state versions.
 
-推荐实施顺序是 Bern 的工程选择：先用 Web 验证环境快照、布局连续性和虚拟窗口，再分别验证默认桌面目标；随后加入移动/折叠与电视输入。可并行做各平台能力原型，但一个平台通过不能替其他平台完成验收。
+The recommended implementation order is Bern's engineering choice: first use the Web to verify environment snapshots, layout continuity and virtual windows, then verify each default desktop target; after that, add mobile/foldable and TV input. Capability prototypes for the platforms can be built in parallel, but one platform passing cannot complete acceptance on behalf of the others.
 
-tvOS 已有可构建的目标（`swiftui + tvos`，最低 tvOS 18，2026-10-20 起，模拟器构建，见 [tvOS 实现记录](../Implementation/tvOS-SwiftUI.md)）；真机与真实遥控器尚未验收。HarmonyOS 仍在适配研究范围，需要独立目标描述、工具链、运行时桥接和能力原型，不在未核验 SDK 前确定最低系统版本。
+tvOS already has a buildable target (`swiftui + tvos`, minimum tvOS 18, since 2026-10-20, simulator builds, see the [tvOS implementation notes](../Implementation/tvOS-SwiftUI.md)); real devices and a real remote have not yet been accepted. HarmonyOS is still within the scope of adaptation research; it needs its own target description, toolchain, runtime bridge and capability prototype, and no minimum system version is set before the SDK has been verified.
 
-## 资料维护
+## Maintaining the sources
 
-官方页面可能随系统和 SDK 更新而变化。实现前锁定版本时，重新核验将使用的 API、尺寸规则与平台限制；更新文档时同时记录受影响的 Bern 决策和验收场景。来源正文未取得或存在冲突的项目保留明确状态，不能以搜索排名或社区截图补成官方结论。
+Official pages may change with system and SDK updates. When locking versions before implementation, re-verify the APIs, size rules and platform limits that will be used; when updating the documents, also record the affected Bern decisions and acceptance scenarios. Items whose source body text could not be obtained, or whose sources conflict, keep an explicit status; search rankings or community screenshots cannot be used to fill them in as official conclusions.

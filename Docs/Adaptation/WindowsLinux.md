@@ -1,199 +1,201 @@
-# Windows 与 Linux 自适应依据及 Bern 适配设计
+**English** · [简体中文](../zh-CN/Adaptation/WindowsLinux.md)
 
-- 核查日期：2026-10-09（Asia/Shanghai）。
-- 文档性质：官方资料核验与设计建议；不是已实现能力清单。
-- Windows 范围：WinUI 3、Windows App SDK 与 Microsoft Windows 应用设计指南。
-- Linux 范围：以 GTK 4／libadwaita 的 GNOME 路线为默认研究对象，同时对照 KDE HIG。
-- 本文的“官方依据”概括已读取正文；“Bern 映射”是本项目提出的设计决策。
-- API 名称用于界定适配职责，具体 Rust 封装、版本下限和生成代码仍须原型验证。
+# Windows and Linux: adaptive basis and Bern adaptation design
 
-## 资料范围与读取记录
+- Checked on: 2026-10-09 (Asia/Shanghai).
+- Nature of this document: verification of official sources and design recommendations; not a list of implemented capabilities.
+- Windows scope: WinUI 3, the Windows App SDK and Microsoft's Windows app design guidelines.
+- Linux scope: the GNOME route of GTK 4/libadwaita is the default subject of study, compared against the KDE HIG.
+- The "official basis" sections of this document summarize the body text that was read; the "Bern mapping" sections are design decisions proposed by this project.
+- API names are used to delimit adaptation responsibilities; the specific Rust wrappers, minimum versions and generated code still have to be verified in a prototype.
 
-Microsoft 的窗口概览明确面向 WinUI 与 Windows App SDK；不能把同名 UWP `Windows.UI.WindowManagement.AppWindow` 直接当作 WinUI 3 API。本文窗口依据使用 `Microsoft.UI.Windowing`。[Windowing overview](https://learn.microsoft.com/en-us/windows/apps/develop/ui/windowing-overview)
+## Source scope and reading record
 
-GNOME HIG 明确以近期 GNOME 平台、尤其 GTK 4 与 libadwaita 为范围；KDE HIG 则围绕 KDE Plasma 的使用习惯，并考虑其他环境。由此可见，“Linux 原生”不能指向一套通用于所有桌面的 HIG。[GNOME HIG 平台定义](https://developer.gnome.org/hig/)、[KDE HIG 范围](https://develop.kde.org/hig/)
+Microsoft's windowing overview is explicitly aimed at WinUI and the Windows App SDK; the UWP `Windows.UI.WindowManagement.AppWindow` of the same name cannot be taken directly as a WinUI 3 API. The windowing basis in this document uses `Microsoft.UI.Windowing`. [Windowing overview](https://learn.microsoft.com/en-us/windows/apps/develop/ui/windowing-overview)
 
-| 来源组 | 正文读取状态 | 版本与限制 |
+The GNOME HIG is explicitly scoped to the recent GNOME platform, especially GTK 4 and libadwaita; the KDE HIG centers on the usage conventions of KDE Plasma while also considering other environments. It follows that "Linux native" cannot point to a single HIG common to all desktops. [GNOME HIG platform definition](https://developer.gnome.org/hig/), [KDE HIG scope](https://develop.kde.org/hig/)
+
+| Source group | Body reading status | Version and limitations |
 | --- | --- | --- |
-| Microsoft 布局、导航、输入、无障碍 | 已读取本文所引小节 | 动态更新的 Windows 应用文档，不据此推导 Bern 最低 OS 版本 |
-| Windows 窗口 API | 已读取 Closing、Cancel 与窗口概览 | API 链接固定 `windows-app-sdk-1.8` 视图；不声称该版本为最新版本 |
-| Windows 媒体与合成 | 已读取播放、控件绑定、资源归属与优化小节 | 仅确定适配方向，不证明全部编码、DRM 或 GPU 环境可用 |
-| GNOME HIG | 已读取缩放、指针、键盘、窗口、无障碍正文 | HIG 未给本文涉及全部规则统一标注发行版本 |
-| libadwaita Adaptive Layouts | 已读取断点、Clamp、Dialog、View Switcher 小节 | `/doc/1.8/` 页面显示 Library Version 1.8.8；不是 Bern 依赖承诺 |
-| libadwaita Styles & Appearance | 已读取 `main` 的深浅色与高对比小节 | 页面显示 1.11.alpha；只作方向依据，使用前须核对项目锁定版本 |
-| GTK／GDK API | 已读取缩放、关闭、最小化、视频正文 | 浮动 GTK 4 文档；仅 `get_scale` 的 4.12 起始版本已由正文核实 |
-| KDE | 已读取 HIG 范围、布局与导航正文 | KDE 路线对照，不意味着 Bern 已有 Qt／Kirigami 后端 |
+| Microsoft layout, navigation, input, accessibility | Read the subsections cited in this document | Continuously updated Windows app documentation; Bern's minimum OS version is not derived from it |
+| Windows window APIs | Read Closing, Cancel and the windowing overview | API links are pinned to the `windows-app-sdk-1.8` view; that version is not claimed to be the latest |
+| Windows media and composition | Read the playback, control binding, resource ownership and optimization subsections | Only settles the adaptation direction; does not prove that all codecs, DRM or GPU environments are available |
+| GNOME HIG | Read the body text on scaling, pointer, keyboard, windows and accessibility | The HIG does not uniformly mark release versions for all the rules this document covers |
+| libadwaita Adaptive Layouts | Read the breakpoints, Clamp, Dialog and View Switcher subsections | The `/doc/1.8/` page shows Library Version 1.8.8; not a Bern dependency commitment |
+| libadwaita Styles & Appearance | Read the light and dark mode and high contrast subsections of `main` | The page shows 1.11.alpha; only a basis for direction, and must be checked against the version the project pins before use |
+| GTK/GDK API | Read the body text on scaling, closing, minimizing and video | Floating GTK 4 documentation; only the 4.12 starting version of `get_scale` has been confirmed in the body text |
+| KDE | Read the HIG scope and the layout and navigation body text | A comparison with the KDE route; does not mean Bern already has a Qt/Kirigami backend |
 
-读取异常也保留记录：Microsoft Learn 部分页面顶部出现授权提示，但正文实际可读；本次没有登录或绕过权限。libadwaita `/doc/1.8/styles-and-appearance.html` 返回读取错误；另一次 `/doc/1.5/` 返回页面头显示 1.10.0，因此不按 URL 路径推定内容版本。主题引用最终采用明确标注开发版本的 `main`，不把该部分描述为 1.8 已验证 API。
+Reading anomalies are also recorded: some Microsoft Learn pages showed an authorization prompt at the top, but the body was actually readable; no sign-in or permission bypass was done this time. libadwaita `/doc/1.8/styles-and-appearance.html` returned a read error; on another occasion `/doc/1.5/` returned a page whose header showed 1.10.0, so the content version is not inferred from the URL path. The theme citations finally use `main`, which is explicitly labeled as the development version, and this part is not described as API verified on 1.8.
 
-## Windows：官方依据
+## Windows: official basis
 
-### W1 窗口尺寸与逻辑单位
+### W1 Window size and logical units
 
-Microsoft 建议根据应用可用窗口空间设置断点，而不是按物理显示器尺寸划分。XAML 布局采用 effective pixels；缩放后的设备像素不应直接作为布局宽度。[Screen sizes and breakpoints](https://learn.microsoft.com/en-us/windows/apps/design/layout/screen-sizes-and-breakpoints-for-responsive-design)
+Microsoft recommends setting breakpoints according to the window space available to the app rather than by physical display size. XAML layout uses effective pixels; scaled device pixels should not be used directly as layout widths. [Screen sizes and breakpoints](https://learn.microsoft.com/en-us/windows/apps/design/layout/screen-sizes-and-breakpoints-for-responsive-design)
 
-官方通用页面的开头与表格对 640 边界措辞略有差别；本文采用 NavigationView 明确列出的默认行为：宽度不超过 640 时为最小导航，641–1007 为紧凑导航，1008 及以上展开。它们是控件默认策略，阈值可修改。[NavigationView：Adaptive behavior](https://learn.microsoft.com/en-us/windows/apps/develop/ui/controls/navigationview#adaptive-behavior)
+The opening and the table of the official general page word the 640 boundary slightly differently; this document adopts the default behavior that NavigationView lists explicitly: minimal navigation at widths up to 640, compact navigation from 641 to 1007, and expanded at 1008 and above. These are the control's default strategy, and the thresholds can be changed. [NavigationView: Adaptive behavior](https://learn.microsoft.com/en-us/windows/apps/develop/ui/controls/navigationview#adaptive-behavior)
 
-### W2 导航不是自动业务路由
+### W2 Navigation is not automatic business routing
 
-NavigationView 支持顶部和侧边导航，默认可在最小、紧凑、展开侧栏之间适应宽度；控件本身不维护应用的前进、返回业务流程。`ItemInvoked` 表示调用，`SelectionChanged` 也可能来自程序写回；两者不能无区别地触发同一导航动作。[NavigationView：Display modes 与 Navigation](https://learn.microsoft.com/en-us/windows/apps/develop/ui/controls/navigationview)
+NavigationView supports top and side navigation and by default can adapt to width among minimal, compact and expanded sidebars; the control itself does not maintain the app's forward and back business flow. `ItemInvoked` represents an invocation, while `SelectionChanged` can also come from a programmatic write-back; the two cannot indiscriminately trigger the same navigation action. [NavigationView: Display modes and Navigation](https://learn.microsoft.com/en-us/windows/apps/develop/ui/controls/navigationview)
 
-### W3 输入与命中区域
+### W3 Input and hit areas
 
-WinUI 控件具有键盘行为基础；官方要求可预测的 Tab 顺序、合理初始焦点及分组内方向键导航。静态标签不应为了可读而全部变成 Tab 停靠点。[Keyboard interactions](https://learn.microsoft.com/en-us/windows/apps/develop/input/keyboard-interactions)
+WinUI controls have a foundation of keyboard behavior; the official guidance requires a predictable Tab order, a sensible initial focus and arrow-key navigation within groups. Static labels should not all become Tab stops for the sake of readability. [Keyboard interactions](https://learn.microsoft.com/en-us/windows/apps/develop/input/keyboard-interactions)
 
-触屏目标建议通常约为 7.5mm 见方，文档举例为指定密度与缩放下的 40×40 像素；大小还需考虑误触后果和使用频率。这不是要求所有可见图标绘制成固定 40px 方块。[Guidelines for touch targets](https://learn.microsoft.com/en-us/windows/apps/develop/input/guidelines-for-targeting)
+The recommended touch target is usually about 7.5mm square, and the documentation gives the example of 40×40 pixels at a specified density and scale; the size also has to take into account the consequences of mis-taps and the frequency of use. This is not a requirement that all visible icons be drawn as fixed 40px squares. [Guidelines for touch targets](https://learn.microsoft.com/en-us/windows/apps/develop/input/guidelines-for-targeting)
 
-### W4 文本缩放、主题与无障碍
+### W4 Text scaling, themes and accessibility
 
-Windows 文本大小与整体显示缩放是不同设置。WinUI 文本控件通常支持系统文本缩放，官方不建议大范围关闭 `IsTextScaleFactorEnabled`；静态文本与可编辑文本也应保持正确的 UI Automation 角色。[Accessible text requirements](https://learn.microsoft.com/en-us/windows/apps/design/accessibility/accessible-text-requirements)
+Windows text size and overall display scaling are different settings. WinUI text controls usually support system text scaling, and the official guidance advises against disabling `IsTextScaleFactorEnabled` broadly; static text and editable text should also keep the correct UI Automation roles. [Accessible text requirements](https://learn.microsoft.com/en-us/windows/apps/design/accessibility/accessible-text-requirements)
 
-对比主题与深浅色不是同一个维度。主题资源应在运行时跟随系统，HighContrast 资源使用系统语义色及正确前景背景配对，不能用品牌色硬覆盖用户自定义对比主题。[Contrast themes](https://learn.microsoft.com/en-us/windows/apps/design/accessibility/high-contrast-themes)
+Contrast themes and light and dark mode are not the same dimension. Theme resources should follow the system at runtime; HighContrast resources use system semantic colors and correct foreground–background pairings, and brand colors must not forcibly override the user's custom contrast theme. [Contrast themes](https://learn.microsoft.com/en-us/windows/apps/design/accessibility/high-contrast-themes)
 
-### W5 窗口、关闭与系统事实
+### W5 Windows, closing and system facts
 
-WinUI 的 XAML Window 承载内容与生命周期，AppWindow 对顶层 HWND 提供窗口管理抽象；系统窗口与 Bern 的逻辑窗口身份不是同一对象。[Windowing overview](https://learn.microsoft.com/en-us/windows/apps/develop/ui/windowing-overview)
+WinUI's XAML Window hosts content and lifecycle, and AppWindow provides a window management abstraction over the top-level HWND; the system window and Bern's logical window identity are not the same object. [Windowing overview](https://learn.microsoft.com/en-us/windows/apps/develop/ui/windowing-overview)
 
-`AppWindow.Closing` 针对系统提供的关闭入口，直接调用 `Destroy` 不触发该事件。`Cancel=true` 会在 Closing 处理器退出时取消本次系统关闭；不能只依赖该事件统一拦住所有销毁。[Closing](https://learn.microsoft.com/en-us/windows/windows-app-sdk/api/winrt/microsoft.ui.windowing.appwindow.closing?view=windows-app-sdk-1.8)、[ClosingEventArgs.Cancel](https://learn.microsoft.com/en-us/windows/windows-app-sdk/api/winrt/microsoft.ui.windowing.appwindowclosingeventargs.cancel?view=windows-app-sdk-1.8)
+`AppWindow.Closing` targets the close entry points the system provides; calling `Destroy` directly does not raise this event. `Cancel=true` cancels this system close when the Closing handler exits; this event alone cannot be relied on to intercept all destruction uniformly. [Closing](https://learn.microsoft.com/en-us/windows/windows-app-sdk/api/winrt/microsoft.ui.windowing.appwindow.closing?view=windows-app-sdk-1.8), [ClosingEventArgs.Cancel](https://learn.microsoft.com/en-us/windows/windows-app-sdk/api/winrt/microsoft.ui.windowing.appwindowclosingeventargs.cancel?view=windows-app-sdk-1.8)
 
-### W6 视频呈现与合成
+### W6 Video presentation and composition
 
-MediaPlayerElement 可以绑定已有 MediaPlayer，也可自行创建播放器；两种方式的释放责任不同。官方支持关闭内置控制条，并提醒不要交替写入控件和底层播放器的等价属性，否则状态可能不一致。[Play audio and video with MediaPlayer](https://learn.microsoft.com/en-us/windows/apps/develop/media-playback/play-audio-and-video-with-mediaplayer)
+MediaPlayerElement can bind an existing MediaPlayer or create its own player; the two approaches carry different disposal responsibilities. The official guidance supports turning off the built-in transport controls and warns against alternately writing equivalent properties on the control and on the underlying player, otherwise the state may become inconsistent. [Play audio and video with MediaPlayer](https://learn.microsoft.com/en-us/windows/apps/develop/media-playback/play-audio-and-video-with-mediaplayer)
 
-WinUI 对全窗口视频提供 `IsFullWindow` 优化路径；叠加 XAML 内容会影响媒体合成效率。字幕和临时控制仍有合理用途，官方建议不需要时将其折叠；这不是禁止叠加控件的功能限制。[Optimize animations, media, and images](https://learn.microsoft.com/en-us/windows/apps/develop/performance/optimize-animations-and-media#optimize-media-resources)
+WinUI provides an `IsFullWindow` optimization path for full-window video; overlaying XAML content affects media composition efficiency. Subtitles and temporary controls still have legitimate uses, and the official guidance recommends collapsing them when they are not needed; this is not a functional restriction forbidding overlaid controls. [Optimize animations, media, and images](https://learn.microsoft.com/en-us/windows/apps/develop/performance/optimize-animations-and-media#optimize-media-resources)
 
-## Windows：Bern 映射
+## Windows: Bern mapping
 
-以下为待实施设计，不是 Microsoft 强制规定。
+The following is a design yet to be implemented, not a Microsoft mandate.
 
-- **尺寸**：目标适配器上报窗口内容区逻辑尺寸、显示缩放、文本缩放；公共 IR 不接收 HWND 外框像素作为页面可用宽度。
-- **断点**：Windows 导航预设可参考 640／1008；公共 Adaptive 允许按内容重定义。实际比较规则须覆盖分数宽度且没有未归类区间。
-- **状态保持**：紧凑侧栏与展开侧栏引用同一路由、命令和 Feature；切换宽度保留当前页面、选择、草稿及滚动身份。
-- **导航**：原生调用事件转换为 `ui.navigate`／`ui.back` 会话命令；程序写回的选择通知只同步状态，不重复执行命令。
-- **输入**：鼠标、触屏、键盘、UI Automation 的控件激活最终引用同一动作；文字输入继续采用原生输入法编辑会话。
-- **命中区域**：透明热区可以大于图标；IconButton 默认使用 WinUI 标准的图标按钮样式，可访问名称、焦点指示和足够命中空间不得删除。
-- **主题**：按“原生优先”使用 WinUI 主题资源与平台外观，品牌色映射为强调色资源；高对比资源映射到系统色，主题变化不重建业务引擎或窗口身份。
-- **文字**：文本缩放影响测量和重排；不能只缩放 glyph 后仍使用原来的固定高度。图标资源与视频缓冲区另按渲染尺寸处理。
-- **关闭**：可取消关闭入口先取消原生默认动作，再执行统一关闭流程；确认完成后由受控路径销毁，防止重复确认或重复释放。
-- **系统事实**：已经发生的移动、尺寸、激活或销毁通过类型化观察事件归并；不事后补造命令声称事前控制了 OS。
-- **视频**：标准 Video 的控制绑定经过 Bern 命令；播放器归属与呈现控件归属分开，切换布局不应意外 Dispose 引擎级播放器。
-- **合成**：字幕、弹幕、菜单与虚拟窗口叠加仍是允许能力；目标须单独测量合成成本，不能承诺所有组合都获得最低功耗路径。
+- **Size**: the target adapter reports the logical size of the window content area, the display scale and the text scale; the shared IR does not accept HWND frame pixels as the page's available width.
+- **Breakpoints**: Windows navigation presets can refer to 640/1008; the shared Adaptive allows redefining them by content. The actual comparison rules must cover fractional widths and leave no unclassified range.
+- **State preservation**: the compact sidebar and the expanded sidebar reference the same routes, commands and Features; changing the width preserves the current page, selection, drafts and scroll identity.
+- **Navigation**: native invocation events are converted into `ui.navigate`/`ui.back` session commands; selection notifications from programmatic write-backs only synchronize state and do not execute the command again.
+- **Input**: control activation from the mouse, touch, keyboard and UI Automation ultimately references the same action; text input continues to use the native input method editing session.
+- **Hit areas**: transparent hot zones can be larger than the icon; IconButton by default uses WinUI's standard icon button style, and the accessible name, focus indicator and sufficient hit space must not be removed.
+- **Theme**: following "native first", WinUI theme resources and the platform appearance are used, and brand colors are mapped to accent color resources; high-contrast resources map to system colors, and theme changes do not rebuild the business engine or the window identity.
+- **Text**: text scaling affects measurement and reflow; scaling only the glyphs while keeping the original fixed height is not acceptable. Icon resources and video buffers are handled separately according to their rendered size.
+- **Closing**: a cancelable close entry point first cancels the native default action and then runs the unified close flow; after confirmation, the window is destroyed through a controlled path, preventing duplicate confirmation or duplicate release.
+- **System facts**: moves, resizes, activation or destruction that have already happened are merged through typed observation events; commands are not fabricated after the fact to claim the OS was controlled beforehand.
+- **Video**: the control bindings of the standard Video go through Bern commands; player ownership and presentation control ownership are separate, and switching layouts should not unexpectedly Dispose an engine-level player.
+- **Composition**: overlaying subtitles, danmaku, menus and virtual windows remains an allowed capability; the target must measure the composition cost separately and cannot promise that every combination gets the lowest-power path.
 
-## GNOME／GTK：官方依据
+## GNOME/GTK: official basis
 
-### G1 按空间与内容自适应
+### G1 Adapting to space and content
 
-GNOME 建议从最受限的空间及输入条件出发，使用断点重组 UI；大窗口需要内容最大宽度，避免文本过长或相关控件距离过远。设备外形不能可靠代表是否有键盘或触摸能力。[Scaling & Adaptiveness](https://developer.gnome.org/hig/guidelines/adaptive.html)
+GNOME recommends starting from the most constrained space and input conditions and using breakpoints to reorganize the UI; large windows need a maximum content width so that text lines do not become too long and related controls are not too far apart. The device form factor cannot reliably indicate whether a keyboard or touch is available. [Scaling & Adaptiveness](https://developer.gnome.org/hig/guidelines/adaptive.html)
 
-该 HIG 当前推荐支持的桌面显示尺寸下限为 1024×600；适合手机形态的应用应能缩至 360×294。前者是显示环境建议，不能解释为每个应用都必须强制最小窗口 1024×600。[Scaling & Adaptiveness：Small Size Handling](https://developer.gnome.org/hig/guidelines/adaptive.html#small-size-handling)
+The HIG currently recommends 1024×600 as the lower bound of supported desktop display sizes; apps suited to the phone form factor should be able to shrink to 360×294. The former is a recommendation about the display environment and cannot be read as requiring every app to enforce a minimum window of 1024×600. [Scaling & Adaptiveness: Small Size Handling](https://developer.gnome.org/hig/guidelines/adaptive.html#small-size-handling)
 
-### G2 libadwaita 的可用结构
+### G2 Structures available in libadwaita
 
-已读取的 libadwaita 1.8 文档提供 Clamp 限制内容最大宽度、Breakpoint 改变布局、顶部／底部 View Switcher 切换，以及随父窗口尺寸改变呈现方式的 Dialog。使用断点的宿主需要声明所支持的最小尺寸，不能期待内容自然给出全部约束。[Adaptive Layouts](https://gnome.pages.gitlab.gnome.org/libadwaita/doc/1.8/adaptive-layouts.html)
+The libadwaita 1.8 documentation that was read provides Clamp to limit the maximum content width, Breakpoint to change the layout, top/bottom View Switcher switching, and Dialog, which changes its presentation with the parent window's size. A host that uses breakpoints needs to declare the minimum size it supports; it cannot expect the content to supply all constraints on its own. [Adaptive Layouts](https://gnome.pages.gitlab.gnome.org/libadwaita/doc/1.8/adaptive-layouts.html)
 
-### G3 指针、触屏与键盘
+### G3 Pointer, touch and keyboard
 
-GNOME 不允许关键操作只在 hover 时出现；指针可完成的操作也应能通过键盘完成。三指、四指及上下屏幕边缘手势保留给系统，应用不应抢占。[Pointer & Touch](https://developer.gnome.org/hig/guidelines/pointer-touch.html)
+GNOME does not allow key actions to appear only on hover; actions that can be done with a pointer should also be possible with the keyboard. Three- and four-finger gestures and gestures from the top and bottom screen edges are reserved for the system, and apps should not take them over. [Pointer & Touch](https://developer.gnome.org/hig/guidelines/pointer-touch.html)
 
-键盘指南要求整个界面可键盘导航，沿用标准快捷键；Super 保留给系统，Alt 访问键需与本地化文案一起处理冲突。[Keyboard](https://developer.gnome.org/hig/guidelines/keyboard.html)
+The keyboard guidelines require the entire interface to be keyboard-navigable and the standard keyboard shortcuts to be followed; Super is reserved for the system, and conflicts among Alt access keys have to be handled together with the localized text. [Keyboard](https://developer.gnome.org/hig/guidelines/keyboard.html)
 
-### G4 缩放与资源像素
+### G4 Scaling and resource pixels
 
-GTK 的 `Widget.get_scale_factor()` 返回整数；面对分数缩放，文档建议在需要实际比例时使用 `Gdk.Surface.get_scale()`。后者从 4.12 起提供，可在 Surface 生命周期内变化。[Gtk.Widget.get_scale_factor](https://docs.gtk.org/gtk4/method.Widget.get_scale_factor.html)、[Gdk.Surface.get_scale](https://docs.gtk.org/gdk4/method.Surface.get_scale.html)
+GTK's `Widget.get_scale_factor()` returns an integer; for fractional scaling, the documentation recommends using `Gdk.Surface.get_scale()` when the actual ratio is needed. The latter is available since 4.12 and can change during the Surface's lifetime. [Gtk.Widget.get_scale_factor](https://docs.gtk.org/gtk4/method.Widget.get_scale_factor.html), [Gdk.Surface.get_scale](https://docs.gtk.org/gdk4/method.Surface.get_scale.html)
 
-### G5 深浅色、高对比与辅助技术
+### G5 Light and dark mode, high contrast and assistive technologies
 
-libadwaita 的外观文档将系统偏好、强制浅色和强制深色分别建模；高对比独立于深浅色，标准控件已有支持，自定义绘制仍需处理。该引用读取的是开发分支，不据此要求 Bern 立即采用新 CSS 功能。[Styles & Appearance](https://gnome.pages.gitlab.gnome.org/libadwaita/doc/main/styles-and-appearance.html)
+libadwaita's appearance documentation models the system preference, forced light and forced dark separately; high contrast is independent of light and dark mode, standard controls already support it, and custom drawing still has to handle it. This citation reads the development branch, and Bern is not required on that basis to adopt new CSS features immediately. [Styles & Appearance](https://gnome.pages.gitlab.gnome.org/libadwaita/doc/main/styles-and-appearance.html)
 
-GNOME HIG 要求描述性可访问名称，并实际测试高对比、大文本、纯键盘、屏幕阅读器及屏幕键盘；采用 GTK 控件不替代应用层验收。[Accessibility](https://developer.gnome.org/hig/guidelines/accessibility.html)
+The GNOME HIG requires descriptive accessible names and actually testing high contrast, large text, keyboard only, screen readers and the on-screen keyboard; using GTK controls does not replace app-level acceptance. [Accessibility](https://developer.gnome.org/hig/guidelines/accessibility.html)
 
-### G6 窗口关系与关闭
+### G6 Window relationships and closing
 
-主窗口应可调整大小；多个主窗口相互独立。辅助窗口从属于主窗口，主窗口关闭时一并关闭；标准关闭快捷键为 Ctrl+W，模态窗口还应支持 Esc。[Windows](https://developer.gnome.org/hig/patterns/containers/windows.html)
+Main windows should be resizable; multiple main windows are independent of each other. Secondary windows belong to a main window and close along with it when the main window closes; the standard close shortcut is Ctrl+W, and modal windows should also support Esc. [Windows](https://developer.gnome.org/hig/patterns/containers/windows.html)
 
-这里 GNOME 的“主窗口”指独立顶层窗口，可以有多个；它不等同于 Bern WindowSet 中唯一的 primary 角色。Bern 默认会话所有权与 GNOME 辅助窗口约定有差异：应用若需要随父窗口关闭的辅助窗，应显式声明所有者与关闭关系，后端不偷偷改变公共生命周期。
+GNOME's "main window" here means an independent top-level window, of which there can be several; it is not the same as the unique primary role in Bern's WindowSet. Bern's default session ownership differs from GNOME's secondary window convention: an app that needs a secondary window that closes with its parent window should declare the owner and the closing relationship explicitly, and the backend does not quietly change the shared lifecycle.
 
-GTK `close-request` 在用户点击关闭按钮时发出，处理器可返回 true 阻止继续传递。另一方面，GDK 明确指出窗口系统可能忽略最小化请求；发送请求并不保证实际窗口状态已经改变。[Gtk.Window::close-request](https://docs.gtk.org/gtk4/signal.Window.close-request.html)、[Gdk.Toplevel.minimize](https://docs.gtk.org/gdk4/method.Toplevel.minimize.html)
+GTK's `close-request` is emitted when the user clicks the close button, and a handler can return true to stop further propagation. On the other hand, GDK states explicitly that the window system may ignore a minimize request; sending the request does not guarantee that the actual window state has changed. [Gtk.Window::close-request](https://docs.gtk.org/gtk4/signal.Window.close-request.html), [Gdk.Toplevel.minimize](https://docs.gtk.org/gdk4/method.Toplevel.minimize.html)
 
-### G7 视频不是仅映射 GtkVideo
+### G7 Video is not just a mapping to GtkVideo
 
-GtkVideo 面向预览、嵌入动画和简单媒体控制，官方明确列出其缺少视频 overlays、多声道音频及设备选择等功能；完整播放器可使用 GdkPaintable 与 GStreamer 等媒体框架。无控制呈现可走 Paintable／GtkPicture。[Gtk.Video](https://docs.gtk.org/gtk4/class.Video.html)
+GtkVideo is aimed at previews, embedded animations and simple media controls, and the official documentation explicitly lists features it lacks, such as video overlays, multichannel audio and device selection; a full player can use GdkPaintable together with a media framework such as GStreamer. Presentation without controls can go through Paintable/GtkPicture. [Gtk.Video](https://docs.gtk.org/gtk4/class.Video.html)
 
-## GNOME／GTK：Bern 映射
+## GNOME/GTK: Bern mapping
 
-以下为待实施设计，不把 GNOME 约定推广为所有 Linux 桌面的强制规范。
+The following is a design yet to be implemented; it does not extend GNOME conventions into mandatory guidelines for all Linux desktops.
 
-- **布局**：GTK 目标可映射到 libadwaita 的已支持容器；按目标锁定版本声明能力，公共 IR 不暴露 Adw 对象。
-- **阈值**：根据导航项、翻译后标签与内容最小宽度选择断点，不复制 Windows 的 640／1008 常量。
-- **大窗口**：表单和阅读内容使用最大宽度约束；视频、图表等可扩张区域按自身内容规则分配空间。
-- **窄窗口**：导航可以移到页栈、底部切换器或按需面板，Feature 和命令身份保持一致；不允许把装不下的功能直接删除。
-- **输入**：触屏不依赖 hover 或右键；快捷键、菜单与可访问动作绑定同一命令，不占用 GNOME 保留手势。
-- **缩放**：布局、窗口尺寸与图像／视频缓冲像素分开；跨显示器移动后重新选择资源分辨率，不能把整数 scale 当作真实分数比例。
-- **主题**：按“原生优先”使用 GTK 与已支持桌面主题的深浅色样式；所选环境无法提供完整深浅色时，按能力描述改用 Bern 语义角色映射；高对比优先。暂不把开发分支 CSS media query 列为最低可用实现。
-- **无障碍**：保留 GTK 的可访问树、编辑角色和焦点行为；生成的自定义控件必须补齐同样的协议。
-- **窗口**：专门窗口声明显式区分主窗口、辅助窗口、父级与模态作用域；多个主窗口关闭互不连带销毁。
-- **关闭确认**：关闭按钮、Ctrl+W、CLI 和 MCP 使用同一 `window.request_close`；未保存检查可返回待确认结果，不能只弹窗然后让外部调用永久等待。
-- **窗口系统**：请求和观察结果分别记录；最小化、激活、尺寸和位置能力按 compositor／后端验证，不能把 Linux 当作统一窗口管理器。
-- **视频**：简单预览和完整播放器是不同能力档；后者单列媒体内核、Paintable／纹理路径、字幕叠加、色彩及硬件解码验收。
+- **Layout**: the GTK target can map to the supported containers of libadwaita; capabilities are declared per the version the target pins, and the shared IR does not expose Adw objects.
+- **Thresholds**: breakpoints are chosen from the navigation items, the translated labels and the minimum content width; the Windows constants 640/1008 are not copied.
+- **Large windows**: forms and reading content use a maximum width constraint; expandable regions such as video and charts are allocated space by their own content rules.
+- **Narrow windows**: navigation can move to a page stack, a bottom switcher or an on-demand panel, and Feature and command identity stay the same; features that do not fit must not simply be deleted.
+- **Input**: touch does not depend on hover or right-click; keyboard shortcuts, menus and accessible actions bind the same command and do not take over GNOME's reserved gestures.
+- **Scaling**: layout, window size and image/video buffer pixels are kept separate; after moving across displays the resource resolution is chosen again, and the integer scale must not be treated as the real fractional ratio.
+- **Theme**: following "native first", the light and dark styles of GTK and of supported desktop themes are used; when the chosen environment cannot provide full light and dark mode, Bern's semantic role mapping is used instead according to the capability description; high contrast takes priority. For now, development-branch CSS media queries are not listed as the minimum usable implementation.
+- **Accessibility**: GTK's accessibility tree, editing roles and focus behavior are kept; generated custom controls must supply the same protocol.
+- **Windows**: dedicated window declarations explicitly distinguish main windows, secondary windows, parents and modal scopes; closing one of several main windows does not destroy the others along with it.
+- **Close confirmation**: the close button, Ctrl+W, the CLI and MCP use the same `window.request_close`; the unsaved-changes check can return a pending-confirmation result, rather than only showing a dialog and leaving the external caller waiting forever.
+- **Window system**: requests and observed results are recorded separately; minimize, activate, size and position capabilities are verified per compositor/backend, and Linux cannot be treated as one uniform window manager.
+- **Video**: a simple preview and a full player are different capability tiers; the latter has its own acceptance for the media core, the Paintable/texture path, subtitle overlays, color and hardware decoding.
 
-## KDE 对照：Linux 没有统一 HIG
+## KDE comparison: Linux has no single HIG
 
-**官方依据。** KDE 要求窗口在平铺、最大化和窄窗口状态下平滑适应；其布局表建议窄形态工具栏／导航栏向底部调整，侧栏按需显示或进入页栈。Kirigami 的布局单位和 GlobalDrawer／PageStack 是其具体实现体系。[KDE Layout and navigation](https://develop.kde.org/hig/layout_and_nav/)
+**Official basis.** KDE requires windows to adapt smoothly in tiled, maximized and narrow states; its layout table recommends moving toolbars/navigation bars toward the bottom in narrow forms, with sidebars shown on demand or moved into a page stack. Kirigami's layout units and GlobalDrawer/PageStack are its concrete implementation system. [KDE Layout and navigation](https://develop.kde.org/hig/layout_and_nav/)
 
-**Bern 映射。** 首个 Linux 默认目标仍可选择 GTK，但目标描述应明确“GNOME／GTK 约定”；在 Plasma 下运行 GTK 应用不等于已经采用 KDE HIG。未来 Qt／Kirigami 目标通过独立生成器接入，复用窗口、命令、状态和主题语义；它不需要复制 GTK 的控件外形，也不能绕过 Bern 的完整功能要求。
+**Bern mapping.** The first default Linux target can still be GTK, but the target description should state "GNOME/GTK conventions" explicitly; running a GTK app under Plasma does not mean the KDE HIG has been adopted. A future Qt/Kirigami target plugs in through a separate generator and reuses the window, command, state and theme semantics; it does not need to copy GTK's control shapes, and it cannot bypass Bern's full feature requirements either.
 
-**能力边界。** 分别报告桌面环境、窗口系统、GTK／libadwaita 版本与已验证组合。KDE 资料作为对照，不构成本轮 Qt 实现、发布兼容性或全 Linux 发行版认证。
+**Capability boundary.** Report the desktop environment, window system, GTK/libadwaita version and verified combinations separately. The KDE materials serve as a comparison and do not constitute a Qt implementation in this round, release compatibility, or certification for all Linux distributions.
 
-## 跨平台窗口与命令边界
+## Cross-platform window and command boundaries
 
-以下是 Bern 协议要求，不能从单个原生 API 的存在推导为已实现。
+The following are Bern protocol requirements; they cannot be inferred to be implemented from the existence of a single native API.
 
-| 场景 | Bern 需要的规则 |
+| Scenario | Rule Bern needs |
 | --- | --- |
-| 有原生多窗口能力 | 窗口声明映射为原生窗口；每个实例有独立逻辑身份及生命周期 |
-| 只有单宿主表面 | 自动使用应用内虚拟窗口；语义命令不改变，实际呈现模式可查询 |
-| 虚拟窗口限制 | 不宣称拥有系统任务栏入口、跨显示器独立窗口或系统全局置顶 |
-| 外部关闭请求 | UI、CLI、JSON、MCP 共用关闭检查与确认协议；确认关联实例及状态版本 |
-| OS 已发生的事实 | 受信任适配器上报观察事件；不能伪造先执行命令，也不能允许外部注入状态 |
-| 强制结束宿主 | 子窗口随宿主消失；依靠恢复策略，不能保证每次都有机会展示关闭确认 |
-| 引擎共享 | 多窗口绑定同一 engine_id；窗口关闭只释放所拥有资源，是否停止播放由所有权决定 |
-| 陈旧目标 | window_id 结合实例代次校验；销毁后旧命令不能命中新建的同名窗口 |
+| Native multi-window capability available | Window declarations map to native windows; each instance has its own logical identity and lifecycle |
+| Only a single host surface | The in-app virtual window is used automatically; semantic commands do not change, and the actual presentation mode can be queried |
+| Virtual window limits | Does not claim a system taskbar entry, independent windows across displays, or system-wide always-on-top |
+| External close request | UI, CLI, JSON and MCP share the close check and confirmation protocol; a confirmation is tied to the instance and the state version |
+| Facts that already happened in the OS | Trusted adapters report observation events; a command cannot be faked as having been executed first, and external state injection cannot be allowed |
+| Host forcibly terminated | Child windows disappear with the host; relies on the recovery strategy and cannot guarantee a chance to show the close confirmation every time |
+| Engine sharing | Multiple windows bind the same engine_id; closing a window only releases the resources it owns, and whether playback stops is decided by ownership |
+| Stale targets | window_id is validated together with the instance generation; after destruction, old commands cannot hit a newly created window with the same name |
 
-自动回退解决呈现能力差异，不改变目标的功能契约；需要真实系统能力的功能应报告不支持或使用已声明替代方案。
+Automatic fallback resolves differences in presentation capability and does not change the target's feature contract; features that need real system capabilities should report that they are unsupported or use a declared alternative.
 
-## 可操作验收清单
+## Actionable acceptance checklist
 
-以下场景须在真实目标上执行。GNOME／GTK 部分的首轮执行情况见 [Linux GTK 实现记录](../Implementation/Linux-GTK.md)，Windows／WinUI 3 部分见 [Windows WinUI 3 实现记录](../Implementation/Windows-WinUI3.md)。
+The following scenarios must be run on real targets. For the first round of results for the GNOME/GTK part, see the [Linux GTK implementation notes](../Implementation/Linux-GTK.md); for the Windows/WinUI 3 part, see the [Windows WinUI 3 implementation notes](../Implementation/Windows-WinUI3.md).
 
-### Windows 验收
+### Windows acceptance
 
-- [ ] 在 640 与 1008 附近连续调整内容区宽度，包括边界值；导航保持同一路由且没有功能缺失。
-- [ ] 以目标支持的 100%、125%、150%、200% 显示缩放重复测试；移动到不同缩放显示器后命中区域仍对应画面。
-- [ ] 单独增大系统文本大小；按钮、菜单、标题及表单可完整读取，不用裁剪代替重排。
-- [ ] 鼠标、触屏、键盘分别完成打开媒体、搜索、选择、播放、返回；每次动作只产生一次命令。
-- [ ] 仅用键盘遍历页面，初始焦点与模态关闭后的恢复合理；静态标签没有多余 Tab 停靠点。
-- [ ] 运行时切换深浅色和系统对比主题，并测试用户修改后的对比颜色；无硬编码失读状态。
-- [ ] 使用 Narrator 检查名称、角色、值、禁用态及导航顺序，原生写回不重复派发命令。
-- [ ] 分别测试标题栏关闭、程序关闭、外部 CLI 关闭及销毁后迟到消息；关闭确认与资源释放各执行一次。
-- [ ] 视频切换嵌入／全窗口、显示／隐藏字幕及控制条，核对实际播放状态、合成性能和释放情况。
+- [ ] Continuously resize the content area width around 640 and 1008, including the boundary values; navigation keeps the same route and no features are missing.
+- [ ] Repeat the tests at the 100%, 125%, 150% and 200% display scales the target supports; after moving to a display with a different scale, hit areas still correspond to what is drawn.
+- [ ] Increase the system text size on its own; buttons, menus, titles and forms can be read in full, without clipping in place of reflow.
+- [ ] Open media, search, select, play and go back with the mouse, touch and keyboard separately; each action produces exactly one command.
+- [ ] Traverse pages with the keyboard only; the initial focus and the focus restoration after a modal closes are sensible; static labels have no extra Tab stops.
+- [ ] Switch light and dark mode and the system contrast theme at runtime, and test contrast colors the user has modified; no hard-coded unreadable states.
+- [ ] Use Narrator to check names, roles, values, disabled states and navigation order; native write-backs do not dispatch commands again.
+- [ ] Test closing from the title bar, closing programmatically, closing from an external CLI, and late messages after destruction, separately; close confirmation and resource release each run once.
+- [ ] Switch video between embedded and full-window, show/hide subtitles and the transport controls, and check the actual playback state, composition performance and release.
 
-### GNOME／GTK 验收
+### GNOME/GTK acceptance
 
-- [ ] 在 1024×600 桌面环境及窄窗口验证所有必要功能；仅当应用声明手机支持时加入 360×294 场景。
-- [ ] 长翻译、大文本、侧栏折叠和窗口展开组合下，内容不越界；导航切换不丢失草稿与选择。
-- [ ] 鼠标、触摸、触控板与纯键盘分别操作；重要功能不依赖 hover、右键或保留手势。
-- [ ] Ctrl+W、Esc、标准快捷键与本地化访问键无冲突；模态作用域及焦点恢复符合声明。
-- [ ] 在所声明的整数／分数缩放环境及跨显示器移动后检查文字、图标、视频和指针命中一致性。
-- [ ] 深浅色、高对比、大文本、屏幕阅读器及屏幕键盘逐项验证，记录可访问树结果。
-- [ ] 两个独立顶层窗口共享引擎，关闭一个保留另一个；显式声明从属关系的辅助窗口按所有者关闭协议处理，不误销毁应用级播放器。
-- [ ] 窗口系统拒绝请求、外部关闭、宿主失联时返回实际状态；不得把请求发出记录为已经完成。
-- [ ] 完整播放器分别验证字幕／控制叠加、媒体后端失败、换源、释放及实际支持的编码组合。
+- [ ] Verify all required features in a 1024×600 desktop environment and in narrow windows; add the 360×294 scenario only when the app declares phone support.
+- [ ] Under combinations of long translations, large text, a collapsed sidebar and an expanded window, content does not overflow; switching navigation does not lose drafts or selections.
+- [ ] Operate with the mouse, touch, touchpad and keyboard only, separately; important features do not depend on hover, right-click or reserved gestures.
+- [ ] Ctrl+W, Esc, standard keyboard shortcuts and localized access keys do not conflict; modal scopes and focus restoration match the declaration.
+- [ ] In the declared integer/fractional scaling environments and after moving across displays, check that text, icons, video and pointer hits are consistent.
+- [ ] Verify light and dark mode, high contrast, large text, the screen reader and the on-screen keyboard item by item, and record the accessibility tree results.
+- [ ] Two independent top-level windows share the engine, and closing one keeps the other; secondary windows whose subordinate relationship is declared explicitly are handled by the owner close protocol, without wrongly destroying the app-level player.
+- [ ] When the window system rejects a request, on an external close, and when the host is lost, the actual state is returned; a request having been sent must not be recorded as already completed.
+- [ ] For the full player, separately verify subtitle/control overlays, media backend failure, source switching, release, and the codec combinations actually supported.
 
-### 交叉能力验收
+### Cross-capability acceptance
 
-- [ ] 同一 fixture 分别用 UI、CLI、JSON、MCP 驱动同一引擎实例，业务状态与版本连续一致。
-- [ ] 原生／虚拟窗口运行同一声明；窗口身份、关闭确认、导航与功能覆盖结论一致，系统能力差异明确可查。
-- [ ] GNOME 与 Plasma 环境分别记录结果；一个环境通过不能替另一个环境签署支持。
-- [ ] 锁定工具链后记录 OS、桌面环境、窗口系统、SDK／GTK／libadwaita 与媒体后端版本，再确定发布支持范围。
+- [ ] Drive the same engine instance from the same fixture with the UI, CLI, JSON and MCP separately; business state and versions stay continuous and consistent.
+- [ ] Run the same declaration with native and virtual windows; the conclusions on window identity, close confirmation, navigation and feature coverage are consistent, and system capability differences can be queried clearly.
+- [ ] Record results for GNOME and Plasma environments separately; passing in one environment cannot sign off support for another.
+- [ ] After pinning the toolchain, record the OS, desktop environment, window system, SDK/GTK/libadwaita and media backend versions, and only then decide the scope of release support.
 
-验收报告应区分“声明编译通过”“真实输入可操作”“原生 API 请求成功”“实际状态已确认”和“性能测量通过”，不能用其中一项替代全部结论。
+The acceptance report should distinguish "declaration compiles", "operable with real input", "native API request succeeded", "actual state confirmed" and "performance measurements passed"; no one of them can replace all the conclusions.

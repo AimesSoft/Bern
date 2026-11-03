@@ -1,125 +1,127 @@
-# HarmonyOS 界面自适应
+**English** · [简体中文](../zh-CN/Adaptation/HarmonyOS.md)
 
-- 文档版本：v0.1
-- 官方资料核查日期：2026-10-09
-- 范围：HarmonyOS 的手机、折叠屏、平板与电脑形态；智慧屏能力单独验证。
-- 状态：适配设计准备。ArkUI 目标、Rust 桥接与媒体适配尚未实现或验收。
-- 上位约束：[架构设计](../Design.md)与[自适应总则](README.md)。
+# HarmonyOS adaptive UI
 
-HarmonyOS 需要独立的目标支持矩阵与 ArkUI 适配，不能因为某段 Android 逻辑可复用就认定 Android UI 后端可以直接覆盖鸿蒙。本文的官方依据来自华为开发者资料；OpenHarmony 的版本和设备能力不能无条件代替商用 HarmonyOS 环境。
+- Document version: v0.1
+- Official sources checked on: 2026-10-09
+- Scope: HarmonyOS phone, foldable, tablet and PC form factors; smart screen capabilities are verified separately.
+- Status: preparing the adaptation design. The ArkUI target, the Rust bridge and media adaptation are not yet implemented or accepted.
+- Governing constraints: [architecture design](../Design.md) and [general adaptation principles](README.md).
 
-## 官方设计依据
+HarmonyOS needs its own target support matrix and ArkUI adaptation; the fact that some Android logic can be reused does not mean the Android UI backend can cover HarmonyOS directly. The official basis of this document comes from Huawei developer materials; OpenHarmony versions and device capabilities cannot unconditionally stand in for a commercial HarmonyOS environment.
 
-### 响应式结构与自适应尺寸
+## Official design basis
 
-华为的多设备最佳实践区分两类能力：响应式布局根据窗口特征改变结构，例如单列变双列；自适应布局处理区域内的拉伸、均分、折行等变化。它同时列出窗口模式、输入交互和 SysCap 能力检查，而非只按设备名称选择界面。[HarmonyOS 多设备开发最佳实践](https://developer.huawei.com/consumer/cn/best-practices/multidevice/)。
+### Responsive structure and adaptive sizing
 
-这对应 Bern 的两个层次：组件布局计算可用大小，Adaptive 选择具有不同结构的声明分支。设备类型可以提供样式和默认策略，实际窗口空间决定能否容纳某种结构。
+Huawei's multi-device best practices distinguish two kinds of capability: responsive layout changes the structure according to window characteristics, for example from one column to two columns; adaptive layout handles changes within a region such as stretching, equal distribution and wrapping. They also list window modes, input interaction and SysCap capability checks, rather than choosing the interface by device name alone. [HarmonyOS multi-device development best practices](https://developer.huawei.com/consumer/cn/best-practices/multidevice/).
 
-### 折叠屏的连续使用
+This corresponds to Bern's two levels: component layout computes the available size, and Adaptive selects declaration branches with different structures. The device type can provide styles and default strategies; the actual window space decides whether a given structure fits.
 
-Pura X Max 官方适配页明确关注较宽而短的外屏、展开内屏及折叠/展开/悬停状态，并列出键盘遮挡、短屏内容截断、分栏布局和切换后状态恢复问题。这些是该设备的官方设计输入，不能据此推断所有折叠屏都有相同尺寸或形态。[Pura X Max 官方适配指南](https://developer.huawei.com/consumer/cn/newdevice/pura-x-max/)。
+### Continuous use on foldables
 
-Bern 应把窗口尺寸、可用高度与折叠姿态分别建模。姿态变化可以改变内容与控制区的关系，但不直接以“折叠”布尔值决定单列或双列。旋转、开合和窗口缩放期间保持当前条目、草稿、导航与播放器身份。
+The official Pura X Max adaptation page explicitly addresses the wider and shorter outer screen, the unfolded inner screen and the folded/unfolded/hover states, and lists problems with keyboard occlusion, content truncation on short screens, split layouts and state restoration after switching. These are official design inputs for that device; they cannot be used to infer that all foldables have the same size or form. [Pura X Max official adaptation guide](https://developer.huawei.com/consumer/cn/newdevice/pura-x-max/).
 
-### 窗口变化与旋转策略的生命周期
+Bern should model window size, available height and fold posture separately. A posture change can change the relationship between content and the control area, but a "folded" boolean does not directly decide between one column and two. During rotation, folding and unfolding, and window resizing, the current item, drafts, navigation and player identity are preserved.
 
-本次实际读到了官方英文归档实践正文：页面更新时间为 2025-01-15，位于 `best-practices-V5`。文中说明 `setPreferredOrientation` 改变的是整个窗口的方向，页面跳转后仍可能保持该设置；临时视频页面退出时需要按应用策略恢复。示例通过 `windowSizeChange` 监听当前窗口宽高，将像素转换为 vp 后调整布局，并在页面退出时解除监听。[Switching Between Landscape and Portrait Modes](https://developer.huawei.com/consumer/en/doc/best-practices-V5/bpta-landscape-and-portrait-development-V5)。
+### Lifecycle of window changes and orientation strategies
 
-**Bern 映射。** 方向请求进入会话命令，窗口大小观察进入环境事件；页面拥有的方向策略和监听随页面作用域恢复或释放。窗口物理像素与 UI 逻辑尺寸分开传递，不能依据传感器方向直接推断当前内容宽高。这是从已读实践形成的适配规则；归档路径不证明最新 SDK 的最低 API、自由窗口限制或所有机型行为。
+This time the body of the official English archived practice was actually read: the page was updated on 2025-01-15 and is under `best-practices-V5`. It explains that `setPreferredOrientation` changes the orientation of the whole window, and the setting may persist after navigating to another page; a temporary video page needs to restore it on exit according to the app's strategy. The example listens to the current window's width and height through `windowSizeChange`, converts pixels to vp to adjust the layout, and removes the listener when the page exits. [Switching Between Landscape and Portrait Modes](https://developer.huawei.com/consumer/en/doc/best-practices-V5/bpta-landscape-and-portrait-development-V5).
 
-### 大屏与媒体场景
+**Bern mapping.** Orientation requests go into session commands, and window size observation goes into environment events; orientation strategies and listeners owned by a page are restored or released with the page scope. Physical window pixels and logical UI sizes are passed separately, and the current content width and height cannot be inferred directly from the sensor orientation. This is an adaptation rule formed from the practice that was read; the archive path does not prove the minimum API of the latest SDK, freeform window restrictions or the behavior of all device models.
 
-华为设计门户提供手机/折叠屏/平板、电脑和智慧屏的不同入口，并展示左右布局播放、画中画及应用内分屏等媒体场景。这些例子支持按任务调整结构，不意味着所有窗口都应拉伸成同一个桌面版式。[HarmonyOS 设计](https://developer.huawei.com/consumer/cn/design/)。
+### Large screens and media scenarios
 
-其中素材、材质和示例布局是 HarmonyOS 的设计语境。Bern 的命令规则不变；主题按主设计文档的“原生优先，算法兜底”执行，ArkUI 具备深浅色体系时使用平台颜色与标准控件样式。需要偏离平台推荐视觉时，后端要记录差异并验证可用性，不能声称同时逐像素遵循全部平台样式。
+The Huawei design portal provides separate entries for phones/foldables/tablets, PCs and smart screens, and shows media scenarios such as playback in a side-by-side layout, picture-in-picture and in-app split screen. These examples support adjusting the structure by task; they do not mean that every window should be stretched into the same desktop layout. [HarmonyOS Design](https://developer.huawei.com/consumer/cn/design/).
 
-## Bern 的平台映射决策
+The assets, materials and example layouts there are HarmonyOS's design context. Bern's command rules do not change; theming follows the main design document's "native first, algorithm as fallback": when ArkUI has a light and dark mode system, platform colors and standard control styles are used. When departing from the platform's recommended visuals is necessary, the backend must record the difference and verify usability; it cannot claim to follow all platform styles pixel for pixel at the same time.
 
-本节是 Bern 的设计要求，具体 ArkUI API、最低系统版本和 SDK 版本在实现原型中确定。
+## Bern's platform mapping decisions
 
-| 适配对象 | Bern 规则 | 平台适配器职责 |
+This section states Bern's design requirements; the specific ArkUI APIs, the minimum system version and the SDK version are determined in the implementation prototype.
+
+| Adaptation subject | Bern rule | Platform adapter responsibility |
 | --- | --- | --- |
-| 窗口空间 | 使用当前内容区域，宽度和高度都参与判断 | 上报窗口变化，不以整块屏幕分辨率代替 |
-| 分栏 | 紧凑时单列导航，宽窗口按内容需要显示列表详情或辅助区 | 将可分析布局映射为目标容器 |
-| 折叠与悬停 | 姿态、布局区域、遮挡与方向独立表达，未知值保留 unknown | 只上报实际可用的信息，不推算未公开的铰链区域 |
-| 系统避让 | 背景延展和关键内容避让分别处理 | 同步状态栏、导航区、窗口控制区、挖孔及键盘变化 |
-| 输入 | 触摸、键鼠、笔、遥控器属于可并存能力 | 归一为激活、编辑、返回与焦点等语义命令 |
-| 字体 | 保留系统文字缩放和可读性，不整体缩小页面容纳文字 | 验证中文、拉丁文、混排和长标题的度量 |
-| 主题 | 跟随系统；平台具备深浅色体系时使用平台颜色与标准控件样式，Bern 自绘部分执行 Bern 控件配方 | 监听环境变化、处理对比度和材质降级 |
-| 无障碍 | 名称、角色、状态、操作与焦点顺序完整 | 验证目标辅助功能的实际朗读与操作 |
-| 生命周期 | 页面隐藏不等于任务结束，窗口关闭不等于引擎退出 | 按应用、窗口和媒体作用域同步实际生命周期 |
+| Window space | Use the current content area; both width and height take part in the decision | Report window changes; do not substitute the whole screen resolution |
+| Split view | Single-column navigation when compact; wide windows show list-detail or an auxiliary area as the content needs | Map analyzable layouts to target containers |
+| Folding and hover | Posture, layout regions, occlusion and orientation are expressed independently; unknown values stay unknown | Report only information that is actually available; do not extrapolate undisclosed hinge regions |
+| System avoid areas | Extending backgrounds and keeping key content clear are handled separately | Sync changes of the status bar, navigation area, window control area, cutouts and keyboard |
+| Input | Touch, keyboard and mouse, pen, and remote control are capabilities that can coexist | Normalize into semantic commands such as activate, edit, back and focus |
+| Fonts | Keep system text scaling and readability; do not shrink the whole page to fit text | Verify the metrics of Chinese, Latin, mixed text and long titles |
+| Theme | Follow the system; when the platform has a light and dark mode system use platform colors and standard control styles, and Bern's self-drawn parts follow Bern's control recipes | Listen for environment changes; handle contrast and material degradation |
+| Accessibility | Complete names, roles, states, actions and focus order | Verify actual reading and operation with the target's assistive features |
+| Lifecycle | A hidden page does not mean the task has ended; a closed window does not mean the engine exits | Sync the actual lifecycle by app, window and media scope |
 
-不在公共 IR 中硬编码某一机型分辨率，也暂不规定一组“全部 HarmonyOS 设备统一”的数字断点。断点应由内容最小可用宽度、平台组件行为和实际目标规范共同确定；具体官方数值需在锁定的 SDK 文档正文中核对后再入库。
+Do not hardcode any one device model's resolution in the common IR, and for now do not prescribe a set of numeric breakpoints "uniform across all HarmonyOS devices". Breakpoints should be determined jointly by the minimum usable content width, platform component behavior and the actual target guidelines; specific official values must be checked against the body of the locked SDK documentation before they go into the repository.
 
-### 多窗口
+### Multiple windows
 
-Window 的 auto 策略仍是：所需原生窗口能力可用时使用原生窗口，否则在有效 UI 宿主中提供虚拟窗口。系统分屏、自由窗口、应用子窗口与 Bern 逻辑窗口不是同一个概念；适配器须说明每一种原生对象能满足哪些语义。
+The auto strategy of Window remains: use native windows when the required native window capability is available, otherwise provide virtual windows in a valid UI host. System split screen, freeform windows, app sub-windows and Bern logical windows are not the same concept; the adapter must state which semantics each kind of native object can satisfy.
 
-创建、激活、请求关闭、恢复和设置尺寸走统一会话命令。系统已发生的尺寸、焦点或销毁变化以事实事件归并。若普通原生关闭不能满足应用要求的确认检查，应选择可满足契约的虚拟呈现，或让 native_required 明确失败。
+Creating, activating, requesting close, restoring and setting size go through unified session commands. Changes of size, focus or destruction that the system has already made are merged as fact events. If an ordinary native close cannot satisfy the confirmation check the app requires, choose a virtual presentation that can satisfy the contract, or let native_required fail explicitly.
 
-主窗口、多个辅助窗口和应用内虚拟窗口共享引擎，分别维护焦点与导航。虚拟窗口必须适配窄屏切换；不能在手机上显示多个无法操作的微小桌面浮窗。
+The main window, multiple auxiliary windows and in-app virtual windows share the engine and each maintain their own focus and navigation. Virtual windows must adapt to switching to narrow screens; a phone must not show several tiny desktop floating windows that cannot be operated.
 
-### 视频与平台服务
+### Video and platform services
 
-Video 的应用语法不变。HarmonyOS 媒体后端负责实际播放，ArkUI 呈现适配器负责挂载和合成。播放器状态、UI 控件和服务器上报继续使用同一 player_id 及源版本规则。
+The app syntax of Video does not change. The HarmonyOS media backend handles actual playback, and the ArkUI presentation adapter handles mounting and compositing. Player state, UI controls and server reports continue to use the same player_id and source version rules.
 
-需要原型分别核验：
+The prototype needs to verify separately:
 
-- 播放设施支持的容器、音视频格式、字幕、轨道选择和硬件能力。
-- 视频与虚拟窗口、弹幕、字幕、菜单的层叠和输入命中。
-- 原生播放控制能否在操作前进入命令协议；无法满足时使用 Bern 标准控制条。
-- 画中画、系统播放控制、后台执行与音频中断的实际权限和生命周期。
-- 折叠或切换窗口时，播放器能否在视图暂时分离后继续工作。
-- 智慧屏的输入、主题和媒体能力。不能从手机 ArkUI 实现推断智慧屏已经支持。
+- The containers, audio and video formats, subtitles, track selection and hardware capabilities supported by the playback facility.
+- The layering and input hit-testing of video together with virtual windows, danmaku, subtitles and menus.
+- Whether native playback controls can enter the command protocol before acting; when they cannot, use Bern's standard control bar.
+- The actual permissions and lifecycle of picture-in-picture, system playback controls, background execution and audio interruptions.
+- Whether the player keeps working after its view is temporarily detached when folding or switching windows.
+- The input, theme and media capabilities of smart screens. Support on smart screens cannot be inferred from the phone ArkUI implementation.
 
-跨设备接续、投播与分布式能力是独立的服务扩展，不是启用响应式布局后自动获得的功能。具体媒体传输和服务端业务仍在媒体或应用适配器中。
+Cross-device continuation, casting and distributed capabilities are separate service extensions, not features gained automatically by enabling responsive layout. Concrete media transport and server-side business logic remain in the media or app adapters.
 
-## 实施前的目标描述
+## Target description before implementation
 
-每个受支持组合至少记录以下字段，缺失项不得标记为已完成：
+Every supported combination records at least the following fields; a combination with missing items must not be marked as done:
 
-| 项目 | 必须记录的信息 |
+| Item | Information that must be recorded |
 | --- | --- |
-| 系统与设备 | 商用 HarmonyOS 版本、设备形态、实际测试设备 |
-| 工具链 | DevEco Studio、编译 SDK、最低 API、Rust 与 ArkUI 桥接方案 |
-| 窗口 | 主窗、子窗、多实例、自由窗口、关闭检查及虚拟回退能力 |
-| 输入与辅助功能 | 触摸、键鼠、笔或遥控器，以及实际辅助功能验证结果 |
-| 媒体 | 后端、呈现方式、覆盖层、画中画及后台策略 |
-| 主题 | 系统模式获取、字体缩放、提高对比度与特殊设备限制 |
-| 证据 | 官方文档直达链接、版本或 API 限定、测试结果与日期 |
+| System and device | Commercial HarmonyOS version, device form factor, actual test device |
+| Toolchain | DevEco Studio, compile SDK, minimum API, Rust and ArkUI bridging approach |
+| Windows | Main window, sub-windows, multiple instances, freeform windows, close checks and virtual fallback capability |
+| Input and accessibility | Touch, keyboard and mouse, pen or remote control, and the actual accessibility verification results |
+| Media | Backend, presentation method, overlays, picture-in-picture and background strategy |
+| Theme | Reading the system mode, font scaling, increased contrast and special device limitations |
+| Evidence | Direct links to official documentation, version or API qualifications, test results and dates |
 
-## 验收清单
+## Acceptance checklist
 
-- [ ] 同一应用在短外屏、展开内屏、平板分屏和可调整大小窗口中均可完成必需 Feature。
-- [ ] 键盘出现时输入框与确认操作可见，隐藏键盘后恢复布局而不丢草稿。
-- [ ] 折叠、旋转、窗口变化不重置选中项、导航栈、列表位置或播放进度。
-- [ ] 内容结构按可用区域变化；同一姿态下的不同窗口大小不会误用同一布局。
-- [ ] 状态栏、挖孔、导航区和窗口控制区不遮挡关键操作。
-- [ ] 触摸与键鼠均能完成关键路径；外设切换不无故重建界面。
-- [ ] 普通原生关闭与虚拟关闭执行同一确认协议，系统强制销毁正确清理。
-- [ ] 浅色、深色、字号放大、长文本及辅助功能逐项验证。
-- [ ] 视频覆盖层可读且可操作，窗口切换不会复制播放器或伪造持续播放。
-- [ ] 原生能力不满足时正确使用虚拟窗口；无 UI 宿主时返回明确错误。
-- [ ] SDK 升级后重验窗口能力、桥接、媒体叠层和输入行为，不仅检查编译成功。
+- [ ] The same app can complete the required Features on the short outer screen, the unfolded inner screen, tablet split screen and resizable windows.
+- [ ] When the keyboard appears, input fields and confirmation actions stay visible; after the keyboard hides, the layout is restored without losing drafts.
+- [ ] Folding, rotation and window changes do not reset the selected item, the navigation stack, the list position or playback progress.
+- [ ] The content structure changes with the available area; different window sizes in the same posture do not wrongly use the same layout.
+- [ ] The status bar, cutouts, navigation area and window control area do not cover key actions.
+- [ ] Both touch and keyboard and mouse can complete the key paths; switching peripherals does not rebuild the UI without reason.
+- [ ] An ordinary native close and a virtual close run the same confirmation protocol, and forced destruction by the system is cleaned up correctly.
+- [ ] Light mode, dark mode, enlarged text, long text and accessibility are verified item by item.
+- [ ] Video overlays are readable and operable, and window switching neither duplicates the player nor fakes continued playback.
+- [ ] Virtual windows are used correctly when native capabilities are insufficient; a clear error is returned when there is no UI host.
+- [ ] After an SDK upgrade, window capabilities, bridging, media layering and input behavior are verified again, rather than only checking that the build compiles.
 
-## 官方来源与读取边界
+## Official sources and reading boundaries
 
-核查日期均为 2026-10-09。已阅读正文的门户及一份英文归档实践支持上面的设计方向；其他详细文档出现动态加载或超时，因此不把未读取到的 API 参数、数值和版本条件写成已确认规则。搜索结果能返回部分详细段落，但与实际打开页面取得正文分开记录。
+All checks were made on 2026-10-09. The portals whose body text was read and one English archived practice support the design direction above; other detailed documents loaded dynamically or timed out, so API parameters, values and version conditions that were not read are not written down as confirmed rules. Search results can return some detailed passages, but they are recorded separately from body text obtained by actually opening the page.
 
-| 官方来源 | 本次读取情况与用途 |
+| Official source | Reading status this time and use |
 | --- | --- |
-| [HarmonyOS 多设备开发最佳实践](https://developer.huawei.com/consumer/cn/best-practices/multidevice/) | 已读取正文：响应式、自适应、窗口、输入、SysCap 与各设备入口 |
-| [Pura X Max 官方适配指南](https://developer.huawei.com/consumer/cn/newdevice/pura-x-max/) | 已读取正文：短屏、键盘、开合、分栏与状态恢复场景 |
-| [HarmonyOS 设计](https://developer.huawei.com/consumer/cn/design/) | 已读取正文：设备设计分类与媒体布局示例 |
-| [横竖屏切换英文归档实践](https://developer.huawei.com/consumer/en/doc/best-practices-V5/bpta-landscape-and-portrait-development-V5) | 已读取正文及示例：窗口方向跨页面保留、当前窗口宽高监听、px/vp 转换与监听释放；页面更新 2025-01-15，属归档资料 |
-| [多设备通用适配指南](https://developer.huawei.com/consumer/cn/multidevice/adaptive-apps/) | 仅稳定取得标题及检索摘要；作为后续核对入口 |
-| [响应式布局](https://developer.huawei.com/consumer/cn/doc/best-practices/bpta-multi-device-responsive-layout) | 文档壳或超时；浏览器跳转到新版文档中心，但正文提取未完成 |
-| [折叠屏应用开发](https://developer.huawei.com/consumer/cn/doc/best-practices/bpta-foldable-guide) | 本次取得目录壳；具体接口规则待正文核对 |
-| [自由窗口](https://developer.huawei.com/consumer/cn/doc/HarmonyOS-Guides/freeform-window) | 检索可见标题与目录，正文读取超时；不能据此确认最低 API |
-| [电脑与平板适配](https://developer.huawei.com/consumer/cn/multidevice/pc/adapt) | 正文提取不稳定，未将细节作为已核验规范 |
-| [沉浸式窗口能力](https://developer.huawei.com/consumer/cn/doc/doccenter-capabilities/immersive-window-feature) | 检索可见相关内容，正文读取不稳定；API 限定待核对 |
-| [多窗口布局适配英文 V14](https://developer.huawei.com/consumer/en/doc/harmonyos-guides-V14/multi-window-layout-adapt-V14) | 检索返回详细段落；实际打开仍为文档壳或超时，未据此写入设备比例或 API 限定 |
-| [Tabs 沉浸式官方 FAQ](https://developer.huawei.com/consumer/cn/doc/doccenter-dev-faq/faqs-arkui-1584) | 检索返回方案和版本描述；实际打开只得到站点导航壳，未将版本条件计为正文核验 |
+| [HarmonyOS multi-device development best practices](https://developer.huawei.com/consumer/cn/best-practices/multidevice/) | Body read: responsive and adaptive layout, windows, input, SysCap and the entries for each device |
+| [Pura X Max official adaptation guide](https://developer.huawei.com/consumer/cn/newdevice/pura-x-max/) | Body read: short screen, keyboard, folding and unfolding, split layout and state restoration scenarios |
+| [HarmonyOS Design](https://developer.huawei.com/consumer/cn/design/) | Body read: device design categories and media layout examples |
+| [English archived practice on switching between landscape and portrait](https://developer.huawei.com/consumer/en/doc/best-practices-V5/bpta-landscape-and-portrait-development-V5) | Body and examples read: window orientation persisting across pages, listening to the current window's width and height, px/vp conversion and releasing the listener; page updated 2025-01-15, archived material |
+| [Multi-device general adaptation guide](https://developer.huawei.com/consumer/cn/multidevice/adaptive-apps/) | Only the title and the search summary were obtained reliably; kept as an entry point for later checks |
+| [Responsive layout](https://developer.huawei.com/consumer/cn/doc/best-practices/bpta-multi-device-responsive-layout) | Documentation shell or timeout; the browser redirected to the new documentation center, but body extraction did not complete |
+| [Foldable app development](https://developer.huawei.com/consumer/cn/doc/best-practices/bpta-foldable-guide) | Only the table-of-contents shell was obtained this time; the specific API rules await a check of the body |
+| [Freeform windows](https://developer.huawei.com/consumer/cn/doc/HarmonyOS-Guides/freeform-window) | Title and table of contents visible in search, reading the body timed out; the minimum API cannot be confirmed from it |
+| [PC and tablet adaptation](https://developer.huawei.com/consumer/cn/multidevice/pc/adapt) | Body extraction unstable; details not taken as verified guidelines |
+| [Immersive window capability](https://developer.huawei.com/consumer/cn/doc/doccenter-capabilities/immersive-window-feature) | Related content visible in search, reading the body unstable; API qualifications await a check |
+| [Multi-window layout adaptation, English V14](https://developer.huawei.com/consumer/en/doc/harmonyos-guides-V14/multi-window-layout-adapt-V14) | Search returned detailed passages; actually opening it still gave a documentation shell or a timeout, so no device ratios or API qualifications were written down from it |
+| [Official Tabs immersive FAQ](https://developer.huawei.com/consumer/cn/doc/doccenter-dev-faq/faqs-arkui-1584) | Search returned the approach and version descriptions; actually opening it gave only the site navigation shell, so the version conditions are not counted as verified from the body |
 
-鸿蒙实现启动前，仍应补齐当前版本窗口、避让区与响应式 API 的正文和版本核验。本章已确定适配目标与验收场景，不能代替 SDK 接口审查或真机测试。
+Before the HarmonyOS implementation starts, the body text and version conditions of the window, avoid area and responsive APIs of the current version should still be checked. This chapter settles the adaptation goals and acceptance scenarios; it cannot replace a review of the SDK APIs or testing on real devices.
