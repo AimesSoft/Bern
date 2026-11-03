@@ -200,7 +200,7 @@ impl Generator<'_> {
 
     /// The buttons of a row menu; `choose` makes the rows it opened over
     /// the selection first.
-    fn table_menu(&self, out: &mut Out, items: &[&Element], choose: &str) {
+    pub(super) fn table_menu(&self, out: &mut Out, items: &[&Element], choose: &str) {
         for item in items {
             if item.kind == "Divider" {
                 out.line("SwiftUI.Divider()");

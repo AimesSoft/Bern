@@ -27,7 +27,7 @@ pub fn scale_box(
     height: f32,
     build: impl FnOnce() -> Vec<El>,
 ) -> El {
-    let target = c.target(id);
+    let target = c.key(id);
     let window = (c.win().width.get(), c.win().height.get());
     let given = GIVEN
         .with(|given| given.borrow().get(&target).copied())
@@ -92,6 +92,8 @@ pub struct Place {
     pub height: Option<f32>,
     /// Continue past each scene edge it reaches to the edge of the box.
     pub bleed: bool,
+    /// Where its motion has it now.
+    pub pose: crate::Pose,
 }
 
 /// `Positioned`: its content at a place from the top leading corner of the
@@ -112,23 +114,66 @@ pub fn positioned(c: &Ctx, place: Place, children: Vec<El>) -> El {
         width = width.map(|width| width + left);
         height = height.map(|height| height + top);
     }
+    // In motion it is built at its scale (`motion::moving`), so its place
+    // is given in the scaled lengths: about its center, moved by the pose.
+    let pose = place.pose;
+    let scale = pose.scale.max(0.001);
+    let (full_width, full_height) = (width.unwrap_or(0.0), height.unwrap_or(0.0));
+    let left = (x + pose.x + full_width * (1.0 - scale) / 2.0) / scale;
+    let top = (y + pose.y + full_height * (1.0 - scale) / 2.0) / scale;
     let element = div()
         .absolute()
-        .left(px(x))
-        .top(px(y))
+        .left(px(left))
+        .top(px(top))
         .flex()
         .flex_col()
-        .children(children);
-    let element = match width {
+        .opacity(pose.opacity);
+    let (shown_width, shown_height) = match pose.grow {
+        Some((crate::Edge::Top | crate::Edge::Bottom, shown)) => {
+            (width, height.map(|height| height * shown))
+        }
+        Some((_, shown)) => (width.map(|width| width * shown), height),
+        None => (width, height),
+    };
+    let element = match shown_width {
         Some(width) => element.w(px(width)),
         None => element,
     };
-    let element = match height {
+    let element = match shown_height {
         Some(height) => element.h(px(height)),
         None => element,
     };
     let _ = c;
-    element.into_any_element()
+    match pose.grow {
+        // Growing from an edge, it shows that much of itself from there.
+        Some((edge, shown)) => {
+            let inside = div().absolute().flex().flex_col();
+            let inside = match width {
+                Some(width) => inside.w(px(width)),
+                None => inside,
+            };
+            let inside = match height {
+                Some(height) => inside.h(px(height)),
+                None => inside,
+            };
+            let inside = match edge {
+                crate::Edge::Bottom => inside.bottom(px(0.0)).left(px(0.0)),
+                crate::Edge::Trailing => inside.top(px(0.0)).right(px(0.0)),
+                _ => inside.top(px(0.0)).left(px(0.0)),
+            };
+            // The edge it grows from stays where it is.
+            let element = match edge {
+                crate::Edge::Bottom => element.top(px(top + full_height * (1.0 - shown))),
+                crate::Edge::Trailing => element.left(px(left + full_width * (1.0 - shown))),
+                _ => element,
+            };
+            element
+                .overflow_hidden()
+                .child(inside.children(children))
+                .into_any_element()
+        }
+        None => element.children(children).into_any_element(),
+    }
 }
 
 /// Where a child stands on a `Rail`: at a fraction of its length, or

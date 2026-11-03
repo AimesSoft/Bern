@@ -20,9 +20,11 @@ mod host;
 mod icons;
 mod kernel;
 mod layout;
+mod lazy;
 mod markdown;
 mod media;
 pub mod motion;
+mod overlay;
 mod palette;
 mod parent;
 mod picture;
@@ -60,6 +62,7 @@ pub use features::{
 };
 pub use glib;
 pub use host::{dispatch, run};
+pub use lazy::LazyGrid;
 pub use media::{MediaOp, Video, VideoProps, media, media_open};
 pub use motion::{Curve, Decor, Decorate, Edge, Num, Transition, TransitionKind, staggered};
 pub use palette::{SearchItem, SearchItemProps, SearchPalette};
@@ -238,3 +241,19 @@ pub struct AppDef {
 
 #[cfg(feature = "script")]
 mod script;
+
+/// The checks that need a display (Broadway on the Linux test machine),
+/// one after another on the thread that set GTK up: GTK lives on one
+/// thread, and the test harness runs each test on a thread of its own, so
+/// tests that each set GTK up would race, or find it on another thread.
+/// Without a display nothing draws, and there is nothing to check.
+#[cfg(test)]
+#[test]
+fn on_a_display() {
+    if gtk::init().is_err() {
+        return;
+    }
+    motion::tests::a_spinning_box_turns_stops_where_it_is_and_goes_on();
+    motion::tests::a_glowing_box_lights_under_the_pointer_and_fades();
+    lazy::tests::a_long_grid_builds_only_the_rows_near_the_view();
+}

@@ -698,6 +698,9 @@ mod tests {
                 platform_icons: BTreeMap::new(),
                 alternate_icons: BTreeMap::new(),
                 publisher: None,
+                files_folder: false,
+                background_audio: false,
+                overlays: false,
             },
             languages: Languages {
                 supported: vec!["zh-Hans".into(), "en".into()],

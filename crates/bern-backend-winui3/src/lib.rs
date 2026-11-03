@@ -109,6 +109,10 @@ pub struct WinUi3Windows;
 /// IR features the target builds, in both front ends.
 const FEATURES: &[&str] = &[
     bern_target_api::feature::BUTTON_CONTENT,
+    bern_target_api::feature::SCROLL_ANCHOR,
+    bern_target_api::feature::SCROLL_BROWSING,
+    bern_target_api::feature::BOUND_BLUR,
+    bern_target_api::feature::TEXT_BOLD,
     bern_target_api::feature::TAB_ACCESSORY,
     bern_target_api::feature::REVEAL,
     bern_target_api::feature::TOOLBAR_SEARCH,
@@ -132,6 +136,7 @@ const FEATURES: &[&str] = &[
     bern_target_api::feature::RUNTIME_PALETTE,
     bern_target_api::feature::RUNTIME_IMAGES,
     bern_target_api::feature::PICTURE_FILLS,
+    bern_target_api::feature::COVER_IMAGES,
     bern_target_api::feature::FILE_PICK,
     bern_target_api::feature::SCROLL_SNAP,
     bern_target_api::feature::RAILS,
@@ -191,6 +196,9 @@ const MOTION: &[&str] = &[
     "reduce_motion",
     "spin",
     "spin_period",
+    "glow",
+    "glow_opacity",
+    "blur",
     "appear_delay",
     "stagger",
     "idle_area",

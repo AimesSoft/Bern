@@ -21,6 +21,8 @@ let exported_uri = bern::platform::export_path(&received_file, &selected_tree.ur
 
 导入和导出是同步 I/O，调用方应放在工作线程上，不能放在 UI 线程。2026-10-23 实现，Android 构建与真机验证记录待补充。
 
+不复制也能读所选的文件夹：`bern::files::list` 与 `walk` 直接列出文档树，`open` 打开其中的文档（见设计文档“引擎读取交来的文件”）。Rust 一侧的 `content` 打开方式经 JNI 调 `BernBridge.listFolder`：文档树（`…/tree/<id>`）代表它的顶层文档，树下的文档地址（`…/tree/<id>/document/<id>`）原样使用；先查文档的类型，不是文件夹答复 `error:not_a_folder`，是文件夹就用 `buildChildDocumentsUriUsingTree` 查询子文档的 ID、显示名、类型、大小与修改时间，每个子文档经 `buildDocumentUriUsingTree` 得到同一文档树下的地址，选择器保存的授权覆盖它们。结果以 `ok:` 开头、每个字段后跟一个 NUL 交回，失败时是 `error:` 与原因。`fileName` 也接受文档树，取顶层文档的显示名，`files::name` 因此得到文件夹的名字。2026-11-02 在 `Enji_Test` 模拟器（API 36）上用一个音乐应用验证：选择器选中 `Music/EnjiTest` 后列出含子文件夹在内的三首歌与一个 `.lrc`，读出标签、封面与歌词并从文档地址播放，重启后授权仍在、重新遍历结果相同；未授权的文档树列举失败（`SecurityException`），引擎得到 `source_unavailable`。
+
 - 日期：2026-10-14（页面级布局、场景与控件形态的能力于 2026-10-19 补齐，见同名一节）
 - 依据：[Bern 架构设计 v0.30](../Design.md)，[Android 适配规范](../Adaptation/Android.md)
 - 工具链：Rust 1.99.0（`aarch64-linux-android`）；Android NDK 29.0.14206865；Android Gradle 插件 9.3.3、Gradle 9.5.1、JDK 21（Android Studio 自带的运行时）；Kotlin 2.4.21 的 Compose 编译器插件；Compose BOM 2026.09.00（Compose 1.12.1、Material 3）；Media3 1.11.1；compileSdk 37、targetSdk 36、minSdk 26
@@ -76,7 +78,7 @@ Kotlin 对象 `BernNative` 声明 C ABI 的每个函数，`bern-ffi` 的 `androi
 - **分栏**：宽度不小于 600 dp 时侧边栏（280 dp）与详情并排；更窄时先显示侧边栏列表，选中后进入详情，系统返回与顶栏的返回箭头回到列表。外部入口选择侧栏项时同样进入详情。
 - **页签**：底部 `NavigationBar`；工具栏中的选择器显示为顶栏里的下拉菜单，因为顶栏只有一行高。
 - **控件**：`Button` 默认是色调按钮，`prominent` 为实心按钮，`plain` 为文字按钮；`Switch` 是整行可点按的开关或复选框；`Picker` 按样式是下拉框、分段按钮、单选列表或一排 `FilterChip`（`chips`）；分段按钮不带对勾（设计的 `.c-seg` 只以底色标出选中段），标签按整行宽度量，计数等后缀不会被截掉；`TextInput` 是带标签的描边输入框；`Slider` 可带两端图标。
-- **启动器图标**：没有声明或声明 PNG 时是 `mipmap-xxxhdpi/ic_launcher.png`；`[app.icon].android` 为 `res` 文件夹时原样并入应用的 `res`，自适应图标与主题图标（单色层）随之生效，有 `ic_launcher_round` 时清单加 `android:roundIcon`。
+- **启动器图标**：没有声明或声明 PNG 时生成自适应图标（`mipmap-anydpi-v26/ic_launcher.xml`）：前景层 `ic_launcher_foreground.png` 边长 432 像素，画面缩放到中间 72/108 的安全区，背景层是画面角上颜色的 `drawable/ic_launcher_background.xml`；Android 8 以前仍用 `mipmap-xxxhdpi/ic_launcher.png`。此前只有 `ic_launcher.png`，启动器把它整个缩进圆形，比其他应用的图标小一圈（2026-11-01）。PNG 读不出来时只生成旧的 `ic_launcher.png`。`[app.icon].android` 为 `res` 文件夹时原样并入应用的 `res`，自适应图标与主题图标（单色层）随之生效，有 `ic_launcher_round` 时清单加 `android:roundIcon`。
 - **图标**：Bern 的图标名（SF Symbols 命名）映射到 Material 图标：Material 核心图标集里有的直接用，核心集没有的（暂停、音量、亮度、网格、归档、文件夹、调色板、媒体库、同步、插件、键盘、无线网络等）由运行时按 Material 图标（baseline 样式）的路径数据绘制。对照表只有一份（`src/icons.rs`），生成时写进 `BernIcons.get`；应用用到表中没有的名字时检查报错并指向声明，不再在运行时显示中性圆点（圆点只留给没有图标的位置）。表至少包含 Bern 图标集（`bern_target_api::icon_set::NAMES`）的全部名字，测试逐个核对。
 - **导航项按条件出现**：`if`、`match` 与 `ForEach` 中的侧栏项与页签照常生成，选中项消失时回到 `fallback` 或第一个可见项。
 
@@ -269,6 +271,29 @@ Android 与 Material 3 都没有表格控件，`Table` 按 Material 数据表的
 
 `Watch` 是 `BernWatch(value)`：`LaunchedEffect(value)` 在组合时与值变化时运行动作（`rememberUpdatedState` 取最新的动作），列表与枚举按值比较。`Text(color:)` 取 `bernPalette().role(…)`。Android 应用不在登录时打开，`Switch(login_item: true)` 不生成任何东西。验证：gallery 的生成器测试；未构建 APK、未在设备上运行。
 
+## 歌词页所需的能力与原生音频（2026-10-31）
+
+- 跟随状态的模糊、条件加粗、滚动定位比例 `anchor` 与手动滚动 `browsing` 已实现，见设计文档“定位比例”“手动滚动”“跟随状态的模糊与加粗”。`Stack` 样式的 `shadow` 画在圆角裁切之外。
+- `SidebarFooter` 里直接调用组件时，生成代码在页脚的 lambda 里引用 `this`；页脚改为 `ColumnScope` 的接收者 lambda。
+- 引擎依赖里的 C++（如 cpal 的 Oboe 音频）需要 `CXX_aarch64_linux_android`，构建与 `CC_…` 一起传入 NDK 的 `clang++`。Oboe 静态链接 libc++ 时，应用自己的构建脚本需再链接 `c++abi`。
+- 通过 `ndk-context` 找 Java 虚拟机与应用的库（cpal 的音频输出即是）此前在启动音频时 panic，线程静默退出：`BernBridge` 新增 `applicationContext()`，`bern-ffi` 启动时用它初始化 `ndk-context`，进程内只做一次。
+- 新增 Material 图标：`backward.fill` / `forward.fill`（Fast Rewind / Fast Forward）、`chart.bar`（Bar Chart）、`info.circle.fill`、`iphone`（Smartphone）、`qrcode`、`qrcode.viewfinder`（QR Code Scanner）、`quote.bubble(.fill)`（Mic None / Mic：Material 没有引号气泡，按苹果音乐类应用里它作为歌词按钮的含义取麦克风）、`rectangle.portrait.and.arrow.right`（Logout）、`repeat`、`repeat.1`、`shuffle`。
+- 实测（Android 16 模拟器，一个音乐应用）：歌词页正在唱的一行加粗放大、两侧逐渐模糊；播放进度推进（输出音量设为 0）。
+
+## 浮起的标签栏与圆形图标按钮（2026-10-31）
+
+- `Tabs(bar: floating)`：标签栏是离开屏幕两侧与底边的胶囊（`surfaceContainer`，阴影 6dp，避开系统导航条），每项占一份宽度，选中的一项图标与文字取强调色、背后另有一块胶囊；`TabAccessory` 随之成为同宽的胶囊。不写时仍是 Material 的 `NavigationBar`。
+- 带样式且写了 `height` 的 `IconButton` 宽高都取这个直径、不再加样式的内边距，样式的 `corner` 取半径时就是圆形按钮；此前它按内边距撑成横向的胶囊，图标也被挤小。
+- 行里包着文字输入框或滑块的 `Stack` 占去其余的宽度（`weight(1f)`），与直接写在行里的输入框相同；此前它按输入框铺满整行，把同一行后面的按钮挤出屏幕。
+- 实测（Android 16 模拟器，一个音乐应用）：首页底部为胶囊标签栏与胶囊迷你播放器，右上角圆形搜索按钮；搜索层的输入框与“取消”同在一行。
+
+## 行里的搜索框与选择器（2026-11-01）
+
+- 行里的 `Search` 与 `TextInput` 一样占去其余的宽度（`weight(1f)`）；此前它铺满整行，把同一行的“取消”挤出屏幕。包着它的 `Stack` 同样占去其余宽度。
+- 行里的 `Picker` 与 `LanguagePicker` 保持自己的宽度：菜单样式是写着所选项的文字按钮，点开列出其他选项（与 iOS 设置行末尾的菜单相同），分段样式不再铺满整行；此前它们铺满整行，把同一行的名称挤成一字一行。
+- 实测（Android 16 模拟器，一个音乐应用的设置页）：音质、语言的菜单在行末，外观的分段控件靠右，各行名称完整。
+- `Tabs(bar: floating)` 时页面铺到屏幕底部、在胶囊标签栏与 `TabAccessory` 之下，与 iOS 相同；纵向滚动视图（`ScrollView` 与按位置停靠的滚动视图）按标签栏盖住自己的高度在内容末尾留出空白，最后几项能滚到标签栏之上；标签栏本身也延伸到系统导航条之下，按导航条的高度在底部留出内边距，导航条后面不再是一条空白（2026-11-01）。此前页面止于标签栏上方，胶囊两侧与背后是一条空白，滚到底时内容像被截断（2026-11-01，Android 16 模拟器上验证首页滚到底时最后一行完整露出）。
+
 ## 验证记录
 
 2026-10-12 至 13，小米 MIX 2S（Android 15），由生成的 CLI、`adb` 截图与录屏驱动：
@@ -419,7 +444,7 @@ Android 与 Material 3 都没有表格控件，`Table` 按 Material 数据表的
 - 发布版没有开启 R8 缩减，hello 的发布版 APK 约 12 MB。
 - 列表项移除时没有消失过渡。
 - 带样式的侧栏项不支持方向键切换。
-- 交给应用的文件是 `content://` 地址。引擎经 `MediaSource::file_name()` 与 `open()` 读取：Rust 一侧经 JNI 调 `BernBridge.fileName` 与 `openFile`，前者查 `OpenableColumns.DISPLAY_NAME`，后者用内容解析器打开文档并交出文件描述符（`detachFd`），引擎当普通文件读取。经管道提供内容的文档提供方给出的描述符不能跳转、长度为 0。
+- 交给应用的文件是 `content://` 地址。引擎经 `MediaSource::file_name()` 与 `open()` 读取：Rust 一侧经 JNI 调 `BernBridge.fileName` 与 `openFile`，前者查 `OpenableColumns.DISPLAY_NAME`，后者用内容解析器打开文档并交出文件描述符（`detachFd`），引擎当普通文件读取。经管道提供内容的文档提供方给出的描述符不能跳转、长度为 0。选择器给的文件夹经 `listFolder` 列举，每个文件夹一次跨进程查询。
 - 只有当前屏幕上的控件登记快捷键：手机上停在侧栏时，页面工具栏的快捷键不生效。
 - 胶片的放大与停靠在宽屏布局、`arrival: nudge` 的晃动在 Android 上未逐帧确认。
 - 错峰：一次更新加入几个子元素（而不是容器本身出现）时的错峰、系统关闭动画时不错峰，未验证；画廊与探针都没有一次加入几行的操作。时序是在动画放慢 100 倍时量的，正常速度下的间隔是按倍率换算的。

@@ -5,7 +5,8 @@
 //! whatever the image's own size; the picture's content fit draws the image
 //! inside. Given more room than that, as across a column, the picture stays
 //! at the leading edge. With only an aspect ratio, the frame is as wide as
-//! its container and as tall as the ratio makes that.
+//! its container and as tall as the ratio makes that; with no size, it
+//! takes all the room its container gives, the picture covering it.
 //!
 //! `Template` draws a picture as a symbol: its shape in the foreground
 //! color.
@@ -24,6 +25,8 @@ mod imp {
         pub height: Cell<i32>,
         /// Width over height, when the frame takes its container's width.
         pub fill: Cell<Option<f64>>,
+        /// It takes all the room its container gives.
+        pub covers: Cell<bool>,
     }
 
     #[glib::object_subclass]
@@ -51,6 +54,9 @@ mod imp {
         }
 
         fn measure(&self, orientation: gtk::Orientation, for_size: i32) -> (i32, i32, i32, i32) {
+            if self.covers.get() {
+                return (0, 0, -1, -1);
+            }
             if let Some(ratio) = self.fill.get() {
                 return match orientation {
                     gtk::Orientation::Horizontal => (0, 0, -1, -1),
@@ -76,15 +82,15 @@ mod imp {
         /// A declared size never asks for more room, whatever the picture
         /// inside; with only a ratio, it takes the container's width.
         fn compute_expand(&self, hexpand: &mut bool, vexpand: &mut bool) {
-            *hexpand = self.fill.get().is_some();
-            *vexpand = false;
+            *hexpand = self.fill.get().is_some() || self.covers.get();
+            *vexpand = self.covers.get();
         }
 
         fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
             if let Some(child) = self.obj().first_child() {
                 // GTK expects a measure before every allocation.
                 child.measure(gtk::Orientation::Horizontal, -1);
-                let (w, h) = if self.fill.get().is_some() {
+                let (w, h) = if self.fill.get().is_some() || self.covers.get() {
                     (width, height)
                 } else {
                     (width.min(self.width.get()), height.min(self.height.get()))
@@ -198,6 +204,14 @@ impl Frame {
     pub fn fill_width(&self, ratio: f64) {
         self.imp().fill.set(Some(ratio));
         self.set_hexpand(true);
+        self.queue_resize();
+    }
+
+    /// As large as the container: the picture inside covers it, cropped.
+    pub fn cover(&self) {
+        self.imp().covers.set(true);
+        self.set_hexpand(true);
+        self.set_vexpand(true);
         self.queue_resize();
     }
 }

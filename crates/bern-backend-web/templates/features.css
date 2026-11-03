@@ -95,6 +95,13 @@
   width: auto;
 }
 
+/* The rows of a list in a column, built as they come into sight, fill it
+   as the column's own children would. */
+.bern-column-list > :is(.bern-fill-width, .bern-layout-width):not(.bern-sized-width) {
+  justify-self: stretch;
+  width: auto;
+}
+
 :is(.bern-detail-body, .bern-nav-page, .bern-tabpanels, .bern-adaptive, .bern-window-content, .bern-modal-content, .bern-query, .bern-query-content, .bern-drop, .bern-gesture) > :is(.bern-fill-height, .bern-layout-height):not(.bern-inspector, .bern-sized-height) {
   flex: 1 1 auto;
   min-height: 0;
@@ -227,6 +234,32 @@
 @keyframes bern-spin {
   from { rotate: 0deg; }
   to { rotate: 360deg; }
+}
+
+/* MARK: - Glow */
+
+/* `glow`: a white light under the pointer, added to what is drawn: full
+   strength at the centre, a fifth of it at 55% of the radius, none at the
+   radius; it fades in and out in 0.18 s. A light inside its element fills
+   it; one beside a picture is placed over it by the script. */
+.bern-glow-light {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  border-radius: inherit;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+  mix-blend-mode: screen;
+  mix-blend-mode: plus-lighter;
+  background: radial-gradient(circle var(--bern-glow-radius, 0px) at var(--bern-glow-x, 50%) var(--bern-glow-y, 50%),
+    rgb(255 255 255 / var(--bern-glow-opacity, 0.4)) 0%,
+    rgb(255 255 255 / calc(var(--bern-glow-opacity, 0.4) * 0.2)) 55%,
+    rgb(255 255 255 / 0) 100%);
+}
+
+.bern-glow-light.bern-lit {
+  opacity: 1;
 }
 
 /* MARK: - Reveal on hover */

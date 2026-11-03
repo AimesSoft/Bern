@@ -1989,6 +1989,8 @@ struct BernWindowRoot<Content: View>: View {
             .animation(BernMotion(period: 0.45, damping: 1.0).animation, value: modal != nil)
         }
         .bernHeroRoot()
+        .bernGlowRoot()
+        .bernCoverRoot()
         .modifier(BernRenderActive())
         .alert(
             context.pendingClose?.message ?? "",
@@ -2077,7 +2079,12 @@ struct BernImage: View {
     /// Squeezed down from a much larger picture by the compositor alone, its
     /// edges would break up.
     var oneSize = false
-    @State private var fetched: Picture?
+    /// Without a size, it covers the room its container gives, cropped.
+    var covers = false
+    /// The picture loaded last, with what it was loaded for: once the
+    /// source changes it is no longer shown, so the old picture does not
+    /// stand in for the new one while that loads.
+    @State private var fetched: (request: BernPictures.Request, picture: Picture)?
     @Environment(\.colorScheme) private var scheme
     @Environment(\.displayScale) private var displayScale
 
@@ -2197,7 +2204,12 @@ struct BernImage: View {
         let request = url.map {
             BernPictures.Request(url: $0, width: oneSize ? width : nil, height: oneSize ? height : nil, fit: fit, scale: oneSize ? displayScale : 0)
         }
-        let picture = declared ?? fetched ?? request.flatMap { BernPictures.shared.cached($0) }
+        let picture = declared
+            ?? request.flatMap { BernPictures.shared.cached($0) }
+            ?? fetched.flatMap { $0.request == request ? $0.picture : nil }
+            // Its source changed: a file on this device is read at once, so
+            // its place is not left empty for a frame in between.
+            ?? (fetched != nil ? request.flatMap { BernPictures.shared.local($0) } : nil)
         let ratio = picture?.ratio ?? 1
         let content = Group {
             if let picture {
@@ -2214,7 +2226,11 @@ struct BernImage: View {
         }
         .allowedDynamicRange(.high)
         let shown = Group {
-            if let aspect {
+            if covers {
+                Color.clear
+                    .overlay { content }
+                    .clipped()
+            } else if let aspect {
                 Color.clear
                     .aspectRatio(max(0.01, aspect), contentMode: .fit)
                     // The overlay receives the aspect-fitted proposal directly.
@@ -2229,7 +2245,7 @@ struct BernImage: View {
         }
         .task(id: request) {
             guard let request else { return }
-            fetched = await BernPictures.shared.load(request)
+            fetched = await BernPictures.shared.load(request).map { (request, $0) }
         }
         .modifier(BernPictureHero(id: hero, picture: picture, fit: fit, corner: heroCorner, motion: heroMotion))
         if let label {
@@ -2265,6 +2281,21 @@ final class BernPictures {
     private(set) var averages: [String: UInt32] = [:]
 
     func cached(_ request: Request) -> BernImage.Picture? { pictures[request] }
+
+    /// A picture from a file on this device of no more than 2 MB, read and
+    /// decoded now, on the interface thread, unless it is kept already;
+    /// pictures from the network and larger files load in the background.
+    func local(_ request: Request) -> BernImage.Picture? {
+        if let picture = pictures[request] { return picture }
+        guard let location = URL(string: request.url), location.isFileURL,
+              let size = (try? location.resourceValues(forKeys: [.fileSizeKey]))?.fileSize, size <= 2_000_000,
+              let data = try? Data(contentsOf: location),
+              let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let pixels = BernImage.sampledPixels(source, width: request.width, height: request.height, fit: request.fit, scale: request.scale)
+        guard let picture = BernImage.decode(source, pixels: pixels) else { return nil }
+        pictures[request] = picture
+        return picture
+    }
 
     func load(_ url: String) async -> BernImage.Picture? {
         await load(Request(url: url))

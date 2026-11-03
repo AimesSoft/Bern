@@ -65,8 +65,13 @@ const FEATURES_BUILT: &[&str] = &[
     bern_target_api::feature::DIALOG_WINDOWS,
     bern_target_api::feature::RUNTIME_IMAGES,
     bern_target_api::feature::PICTURE_FILLS,
+    bern_target_api::feature::COVER_IMAGES,
     bern_target_api::feature::FILE_PICK,
     bern_target_api::feature::SCROLL_SNAP,
+    bern_target_api::feature::SCROLL_ANCHOR,
+    bern_target_api::feature::SCROLL_BROWSING,
+    bern_target_api::feature::BOUND_BLUR,
+    bern_target_api::feature::TEXT_BOLD,
     bern_target_api::feature::RAILS,
     bern_target_api::feature::POPOVER_BUTTON,
     bern_target_api::feature::SIZE_CLASSES,
@@ -165,6 +170,9 @@ impl Target for ComposeAndroid {
                 "reduce_motion",
                 "spin",
                 "spin_period",
+                "glow",
+                "glow_opacity",
+                "blur",
                 "appear_delay",
                 "stagger",
                 "idle_area",
@@ -265,11 +273,9 @@ impl Target for ComposeAndroid {
                 let images =
                     icon::images(app, "android", &context.project_dir, icon::Shape::AsDrawn)
                         .map_err(failed)?;
-                let launcher = GeneratedFile {
-                    path: main.join("res/mipmap-xxxhdpi/ic_launcher.png"),
-                    contents: icon::largest(&images).png.to_vec(),
-                };
-                (vec![launcher], false)
+                let launcher = adaptive_icon(&main, "ic_launcher", &icon::largest(&images).png)
+                    .map_err(failed)?;
+                (launcher, false)
             }
         };
         // The icons `WindowSet(icon:)` switches to: each its own launcher
@@ -318,10 +324,7 @@ impl Target for ComposeAndroid {
                     let contents = std::fs::read(path).map_err(|error| {
                         failed(format!("cannot read {}: {error}", path.display()))
                     })?;
-                    launcher.push(GeneratedFile {
-                        path: main.join(format!("res/mipmap-xxxhdpi/{renamed}.png")),
-                        contents,
-                    });
+                    launcher.extend(adaptive_icon(&main, &renamed, &contents).map_err(failed)?);
                     false
                 }
                 icon::Source::Logo => false,
@@ -493,6 +496,11 @@ impl Target for ComposeAndroid {
                 path(&linker),
             ),
             ("CC_aarch64_linux_android".to_string(), path(&linker)),
+            // C++ in the engine's crates, such as Oboe's audio.
+            (
+                "CXX_aarch64_linux_android".to_string(),
+                path(&bin.join(format!("{RUST_TARGET}{MINIMUM_SDK}-clang++"))),
+            ),
             (
                 "AR_aarch64_linux_android".to_string(),
                 path(&bin.join("llvm-ar")),
@@ -743,4 +751,41 @@ impl Target for ComposeAndroid {
             notes,
         })
     }
+}
+
+/// The launcher icon `name` from a square PNG: the image itself for
+/// launchers before Android 8, and an adaptive icon whose layers fill the
+/// launcher's shape ([`icon::adaptive_layers`]); a picture that cannot be
+/// read stays the image alone.
+fn adaptive_icon(
+    main: &std::path::Path,
+    name: &str,
+    png: &[u8],
+) -> Result<Vec<GeneratedFile>, String> {
+    let legacy = GeneratedFile {
+        path: main.join(format!("res/mipmap-xxxhdpi/{name}.png")),
+        contents: png.to_vec(),
+    };
+    let Ok((foreground, [r, g, b])) = icon::adaptive_layers(png) else {
+        return Ok(vec![legacy]);
+    };
+    Ok(vec![
+        legacy,
+        GeneratedFile {
+            path: main.join(format!("res/mipmap-xxxhdpi/{name}_foreground.png")),
+            contents: foreground,
+        },
+        GeneratedFile::text(
+            main.join(format!("res/drawable/{name}_background.xml")),
+            format!(
+                "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<shape xmlns:android=\"http://schemas.android.com/apk/res/android\">\n    <solid android:color=\"#{r:02X}{g:02X}{b:02X}\" />\n</shape>\n"
+            ),
+        ),
+        GeneratedFile::text(
+            main.join(format!("res/mipmap-anydpi-v26/{name}.xml")),
+            format!(
+                "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<adaptive-icon xmlns:android=\"http://schemas.android.com/apk/res/android\">\n    <background android:drawable=\"@drawable/{name}_background\" />\n    <foreground android:drawable=\"@mipmap/{name}_foreground\" />\n</adaptive-icon>\n"
+            ),
+        ),
+    ])
 }

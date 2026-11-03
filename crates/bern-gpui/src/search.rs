@@ -38,10 +38,19 @@ struct Palette {
     highlight: usize,
     /// The navigable items of its last frame, in order.
     items: Vec<crate::ctx::Press>,
+    /// Going back into its field.
+    closing: bool,
 }
+
+/// The spring the palette grows out of its field and goes back with
+/// (`hero`).
+const GROWTH: crate::Curve = (0.48, 0.86);
 
 thread_local! {
     static PALETTE: RefCell<Option<Palette>> = const { RefCell::new(None) };
+    /// Where each palette's field was last laid out, in the window.
+    static FIELDS: RefCell<std::collections::HashMap<String, gpui::Bounds<gpui::Pixels>>> =
+        RefCell::new(std::collections::HashMap::new());
     /// While a palette's results build: the item the keyboard stands on,
     /// and the navigable items so far.
     static COLLECTING: RefCell<Option<(usize, Vec<crate::ctx::Press>)>> = const { RefCell::new(None) };
@@ -51,11 +60,16 @@ fn open_key() -> Option<String> {
     PALETTE.with(|palette| palette.borrow().as_ref().map(|palette| palette.key.clone()))
 }
 
+/// The palette goes back into its field, and is gone once there.
 fn close() {
-    if PALETTE
-        .with(|palette| palette.borrow_mut().take())
-        .is_some()
-    {
+    let closing = PALETTE.with(|palette| match palette.borrow_mut().as_mut() {
+        Some(palette) if !palette.closing => {
+            palette.closing = true;
+            true
+        }
+        _ => false,
+    });
+    if closing {
         crate::host::redraw();
     }
 }
@@ -71,7 +85,7 @@ pub(crate) fn keystroke(key: &str, cx: &mut App) -> bool {
     }
     let then = PALETTE.with(|palette| {
         let mut palette = palette.borrow_mut();
-        let Some(palette) = palette.as_mut() else {
+        let Some(palette) = palette.as_mut().filter(|palette| !palette.closing) else {
             return Then::Nothing;
         };
         let last = palette.items.len().saturating_sub(1);
@@ -145,7 +159,7 @@ pub fn search(
     if props.palette {
         return palette(c, id, field, props, submit, results);
     }
-    let key = c.target(id);
+    let key = c.key(id);
     let value = crate::value::as_text(&c.read(field));
     let input = controls::text_input(
         c,
@@ -222,8 +236,8 @@ fn palette(
     submit: Option<Act>,
     results: Option<crate::ctx::Content<'_>>,
 ) -> El {
-    let key = format!("{}/{}", c.win().id, c.target(id));
-    let field_key = c.target(&format!("{id}.palette"));
+    let key = format!("{}/{}", c.win().id, c.key(id));
+    let field_key = c.key(&format!("{id}.palette"));
     let open: crate::ctx::Press = {
         let c = c.clone();
         let key = key.clone();
@@ -235,6 +249,7 @@ fn palette(
                     key: key.clone(),
                     highlight: 0,
                     items: Vec::new(),
+                    closing: false,
                 })
             });
             controls::request_focus(&field_key);
@@ -302,7 +317,23 @@ fn palette(
             }))
             .when(!enabled, |trigger| trigger.opacity(0.5))
             .when(enabled, |trigger| {
-                trigger.on_click(move |_, _, cx| open(cx))
+                trigger.on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    open(cx)
+                })
+            })
+            .relative()
+            .child({
+                // Where the field is, for the palette to grow out of.
+                let key = key.clone();
+                gpui::canvas(
+                    move |bounds, _, _| {
+                        FIELDS.with(|fields| fields.borrow_mut().insert(key, bounds));
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .size_full()
             })
     };
     if !is_open && !c.listing() {
@@ -368,6 +399,26 @@ fn palette(
     let window_height = c.win().height.get();
     let width = props.width.unwrap_or(640.0).min(window_width - 32.0);
     let height = props.height.unwrap_or(480.0).min(window_height - 48.0);
+    // It grows out of its field on the hero spring and goes back into it;
+    // the window dims under it as it grows.
+    let closing = PALETTE.with(|palette| {
+        palette
+            .borrow()
+            .as_ref()
+            .is_some_and(|palette| palette.closing)
+    });
+    let grown = crate::motion::spring_from(
+        c,
+        &format!("{key}#grown"),
+        Some(0.0),
+        GROWTH,
+        if closing { 0.0 } else { 1.0 },
+        1.0,
+    );
+    if closing && grown <= 0.001 {
+        PALETTE.with(|palette| palette.borrow_mut().take());
+        crate::host::redraw();
+    }
     let panel = div()
         .id(gpui::ElementId::Name(format!("{key}.palette").into()))
         .occlude()
@@ -418,6 +469,35 @@ fn palette(
                 .p(px(6.0))
                 .children(list),
         );
+    let top = 56.0;
+    let field = FIELDS.with(|fields| fields.borrow().get(&key).copied());
+    let shown = match field {
+        // On its way: a box from the field's place and size to the
+        // panel's, showing the panel from its leading top corner.
+        Some(field) if grown < 0.999 => {
+            let mix = |from: f32, to: f32| from + (to - from) * grown;
+            let (left, panel_top) = ((window_width - width) / 2.0, top);
+            div()
+                .absolute()
+                .left(gpui::px(mix(f32::from(field.origin.x), left)))
+                .top(gpui::px(mix(f32::from(field.origin.y), panel_top)))
+                .w(gpui::px(mix(f32::from(field.size.width), width).max(0.0)))
+                .h(gpui::px(mix(f32::from(field.size.height), height).max(0.0)))
+                .rounded(gpui::px(mix(16.0, 14.0)))
+                .overflow_hidden()
+                .child(panel)
+                .into_any_element()
+        }
+        _ => div()
+            .absolute()
+            .top(px(top))
+            .w(px(window_width))
+            .flex()
+            .flex_col()
+            .items_center()
+            .child(panel)
+            .into_any_element(),
+    };
     div()
         .relative()
         .flex_none()
@@ -426,17 +506,20 @@ fn palette(
             deferred(
                 anchored()
                     .position_mode(AnchoredPositionMode::Window)
-                    .position(point(px(0.0), px(0.0)))
+                    .position(point(px(c.win().inset.get()), px(c.win().inset.get())))
                     .child(
                         div()
+                            .relative()
                             .w(px(window_width))
                             .h(px(window_height + 100.0))
-                            .flex()
-                            .flex_col()
-                            .items_center()
-                            .pt(px(56.0))
-                            .bg(c.slot("dialog", "open", "scrim"))
-                            .child(panel),
+                            .child(
+                                div()
+                                    .absolute()
+                                    .size_full()
+                                    .bg(c.slot("dialog", "open", "scrim"))
+                                    .opacity(grown.clamp(0.0, 1.0)),
+                            )
+                            .child(shown),
                     ),
             )
             .with_priority(2),
@@ -521,7 +604,10 @@ pub fn search_item(
                 }
             })
         })
-        .on_click(move |_, _, cx| choose(cx));
+        .on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            choose(cx)
+        });
     let element = match content {
         Some(content) => element.flex_col().p(px(4.0)).children(content),
         None => {
@@ -563,17 +649,45 @@ pub fn toolbar(c: &Ctx, leading: Vec<El>, trailing: Vec<El>) -> El {
     if c.win().immersive.get() {
         return div().into_any_element();
     }
-    div()
+    let gap = 8.0;
+    let row = div()
         .flex()
         .flex_row()
         .flex_none()
         .items_center()
-        .gap(px(8.0))
-        .w_full()
-        .h(px(52.0))
-        .px(px(12.0))
+        .gap(px(gap))
+        .w_full();
+    if !(c.is_under_bars() && c.win().title_bar.get() > 0.0) {
+        return row
+            .h(px(52.0))
+            .px(px(12.0))
+            .children(leading)
+            .child(div().flex_1())
+            .children(trailing)
+            .into_any_element();
+    }
+    // Under the title bar it stands in the bar's row, as tall as the bar
+    // and on the window buttons' middle line, its ends clear of them. Its
+    // free room moves the window, and its items take their clicks.
+    c.win().bar_toolbar_built.set(true);
+    let (start, end) = c.win().caption.get();
+    // The row's gap stands between the room at an end and the item there.
+    // Where the window buttons stand the room does not drag: Windows takes
+    // the first area it finds under the pointer, and the toolbar's come
+    // before the buttons'.
+    let end_room = |caption: f32| {
+        let room = div().flex_none().h_full();
+        if caption > 0.0 {
+            room.w(px(caption - gap))
+        } else {
+            crate::chrome::drag(room.w(px(12.0 - gap)))
+        }
+    };
+    row.h(px(crate::chrome::TOOLBAR_ROW))
+        .child(end_room(start))
         .children(leading)
-        .child(div().flex_1())
+        .child(crate::chrome::drag(div().flex_1().h_full()))
         .children(trailing)
+        .child(end_room(end))
         .into_any_element()
 }

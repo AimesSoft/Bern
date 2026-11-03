@@ -135,6 +135,10 @@ pub struct TextProps {
     pub line_height: Option<Num>,
     /// The content is inline Markdown.
     pub markdown: bool,
+    /// Bold while this holds, else in the style's weight.
+    pub bold: Option<Get>,
+    /// The spring a size that follows state changes with.
+    pub animate: Option<Curve>,
 }
 
 /// The size and line height of a label's text, as Pango attributes.
@@ -154,15 +158,22 @@ fn text_attributes(label: &gtk::Label, size: Option<f64>, line_height: Option<f6
     label.set_attributes(Some(&attributes));
 }
 
-/// Keep a label's size and line height in step with bound lengths.
-fn bind_text_size(ctx: &Ctx, label: &gtk::Label, size: Option<Num>, line_height: Option<Num>) {
+/// Keep a label's size and line height in step with bound lengths, the
+/// size springing with `curve` when given.
+fn bind_text_size(
+    ctx: &Ctx,
+    label: &gtk::Label,
+    size: Option<Num>,
+    line_height: Option<Num>,
+    curve: Option<Curve>,
+) {
     if size.is_none() && line_height.is_none() {
         return;
     }
     let values = Rc::new(Cell::new((None::<f64>, None::<f64>)));
     if let Some(size) = &size {
         let (values, label_) = (Rc::clone(&values), label.clone());
-        bind_number(ctx, size, None, label, move |value| {
+        bind_number(ctx, size, curve, label, move |value| {
             values.set((Some(value), values.get().1));
             let (size, height) = values.get();
             text_attributes(&label_, size, height);
@@ -212,7 +223,23 @@ pub fn Text(p: &Parent, ctx: &Ctx, props: TextProps) {
         label.set_lines(lines.max(1.0) as i32);
         label.set_ellipsize(gtk::pango::EllipsizeMode::End);
     }
-    bind_text_size(ctx, &label, props.font_size, props.line_height);
+    bind_text_size(
+        ctx,
+        &label,
+        props.font_size,
+        props.line_height,
+        props.animate,
+    );
+    if let Some(bold) = props.bold {
+        let (at, shown) = (ctx.clone(), label.clone());
+        effect(move || {
+            if crate::value::truthy(&bold(&at)) {
+                shown.add_css_class("bern-bold");
+            } else {
+                shown.remove_css_class("bern-bold");
+            }
+        });
+    }
     if let Some(content) = &props.content {
         if props.markdown {
             let text = bound_text(ctx, content);
@@ -309,6 +336,8 @@ pub struct ButtonProps {
     pub shape: Shape,
     /// `width: fill`: as wide as its container.
     pub fill: bool,
+    /// `ContextMenu`: what a secondary click or a long touch opens.
+    pub menu: Vec<Option<MenuItem>>,
 }
 
 fn register_button(
@@ -398,6 +427,9 @@ pub fn Button(p: &Parent, ctx: &Ctx, props: ButtonProps, action: Option<Act>) {
         set_file.zip(props.pick.map(|pick| pick.kinds)),
     );
     shape(ctx, button.upcast_ref(), &props.shape);
+    if !props.menu.is_empty() {
+        crate::table::context_menu(ctx, button.upcast_ref(), props.menu);
+    }
     if props.fill {
         button.set_hexpand(true);
         button.set_halign(gtk::Align::Fill);
@@ -1738,7 +1770,7 @@ pub(crate) fn bind_size(
 /// How a column or row aligns its children across its axis. A column
 /// without `align` is a leading one: what fills across, such as a field, a
 /// divider or a grid, fills it, and the rest keeps its own width.
-fn stack_cross(align: Option<&str>, column: bool) -> gtk::Align {
+pub(crate) fn stack_cross(align: Option<&str>, column: bool) -> gtk::Align {
     match (align, column) {
         (Some("center"), _) => gtk::Align::Center,
         (Some("trailing") | Some("bottom"), _) => gtk::Align::End,
@@ -1860,14 +1892,58 @@ pub fn Grid(p: &Parent, ctx: &Ctx, props: GridProps, children: Build) {
         .map(|width| width.peek(ctx))
         .unwrap_or(120.0);
     let cells = Parent::of_flow(&flow, Rc::new(Cell::new(first.round() as i32)));
+    // A cell is never wider than the grid has room for: with less room
+    // than `min_width`, one column fills it, as on the other targets. A
+    // probe with no height above the cells measures the room; until it
+    // has, and while the room is short, the cells ask for no width, so
+    // the probe measures the room the grid is given, not the width its
+    // cells would force.
+    let wanted = Rc::new(Cell::new(first));
+    let room = Rc::new(Cell::new(0.0));
+    let fit = {
+        let (cells, wanted, room, flow) = (
+            cells.clone(),
+            Rc::clone(&wanted),
+            Rc::clone(&room),
+            flow.clone(),
+        );
+        Rc::new(move || {
+            let inside = room.get() - f64::from(flow.margin_start() + flow.margin_end());
+            if wanted.get() > inside {
+                flow.set_max_children_per_line(1);
+                cells.set_cell_width(-1);
+            } else {
+                flow.set_max_children_per_line(64);
+                cells.set_cell_width(wanted.get().round().max(1.0) as i32);
+            }
+        })
+    };
+    fit();
     if let Some(min_width) = &props.min_width {
-        let resized = cells.clone();
+        let (wanted, fit) = (Rc::clone(&wanted), Rc::clone(&fit));
         bind_number(ctx, min_width, props.animate, &flow, move |value| {
-            resized.set_cell_width(value.round().max(1.0) as i32);
+            wanted.set(value);
+            fit();
         });
     }
+    let holder = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    holder.set_hexpand(true);
+    holder.set_valign(gtk::Align::Start);
+    let probe = gtk::DrawingArea::new();
+    probe.set_content_height(0);
+    probe.set_hexpand(true);
+    probe.connect_resize(move |_, width, _| {
+        if width > 0 && f64::from(width) != room.get() {
+            room.set(f64::from(width));
+            // After this layout, which a new size request would upset.
+            let fit = Rc::clone(&fit);
+            glib::idle_add_local_once(move || fit());
+        }
+    });
+    holder.append(&probe);
+    holder.append(&flow);
     children(&cells, ctx);
-    place(p, &flow);
+    place(p, &holder);
 }
 
 #[derive(Default)]
@@ -1999,8 +2075,9 @@ pub(crate) struct Sizing<'a> {
 
 /// A picture of a declared size and shape, holding `picture`: with one
 /// side given, the other follows `ratio`; with only `aspect`, as wide as
-/// its container and as tall as the aspect makes it. Returns the widget
-/// to place and what lays it out again when the ratio changes.
+/// its container and as tall as the aspect makes it; with no size, as
+/// large as its container (it covers it). Returns the widget to place and
+/// what lays it out again when the ratio changes.
 pub(crate) fn framed(
     ctx: &Ctx,
     picture: &gtk::Widget,
@@ -2030,6 +2107,7 @@ pub(crate) fn framed(
     };
     match (width, height, aspect) {
         (None, None, Some(aspect)) => frame.fill_width(aspect),
+        (None, None, None) => frame.cover(),
         _ => {
             if let Some(width) = width {
                 let sides = Rc::clone(&sides);
@@ -2525,6 +2603,8 @@ fn tools(_p: &Parent, ctx: &Ctx, children: Build, leading: bool) {
 pub struct LanguagePickerProps {
     pub id: &'static str,
     pub label: Option<Str>,
+    /// In a list, the menu alone, without the row's title.
+    pub label_hidden: bool,
 }
 
 #[allow(non_snake_case)]
@@ -2534,7 +2614,7 @@ pub fn LanguagePicker(p: &Parent, ctx: &Ctx, props: LanguagePickerProps) {
     let names: Vec<&str> = names.iter().map(String::as_str).collect();
     let model = gtk::StringList::new(&names);
     let label = props.label.as_ref().map(|label| bound_text(ctx, label));
-    let (owner, widget): (glib::Object, gtk::Widget) = if p.is_list() {
+    let (owner, widget): (glib::Object, gtk::Widget) = if p.is_list() && !props.label_hidden {
         let row = adw::ComboRow::new();
         row.set_model(Some(&model));
         if let Some(label) = label.clone() {

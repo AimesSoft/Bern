@@ -84,6 +84,7 @@ pub(crate) const FEATURES: &[&str] = &[
     feature::RUNTIME_PALETTE,
     feature::RUNTIME_IMAGES,
     feature::PICTURE_FILLS,
+    feature::COVER_IMAGES,
     feature::SCROLL_SNAP,
     feature::RAILS,
     feature::POPOVER_BUTTON,

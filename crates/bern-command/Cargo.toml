@@ -9,9 +9,30 @@ rust-version.workspace = true
 [dependencies]
 bern-protocol.workspace = true
 
-# The system credential stores behind `secrets`.
+# The system credential stores behind `secrets`, and the system's now
+# playing behind `now_playing`.
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 security-framework = "3"
+objc2 = "0.6"
+block2 = "0.6"
+dispatch2 = "0.3"
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSAttributedString", "NSData", "NSDictionary", "NSGeometry", "NSString", "NSValue", "objc2-core-foundation"] }
+objc2-media-player = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-core-foundation", "MPMediaItem", "MPNowPlayingInfoCenter", "MPRemoteCommand", "MPRemoteCommandCenter", "MPRemoteCommandEvent"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAttributedString", "NSBox", "NSButton", "NSCell", "NSColor", "NSControl", "NSEvent", "NSFont", "NSFontDescriptor", "NSGraphics", "NSImage", "NSPanel", "NSResponder", "NSScreen", "NSShadow", "NSText", "NSTextField", "NSUserInterfaceItemIdentification", "NSView", "NSWindow", "objc2-core-foundation"] }
+objc2-media-player = { version = "0.3", default-features = false, features = ["objc2-app-kit"] }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2-avf-audio = { version = "0.3", default-features = false, features = ["std", "AVAudioSession", "AVAudioSessionTypes"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-numerics = "0.3"
+windows = { version = "0.62", features = ["Foundation", "Media", "Media_Playback", "Storage_Streams", "Win32_Foundation", "Win32_Graphics_Direct2D", "Win32_Graphics_Direct2D_Common", "Win32_Graphics_DirectWrite", "Win32_Graphics_Dxgi_Common", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_System_WinRT", "Win32_UI_HiDpi", "Win32_UI_WindowsAndMessaging"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = "5"
 
 [target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
 keyring = { version = "3", features = ["windows-native", "sync-secret-service", "crypto-rust"] }

@@ -23,7 +23,7 @@ This document records what was actually completed for the `swiftui + ios` target
 | Screen rotation, keyboard, safe areas | Partial | Keyboard input, safe areas and iPad window resizing (stopping at the minimum size) measured; rotation is handled by SwiftUI, not measured |
 | Subscribable state; commands with parameters and error returns | Done | The same runtime as macOS: engine state, session drafts, queries, close protocol |
 | Native Video presentation | Done | AVFoundation executor and `AVPlayerLayer` presentation, command-driven control bar |
-| Device build and packaging | Not done | The engine and UI compile and link for `aarch64-apple-ios`; signing, provisioning profiles, installation and `bern package` not done |
+| Device build and packaging | Partial | `bern package` produces an ad-hoc signed `.ipa` (2026-11-02); developer signing, provisioning profiles and installation not done |
 
 ## Project structure
 
@@ -194,9 +194,15 @@ The generator is shared with macOS (see the macOS implementation notes): `Table`
 
 `Watch` and `Text(color:)` are the same as on macOS (`BernWatch`, `foregroundStyle`). iOS has no login items, so `Switch(login_item: true)` generates `EmptyView` (the capability `login_switch` does not apply). Verification: the `tables` test type-checks against the iOS SDK; not run in the simulator.
 
+## Packaging (2026-11-02)
+
+`bern package --target ios` first builds the simulator app as usual, then copies the bundle into `target/bern/ios/package/Payload/` and replaces the parts built for devices there: the engine and the bridge are compiled for `aarch64-apple-ios` (`IPHONEOS_DEPLOYMENT_TARGET` is the minimum system version), `actool` recompiles the icon for `iphoneos`, `swiftc` recompiles and links the frontend with the `iphoneos` SDK and `arm64-apple-ios17.0`, and symbols are stripped for release; `plutil` changes `CFBundleSupportedPlatforms` to `iPhoneOS`, `codesign --sign -` signs it ad hoc, and `ditto` packs it into `target/bern/dist/<product>-<version>-ios.ipa`. Resources, localizations and the other Info.plist keys are taken over from the simulator bundle.
+
+Verification: Enji produced an `.ipa` on this Mac and on macOS 26 in GitHub Actions; the program in the bundle is arm64 with `platform IOS` and `minos 17.0`, the signature verifies, and the archive contains no resource forks. Not installed or run on a device.
+
 ## Incomplete work and known limitations
 
-- Only simulator apps are built. Devices need developer signing and provisioning profiles; installation and `bern package` are not implemented.
+- `bern build` builds only simulator apps. The `.ipa` from `bern package` is only ad-hoc signed and has to be installed with a tool that re-signs it with an Apple ID or a developer certificate; signing with provisioning profiles and installing directly to a device are not implemented.
 - HDR: the simulator cannot display HDR, and in the simulator gain maps decode only the SDR version; on a device images decode as HDR and video is shown by `AVPlayerLayer`, with HDR not verified for either.
 - No background audio is declared, so on a device the system pauses playback after the app enters the background; this was only observed in the simulator (where playback continues).
 - The "Settings" item and ⌘, in the iPadOS menu bar are only type-checked, not measured (the simulator offers no menu bar operation with an attached keyboard).
@@ -223,7 +229,7 @@ On an iPhone 17e simulator (iOS 26.5, 390 × 844 points, screenshots 1170 × 253
 - **Phone dropdown capsules**: on iOS `Menu(shape: capsule)` is laid out per design section 6.3: the symbol in a 16-point frame, the arrow in a 12-point frame at 60 % opacity, spacing 6, and 11 points from the edge on the arrow side. The button of `Picker(style: menu, shape: capsule)` carries the same arrow (iOS menu buttons do not draw an arrow themselves).
 - **Capsule split buttons**: the toggle part of `SplitButton(shape: capsule)` does not use the system `Label`; the symbol is in a 16-point frame, 6 from the text, 14 from the end of the capsule and 10 from the divider; the dropdown part is 30 wide. macOS and iOS do it the same way.
 - **Immersive windows fill the screen**: when `immersive` is true, iOS window content extends under the safe area (`ignoresSafeArea`), and on a phone in landscape an 844 × 390 picture fills it at 1x; when it is false the content returns inside the safe area.
-- **Tab bar accessory**: from iOS 26.1 on, `TabAccessory` generates `tabViewBottomAccessory(isEnabled:)`, with the content built only once (`AnyView`), and when `shown` is false the system collapses the accessory; earlier iOS versions embed a material capsule inside the safe area at the bottom of each page. Icon buttons in the accessory are symbols on the bar (environment `bernOnBar`): they no longer each carry glass, and `IconButton(height:)` only gives the size of the tap area. Measured on an iPhone 17e simulator (iOS 26.5): the accessory appears above the tab bar when playback starts and collapses after the player is closed.
+- **Tab bar accessory**: from iOS 26.1 on, `TabAccessory` generates `tabViewBottomAccessory(isEnabled:)`, with the content built only once (`AnyView`), and when `shown` is false the system collapses the accessory; earlier iOS versions embed a material capsule inside the safe area at the bottom of each page. Icon buttons in the accessory are symbols on the bar (environment `bernOnBar`): they no longer each carry glass, and `IconButton(height:)` only gives the size of the tap area. Measured on an iPhone 17e simulator (iOS 26.5): the accessory appears above the tab bar when playback starts and collapses after the player is closed. The accessory's content takes the window's appearance (like the tab bar): the system's accessory glass changes with the content scrolling under it, and when a dark image scrolled under the accessory it turned the text and symbols in it white while the glass itself stayed light, so the text was nearly invisible (fixed 2026-11-01; on an iPhone 17 Pro simulator, "Not Playing" and the play button at the same position stay dark).
 - **Internal layout of capsule buttons**: `Button(shape: capsule)` with an icon no longer uses the system `Label` (its spacing differs between the two platforms); instead the symbol is in a 16-point frame (14 points for 30-point-tall tag capsules), 6 from the text; the horizontal padding follows the size class: 22 at 42 points and above, 13 at 30 points and below, 14 otherwise. macOS and iOS do it the same way.
 
 Chinese glyphs: with the same 30-point system font, the advance width of PingFang Han characters rendered by Chrome is 1 em, while native iOS rendering gives about 0.947 em, so Chinese titles look about 5% smaller. Layout is aligned by points and glyph rendering is left to the system; the font size was not enlarged to compensate.
@@ -235,3 +241,9 @@ Generation is shared with macOS: when `shortcut:` and `Shortcut(key:)` are bound
 ## Scroll bars shown only for the mouse (2026-10-27)
 
 `ScrollView(indicators: mouse)` shares `.bernMouseIndicators()` with macOS: only a pointer can hover, a finger cannot, so on iPad, once a pointer has hovered over the scroll view, it uses `.scrollIndicators(.automatic)`, and before that, as well as when only fingers are used, `.never`. Verification: the generator test type-checks the Swift for iOS; not measured on an iPad or in the simulator.
+
+## Several children in a modal (2026-11-01)
+
+- The content of a `Modal` is first wrapped in a `ZStack` before it is handed to the modal's stage. The stage places only two things, the background and the card; when the content contains a `Shortcut` besides the body (for example Escape to close), SwiftUI counts them as several child views, so the stage placed nothing: the macOS window showed only a plain background, while the card was laid out at the whole window's width. Measured: Enji's "Add to Playlist" and "New Playlist" show on macOS as centered cards 380 and 360 wide.
+
+- **Text fields outside forms**: a `TextInput(label_hidden: true)` outside a `Form` was drawn on iOS by SwiftUI as just text, with nothing showing it is a place to type. Now such a text field (including `kind: secure`) has a filled rounded box (`tertiarySystemFill`, corner radius 12, at least 46 high), like the system's sign-in sheets; a `Form` tells its text fields through the environment that they are form rows there, without a box, and so are text fields in components. macOS text fields have their own border and are unchanged. Verified on 2026-11-01 on an iOS 26.5 simulator with a real app's sign-in popup.

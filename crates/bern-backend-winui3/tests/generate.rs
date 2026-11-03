@@ -522,6 +522,8 @@ fn gallery_generates_without_warnings() {
         // The record in the about window turns.
         ".spin = [](Ctx const& c)",
         ".spinPeriod = 12",
+        // Its picture beneath, lit under the pointer inside its corner.
+        ".glow = 1.0, .glowOpacity = 0.3, .glowCorner = 12.0, .blur = B::Len(16.0), .blurCorner = 12.0",
         "R::Url(c.Engine(",
         "B::KeyShortcut(p, c, {.keys = \"escape\"",
         "B::DefaultFocus(c, ",

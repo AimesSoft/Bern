@@ -140,6 +140,9 @@ struct EachProps {
     std::optional<double> stagger;
     /// The container's children slide to their new places.
     Motion const* reflow = nullptr;
+    /// A list from a column (`leading`, `center` or `trailing`): its rows
+    /// stand across as the column's children would.
+    char const* align = nullptr;
 };
 
 /// Keyed rows: a row keeps its elements, controls and state while its key
@@ -599,7 +602,8 @@ inline void PaneToggle(controls::TitleBar const& bar, controls::NavigationView c
     auto key = winrt::box_value(L"bern.paneToggle");
     int64_t token = ++paneToggleOwner;
     bar.Resources().Insert(key, winrt::box_value(token));
-    bar.IsPaneToggleButtonVisible(true);
+    // Not while a layer under the bars has faded the title bar out.
+    bar.IsPaneToggleButtonVisible(bar.Opacity() > 0);
     auto owns = [key, token](controls::TitleBar const& bar) {
         return bar.Resources().HasKey(key) && winrt::unbox_value<int64_t>(bar.Resources().Lookup(key)) == token;
     };

@@ -271,6 +271,49 @@ pub fn check(bytes: &[u8]) -> Result<u32, String> {
     Ok(width)
 }
 
+/// The side of an Android adaptive icon's layers in pixels: 108 dp at the
+/// density of `mipmap-xxxhdpi`.
+pub const ADAPTIVE_SIDE: u32 = 432;
+
+/// An Android adaptive icon made from a square icon image: the foreground
+/// layer (PNG, [`ADAPTIVE_SIDE`] square) holds the image over the 72 dp in
+/// the middle that the launcher's shape shows, and the background is the
+/// colour of the image's corner, or white where the corner is clear. A
+/// full-bleed icon on a plate thus fills the launcher's shape, as other
+/// apps' icons do, instead of being shrunk inside a plate of the
+/// launcher's own.
+pub fn adaptive_layers(png: &[u8]) -> Result<(Vec<u8>, [u8; 3]), String> {
+    let source = resvg::tiny_skia::Pixmap::decode_png(png).map_err(|error| error.to_string())?;
+    let corner = source
+        .pixel(0, 0)
+        .map(|pixel| pixel.demultiply())
+        .filter(|pixel| pixel.alpha() == 255)
+        .map_or([255, 255, 255], |pixel| {
+            [pixel.red(), pixel.green(), pixel.blue()]
+        });
+    let side = ADAPTIVE_SIDE as f32;
+    let shown = side * 72.0 / 108.0;
+    let scale = shown / source.width().max(1) as f32;
+    let offset = (side - shown) / 2.0;
+    let mut layer = resvg::tiny_skia::Pixmap::new(ADAPTIVE_SIDE, ADAPTIVE_SIDE)
+        .ok_or("cannot allocate the icon's layer")?;
+    layer.draw_pixmap(
+        0,
+        0,
+        source.as_ref(),
+        &resvg::tiny_skia::PixmapPaint {
+            quality: resvg::tiny_skia::FilterQuality::Bicubic,
+            ..Default::default()
+        },
+        resvg::tiny_skia::Transform::from_row(scale, 0.0, 0.0, scale, offset, offset),
+        None,
+    );
+    Ok((
+        layer.encode_png().map_err(|error| error.to_string())?,
+        corner,
+    ))
+}
+
 /// The one-colour SVG of `StatusItem(image:)`, a declared resource name.
 pub fn status_image(app: &Application) -> Option<&str> {
     app.windows.status_item.as_ref()?.resource("image")

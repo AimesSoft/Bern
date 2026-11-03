@@ -83,7 +83,7 @@ pub(crate) fn picture(
         (None, Some(height)) => (Some(height * ratio), Some(height)),
         sides => sides,
     };
-    let key = format!("{:p}{}", Rc::as_ptr(c.win()), c.target(element));
+    let key = format!("{:p}{}", Rc::as_ptr(c.win()), c.key(element));
     let color = template.or(picture.color);
     let corner = corner.unwrap_or(0.0);
     let path = path.to_path_buf();

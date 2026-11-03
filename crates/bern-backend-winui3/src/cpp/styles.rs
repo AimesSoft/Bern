@@ -106,6 +106,10 @@ impl Generator<'_> {
                     string(&format!("{edge:?}").to_lowercase()),
                     float(*distance)
                 ),
+                TransitionKind::Move { edge } => format!(
+                    ".kind = B::Transition::Move, .edge = {}, .motion = {motion}",
+                    string(&format!("{edge:?}").to_lowercase())
+                ),
             };
             out.line(format!(
                 "[[maybe_unused]] static B::Transition const X_{}{{{body}}};",

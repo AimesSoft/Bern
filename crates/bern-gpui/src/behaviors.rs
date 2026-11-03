@@ -123,7 +123,9 @@ impl RenderOnce for Track {
             (Rc::clone(&dragging), Rc::clone(&dragging), dragging);
         let (preview, preview_move, commit) = (Rc::clone(&self.preview), self.preview, self.commit);
         element
-            .on_mouse_down(MouseButton::Left, move |event: &MouseDownEvent, _, _| {
+            .on_mouse_down(MouseButton::Left, move |event: &MouseDownEvent, _, cx| {
+                // The slider takes the press: what lies under it does not.
+                cx.stop_propagation();
                 dragging_down.set(true);
                 preview(at(event.position.x, down.get()));
             })
@@ -268,7 +270,8 @@ pub fn slider(c: &Ctx, id: &'static str, label: String, model: Model, props: Sli
             )
             .child(row)
     };
-    c.grow().apply(element).into_any_element()
+    // It takes the room left beside the texts of its row, which keep theirs.
+    c.grow().apply(element.min_w(px(0.0))).into_any_element()
 }
 
 // MARK: - Shortcuts
@@ -507,7 +510,7 @@ pub fn timer(c: &Ctx, id: &str, interval: f64, enabled: bool, action: Option<Act
             Rc::new(move || action(&c)) as Rc<dyn Fn()>
         });
     Ticker {
-        key: ElementId::Name(format!("{}.timer.{interval}", c.target(id)).into()),
+        key: ElementId::Name(format!("{}.timer.{interval}", c.key(id)).into()),
         interval: Duration::from_secs_f64(interval.max(0.05)),
         run,
     }
@@ -543,7 +546,7 @@ pub fn watch(c: &Ctx, id: &str, value: Value, action: Option<Act>) -> El {
         None => Rc::new(|| {}),
     };
     Watcher {
-        key: ElementId::Name(format!("{}.watch", c.target(id)).into()),
+        key: ElementId::Name(format!("{}.watch", c.key(id)).into()),
         value,
         run,
     }
@@ -635,7 +638,7 @@ pub fn toast(
     duration: Option<f64>,
 ) -> El {
     Notice {
-        key: ElementId::Name(format!("{}.toast", c.target("toast")).into()),
+        key: ElementId::Name(format!("{}.toast", c.key("toast")).into()),
         shown_key: key.unwrap_or_else(|| content.clone()),
         content,
         icon,
@@ -672,7 +675,7 @@ impl RenderOnce for Focused {
 /// `default_focus: true`: the control takes the keyboard when it appears.
 pub fn focus_on_appear(c: &Ctx, id: &str, child: El) -> El {
     Focused {
-        key: ElementId::Name(format!("{}.focus", c.target(id)).into()),
+        key: ElementId::Name(format!("{}.focus", c.key(id)).into()),
         child,
     }
     .into_any_element()
@@ -709,7 +712,7 @@ impl RenderOnce for Region {
 pub fn focus_region(c: &Ctx, id: &str, content: Vec<El>) -> El {
     c.grow()
         .apply(div().flex().flex_col().child(Region {
-            key: c.target(id).into(),
+            key: c.key(id).into(),
             content,
         }))
         .into_any_element()

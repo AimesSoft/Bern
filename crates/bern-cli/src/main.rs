@@ -485,7 +485,13 @@ fn main() -> ExitCode {
 
 fn manifest(options: &Options) -> Option<PathBuf> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    options.manifest.clone().or_else(|| find_manifest(&cwd))
+    // From the working directory: a bare file name has no directory of its
+    // own to find the application's workspace from.
+    options
+        .manifest
+        .clone()
+        .map(|path| cwd.join(path))
+        .or_else(|| find_manifest(&cwd))
 }
 
 /// `bern new --module <id>`.

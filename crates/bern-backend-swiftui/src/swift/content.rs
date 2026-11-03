@@ -15,6 +15,9 @@ impl Generator<'_> {
             out.line(format!("SwiftUI.Text(verbatim: {content})"));
         }
         self.font(out, element);
+        if let Some(bold) = element.expr("bold") {
+            out.line(format!(".bold({})", self.expr(bold)));
+        }
         if let Some(height) = self.length(element, "line_height") {
             out.line(format!(
                 ".bernLineHeight({height}, size: {})",
@@ -199,8 +202,17 @@ impl Generator<'_> {
         } else {
             ""
         };
+        // Without a size it covers the room its container gives.
+        let covers = if ["width", "height", "aspect"]
+            .iter()
+            .all(|name| element.prop(name).is_none())
+        {
+            ", covers: true"
+        } else {
+            ""
+        };
         out.line(format!(
-            "BernImage({source}, label: {}, width: {}, height: {}, fit: {fit}{}, aspect: {}{hero}{one_size})",
+            "BernImage({source}, label: {}, width: {}, height: {}, fit: {fit}{}, aspect: {}{hero}{one_size}{covers})",
             self.text_prop(element, "label")
                 .unwrap_or_else(|| "nil".into()),
             length("width"),

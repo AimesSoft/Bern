@@ -501,6 +501,7 @@ pub fn run(def: AppDef, start: StartEngine) -> glib::ExitCode {
             return;
         };
         bern_ffi::platform::install(Services);
+        bern_ffi::overlay::install(crate::overlay::Overlays);
         if let Err(message) = start_engine(&host(), start) {
             eprintln!("bern: {message}");
             failed_startup.set(true);

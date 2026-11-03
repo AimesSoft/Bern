@@ -20,7 +20,7 @@ Updated: 2026-10-25. To get started, use the [quick start in the root README](..
 ## Implementation and topics
 
 - [macOS](Implementation/macOS-SwiftUI.md), [iOS](Implementation/iOS-SwiftUI.md), [tvOS](Implementation/tvOS-SwiftUI.md), [Android](Implementation/Android-Compose.md), [Windows](Implementation/Windows-WinUI3.md), [Linux](Implementation/Linux-GTK.md), [Web](Implementation/Web.md): implementation details, past verifications and limitations.
-- [GPUI](Implementation/GPUI.md): the self-drawn desktop target that is chosen explicitly, first version on macOS: dependency versions, structure, implemented components and measurements.
+- [GPUI](Implementation/GPUI.md): the self-drawn desktop target that is chosen explicitly, first version (macOS, Windows, Linux): dependency versions, structure, window frames and video surfaces, implemented components and measurements.
 - [Animated SVG](Implementation/Animated-SVG.md): the optional component's interface, resources, dependencies, static fallback and verification scope.
 - [JavaScript and target capabilities](Implementation/JavaScript.md): conditional builds for WebView / browser and Boa, the script context and capability branches.
 - [Building by module](Implementation/Module-Builds.md): `--exclude-module`, compile-time UI conditions and optional Cargo dependencies.

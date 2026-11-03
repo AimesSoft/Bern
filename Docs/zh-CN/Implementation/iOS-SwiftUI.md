@@ -23,7 +23,7 @@
 | 屏幕旋转、键盘、安全区域 | 部分 | 键盘输入、安全区域与 iPad 窗口缩放（停在最小尺寸）实测；旋转由 SwiftUI 处理，未实测 |
 | 状态可订阅；带参数命令与错误返回 | 完成 | 与 macOS 相同的运行时：引擎状态、会话草稿、查询、关闭协议 |
 | Video 原生呈现 | 完成 | AVFoundation 执行端与 `AVPlayerLayer` 呈现、命令驱动的控制条 |
-| 真机构建与打包 | 未完成 | 引擎与界面能按 `aarch64-apple-ios` 编译链接；签名、描述文件、安装与 `bern package` 未做 |
+| 真机构建与打包 | 部分 | `bern package` 生成临时签名的 `.ipa`（2026-11-02）；开发者签名、描述文件与安装未做 |
 
 ## 工程结构
 
@@ -194,9 +194,15 @@ iPhone 17 模拟器（iOS 26.1），一个真实应用首次启动即显示全�
 
 `Watch` 与 `Text(color:)` 与 macOS 相同（`BernWatch`、`foregroundStyle`）。iOS 没有登录项，`Switch(login_item: true)` 生成 `EmptyView`（能力 `login_switch` 不适用）。验证：`tables` 测试按 iOS SDK 类型检查；未在模拟器上运行。
 
+## 打包（2026-11-02）
+
+`bern package --target ios` 先照常构建模拟器应用，再把包复制到 `target/bern/ios/package/Payload/`，在其中替换按真机构建的部分：引擎与桥按 `aarch64-apple-ios` 编译（`IPHONEOS_DEPLOYMENT_TARGET` 为最低系统版本），`actool` 按 `iphoneos` 重编图标，`swiftc` 用 `iphoneos` SDK 与 `arm64-apple-ios17.0` 重新编译链接前端，release 时剥去符号；`plutil` 把 `CFBundleSupportedPlatforms` 改为 `iPhoneOS`，`codesign --sign -` 临时签名，`ditto` 打成 `target/bern/dist/<产品>-<版本>-ios.ipa`。资源、本地化与其余 Info.plist 键沿用模拟器的包。
+
+验证：Enji 在本机与 GitHub Actions 的 macOS 26 上打出 `.ipa`；包里的程序是 `platform IOS`、`minos 17.0` 的 arm64，签名校验通过，压缩包里没有资源分叉。未在真机上安装运行。
+
 ## 未完成与已知限制
 
-- 只构建模拟器应用。真机需要开发者签名与描述文件，安装与 `bern package` 未实现。
+- `bern build` 只构建模拟器应用。`bern package` 的 `.ipa` 只有临时签名，要用以 Apple ID 或开发者证书重新签名的工具安装；按描述文件签名与直接安装到设备未实现。
 - HDR：模拟器显示不了 HDR，增益图在模拟器里只解码 SDR 版本；真机上图片按 HDR 解码，视频由 `AVPlayerLayer` 显示，HDR 均未验证。
 - 真机上没有声明后台音频，进入后台后系统会暂停播放；只在模拟器里观察过（模拟器里继续播放）。
 - iPadOS 菜单栏中的“设置”与 ⌘, 只经过类型检查，未实测（模拟器上没有接键盘的菜单栏操作）。
@@ -223,7 +229,7 @@ iPhone 17e 模拟器（iOS 26.5，390 × 844 点，截图 1170 × 2532）上，�
 - **手机下拉胶囊**：iOS 的 `Menu(shape: capsule)` 按设计 6.3 排列：符号在 16 点框内，箭头在 12 点框内、60 % 不透明度，间距 6，箭头一侧离边 11 点。`Picker(style: menu, shape: capsule)` 的按钮同样带这个箭头（iOS 的菜单按钮本身不画箭头）。
 - **胶囊分段按钮**：`SplitButton(shape: capsule)` 的开关部分不用系统 `Label`，符号在 16 点框内、与文字相隔 6，离胶囊端 14、离分隔线 10；下拉部分宽 30。macOS 与 iOS 同一做法。
 - **沉浸窗口铺满屏幕**：`immersive` 为真时，iOS 窗口内容伸到安全区下（`ignoresSafeArea`），横屏手机上 844 × 390 的画面按 1 倍铺满；为假时回到安全区内。
-- **标签栏附件**：`TabAccessory` 在 iOS 26.1 起生成 `tabViewBottomAccessory(isEnabled:)`，内容只构建一次（`AnyView`），`shown` 为假时系统收起附件；更早的 iOS 在每页底部的安全区内嵌一条材质胶囊。附件里的图标按钮是条上的符号（环境 `bernOnBar`）：不再各带玻璃，`IconButton(height:)` 只给出点按区域的大小。iPhone 17e 模拟器（iOS 26.5）上实测附件随播放出现在标签栏上方、关闭播放器后收起。
+- **标签栏附件**：`TabAccessory` 在 iOS 26.1 起生成 `tabViewBottomAccessory(isEnabled:)`，内容只构建一次（`AnyView`），`shown` 为假时系统收起附件；更早的 iOS 在每页底部的安全区内嵌一条材质胶囊。附件里的图标按钮是条上的符号（环境 `bernOnBar`）：不再各带玻璃，`IconButton(height:)` 只给出点按区域的大小。iPhone 17e 模拟器（iOS 26.5）上实测附件随播放出现在标签栏上方、关闭播放器后收起。附件的内容取窗口的明暗（与标签栏相同）：系统的附件玻璃随下方滚过的内容变化，暗色图片滚到附件下时会把其中的文字与符号变成白色，玻璃本身却仍是浅色，文字几乎看不见（2026-11-01 修正，iPhone 17 Pro 模拟器上同一位置的“未在播放”与播放按钮保持深色）。
 - **胶囊按钮的内部排列**：`Button(shape: capsule)` 带图标时不再用系统 `Label`（两端平台间距不同），改为符号在 16 点框内（30 点高的标签胶囊为 14 点）、与文字相隔 6；左右内边距按尺寸档取：42 点及以上 22，30 点及以下 13，其余 14。macOS 与 iOS 同一做法。
 
 中文字形：同为 30 点系统字体，Chrome 渲染的苹方汉字前进宽度为 1 em，iOS 原生渲染约 0.947 em，所以中文标题看起来小约 5%。布局按点对齐，字形交给系统渲染，没有放大字号补偿。
@@ -235,3 +241,9 @@ iPhone 17e 模拟器（iOS 26.5，390 × 844 点，截图 1170 × 2532）上，�
 ## 只为鼠标显示的滚动条（2026-10-27）
 
 `ScrollView(indicators: mouse)` 与 macOS 共用 `.bernMouseIndicators()`：只有指针会悬停，手指不会，所以 iPad 上指针悬停过滚动视图后为 `.scrollIndicators(.automatic)`，此前与只用手指时为 `.never`。验证：生成器测试对 iOS 做 Swift 类型检查；未在 iPad 或模拟器上实测。
+
+## 模态的多个子元素（2026-11-01）
+
+- `Modal` 的内容先包进一个 `ZStack` 再交给模态的舞台。舞台只摆放两样东西：背景与卡片；内容里除了主体还写了 `Shortcut`（例如 Escape 关闭）时，SwiftUI 把它们算成多个子视图，舞台于是什么都不摆，macOS 窗口只剩一片底色，卡片却按整个窗口宽度布局。实测：Enji 的“添加到歌单”与“新建歌单”在 macOS 上居中显示为 380 与 360 宽的卡片。
+
+- **表单外的文本框**：`TextInput(label_hidden: true)` 不在 `Form` 里时，SwiftUI 在 iOS 上只画出文字，看不出是可以输入的地方。现在这样的文本框（包括 `kind: secure`）带一个填充的圆角框（`tertiarySystemFill`，圆角 12，至少 46 高），如系统的登录面板；`Form` 经环境告诉其中的文本框，那里仍是表单的行，不加框，组件里的文本框也一样。macOS 的文本框有自己的边框，不变。2026-11-01 在 iOS 26.5 模拟器上验证一个实际应用的登录弹窗。

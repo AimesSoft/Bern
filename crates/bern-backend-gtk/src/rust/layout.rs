@@ -57,25 +57,51 @@ impl Generator<'_> {
     }
 
     pub(super) fn grid(&self, out: &mut Out, element: &Element) {
-        self.container_children(
-            out,
-            &format!(
-                "b::Grid(p, c, b::GridProps {{ min_width: {}, gap: {}, row_gap: {}, padding: {}, animate: {}, cells: {}, reflow: {} }}, ",
-                some(self.num(element, "min_width")),
-                some(self.num(element, "gap")),
-                some(self.num(element, "row_gap")),
-                self.padding(element),
-                self.animate(element),
-                some(element.number("cell_ratio").map(|ratio| format!(
-                    "({}, {})",
-                    float(ratio),
-                    self.num(element, "cell_extra").unwrap_or_else(|| "b::Num::Fixed(0.0)".into())
-                ))),
-                some(Self::reflow(element).map(|token| self.motion(token))),
-            ),
-            element,
-            ");",
+        // A list lowered from a column keeps the column's gap: GTK's 8
+        // where the column gives none.
+        let lowered = bern_ir::lowered_list_align(element);
+        let row_gap = self
+            .num(element, "row_gap")
+            .or_else(|| lowered.map(|_| "b::Num::Fixed(8.0)".to_string()));
+        let props = format!(
+            "b::GridProps {{ min_width: {}, gap: {}, row_gap: {}, padding: {}, animate: {}, cells: {}, reflow: {} }}",
+            some(self.num(element, "min_width")),
+            some(self.num(element, "gap")),
+            some(row_gap),
+            self.padding(element),
+            self.animate(element),
+            some(element.number("cell_ratio").map(|ratio| format!(
+                "({}, {})",
+                float(ratio),
+                self.num(element, "cell_extra").unwrap_or_else(|| "b::Num::Fixed(0.0)".into())
+            ))),
+            some(Self::reflow(element).map(|token| self.motion(token))),
         );
+        // A grid of one `ForEach` builds, in a vertical scroll view, only
+        // the rows near what is in sight.
+        if let Some(each) = bern_ir::lazy_grid_items(element)
+            && let (Some(items), Some(template), Some(Prop::Key { field, .. })) =
+                (each.expr("items"), &each.template, each.prop("key"))
+        {
+            self.children(
+                out,
+                &format!(
+                    "b::LazyGrid(p, c, {props}, {}, {field}, {}, {}, {}, ",
+                    self.getter(items),
+                    string(&template.var),
+                    some(
+                        each.number("stagger")
+                            .or_else(|| element.number("stagger"))
+                            .map(float)
+                    ),
+                    some(lowered.map(string)),
+                ),
+                &each.children,
+                ");",
+            );
+            return;
+        }
+        self.container_children(out, &format!("b::Grid(p, c, {props}, "), element, ");");
     }
 
     pub(super) fn stack(&self, out: &mut Out, element: &Element) {
@@ -164,8 +190,13 @@ impl Generator<'_> {
         self.container_children(
             out,
             &format!(
-                "b::Flow(p, c, b::FlowProps {{ gap: {} }}, ",
+                "b::Flow(p, c, b::FlowProps {{ gap: {}, align: {} }}, ",
                 some(self.num(element, "gap")),
+                match element.keyword("align") {
+                    Some("center") => "0.5",
+                    Some("trailing") => "1.0",
+                    _ => "0.0",
+                },
             ),
             element,
             ");",
@@ -248,7 +279,7 @@ impl Generator<'_> {
         self.children(
             out,
             &format!(
-                "b::ScrollView(p, c, b::ScrollProps {{ axis: {}, snap: {}, position: {}, arrival_nudge: {}, hide_indicators: {}, mouse_indicators: {}, nudge_motion: {}, smooth: {}, open_at: {}, open_center: {} }}, ",
+                "b::ScrollView(p, c, b::ScrollProps {{ axis: {}, snap: {}, position: {}, arrival_nudge: {}, hide_indicators: {}, mouse_indicators: {}, nudge_motion: {}, smooth: {}, open_at: {}, open_center: {}, anchor: {}, browsing: {} }}, ",
                 Self::keyword(element, "axis"),
                 Self::keyword(element, "snap"),
                 some(self.field(element, "position")),
@@ -259,6 +290,8 @@ impl Generator<'_> {
                 self.motion("smooth"),
                 some(element.number("open_at").map(float)),
                 some(self.num(element, "open_center")),
+                some(element.number("anchor").map(float)),
+                some(self.field(element, "browsing")),
             ),
             &element.children,
             ");",

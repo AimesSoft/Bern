@@ -80,6 +80,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
@@ -219,6 +220,9 @@ fun BernText(text: String, style: TextStyle, color: Color, lines: Int? = null) {
     )
 }
 
+/// `bold`: the style's weight bold while `on` holds.
+fun TextStyle.bernBold(on: Boolean): TextStyle = if (on) copy(fontWeight = FontWeight.Bold) else this
+
 // MARK: - Control shapes
 
 /// `shape: capsule` and `height` of a system control: Material's buttons
@@ -292,6 +296,12 @@ fun BernStack(
     val palette = bernPalette()
     var surface = modifier
     val shape = style?.corner?.let { RoundedCornerShape(it.dp) }
+    // The shadow outside the corner, so it goes under the clip.
+    val lift = style?.base?.shadowRadius ?: 0.0
+    if (lift > 0) {
+        val shade = Color.Black.copy(alpha = (style?.base?.shadowOpacity ?: 0.2).toFloat())
+        surface = surface.shadow(lift.dp, shape ?: RectangleShape, clip = false, ambientColor = shade, spotColor = shade)
+    }
     if (shape != null) surface = surface.clip(shape)
     style?.base?.background?.let { surface = surface.background(palette.color(it)) }
     val foreground = style?.base?.foreground?.let(palette::color)
@@ -512,14 +522,14 @@ fun BernAccordion(
     }
 }
 
-/// `Flow`: items at their own width from the leading edge, wrapping onto
-/// a new row where the width runs out; each row centres its items, and a
-/// spacer (`weight`) takes the room left on its row.
+/// `Flow`: items at their own width from the leading edge, or from `align`,
+/// wrapping onto a new row where the width runs out; each row centres its
+/// items, and a spacer (`weight`) takes the room left on its row.
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun BernFlow(gap: Dp, content: @Composable FlowRowScope.() -> Unit) {
+fun BernFlow(gap: Dp, align: Alignment.Horizontal = Alignment.Start, content: @Composable FlowRowScope.() -> Unit) {
     FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(gap),
+        horizontalArrangement = Arrangement.spacedBy(gap, align),
         verticalArrangement = Arrangement.spacedBy(gap),
         itemVerticalAlignment = Alignment.CenterVertically,
     ) { content() }

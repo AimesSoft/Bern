@@ -280,7 +280,7 @@ impl Generator<'_> {
             "LanguagePicker" => self.language_picker(out, element),
             "Detail" | "Destination" | "TabAccessory" | "Sidebar" | "SidebarHeader"
             | "SidebarFooter" | "WindowSet" | "Window" | "Layout" | "MenuItem" | "PickerOption"
-            | "TableColumn" | "TableMenu"
+            | "TableColumn" | "TableMenu" | "ContextMenu"
             // A page has no menu bar.
             | "MenuBar" | "CommandMenu" | "CommandItem"
             // Nor a status area.

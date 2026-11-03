@@ -13,11 +13,14 @@
 //! light or dark appearance. The behavior of text fields comes from
 //! GPUI Kit's unstyled `gpui-base`.
 
+mod bar;
 mod behaviors;
 mod canvas;
+mod chrome;
 mod content;
 mod controls;
 mod ctx;
+mod filters;
 mod form;
 mod host;
 mod icons;
@@ -26,6 +29,7 @@ mod look;
 mod markdown;
 mod media;
 mod menus;
+mod motion;
 mod native;
 mod navigation;
 mod overlay;
@@ -36,6 +40,7 @@ mod scroll;
 mod search;
 mod session;
 mod spin;
+pub use bar::{BarEntry, BarMenu, bar_item, bar_menu, bar_submenu};
 pub use spin::Spin;
 pub mod text;
 mod theme;
@@ -61,17 +66,22 @@ pub use controls::{
 pub use ctx::{
     Act, Ctx, Field, Model, act, session_pop, session_push_str, session_set, session_toggle,
 };
+pub use filters::{blur_scope, glow};
 pub use form::{FormProps, SectionProps, form, section};
 pub use gpui;
 pub use host::{WindowOp, dispatch, window_command};
 pub use layout::{
     AccordionProps, Align, Flex, GridProps, Grow, Layers, Len, Pad, PreviewProps, Size, Style,
-    accordion, adaptive, column, divider, flow, grid, preview_list, reveal, row, scroll, spacer,
-    stack, tabs,
+    accordion, adaptive, column, cover, divider, flow, grid, lazy_grid, preview_list, reveal, row,
+    scroll, spacer, stack, tab_selection, tabs,
 };
 pub use look::{ControlSize, ControlStyle, Look, Shape};
 pub use media::{MediaOp, VideoProps, media, video};
-pub use menus::{MenuEntry, MenuProps, control_group, menu, menu_item};
+pub use menus::{MenuEntry, MenuProps, context_menu, control_group, menu, menu_item};
+pub use motion::{
+    Curve, Edge, Motion, Pose, Transition, TransitionKind, eased, hero_key, leave, leaving, left,
+    left_row, moving, reflow_origin, reflowed, rows, staggered,
+};
 pub use navigation::{
     detail, nav_link, navigation, sidebar, sidebar_item, sidebar_title, split_view,
 };
@@ -168,6 +178,9 @@ pub struct AppDef {
     /// The icon the window set chooses at run time (`WindowSet(icon:)`),
     /// as a picture among the resources.
     pub window_icon: Option<fn(&Ctx) -> Option<&'static str>>,
+    /// The application's menus in the menu bar (`MenuBar`), built with the
+    /// primary window's context.
+    pub menu_bar: Option<fn(&Ctx) -> Vec<BarMenu>>,
     /// The icons the application shows, as SVG documents by name.
     pub icons: &'static [(&'static str, &'static str)],
     /// Text styles with weights (and desktop sizes) of their own, from

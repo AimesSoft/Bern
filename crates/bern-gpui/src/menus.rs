@@ -1,5 +1,6 @@
 //! `Menu`: a button that opens a list of commands, and the option labels of
-//! pickers; `ControlGroup`: controls on one capsule surface.
+//! pickers; `ContextMenu`: the commands a button opens with a secondary
+//! click; `ControlGroup`: controls on one capsule surface.
 
 use crate::ctx::Ctx;
 use crate::look::{self, Colors, Shape};
@@ -87,7 +88,7 @@ pub fn menu(
     props: MenuProps,
     entries: Vec<MenuEntry>,
 ) -> El {
-    let target = c.target(id);
+    let target = c.key(id);
     let open = crate::overlay::is_open(&target);
     let enabled = c.enabled();
     let toggle = {
@@ -97,7 +98,7 @@ pub fn menu(
         })
     };
     c.list(Control {
-        target: target.clone(),
+        target: c.target(id),
         window: c.win().id.clone(),
         role: "menu",
         label: label.clone(),
@@ -182,14 +183,69 @@ pub fn menu(
         .child(icons::icon("chevron.down", 12.0, c.color("icon.secondary")))
     };
     let button = if enabled {
-        button.on_click(move |_, _, cx| toggle(cx))
+        button.on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            toggle(cx)
+        })
     } else {
         button
     };
+    let list = entry_list(c, &target, entries, props.hide_disabled);
+    div()
+        .relative()
+        .flex_none()
+        .child(button)
+        .child(crate::overlay::opener_place(&target))
+        .when(open, |element| {
+            element.child(crate::overlay::panel(c, &target, list))
+        })
+        .into_any_element()
+}
+
+/// `ContextMenu` of a `Button`: a secondary click on the button (GPUI
+/// takes a Control-click on macOS for one) opens its commands where the
+/// pointer is.
+pub fn context_menu(
+    c: &Ctx,
+    id: &'static str,
+    button: &dyn Fn(&Ctx) -> El,
+    entries: Vec<MenuEntry>,
+) -> El {
+    let target = format!("{}#context", c.key(id));
+    // The button takes the room the wrapper is given.
+    let grow = c.grow();
+    let button = button(&c.grown(crate::Grow {
+        flex: false,
+        width: grow.width || grow.flex,
+        height: grow.height || grow.flex,
+    }));
+    let open = crate::overlay::is_open(&target);
+    let opener = target.clone();
+    let wrapper = div()
+        .flex()
+        .flex_col()
+        .flex_none()
+        .on_mouse_down(gpui::MouseButton::Right, move |event, _, cx| {
+            cx.stop_propagation();
+            crate::overlay::open_at(&opener, event.position);
+        })
+        .child(button);
+    let wrapper = c.grow().apply(wrapper);
+    if !open {
+        return wrapper.into_any_element();
+    }
+    let list = entry_list(c, &target, entries, false);
+    wrapper
+        .child(crate::overlay::panel(c, &target, list))
+        .into_any_element()
+}
+
+/// The rows of a menu's panel; choosing one closes the panel `target`.
+fn entry_list(c: &Ctx, target: &str, entries: Vec<MenuEntry>, hide_disabled: bool) -> gpui::Div {
     let hover = c.slot("menu", "hover", "background");
     let error = c.color("status.error");
     let disabled = c.color("disabled.foreground");
-    let list = div()
+    div()
         .flex()
         .flex_col()
         .min_w(px(200.0))
@@ -198,7 +254,7 @@ pub fn menu(
             entries
                 .into_iter()
                 .filter(|entry| {
-                    !props.hide_disabled || !matches!(entry, MenuEntry::Item { enabled: false, .. })
+                    !hide_disabled || !matches!(entry, MenuEntry::Item { enabled: false, .. })
                 })
                 .map(|entry| match entry {
                     MenuEntry::Divider => div()
@@ -219,7 +275,7 @@ pub fn menu(
                             (true, true) => error,
                             (true, false) => c.color("text.primary"),
                         };
-                        let close = target.clone();
+                        let close = target.to_string();
                         div()
                             .id(c.element_id(id))
                             .flex()
@@ -236,6 +292,7 @@ pub fn menu(
                             .when(enabled, |row| {
                                 row.hover(move |style| style.bg(hover))
                                     .on_click(move |_, _, cx| {
+                                        cx.stop_propagation();
                                         crate::overlay::set_open(&close, false);
                                         press(cx);
                                     })
@@ -243,15 +300,7 @@ pub fn menu(
                             .into_any_element()
                     }
                 }),
-        );
-    div()
-        .relative()
-        .flex_none()
-        .child(button)
-        .when(open, |element| {
-            element.child(crate::overlay::panel(c, &target, list))
-        })
-        .into_any_element()
+        )
 }
 
 /// `ControlGroup`: related controls side by side on one capsule surface.

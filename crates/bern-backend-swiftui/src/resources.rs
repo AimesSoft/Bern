@@ -500,7 +500,7 @@ pub fn info_plist_ios(app: &Application, executable: &str, minimum_ios: &str) ->
         <string>UIInterfaceOrientationPortraitUpsideDown</string>
         <string>UIInterfaceOrientationLandscapeLeft</string>
         <string>UIInterfaceOrientationLandscapeRight</string>
-    </array>{documents}
+    </array>{documents}{files}{audio}
 </dict>
 </plist>
 "#,
@@ -510,7 +510,27 @@ pub fn info_plist_ios(app: &Application, executable: &str, minimum_ios: &str) ->
         bundle = xml(&app.app.bundle_id),
         version = xml(&app.app.version),
         documents = document_types(app, true),
+        files = files_folder(app),
+        audio = if app.app.background_audio {
+            "\n    <key>UIBackgroundModes</key>\n    <array>\n        <string>audio</string>\n    </array>"
+        } else {
+            ""
+        },
     )
+}
+
+/// `[app].files_folder`: the Documents folder in the Files app, opened in
+/// place; the key document types add already is not written twice.
+fn files_folder(app: &Application) -> String {
+    if !app.app.files_folder {
+        return String::new();
+    }
+    let in_place = if document_types(app, true).contains("LSSupportsOpeningDocumentsInPlace") {
+        ""
+    } else {
+        "\n    <key>LSSupportsOpeningDocumentsInPlace</key>\n    <true/>"
+    };
+    format!("\n    <key>UIFileSharingEnabled</key>\n    <true/>{in_place}")
 }
 
 /// The Info.plist of a tvOS app for the simulator. The icon and the Top

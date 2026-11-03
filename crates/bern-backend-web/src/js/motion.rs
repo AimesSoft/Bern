@@ -67,6 +67,18 @@ impl Generator<'_> {
             entries.push(("spin", Some(format!("() => ({})", self.expr(when)))));
             entries.push(("spinPeriod", element.number("spin_period").map(number)));
         }
+        entries.push(("glow", element.number("glow").map(number)));
+        entries.push(("glowOpacity", element.number("glow_opacity").map(number)));
+        entries.push((
+            "blur",
+            match element.prop("blur") {
+                Some(Prop::Expr { expr }) => Some(format!("() => ({})", self.expr(expr))),
+                _ => element.number("blur").map(number),
+            },
+        ));
+        if element.prop("blur").is_some() {
+            entries.push(("blurMotion", self.animate(element)));
+        }
         entries.push(("reduceMotion", self.value_prop(element, "reduce_motion")));
         entries.push(("scrollScale", element.number("scroll_scale").map(number)));
         entries.push((

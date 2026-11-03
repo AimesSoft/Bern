@@ -79,8 +79,25 @@ pub(crate) struct Win {
     /// The content's size in points, as the window last drew.
     pub(crate) width: Cell<f32>,
     pub(crate) height: Cell<f32>,
-    /// Content runs under a transparent title bar this tall.
-    pub(crate) title_bar: f32,
+    /// Content runs under a transparent title bar this tall, as the window
+    /// last drew.
+    pub(crate) title_bar: Cell<f32>,
+    /// The frame's shadow around the content (Linux): where the content
+    /// starts in the window.
+    pub(crate) inset: Cell<f32>,
+    /// The room the title bar's own buttons take at the leading and the
+    /// trailing end, which a toolbar under the title bar leaves free.
+    pub(crate) caption: Cell<(f32, f32)>,
+    /// A toolbar stands in the title bar's row: as the window last drew,
+    /// which sizes the title bar, and in the frame being built.
+    pub(crate) bar_toolbar: Cell<bool>,
+    pub(crate) bar_toolbar_built: Cell<bool>,
+    /// macOS's window buttons where AppKit put them, before they were
+    /// moved, and where they were put last.
+    #[cfg(target_os = "macos")]
+    pub(crate) lights: Cell<Option<crate::native::Lights>>,
+    #[cfg(target_os = "macos")]
+    pub(crate) lights_at: Cell<Option<(f32, f32)>>,
     /// Seconds without input after which the window is idle.
     pub(crate) idle_after: Option<f64>,
     pub(crate) last_input: Cell<std::time::Instant>,
@@ -98,7 +115,6 @@ impl Win {
         id: Rc<str>,
         drafts: Vec<Option<Vec<Value>>>,
         size: (f32, f32),
-        title_bar: f32,
         idle_after: Option<f64>,
     ) -> Rc<Self> {
         Rc::new(Win {
@@ -108,7 +124,15 @@ impl Win {
             drafts: RefCell::new(drafts),
             width: Cell::new(size.0),
             height: Cell::new(size.1),
-            title_bar,
+            title_bar: Cell::new(0.0),
+            inset: Cell::new(0.0),
+            caption: Cell::new((0.0, 0.0)),
+            bar_toolbar: Cell::new(false),
+            bar_toolbar_built: Cell::new(false),
+            #[cfg(target_os = "macos")]
+            lights: Cell::new(None),
+            #[cfg(target_os = "macos")]
+            lights_at: Cell::new(None),
             idle_after,
             last_input: Cell::new(std::time::Instant::now()),
             fullscreen: Cell::new(false),
@@ -205,6 +229,10 @@ struct Inner {
     win: Rc<Win>,
     /// The component the controls are written in, or the window kind.
     scope: Rc<str>,
+    /// Where each component on the way here is called, outermost first: the
+    /// same component called twice gives its controls the same targets, and
+    /// this keeps what each draws apart.
+    instance: Rc<str>,
     locals: Option<Rc<Local>>,
     /// Row keys, outermost first: a control inside a list is its row's.
     keys: Vec<Rc<str>>,
@@ -229,13 +257,53 @@ struct Inner {
     scroll: Option<Rc<str>>,
     /// The scroll view this row is an item of.
     item_of: Option<Rc<str>>,
+    /// The scroll view the content is in, and whether it scrolls across.
+    scroller: Option<(Rc<str>, bool)>,
+    /// Content of a `Stack(under_bars:)`, which reaches under the title bar.
+    under_bars: bool,
     /// How the element built with this context takes its container's
     /// space.
     grow: Grow,
+    /// The radius of each corner of its box (top-left, top-right,
+    /// bottom-right, bottom-left) where it lies on a rounded corner of a
+    /// container: what it paints there is rounded too, as GPUI clips only to
+    /// rectangles.
+    round: Corners,
+    /// The same for what it contains: its own corner, or `round` without the
+    /// sides its padding keeps clear.
+    inner: Corners,
+    /// Inside a `Modal`, where there is no page to take a form's title.
+    modal: bool,
     /// Where controls list themselves while an external entry looks for
     /// them; none while the window draws.
     controls: Option<Rc<RefCell<Vec<Control>>>>,
+    /// The opacity of an element in motion, which the container it builds
+    /// takes on its outermost box; not passed on to what it contains.
+    fade: Option<Rc<Fade>>,
+    /// How blurred what is built here is, in points: the `blur` of the
+    /// element and of the containers around it, together.
+    blur: f32,
+    /// The element built with this context has a `blur` of its own: the
+    /// container it builds keeps the blur within its box. Not passed on to
+    /// what it contains.
+    blur_own: bool,
 }
+
+/// An opacity for an element's outermost box, and whether it took it.
+pub(crate) struct Fade {
+    opacity: f32,
+    taken: Cell<bool>,
+}
+
+impl Fade {
+    pub(crate) fn taken(&self) -> bool {
+        self.taken.get()
+    }
+}
+
+/// Radii of a box's corners: top-left, top-right, bottom-right,
+/// bottom-left.
+pub type Corners = [f32; 4];
 
 /// The context content builds in.
 #[derive(Clone)]
@@ -254,6 +322,7 @@ impl Ctx {
             seeds,
             win,
             scope: scope.into(),
+            instance: "".into(),
             locals: None,
             keys: Vec::new(),
             enabled: true,
@@ -265,15 +334,53 @@ impl Ctx {
             foreground: None,
             scroll: None,
             item_of: None,
+            scroller: None,
+            under_bars: false,
             grow: Grow::NONE,
+            round: [0.0; 4],
+            inner: [0.0; 4],
+            modal: false,
             controls,
+            fade: None,
+            blur: 0.0,
+            blur_own: false,
         }))
     }
 
     fn with(&self, change: impl FnOnce(&mut Inner)) -> Self {
         let mut inner = (*self.0).clone();
+        inner.fade = None;
         change(&mut inner);
         Ctx(Rc::new(inner))
+    }
+
+    /// The context of an element shown at `opacity` while it moves; whether
+    /// its container took the opacity tells after it is built.
+    pub(crate) fn with_fade(&self, opacity: f32) -> (Self, Rc<Fade>) {
+        let fade = Rc::new(Fade {
+            opacity,
+            taken: Cell::new(false),
+        });
+        let held = Rc::clone(&fade);
+        (self.with(|inner| inner.fade = Some(held)), fade)
+    }
+
+    /// `element`, the outermost box of a container, at the opacity its
+    /// motion has it.
+    pub(crate) fn faded<E: gpui::Styled>(&self, element: E) -> E {
+        // What a blurred container draws stays within its box.
+        let element = if self.0.blur_own {
+            element.overflow_hidden()
+        } else {
+            element
+        };
+        match &self.0.fade {
+            Some(fade) => {
+                fade.taken.set(true);
+                element.opacity(fade.opacity)
+            }
+            None => element,
+        }
     }
 
     /// Engine state field `field`.
@@ -327,7 +434,7 @@ impl Ctx {
     }
 
     /// The context of a referenced component: its own name and parameters.
-    pub fn child(&self, component: &str, params: Vec<(&'static str, Value)>) -> Self {
+    pub fn child(&self, component: &str, site: &str, params: Vec<(&'static str, Value)>) -> Self {
         let mut locals = None;
         for (name, value) in params {
             locals = Some(Rc::new(Local {
@@ -338,6 +445,7 @@ impl Ctx {
         }
         self.with(|inner| {
             inner.scope = component.into();
+            inner.instance = format!("{}/{site}", inner.instance).into();
             inner.locals = locals;
         })
     }
@@ -371,8 +479,34 @@ impl Ctx {
         self.with(|inner| inner.scroll = scroll)
     }
 
+    /// The context of the content of the scroll view `key`, across when
+    /// `horizontal`, which what follows scrolling there measures itself
+    /// against.
+    pub fn within_scroll(&self, key: Rc<str>, horizontal: bool) -> Self {
+        self.with(|inner| inner.scroller = Some((key, horizontal)))
+    }
+
+    pub(crate) fn scroller(&self) -> Option<(Rc<str>, bool)> {
+        self.0.scroller.clone()
+    }
+
+    /// The context of the layers of a `Stack(under_bars:)`.
+    pub fn under_bars(&self) -> Self {
+        self.with(|inner| inner.under_bars = true)
+    }
+
+    /// Whether this content reaches under the title bar.
+    pub(crate) fn is_under_bars(&self) -> bool {
+        self.0.under_bars
+    }
+
     pub(crate) fn item_of(&self) -> Option<Rc<str>> {
         self.0.item_of.clone()
+    }
+
+    /// The scroll view whose items the rows of a list here are.
+    pub(crate) fn scroll_of(&self) -> Option<Rc<str>> {
+        self.0.scroll.clone()
     }
 
     /// The context of content shown in the light or dark appearance
@@ -462,11 +596,91 @@ impl Ctx {
 
     /// The context of one element, with how it takes its container's
     /// space.
-    pub fn grown(&self, grow: Grow) -> Self {
-        if self.0.grow == grow {
+    /// The context of a child that lies on the corners in `mask` (bits for
+    /// top-left, top-right, bottom-right and bottom-left) of its container.
+    pub fn corners(&self, mask: u8) -> Self {
+        let mut round = [0.0; 4];
+        for (corner, radius) in round.iter_mut().enumerate() {
+            if mask & (1 << corner) != 0 {
+                *radius = self.0.inner[corner];
+            }
+        }
+        if round == self.0.round && round == self.0.inner && self.0.fade.is_none() {
             return self.clone();
         }
-        self.with(|inner| inner.grow = grow)
+        self.with(|inner| {
+            inner.round = round;
+            inner.inner = round;
+        })
+    }
+
+    /// The context of a container's content: its own corner radius, or the
+    /// corners it lies on; none on the sides in `padded` (bits for top,
+    /// right, bottom and left), which its padding keeps clear.
+    pub fn rounding(&self, own: Option<f32>, padded: u8) -> Self {
+        let mut corners = own.map_or(self.0.round, |radius| [radius; 4]);
+        // Each corner lies between two sides: top-left between left and
+        // top, and so on clockwise.
+        for (corner, sides) in [(0, 0b1001), (1, 0b0011), (2, 0b0110), (3, 0b1100)] {
+            if padded & sides != 0 {
+                corners[corner] = 0.0;
+            }
+        }
+        if corners == self.0.inner && self.0.fade.is_none() {
+            return self.clone();
+        }
+        self.with(|inner| inner.inner = corners)
+    }
+
+    /// The context of a `Modal`'s content, which lies on its card's corners
+    /// unless the card covers a compact window.
+    pub fn in_modal(&self, cover_compact: bool) -> Self {
+        let covered = cover_compact && crate::value::truthy(&self.window("compact"));
+        self.with(|inner| {
+            inner.modal = true;
+            inner.inner = if covered {
+                [0.0; 4]
+            } else {
+                [crate::overlay::MODAL_CORNER; 4]
+            };
+        })
+    }
+
+    /// Whether the content is in a `Modal`.
+    pub(crate) fn in_modal_content(&self) -> bool {
+        self.0.modal
+    }
+
+    /// The corners of the element's box that lie on rounded corners.
+    pub(crate) fn round(&self) -> Corners {
+        self.0.round
+    }
+
+    pub fn grown(&self, grow: Grow) -> Self {
+        if self.0.grow == grow && self.0.fade.is_none() && !self.0.blur_own {
+            return self.clone();
+        }
+        self.with(|inner| {
+            inner.grow = grow;
+            inner.blur_own = false;
+        })
+    }
+
+    /// The context of an element blurred with `radius` points (`blur`),
+    /// blurred as much as it already was too.
+    pub fn blurred(&self, radius: f32) -> Self {
+        let radius = radius.max(0.0);
+        let fade = self.0.fade.clone();
+        self.with(|inner| {
+            inner.blur = (inner.blur * inner.blur + radius * radius).sqrt();
+            inner.blur_own = true;
+            inner.fade = fade;
+        })
+    }
+
+    /// How blurred what is built here is, in points.
+    pub(crate) fn blur(&self) -> f32 {
+        self.0.blur
     }
 
     pub(crate) fn grow(&self) -> Grow {
@@ -491,9 +705,16 @@ impl Ctx {
         target
     }
 
+    /// The key of what the control `id` keeps while it shows (its element
+    /// id, whether it is open, under the pointer, scrolled): its target,
+    /// apart for each place its component is called.
+    pub(crate) fn key(&self, id: &str) -> String {
+        format!("{}|{}", self.0.instance, self.target(id))
+    }
+
     /// An element id unique in the window for the control `id`.
     pub(crate) fn element_id(&self, id: &str) -> gpui::ElementId {
-        gpui::ElementId::Name(self.target(id).into())
+        gpui::ElementId::Name(self.key(id).into())
     }
 
     pub(crate) fn read(&self, field: Field) -> Value {

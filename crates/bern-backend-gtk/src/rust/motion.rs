@@ -109,6 +109,24 @@ impl Generator<'_> {
                 float(element.number("spin_period").unwrap_or(1.0))
             ));
         }
+        // Both stay inside the element's corner.
+        let corner = element.number("corner").unwrap_or(0.0);
+        if let Some(radius) = element.number("glow") {
+            entries.push(format!(
+                "glow: Some(({}, {}, {}))",
+                float(radius),
+                float(element.number("glow_opacity").unwrap_or(0.4)),
+                float(corner)
+            ));
+        }
+        // A radius that follows state springs with the element's `animate`.
+        if let Some(radius) = self.num(element, "blur") {
+            entries.push(format!(
+                "blur: Some(({radius}, {}, {}))",
+                float(corner),
+                self.animate(element)
+            ));
+        }
         if let Some(reduce) = element.expr("reduce_motion") {
             entries.push(format!("reduce_motion: Some({})", self.getter(reduce)));
         }

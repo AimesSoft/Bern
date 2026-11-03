@@ -160,6 +160,35 @@ fn hello_generates_a_gpui_application() {
         "{:?}",
         windows.products
     );
+    // Windows programs carry the icon, which GPUI gives every window, and
+    // the version, from a resource script the build script compiles.
+    let windows_files = Gpui::WINDOWS.generate(&compiled.app, &context).unwrap();
+    let windows_file = |name: &str| {
+        let file = windows_files
+            .iter()
+            .find(|file| file.path == Path::new(name))
+            .unwrap_or_else(|| panic!("no {name}"));
+        String::from_utf8_lossy(&file.contents).into_owned()
+    };
+    let script = windows_file("app/app.rc");
+    for expected in ["1 ICON \"app.ico\"", "VALUE \"FileDescription\", \"Hello\""] {
+        assert!(script.contains(expected), "{script}");
+    }
+    assert!(windows_file("app/build.rs").contains("embed_resource::compile(\"app.rc\""));
+    let cargo = windows_file("app/Cargo.toml");
+    assert!(
+        cargo.contains("[build-dependencies]\nembed-resource"),
+        "{cargo}"
+    );
+    assert!(cargo.contains("features = [\"windows\"]"), "{cargo}");
+    assert!(!windows_file("app/app.ico").is_empty());
+    // Linux takes neither.
+    let linux_files = Gpui::LINUX.generate(&compiled.app, &context).unwrap();
+    assert!(
+        !linux_files
+            .iter()
+            .any(|file| file.path == Path::new("app/build.rs"))
+    );
 }
 
 #[test]
@@ -186,4 +215,201 @@ fn what_the_target_does_not_show_fails_where_it_is_declared() {
             .all(|problem| problem.location.is_some()),
         "{problems:?}"
     );
+}
+
+/// A macOS icon declared as an Icon Composer document goes beside the
+/// bundle for `actool`, which compiles it into the bundle; the Info.plist
+/// names the compiled icon.
+#[test]
+fn an_icon_composer_document_is_compiled_into_the_bundle() {
+    let root = workspace();
+    let (config, mut compiled) = compile("hello");
+    let art = root.join("target/bern-test/gpui-icon-document");
+    let _ = std::fs::remove_dir_all(&art);
+    let json = r#"{"fill":"automatic","groups":[{"layers":[{"image-name":"Shape.svg","name":"Shape","glass":true}]}]}"#;
+    for (path, text) in [
+        ("Hello.icon/icon.json", json),
+        ("Hello.icon/Assets/Shape.svg", "<svg/>"),
+    ] {
+        let path = art.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+    compiled
+        .app
+        .app
+        .platform_icons
+        .insert("macos".into(), art.join("Hello.icon").display().to_string());
+    let output = root.join("target/bern-test/gpui-icon-document-out");
+    let context = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: output.clone(),
+        target: gpui_macos(),
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    let files = Gpui::MACOS.generate(&compiled.app, &context).unwrap();
+    let has = |name: &str| files.iter().any(|file| file.path == Path::new(name));
+    assert!(has("AppIcon.icon/icon.json") && has("AppIcon.icon/Assets/Shape.svg"));
+    assert!(!has("Hello.app/Contents/Resources/AppIcon.icns"));
+    let plist = files
+        .iter()
+        .find(|file| file.path == Path::new("Hello.app/Contents/Info.plist"))
+        .map(|file| String::from_utf8_lossy(&file.contents).into_owned())
+        .unwrap();
+    assert!(
+        plist.contains("<key>CFBundleIconName</key>\n    <string>AppIcon</string>"),
+        "{plist}"
+    );
+    let plan = Gpui::MACOS.plan(&compiled.app, &context).unwrap();
+    let actool = plan
+        .steps
+        .iter()
+        .find_map(|step| match step {
+            bern_target_api::BuildStep::Run { program, args, .. }
+                if program == "xcrun" && args.first().is_some_and(|arg| arg == "actool") =>
+            {
+                Some(args.join(" "))
+            }
+            _ => None,
+        })
+        .expect("a step runs actool");
+    assert!(actool.contains("--app-icon AppIcon"), "{actool}");
+    assert!(
+        actool.contains(&format!(
+            "--compile {}",
+            output.join("Hello.app/Contents/Resources").display()
+        )),
+        "{actool}"
+    );
+    let _ = std::fs::remove_dir_all(&art);
+}
+
+/// The gallery's `MenuBar` becomes the menus the runtime merges into the
+/// system's: by role, with submenus, checked items, keys and file panels.
+#[test]
+fn the_menu_bar_is_generated_for_macos() {
+    let root = workspace();
+    let (config, compiled) = compile("gallery");
+    let problems = Gpui::MACOS.check(&compiled.app, &gpui_macos());
+    assert!(
+        !problems
+            .iter()
+            .any(|problem| problem.message.contains("MenuBar")),
+        "{problems:?}"
+    );
+    let output = root.join("target/bern-test/gpui-menu-bar");
+    let context = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: output,
+        target: gpui_macos(),
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    let files = Gpui::MACOS.generate(&compiled.app, &context).unwrap();
+    let ui = files
+        .iter()
+        .find(|file| file.path == Path::new("app/src/ui.rs"))
+        .map(|file| String::from_utf8_lossy(&file.contents).into_owned())
+        .unwrap();
+    for expected in [
+        "fn menu_bar(c: &b::Ctx) -> Vec<b::BarMenu>",
+        "menu_bar: Some(menu_bar)",
+        "Some(\"file\")",
+        "Some(\"about\")",
+        "b::bar_submenu(",
+        "b::bar_item(c, \"menu_open\"",
+        "b::bar_item(c, \"menu_crimson\"",
+        "v.push(b::BarEntry::Divider);",
+    ] {
+        assert!(ui.contains(expected), "the gallery lacks `{expected}`");
+    }
+    // A checked item reads its state; a picking one opens the panel first.
+    let crimson = &ui[ui.find("b::bar_item(c, \"menu_crimson\"").unwrap()..];
+    assert!(!crimson[..crimson.find("));").unwrap()].contains(", false, None,"));
+    let open = &ui[ui.find("b::bar_item(c, \"menu_open\"").unwrap()..];
+    assert!(open[..open.find("));").unwrap()].contains("Some(("));
+}
+
+#[test]
+fn motion_props_move_the_elements_they_are_on() {
+    let root = workspace();
+    let (config, compiled) = compile("gallery");
+    let problems = Gpui::MACOS.check(&compiled.app, &gpui_macos());
+    for prop in [
+        "appear",
+        "disappear",
+        "stagger",
+        "nudge",
+        "animate",
+        "scroll_scale",
+        "scroll_opacity",
+    ] {
+        assert!(
+            !problems
+                .iter()
+                .any(|problem| problem.message.contains(&format!("`{prop}`"))),
+            "`{prop}` is shown without motion: {problems:?}"
+        );
+    }
+    let output = root.join("target/bern-test/gpui-motion");
+    let context = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: output,
+        target: gpui_macos(),
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    let files = Gpui::MACOS.generate(&compiled.app, &context).unwrap();
+    let ui = files
+        .iter()
+        .find(|file| file.path == Path::new("app/src/ui.rs"))
+        .map(|file| String::from_utf8_lossy(&file.contents).into_owned())
+        .unwrap();
+    for expected in [
+        // Tokens and transitions of `style!`, built-in ones too.
+        "const M_SMOOTH: b::Curve = (0.45, 1.0);",
+        "static X_FADE: b::Transition = b::Transition { kind: b::TransitionKind::Fade, motion: M_SMOOTH };",
+        // An element that appears and leaves, and the condition that keeps
+        // it while it leaves.
+        "appear: Some(&X_FADE), disappear: Some(&X_FADE)",
+        "b::leaving(c, ",
+        "b::leave(c, ",
+        // The rows of a staggering list take turns.
+        "b::staggered(c, ",
+        // A nudge, and lengths that spring to their values.
+        "nudge: Some(",
+        "b::eased(c, ",
+        // The film strip's cells follow scrolling, and the cell a changed
+        // position scrolls to nudges.
+        "scroll: Some((1.12, 0.6, (0.5, 0.5)))",
+        ".within_scroll(",
+        "arrival: true",
+    ] {
+        assert!(ui.contains(expected), "the gallery lacks `{expected}`");
+    }
 }

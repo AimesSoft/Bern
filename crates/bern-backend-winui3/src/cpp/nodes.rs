@@ -118,6 +118,25 @@ impl Generator<'_> {
             ("nudgeScale", Self::number(element, "nudge_scale")),
             ("spin", element.expr("spin").map(|when| self.getter(when))),
             ("spinPeriod", Self::number(element, "spin_period")),
+            ("glow", Self::number(element, "glow")),
+            ("glowOpacity", Self::number(element, "glow_opacity")),
+            (
+                "glowCorner",
+                element
+                    .number("glow")
+                    .and_then(|_| Self::number(element, "corner")),
+            ),
+            ("blur", self.len(element, "blur")),
+            (
+                "blurCorner",
+                element
+                    .prop("blur")
+                    .and_then(|_| Self::number(element, "corner")),
+            ),
+            (
+                "blurMotion",
+                element.expr("blur").and_then(|_| Self::animate(element)),
+            ),
             ("appearDelay", Self::number(element, "appear_delay")),
             (
                 "reduceMotion",
@@ -350,7 +369,7 @@ impl Generator<'_> {
             | "MenuBar" | "CommandMenu" | "CommandItem"
             // The application builds the status item's menu when it opens.
             | "StatusItem"
-            | "PickerOption" | "TableColumn" | "TableMenu" => {
+            | "PickerOption" | "TableColumn" | "TableMenu" | "ContextMenu" => {
                 // Realized by their parents.
             }
             other => out.line(format!("/* unsupported {other} */")),

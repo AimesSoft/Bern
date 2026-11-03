@@ -154,6 +154,10 @@ impl<'a> Generator<'a> {
                     string(&format!("{edge:?}").to_lowercase()),
                     number(*distance)
                 ),
+                bern_ir::style::TransitionKind::Move { edge } => format!(
+                    "{{ kind: \"move\", edge: {}",
+                    string(&format!("{edge:?}").to_lowercase())
+                ),
             };
             out.line(format!(
                 "{}: {kind}, motion: {motion} }},",

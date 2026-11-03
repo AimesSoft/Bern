@@ -1,9 +1,14 @@
 //! Video. The application's media kernel plays every player and draws each
-//! `Video` into a surface of the view's own: on macOS a Metal layer in a
-//! view under the window's GPUI view, placed where the `Video` is laid
-//! out. The window paints no background there, so the layer shows through
-//! with what the declaration puts over it still drawn on top. A frame
-//! clock thread tells the kernel when the display wants each frame.
+//! `Video` into a surface of the view's own. Native surfaces stand under
+//! the window's GPUI content, placed where the `Video` is laid out: on
+//! macOS a Metal layer in a view under the GPUI view, on Windows a swap
+//! chain in a DirectComposition tree behind the one GPUI draws into. The
+//! window paints no background there, so the video shows through with what
+//! the declaration puts over it still drawn on top. A kernel that draws
+//! no native surface (Linux, or any kernel that renders pictures itself)
+//! hands the view pictures of its size instead, which the window paints
+//! as an image. A frame clock thread tells the kernel when the display
+//! wants each frame.
 //!
 //! Without a media kernel nothing plays: the target has no media executor
 //! of its own yet, and a `Video` shows its black backdrop.
@@ -12,11 +17,13 @@ use crate::El;
 use crate::ctx::Ctx;
 use crate::host::{host, status, take};
 use crate::protocol::{Value, Writer, encode};
-use bern_ffi::media_contract::kernel::SurfaceKind;
+use bern_ffi::media_contract::kernel::{self, FrameSink, SurfaceHandle, SurfaceKind, VideoFrame};
 use bern_ffi::media_contract::{MediaCommand, media_catalog};
-use gpui::{Bounds, IntoElement, ParentElement, Pixels, Styled, div};
+use gpui::{Bounds, IntoElement, ParentElement, Pixels, RenderImage, Styled, div};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 /// The standard media commands declarations run on players.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -90,8 +97,166 @@ struct View {
     /// The size the kernel was last given: physical pixels and scale.
     size: Option<(u32, u32, f64)>,
     seen: bool,
+    surface: Option<Surface>,
+}
+
+/// What a view gives the kernel to draw into.
+enum Surface {
     #[cfg(target_os = "macos")]
-    surface: Option<mac::Surface>,
+    Layer(mac::Surface),
+    #[cfg(target_os = "windows")]
+    Panel(win::Surface),
+    /// Pictures the window paints.
+    Pictures(Pictures),
+}
+
+impl Surface {
+    /// A surface of `kind` for a view of `window`.
+    #[cfg_attr(
+        not(any(target_os = "macos", target_os = "windows")),
+        allow(unused_variables)
+    )]
+    fn new(kind: SurfaceKind, window: &mut gpui::Window) -> Option<Self> {
+        // A native surface shows through where the window paints nothing.
+        let _under = |window: &mut gpui::Window| {
+            window.set_background_appearance(gpui::WindowBackgroundAppearance::Transparent)
+        };
+        match kind {
+            #[cfg(target_os = "macos")]
+            SurfaceKind::MetalLayer => {
+                let surface = mac::Surface::new(window)?;
+                _under(window);
+                Some(Surface::Layer(surface))
+            }
+            #[cfg(target_os = "windows")]
+            SurfaceKind::SwapChainPanel => {
+                let surface = win::Surface::new(window)?;
+                _under(window);
+                Some(Surface::Panel(surface))
+            }
+            SurfaceKind::FrameSink => {
+                let latest = Arc::new(Latest::default());
+                let handle = kernel::register_frame_sink(Arc::new(Sink(Arc::clone(&latest))));
+                Some(Surface::Pictures(Pictures {
+                    handle,
+                    latest,
+                    shown: None,
+                }))
+            }
+            #[allow(unreachable_patterns)]
+            _ => None,
+        }
+    }
+
+    /// The surface's address, for the kernel.
+    fn handle(&self) -> u64 {
+        match self {
+            #[cfg(target_os = "macos")]
+            Surface::Layer(surface) => surface.layer(),
+            #[cfg(target_os = "windows")]
+            Surface::Panel(surface) => surface.handle(),
+            Surface::Pictures(pictures) => match pictures.handle {
+                SurfaceHandle::FrameSink(id) => id,
+                _ => 0,
+            },
+        }
+    }
+
+    /// Stand at `bounds` of the window, with rounded corners.
+    #[allow(unused_variables)]
+    fn place(&self, bounds: Bounds<Pixels>, corner: f32, scale: f32) {
+        match self {
+            #[cfg(target_os = "macos")]
+            Surface::Layer(surface) => surface.place(bounds, corner),
+            #[cfg(target_os = "windows")]
+            Surface::Panel(surface) => surface.place(bounds, corner, scale),
+            Surface::Pictures(_) => {}
+        }
+    }
+
+    /// The view is gone and the kernel no longer draws into the surface.
+    fn remove(self) {
+        match self {
+            #[cfg(target_os = "macos")]
+            Surface::Layer(surface) => surface.remove(),
+            #[cfg(target_os = "windows")]
+            Surface::Panel(surface) => surface.remove(),
+            Surface::Pictures(pictures) => {
+                kernel::unregister_frame_sink(pictures.handle);
+                if let Some(shown) = pictures.shown {
+                    DROPPED.with(|dropped| dropped.borrow_mut().push(shown));
+                }
+            }
+        }
+    }
+}
+
+/// The kinds of surface that stand under the window's content.
+fn under(kind: SurfaceKind) -> bool {
+    matches!(kind, SurfaceKind::MetalLayer | SurfaceKind::SwapChainPanel)
+}
+
+/// The newest picture of a view, until the window paints it.
+#[derive(Default)]
+struct Latest {
+    frame: Mutex<Option<VideoFrame>>,
+    /// The window was asked to paint it.
+    asked: AtomicBool,
+}
+
+/// The sink a kernel hands a view's pictures to, from its own threads.
+struct Sink(Arc<Latest>);
+
+impl FrameSink for Sink {
+    fn present(&self, frame: VideoFrame) {
+        if let Ok(mut latest) = self.0.frame.lock() {
+            *latest = Some(frame);
+        }
+        if !self.0.asked.swap(true, Ordering::AcqRel) {
+            crate::host::redraw();
+        }
+    }
+}
+
+/// A view's pictures: the sink's handle, the newest picture and the one
+/// the window paints.
+struct Pictures {
+    handle: SurfaceHandle,
+    latest: Arc<Latest>,
+    shown: Option<Arc<RenderImage>>,
+}
+
+impl Pictures {
+    /// The picture to paint: the newest, once the window has it.
+    fn shown(&mut self, window: &mut gpui::Window) -> Option<Arc<RenderImage>> {
+        self.latest.asked.store(false, Ordering::Release);
+        let frame = self
+            .latest
+            .frame
+            .lock()
+            .ok()
+            .and_then(|mut frame| frame.take());
+        if let Some(frame) = frame {
+            let VideoFrame {
+                width,
+                height,
+                mut pixels,
+            } = frame;
+            // GPUI's pictures are BGRA.
+            for pixel in pixels.as_chunks_mut::<4>().0 {
+                pixel.swap(0, 2);
+            }
+            if let Some(buffer) = image::RgbaImage::from_raw(width, height, pixels) {
+                let image = Arc::new(RenderImage::new(smallvec::smallvec![image::Frame::new(
+                    buffer
+                )]));
+                if let Some(old) = self.shown.replace(image) {
+                    let _ = window.drop_image(old);
+                }
+            }
+        }
+        self.shown.clone()
+    }
 }
 
 /// Where videos are and their corners.
@@ -104,15 +269,20 @@ thread_local! {
     /// Where each window's videos are, as laid out this frame, with their
     /// corners: no background is painted there.
     static HOLES: RefCell<HashMap<String, Holes>> = RefCell::new(HashMap::new());
+    /// Pictures of views that are gone, which a window frees.
+    static DROPPED: RefCell<Vec<Arc<RenderImage>>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Let the application's media kernel play the players, when it draws into
 /// a surface this target can give it.
 pub(crate) fn attach_kernel() {
+    // Native surfaces first; pictures wherever a kernel renders them.
     let offers: &[SurfaceKind] = if cfg!(target_os = "macos") {
-        &[SurfaceKind::MetalLayer]
+        &[SurfaceKind::MetalLayer, SurfaceKind::FrameSink]
+    } else if cfg!(target_os = "windows") {
+        &[SurfaceKind::SwapChainPanel, SurfaceKind::FrameSink]
     } else {
-        &[]
+        &[SurfaceKind::FrameSink]
     };
     let mut writer = Writer::new();
     writer.u32(offers.len() as u32);
@@ -131,6 +301,14 @@ pub(crate) fn attach_kernel() {
     if let (Ok(1), Ok(kind)) = (reader.u8(), reader.u32()) {
         KIND.with(|current| current.set(SurfaceKind::from_code(kind)));
     }
+    log(|| format!("kernel attached: {:?}", KIND.with(Cell::get)));
+}
+
+/// Development aid: `BERN_MEDIA_LOG` prints how videos reach the kernel.
+fn log(what: impl FnOnce() -> String) {
+    if std::env::var_os("BERN_MEDIA_LOG").is_some() {
+        eprintln!("bern-media {}", what());
+    }
 }
 
 fn post(call: unsafe extern "C" fn(*mut bern_ffi::BernApp, *const u8, usize), bytes: &[u8]) {
@@ -143,9 +321,10 @@ pub(crate) fn holes(window: &str) -> Holes {
     HOLES.with(|holes| holes.borrow().get(window).cloned().unwrap_or_default())
 }
 
-/// Whether `window` showed a video when it last drew.
+/// Whether `window` showed a video under its content when it last drew.
 pub(crate) fn has_video(window: &str) -> bool {
-    VIEWS.with(|views| views.borrow().values().any(|view| view.window == window))
+    KIND.with(Cell::get).is_some_and(under)
+        && VIEWS.with(|views| views.borrow().values().any(|view| view.window == window))
 }
 
 /// Mark the videos of `window` as not yet drawn in this frame.
@@ -191,7 +370,6 @@ fn detach(token: &str, view: View) {
         writer.u8(0);
         post(bern_ffi::media::bern_media_view, &writer.bytes);
     }
-    #[cfg(target_os = "macos")]
     if let Some(surface) = view.surface {
         surface.remove();
     }
@@ -206,7 +384,7 @@ fn detach(token: &str, view: View) {
 /// `fit` says, on black.
 pub fn video(c: &Ctx, id: &'static str, props: VideoProps) -> El {
     let window = c.win().id.to_string();
-    let token = format!("{window}/{}", c.target(id));
+    let token = format!("{window}/{}", c.key(id));
     let player = props
         .player
         .map(str::to_string)
@@ -229,7 +407,6 @@ pub fn video(c: &Ctx, id: &'static str, props: VideoProps) -> El {
                             bound: None,
                             size: None,
                             seen: true,
-                            #[cfg(target_os = "macos")]
                             surface: None,
                         },
                     );
@@ -289,11 +466,12 @@ pub fn video(c: &Ctx, id: &'static str, props: VideoProps) -> El {
         let token = token.clone();
         let window_id = window.clone();
         let player = player.clone();
+        let painted = token.clone();
         gpui::canvas(
             move |bounds, window, _| {
                 place(&token, &window_id, &player, bounds, corner, fit, window)
             },
-            |_, _, _, _| {},
+            move |bounds, _, window, _| paint(&painted, bounds, corner, window),
         )
         .absolute()
         .size_full()
@@ -310,7 +488,6 @@ pub fn video(c: &Ctx, id: &'static str, props: VideoProps) -> El {
 
 /// The view `token` is laid out at `bounds`: its surface follows, and the
 /// kernel is given it or its new size.
-#[allow(unused_variables)]
 fn place(
     token: &str,
     window_id: &str,
@@ -320,70 +497,90 @@ fn place(
     fit: u32,
     window: &mut gpui::Window,
 ) {
-    HOLES.with(|holes| {
-        holes
-            .borrow_mut()
-            .entry(window_id.to_string())
-            .or_default()
-            .push((bounds, corner))
-    });
     let Some(kind) = KIND.with(Cell::get) else {
+        log(|| format!("{token}: no kernel surface"));
         return;
     };
-    let scale = f64::from(window.scale_factor());
+    if under(kind) {
+        HOLES.with(|holes| {
+            holes
+                .borrow_mut()
+                .entry(window_id.to_string())
+                .or_default()
+                .push((bounds, corner))
+        });
+    }
+    let scale = window.scale_factor();
     let size = (
-        ((f64::from(f32::from(bounds.size.width)) * scale).round() as u32).max(1),
-        ((f64::from(f32::from(bounds.size.height)) * scale).round() as u32).max(1),
-        scale,
+        ((f64::from(f32::from(bounds.size.width)) * f64::from(scale)).round() as u32).max(1),
+        ((f64::from(f32::from(bounds.size.height)) * f64::from(scale)).round() as u32).max(1),
+        f64::from(scale),
     );
-    #[cfg(target_os = "macos")]
-    {
-        if kind != SurfaceKind::MetalLayer {
-            return;
+    let Some((handle, previous)) = VIEWS.with(|views| {
+        let mut views = views.borrow_mut();
+        let view = views.get_mut(token)?;
+        if view.surface.is_none() {
+            view.surface = Surface::new(kind, window);
+            log(|| format!("{token}: {kind:?} surface {}", view.surface.is_some()));
         }
-        let Some((handle, previous)) = VIEWS.with(|views| {
-            let mut views = views.borrow_mut();
-            let view = views.get_mut(token)?;
-            if view.surface.is_none() {
-                view.surface = mac::Surface::new(window);
-                // The layer shows through where the window paints nothing.
-                window.set_background_appearance(gpui::WindowBackgroundAppearance::Transparent);
-            }
-            let surface = view.surface.as_ref()?;
-            surface.place(bounds, corner);
-            let previous = view.size.replace(size);
-            Some((surface.layer(), previous))
-        }) else {
-            return;
-        };
-        let mut writer = Writer::new();
-        writer.text(token);
-        match previous {
-            None => {
-                let mut view = Writer::new();
-                view.text(token);
-                view.u8(1);
-                view.text(player);
-                view.text(window_id);
-                post(bern_ffi::media::bern_media_view, &view.bytes);
-                writer.text(player);
-                writer.u32(kind.code());
-                writer.u64(handle);
-                writer.u32(size.0);
-                writer.u32(size.1);
-                writer.f64(size.2);
-                writer.u32(fit);
-                post(bern_ffi::media::bern_media_surface_attach, &writer.bytes);
-                clock::start(token);
-            }
-            Some(previous) if previous != size => {
-                writer.u32(size.0);
-                writer.u32(size.1);
-                writer.f64(size.2);
-                post(bern_ffi::media::bern_media_surface_resize, &writer.bytes);
-            }
-            Some(_) => {}
+        let surface = view.surface.as_ref()?;
+        surface.place(bounds, corner, scale);
+        let previous = view.size.replace(size);
+        Some((surface.handle(), previous))
+    }) else {
+        return;
+    };
+    let mut writer = Writer::new();
+    writer.text(token);
+    match previous {
+        None => {
+            let mut view = Writer::new();
+            view.text(token);
+            view.u8(1);
+            view.text(player);
+            view.text(window_id);
+            post(bern_ffi::media::bern_media_view, &view.bytes);
+            writer.text(player);
+            writer.u32(kind.code());
+            writer.u64(handle);
+            writer.u32(size.0);
+            writer.u32(size.1);
+            writer.f64(size.2);
+            writer.u32(fit);
+            post(bern_ffi::media::bern_media_surface_attach, &writer.bytes);
+            log(|| format!("surface {token} for {player}: {size:?}"));
+            clock::start(token);
         }
+        Some(previous) if previous != size => {
+            writer.u32(size.0);
+            writer.u32(size.1);
+            writer.f64(size.2);
+            post(bern_ffi::media::bern_media_surface_resize, &writer.bytes);
+        }
+        Some(_) => {}
+    }
+}
+
+/// Paint the view `token`: nothing over a native surface, else black with
+/// the kernel's newest picture over it.
+fn paint(token: &str, bounds: Bounds<Pixels>, corner: f32, window: &mut gpui::Window) {
+    for gone in DROPPED.with(|dropped| std::mem::take(&mut *dropped.borrow_mut())) {
+        let _ = window.drop_image(gone);
+    }
+    if KIND.with(Cell::get).is_some_and(under) {
+        return;
+    }
+    let corners = gpui::Corners::all(gpui::px(corner));
+    window.paint_quad(gpui::fill(bounds, gpui::black()).corner_radii(corners));
+    let shown = VIEWS.with(
+        |views| match views.borrow_mut().get_mut(token)?.surface.as_mut()? {
+            Surface::Pictures(pictures) => pictures.shown(window),
+            #[allow(unreachable_patterns)]
+            _ => None,
+        },
+    );
+    if let Some(image) = shown {
+        let _ = window.paint_image(bounds, bounds, corners, image, 0, false);
     }
 }
 
@@ -459,14 +656,36 @@ mod clock {
         }
     }
 
+    /// Seconds of the clock the kernels time frames by: Core Animation's
+    /// on macOS, the performance counter on Windows, the monotonic clock
+    /// on Linux (GLib's).
     fn now() -> f64 {
         #[cfg(target_os = "macos")]
         {
             objc2_quartz_core::CACurrentMediaTime()
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "windows")]
         {
-            0.0
+            use win32::Win32::System::Performance::{
+                QueryPerformanceCounter, QueryPerformanceFrequency,
+            };
+            let (mut count, mut frequency) = (0i64, 0i64);
+            // SAFETY: both write one integer.
+            unsafe {
+                let _ = QueryPerformanceCounter(&mut count);
+                let _ = QueryPerformanceFrequency(&mut frequency);
+            }
+            count as f64 / frequency.max(1) as f64
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        {
+            let mut time = libc::timespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            };
+            // SAFETY: the call writes the time it reads.
+            unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut time) };
+            time.tv_sec as f64 + time.tv_nsec as f64 / 1e9
         }
     }
 
@@ -570,6 +789,232 @@ mod mac {
 
         pub(super) fn remove(self) {
             self.view.removeFromSuperview();
+        }
+    }
+}
+
+/// Windows: each window's videos are visuals of a DirectComposition tree
+/// behind the one GPUI draws into, each showing the swap chain the kernel
+/// gives its view's panel.
+#[cfg(target_os = "windows")]
+mod win {
+    use gpui::{Bounds, Pixels};
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    use std::ffi::c_void;
+    use std::sync::Mutex;
+    use win32::Win32::Foundation::{E_NOINTERFACE, E_POINTER, HWND, S_OK};
+    use win32::Win32::Graphics::DirectComposition::{
+        DCompositionCreateDevice2, IDCompositionDesktopDevice, IDCompositionRectangleClip,
+        IDCompositionTarget, IDCompositionVisual2,
+    };
+    use win32::Win32::Graphics::Dxgi::IDXGISwapChain;
+    use win32::core::{GUID, HRESULT, IUnknown, Interface};
+
+    /// A window's tree of videos.
+    struct Tree {
+        device: IDCompositionDesktopDevice,
+        _target: IDCompositionTarget,
+        root: IDCompositionVisual2,
+    }
+
+    thread_local! {
+        static TREES: RefCell<HashMap<isize, Tree>> = RefCell::new(HashMap::new());
+    }
+
+    fn tree(hwnd: HWND) -> win32::core::Result<Tree> {
+        // SAFETY: a device of its own for a window that is open.
+        unsafe {
+            let device: IDCompositionDesktopDevice = DCompositionCreateDevice2(None::<&IUnknown>)?;
+            // Not topmost: behind GPUI's own tree, which is.
+            let target = device.CreateTargetForHwnd(hwnd, false)?;
+            let root = device.CreateVisual()?;
+            target.SetRoot(&root)?;
+            device.Commit()?;
+            Ok(Tree {
+                device,
+                _target: target,
+                root,
+            })
+        }
+    }
+
+    /// The panel the kernel sees, laid out as `ISwapChainPanelNative`:
+    /// `IUnknown`'s three methods, then `SetSwapChain`. The view owns it
+    /// and keeps it until the kernel has let go of the surface.
+    #[repr(C)]
+    struct Panel {
+        methods: &'static Methods,
+        /// The swap chain the kernel gave last, until the view shows it.
+        next: Mutex<Option<Option<IDXGISwapChain>>>,
+    }
+
+    #[repr(C)]
+    struct Methods {
+        query_interface:
+            unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
+        add_ref: unsafe extern "system" fn(*mut c_void) -> u32,
+        release: unsafe extern "system" fn(*mut c_void) -> u32,
+        set_swap_chain: unsafe extern "system" fn(*mut c_void, *mut c_void) -> HRESULT,
+    }
+
+    static METHODS: Methods = Methods {
+        query_interface,
+        add_ref,
+        release,
+        set_swap_chain,
+    };
+
+    unsafe extern "system" fn query_interface(
+        this: *mut c_void,
+        iid: *const GUID,
+        out: *mut *mut c_void,
+    ) -> HRESULT {
+        if out.is_null() {
+            return E_POINTER;
+        }
+        // SAFETY: the caller passes an interface id and a place for the
+        // answer.
+        unsafe {
+            if !iid.is_null() && *iid == IUnknown::IID {
+                *out = this;
+                return S_OK;
+            }
+            *out = std::ptr::null_mut();
+        }
+        E_NOINTERFACE
+    }
+
+    unsafe extern "system" fn add_ref(_: *mut c_void) -> u32 {
+        1
+    }
+
+    unsafe extern "system" fn release(_: *mut c_void) -> u32 {
+        1
+    }
+
+    unsafe extern "system" fn set_swap_chain(this: *mut c_void, chain: *mut c_void) -> HRESULT {
+        // SAFETY: `this` is a panel of a view that is attached; the chain
+        // is a swap chain or null, which the panel takes a reference to.
+        let (panel, chain) = unsafe {
+            (
+                &*(this as *const Panel),
+                IDXGISwapChain::from_raw_borrowed(&chain).cloned(),
+            )
+        };
+        if let Ok(mut next) = panel.next.lock() {
+            *next = Some(chain);
+        }
+        crate::host::redraw();
+        S_OK
+    }
+
+    /// A view's visual and its panel.
+    pub(super) struct Surface {
+        hwnd: isize,
+        visual: IDCompositionVisual2,
+        clip: IDCompositionRectangleClip,
+        panel: Box<Panel>,
+    }
+
+    impl Surface {
+        pub(super) fn new(window: &gpui::Window) -> Option<Self> {
+            let RawWindowHandle::Win32(handle) =
+                HasWindowHandle::window_handle(window).ok()?.as_raw()
+            else {
+                return None;
+            };
+            let hwnd = handle.hwnd.get();
+            TREES.with(|trees| {
+                let mut trees = trees.borrow_mut();
+                let tree = match trees.entry(hwnd) {
+                    std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+                    std::collections::hash_map::Entry::Vacant(entry) => {
+                        match tree(HWND(hwnd as *mut c_void)) {
+                            Ok(tree) => entry.insert(tree),
+                            Err(error) => {
+                                eprintln!("bern: the window's videos cannot be composed: {error}");
+                                return None;
+                            }
+                        }
+                    }
+                };
+                // SAFETY: objects of the tree's device, on its thread.
+                unsafe {
+                    let visual = tree.device.CreateVisual().ok()?;
+                    let clip = tree.device.CreateRectangleClip().ok()?;
+                    visual.SetClip(&clip).ok()?;
+                    tree.root.AddVisual(&visual, true, None).ok()?;
+                    tree.device.Commit().ok()?;
+                    Some(Surface {
+                        hwnd,
+                        visual,
+                        clip,
+                        panel: Box::new(Panel {
+                            methods: &METHODS,
+                            next: Mutex::new(None),
+                        }),
+                    })
+                }
+            })
+        }
+
+        /// The panel's address, for the kernel.
+        pub(super) fn handle(&self) -> u64 {
+            &*self.panel as *const Panel as u64
+        }
+
+        /// Stand at `bounds` (points) of the window, with rounded corners,
+        /// showing the kernel's newest swap chain.
+        pub(super) fn place(&self, bounds: Bounds<Pixels>, corner: f32, scale: f32) {
+            TREES.with(|trees| {
+                let trees = trees.borrow();
+                let Some(tree) = trees.get(&self.hwnd) else {
+                    return;
+                };
+                let next = self.panel.next.lock().ok().and_then(|mut next| next.take());
+                let pixels = |value: Pixels| (f32::from(value) * scale).round();
+                let (x, y) = (pixels(bounds.origin.x), pixels(bounds.origin.y));
+                let (width, height) = (pixels(bounds.size.width), pixels(bounds.size.height));
+                let radius = corner * scale;
+                // SAFETY: objects of the tree's device, on its thread.
+                unsafe {
+                    if let Some(chain) = next {
+                        let _ = match chain {
+                            Some(chain) => self.visual.SetContent(&chain),
+                            None => self.visual.SetContent(None::<&IUnknown>),
+                        };
+                    }
+                    let _ = self.visual.SetOffsetX2(x);
+                    let _ = self.visual.SetOffsetY2(y);
+                    let _ = self.clip.SetLeft2(0.0);
+                    let _ = self.clip.SetTop2(0.0);
+                    let _ = self.clip.SetRight2(width);
+                    let _ = self.clip.SetBottom2(height);
+                    let _ = self.clip.SetTopLeftRadiusX2(radius);
+                    let _ = self.clip.SetTopLeftRadiusY2(radius);
+                    let _ = self.clip.SetTopRightRadiusX2(radius);
+                    let _ = self.clip.SetTopRightRadiusY2(radius);
+                    let _ = self.clip.SetBottomLeftRadiusX2(radius);
+                    let _ = self.clip.SetBottomLeftRadiusY2(radius);
+                    let _ = self.clip.SetBottomRightRadiusX2(radius);
+                    let _ = self.clip.SetBottomRightRadiusY2(radius);
+                    let _ = tree.device.Commit();
+                }
+            });
+        }
+
+        pub(super) fn remove(self) {
+            TREES.with(|trees| {
+                if let Some(tree) = trees.borrow().get(&self.hwnd) {
+                    // SAFETY: the visual is the root's child.
+                    unsafe {
+                        let _ = tree.root.RemoveVisual(&self.visual);
+                        let _ = tree.device.Commit();
+                    }
+                }
+            });
         }
     }
 }
