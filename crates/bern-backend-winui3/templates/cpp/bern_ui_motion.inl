@@ -565,9 +565,25 @@ inline double Turn(std::shared_ptr<StaggerClock> const& clock) {
 }
 
 /// Where a transition starts (or ends): a move, a scale and no opacity; a
-/// growing one has no size along its axis and stays opaque.
-inline std::array<double, 5> TransitionFrom(Transition const& transition) {
+/// growing one has no size along its axis and stays opaque; a moving one
+/// stands its whole size (the window's, before its first layout) beyond
+/// its edge, opaque.
+inline std::array<double, 5> TransitionFrom(Transition const& transition, xaml::UIElement const& element) {
     std::array<double, 5> from{0, 0, 1, 1, 0};
+    if (transition.kind == Transition::Move) {
+        std::string_view edge = transition.edge ? transition.edge : "bottom";
+        auto size = element.ActualSize();
+        if ((size.x <= 0 || size.y <= 0) && element.XamlRoot()) {
+            auto window = element.XamlRoot().Size();
+            size = {window.Width, window.Height};
+        }
+        if (edge == "top") from[1] = -size.y;
+        else if (edge == "bottom") from[1] = size.y;
+        else if (edge == "leading") from[0] = -size.x;
+        else if (edge == "trailing") from[0] = size.x;
+        from[4] = 1;
+        return from;
+    }
     if (transition.kind == Transition::Grow) {
         std::string_view edge = transition.edge ? transition.edge : "leading";
         if (edge == "leading" || edge == "trailing") from[2] = 0;
@@ -592,7 +608,7 @@ inline std::array<double, 5> TransitionFrom(Transition const& transition) {
 inline void PlayTransition(xaml::UIElement const& element, Transition const& transition, bool entering, std::function<void()> done = nullptr,
     double delay = 0) {
     bool reduced = Reduced();
-    auto from = reduced ? std::array<double, 5>{0, 0, 1, 1, 0} : TransitionFrom(transition);
+    auto from = reduced ? std::array<double, 5>{0, 0, 1, 1, 0} : TransitionFrom(transition, element);
     std::array<double, 5> rest{0, 0, 1, 1, 1};
     auto start = entering ? from : rest;
     auto end = entering ? rest : from;
@@ -1309,6 +1325,12 @@ struct ScrollInfo {
     composition::CompositionPropertySet scrolling{nullptr};
     /// Rows of the lists inside, by key, for snapping and `position`.
     std::vector<std::pair<std::string, winrt::weak_ref<xaml::UIElement>>> items;
+    /// Grids inside that build only the rows near the view: each builds
+    /// the row of a key there and gives its element, or none.
+    std::vector<std::function<xaml::UIElement(std::string const&)>> reveal;
+    /// Set while a scroll the view itself asked for is under way, so it is
+    /// not taken for the person's.
+    bool byCode = false;
 };
 
 /// Scale and opacity by the distance of the element's center from the
@@ -1354,6 +1376,191 @@ inline void ScrollEffect(controls::Grid const& wrapper, std::shared_ptr<ScrollIn
         }
     };
     wrapper.LayoutUpdated([update](auto&&, auto&&) { update(); });
+}
+
+/// Direct2D's Gaussian blur as a Composition effect, without Win2D:
+/// Composition takes any effect that describes itself to Direct2D. Its one
+/// source is the parameter `backdrop`.
+struct GaussianBlurEffect : winrt::implements<GaussianBlurEffect, winrt::Windows::Graphics::Effects::IGraphicsEffect,
+        winrt::Windows::Graphics::Effects::IGraphicsEffectSource, ABI::Windows::Graphics::Effects::IGraphicsEffectD2D1Interop> {
+    explicit GaussianBlurEffect(float deviation) : deviation(deviation) {}
+
+    winrt::hstring Name() const { return name; }
+    void Name(winrt::hstring const& value) { name = value; }
+
+    IFACEMETHODIMP GetEffectId(GUID* id) override {
+        *id = CLSID_D2D1GaussianBlur;
+        return S_OK;
+    }
+    /// `Deviation` can change after the brush is made: a blur that follows
+    /// state.
+    IFACEMETHODIMP GetNamedPropertyMapping(LPCWSTR property, UINT* index, ABI::Windows::Graphics::Effects::GRAPHICS_EFFECT_PROPERTY_MAPPING* mapping) override {
+        if (std::wstring_view(property) != L"Deviation") return E_INVALIDARG;
+        *index = D2D1_GAUSSIANBLUR_PROP_STANDARD_DEVIATION;
+        *mapping = ABI::Windows::Graphics::Effects::GRAPHICS_EFFECT_PROPERTY_MAPPING_DIRECT;
+        return S_OK;
+    }
+    IFACEMETHODIMP GetPropertyCount(UINT* count) override {
+        *count = 3;
+        return S_OK;
+    }
+    IFACEMETHODIMP GetProperty(UINT index, ABI::Windows::Foundation::IPropertyValue** value) override {
+        winrt::Windows::Foundation::IInspectable boxed;
+        switch (index) {
+        case D2D1_GAUSSIANBLUR_PROP_STANDARD_DEVIATION: boxed = winrt::box_value(deviation); break;
+        case D2D1_GAUSSIANBLUR_PROP_OPTIMIZATION: boxed = winrt::box_value(uint32_t(D2D1_GAUSSIANBLUR_OPTIMIZATION_BALANCED)); break;
+        case D2D1_GAUSSIANBLUR_PROP_BORDER_MODE: boxed = winrt::box_value(uint32_t(D2D1_BORDER_MODE_SOFT)); break;
+        default: return E_INVALIDARG;
+        }
+        *value = boxed.as<ABI::Windows::Foundation::IPropertyValue>().detach();
+        return S_OK;
+    }
+    IFACEMETHODIMP GetSource(UINT index, ABI::Windows::Graphics::Effects::IGraphicsEffectSource** source) override {
+        if (index != 0) return E_INVALIDARG;
+        *source = backdrop.as<ABI::Windows::Graphics::Effects::IGraphicsEffectSource>().detach();
+        return S_OK;
+    }
+    IFACEMETHODIMP GetSourceCount(UINT* count) override {
+        *count = 1;
+        return S_OK;
+    }
+
+private:
+    float deviation;
+    winrt::hstring name{L"Blur"};
+    composition::CompositionEffectSourceParameter backdrop{L"backdrop"};
+};
+
+/// `blur`: what `element` draws, blurred with `radius` points and kept
+/// inside its bounds and `corner`. A sprite over the element blurs what
+/// lies beneath it, the element and whatever shows through it, so near its
+/// edges the blur takes in a little of what lies around it.
+inline composition::CompositionEffectBrush Blur(xaml::UIElement const& element, double radius, double corner) {
+    auto compositor = xaml::Hosting::ElementCompositionPreview::GetElementVisual(element).Compositor();
+    auto brush = compositor.CreateEffectFactory(winrt::make<GaussianBlurEffect>(float(radius)), {L"Blur.Deviation"}).CreateBrush();
+    brush.SetSourceParameter(L"backdrop", compositor.CreateBackdropBrush());
+    auto sprite = compositor.CreateSpriteVisual();
+    sprite.Brush(brush);
+    auto shape = compositor.CreateRoundedRectangleGeometry();
+    shape.CornerRadius(float2{float(corner), float(corner)});
+    sprite.Clip(compositor.CreateGeometricClip(shape));
+    xaml::Hosting::ElementCompositionPreview::SetElementChildVisual(element, sprite);
+    element.as<xaml::FrameworkElement>().SizeChanged([sprite, shape](auto&&, xaml::SizeChangedEventArgs const& args) {
+        float2 size{args.NewSize().Width, args.NewSize().Height};
+        sprite.Size(size);
+        shape.Size(size);
+    });
+    return brush;
+}
+
+/// A blur's radius that follows state, springing to each new value with
+/// the element's motion.
+inline void FollowBlur(composition::CompositionEffectBrush const& brush, Ctx const& ctx, Len const& radius, Motion const* motion) {
+    BindLen(ctx, radius, motion, [brush](double now) { brush.Properties().InsertScalar(L"Blur.Deviation", float(std::max(0.0, now))); });
+}
+
+/// `glow` on an element: its light, a sprite over it, and whether the
+/// pointer is over the element.
+struct GlowLight {
+    winrt::weak_ref<xaml::FrameworkElement> element;
+    composition::SpriteVisual sprite{nullptr};
+    composition::CompositionRadialGradientBrush brush{nullptr};
+    double radius = 1;
+    bool lit = false;
+};
+
+/// Lights the glowing elements of `win` the pointer of `args` is over,
+/// and darkens the others; without `args`, darkens them all. It goes by
+/// where they are, so what lies on top of an element does not keep it dark.
+inline void GlowAt(Win& win, xaml::Input::PointerRoutedEventArgs const* args) {
+    std::erase_if(win.glows, [](auto const& glow) { return !glow->element.get(); });
+    for (auto const& glow : win.glows) {
+        auto element = glow->element.get();
+        bool lit = false;
+        if (args && element.IsLoaded() && element.Visibility() == xaml::Visibility::Visible) {
+            auto at = args->GetCurrentPoint(element).Position();
+            float width = float(element.ActualWidth()), height = float(element.ActualHeight());
+            if (at.X >= 0 && at.Y >= 0 && at.X < width && at.Y < height) {
+                lit = true;
+                float radius = float(std::min(width, height) * glow->radius);
+                glow->brush.EllipseCenter(float2{at.X, at.Y});
+                glow->brush.EllipseRadius(float2{radius, radius});
+            }
+        }
+        if (lit == glow->lit) continue;
+        glow->lit = lit;
+        auto fade = glow->sprite.Compositor().CreateScalarKeyFrameAnimation();
+        fade.InsertKeyFrame(1.f, lit ? 1.f : 0.f);
+        fade.Duration(std::chrono::milliseconds(180));
+        glow->sprite.StartAnimation(L"Opacity", fade);
+    }
+}
+
+/// Follows the pointer over the window's content for its glowing
+/// elements: a mouse while it is over the window, a finger or pen while it
+/// presses. The handlers hear events the content handles too, and handle
+/// none.
+inline void WatchGlows(Win& win) {
+    if (win.glowsWatched || !win.root) return;
+    win.glowsWatched = true;
+    using PointerHandler = xaml::Input::PointerEventHandler;
+    std::weak_ptr<bool> alive(win.life);
+    Win* owner = &win;
+    auto moved = [alive, owner](auto&&, xaml::Input::PointerRoutedEventArgs const& args) {
+        if (alive.expired()) return;
+        bool over = args.Pointer().PointerDeviceType() == PointerKind::Mouse || args.Pointer().IsInContact();
+        GlowAt(*owner, over ? &args : nullptr);
+    };
+    win.root.AddHandler(xaml::UIElement::PointerMovedEvent(), winrt::box_value(PointerHandler(moved)), true);
+    win.root.AddHandler(xaml::UIElement::PointerPressedEvent(), winrt::box_value(PointerHandler(moved)), true);
+    auto lifted = [alive, owner](auto&&, xaml::Input::PointerRoutedEventArgs const& args) {
+        if (!alive.expired() && args.Pointer().PointerDeviceType() != PointerKind::Mouse) GlowAt(*owner, nullptr);
+    };
+    win.root.AddHandler(xaml::UIElement::PointerReleasedEvent(), winrt::box_value(PointerHandler(lifted)), true);
+    win.root.AddHandler(xaml::UIElement::PointerCanceledEvent(), winrt::box_value(PointerHandler([alive, owner](auto&&, auto&&) {
+        if (!alive.expired()) GlowAt(*owner, nullptr);
+    })), true);
+    // The content also hears the exits of its parts: only a pointer outside
+    // it darkens everything.
+    win.root.AddHandler(xaml::UIElement::PointerExitedEvent(), winrt::box_value(PointerHandler([alive, owner](auto&& sender, auto&& args) {
+        auto content = sender.try_as<xaml::FrameworkElement>();
+        if (alive.expired() || !content) return;
+        auto at = args.GetCurrentPoint(content).Position();
+        if (at.X >= 0 && at.Y >= 0 && at.X < content.ActualWidth() && at.Y < content.ActualHeight()) return;
+        GlowAt(*owner, nullptr);
+    })), true);
+}
+
+/// `glow`: a white light follows the pointer over `element`, `radius`
+/// times its shorter side, `opacity` at the centre, a fifth of that at 55%
+/// of the radius, none at the radius, inside `corner`; it fades in and out
+/// in 0.18 s. Composition adds light to what lies beneath only through
+/// effects, which need Win2D, so the light is laid over with plain
+/// transparency.
+inline void Glow(Win& win, xaml::UIElement const& element, double radius, double opacity, double corner) {
+    auto compositor = xaml::Hosting::ElementCompositionPreview::GetElementVisual(element).Compositor();
+    auto glow = std::make_shared<GlowLight>();
+    glow->element = winrt::make_weak(element.as<xaml::FrameworkElement>());
+    glow->radius = radius;
+    glow->brush = compositor.CreateRadialGradientBrush();
+    glow->brush.MappingMode(composition::CompositionMappingMode::Absolute);
+    std::array<std::pair<float, double>, 3> stops{{{0.f, opacity}, {0.55f, opacity * 0.2}, {1.f, 0.0}}};
+    for (auto const& [offset, alpha] : stops)
+        glow->brush.ColorStops().Append(compositor.CreateColorGradientStop(offset, winrt::Windows::UI::Color{uint8_t(std::lround(alpha * 255)), 255, 255, 255}));
+    glow->sprite = compositor.CreateSpriteVisual();
+    glow->sprite.Brush(glow->brush);
+    glow->sprite.Opacity(0);
+    auto shape = compositor.CreateRoundedRectangleGeometry();
+    shape.CornerRadius(float2{float(corner), float(corner)});
+    glow->sprite.Clip(compositor.CreateGeometricClip(shape));
+    xaml::Hosting::ElementCompositionPreview::SetElementChildVisual(element, glow->sprite);
+    element.as<xaml::FrameworkElement>().SizeChanged([sprite = glow->sprite, shape](auto&&, xaml::SizeChangedEventArgs const& args) {
+        float2 size{args.NewSize().Width, args.NewSize().Height};
+        sprite.Size(size);
+        shape.Size(size);
+    });
+    win.glows.push_back(glow);
+    WatchGlows(win);
 }
 
 /// `spin`: while `when` holds the element turns about its center, one
@@ -1413,6 +1620,16 @@ struct DecorateProps {
     /// `spin_period` seconds.
     Get spin;
     std::optional<double> spinPeriod;
+    /// `glow`: the light's radius as a multiple of the shorter side, its
+    /// opacity at the centre, and the element's corner.
+    std::optional<double> glow;
+    std::optional<double> glowOpacity;
+    std::optional<double> glowCorner;
+    /// `blur`: the radius, written or following state, the element's
+    /// corner, and the motion a radius that follows state changes with.
+    Len blur;
+    std::optional<double> blurCorner;
+    Motion const* blurMotion = nullptr;
     /// `appear_delay`: the entrance waits this much more, and plays on the
     /// first display too.
     std::optional<double> appearDelay;
@@ -1522,6 +1739,18 @@ inline void Decorate(Parent const& p, Ctx const& ctx, DecorateProps props, Build
         if (props.spin) {
             shown = Wrap(shown);
             Spin(shown, ctx, props.spin, props.spinPeriod.value_or(1));
+        }
+        // A wrapper of its own for each: a Composition sprite over the
+        // element, the light outside the blur and the turning, so it stays
+        // sharp and under the pointer.
+        if (props.blur.Given()) {
+            shown = Wrap(shown);
+            auto brush = Blur(shown, props.blur.fixed.value_or(0), props.blurCorner.value_or(0));
+            if (props.blur.bound) FollowBlur(brush, ctx, props.blur, props.blurMotion);
+        }
+        if (props.glow && ctx.win) {
+            shown = Wrap(shown);
+            Glow(*ctx.win, shown, *props.glow, props.glowOpacity.value_or(0.4), props.glowCorner.value_or(0));
         }
         // What moves goes on a wrapper of its own: the one that follows
         // scrolling belongs to its Composition expressions.

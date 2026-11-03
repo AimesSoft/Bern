@@ -185,6 +185,16 @@ impl Generator<'_> {
             (false, true) => ".fillMaxWidth()",
             (false, false) => "",
         };
+        // In a row, a stack around a field takes the room its neighbours
+        // leave, as the field would on its own.
+        let under_bars = if ctx.scope == Scope::Row
+            && element.prop("width").is_none()
+            && takes_room(&element.children)
+        {
+            format!("{under_bars}.weight(1f)")
+        } else {
+            under_bars.to_string()
+        };
         if style.is_some() || enabled.is_some() {
             out.open(format!(
                 "BernStack(Modifier{}{}{under_bars}, {alignment}{}{}) {{",
@@ -326,8 +336,13 @@ impl Generator<'_> {
 
     pub(super) fn flow(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         out.open(format!(
-            "BernFlow({}) {{",
-            self.length(element, "gap").unwrap_or_else(|| "8.dp".into())
+            "BernFlow({}{}) {{",
+            self.length(element, "gap").unwrap_or_else(|| "8.dp".into()),
+            match element.keyword("align") {
+                Some("center") => ", align = Alignment.CenterHorizontally",
+                Some("trailing") => ", align = Alignment.End",
+                _ => "",
+            }
         ));
         self.children(out, element, &ctx.within(Scope::Flow));
         out.close("}");
@@ -589,13 +604,100 @@ impl Generator<'_> {
         if !padding.is_empty() {
             extra.push_str(&format!(", modifier = Modifier{padding}"));
         }
+        let min_width = self
+            .length(element, "min_width")
+            .unwrap_or_else(|| "120.dp".into());
+        if let Some(each) = bern_ir::lazy_grid_items(element) {
+            // A list lowered from a column keeps the column's gap (8 when it
+            // gives none) and places its rows as the column would.
+            let list = bern_ir::lowered_list_align(element).map(|align| match align {
+                "center" => "Alignment.CenterHorizontally",
+                "trailing" => "Alignment.End",
+                _ => "Alignment.Start",
+            });
+            if let Some(align) = list {
+                if element.prop("row_gap").is_none() {
+                    extra.push_str(", rowGap = 8.dp");
+                }
+                extra.push_str(&format!(", align = {align}"));
+            }
+            let stagger = element.number("stagger");
+            return self.lazy_grid(
+                out,
+                each,
+                &min_width,
+                &gap,
+                &extra,
+                list.is_some(),
+                stagger,
+                ctx,
+            );
+        }
         out.open(format!(
-            "BernGrid(minWidth = {}, gap = {gap}{extra}) {{",
-            self.length(element, "min_width")
-                .unwrap_or_else(|| "120.dp".into()),
+            "BernGrid(minWidth = {min_width}, gap = {gap}{extra}) {{"
         ));
         self.children(out, element, &ctx.within(Scope::Other));
         out.close("}");
+    }
+
+    /// A grid of one `ForEach`, which in a vertical scroll view composes
+    /// only the rows near what is in sight (`BernLazyGrid`). A `list`
+    /// lowered from a column takes no place in it while it has no rows.
+    #[allow(clippy::too_many_arguments)]
+    fn lazy_grid(
+        &self,
+        out: &mut Out,
+        each: &Element,
+        min_width: &str,
+        gap: &str,
+        extra: &str,
+        list: bool,
+        grid_stagger: Option<f64>,
+        ctx: &Ctx,
+    ) {
+        let (Some(items), Some(template), Some(Prop::Key { name, .. })) =
+            (each.expr("items"), &each.template, each.prop("key"))
+        else {
+            return;
+        };
+        let var = member(&template.var);
+        let key = format!("{var}.{}", member(name));
+        let mut inner = ctx.within(Scope::Other);
+        inner.key = Some(key.clone());
+        if list {
+            out.open(format!("if (({}).isNotEmpty()) {{", self.expr(items)));
+        }
+        let stagger = each.number("stagger").or(grid_stagger);
+        if let Some(step) = stagger {
+            inner.stagger = true;
+            out.open(format!(
+                "BernStaggered(rememberBernStagger({})) {{",
+                double(step)
+            ));
+        }
+        out.open(format!(
+            "BernLazyGrid({}, key = {{ {var} -> BernKey.of({key}) }}, minWidth = {min_width}, gap = {gap}{extra}) {{ {var} ->",
+            self.expr(items)
+        ));
+        out.open(format!(
+            "CompositionLocalProvider(LocalBernItemKeys provides LocalBernItemKeys.current + \"[${{{key}}}]\") {{"
+        ));
+        if ctx.scroll_items {
+            inner.scroll_items = false;
+            out.open(format!("Box(Modifier.bernScrollItem({key})) {{"));
+            self.nodes(out, &each.children, &inner);
+            out.close("}");
+        } else {
+            self.nodes(out, &each.children, &inner);
+        }
+        out.close("}");
+        out.close("}");
+        if stagger.is_some() {
+            out.close("}");
+        }
+        if list {
+            out.close("}");
+        }
     }
 
     pub(super) fn form(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
@@ -671,8 +773,15 @@ impl Generator<'_> {
             (Scope::Other | Scope::Flow, true) => "Modifier.bernFlexible(column = false)",
             (Scope::Other | Scope::Flow, false) => "Modifier.bernFlexible().fillMaxHeight()",
         };
+        let mut extra = String::new();
+        if let Some(anchor) = element.number("anchor") {
+            extra.push_str(&format!(", anchor = {}", float(anchor)));
+        }
+        if let Some(field) = self.field(element, "browsing") {
+            extra.push_str(&format!(", onBrowsing = {{ {field} = it }}"));
+        }
         out.open(format!(
-            "BernScroll({horizontal}, {snap}, {position}, {on_position}, {}, {arrival}, 0.dp, {flexible}) {{",
+            "BernScroll({horizontal}, {snap}, {position}, {on_position}, {}, {arrival}, 0.dp, {flexible}{extra}) {{",
             crate::style::motion(self.app, "smooth")
         ));
         // Its content lambda has no receiver: the column or row it
@@ -715,8 +824,10 @@ impl Generator<'_> {
                 Scope::Column | Scope::Row => "Modifier.weight(1f)",
                 Scope::Other | Scope::Flow => "Modifier.bernFlexible().fillMaxHeight()",
             };
+            // The part in sight reaches the grids in it, which compose
+            // only the rows near it.
             out.open(format!(
-                "Column({flexible}.fillMaxWidth().verticalScroll({state})) {{",
+                "BernScrollColumn({flexible}.fillMaxWidth(), {state}) {{",
             ));
             let content = Ctx {
                 scroll_content: true,
@@ -835,7 +946,7 @@ impl Generator<'_> {
             _ => {
                 if lazy {
                     out.open(
-                        "Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {",
+                        "Column(Modifier.fillMaxWidth().bernVerticalScroll(rememberScrollState())) {",
                     );
                     let content = Ctx {
                         scroll_content: true,
@@ -949,6 +1060,23 @@ impl Generator<'_> {
 }
 
 /// Where a stack aligns its layers.
+/// Whether content takes the room it is given along a row: a text field or
+/// a slider, also inside columns, stacks and conditions.
+fn takes_room(nodes: &[Node]) -> bool {
+    nodes.iter().any(|node| match node {
+        Node::Element(element) => match element.kind.as_str() {
+            "TextInput" | "Search" | "Slider" => true,
+            "Column" | "Stack" => takes_room(&element.children),
+            _ => false,
+        },
+        Node::If(branch) => {
+            branch.branches.iter().any(|(_, nodes)| takes_room(nodes))
+                || takes_room(&branch.otherwise)
+        }
+        _ => false,
+    })
+}
+
 fn stack_alignment(align: Option<&str>) -> &'static str {
     match align {
         Some("top_leading") => "Alignment.TopStart",

@@ -74,6 +74,11 @@ pub struct ContributedPage {
     pub label: BTreeMap<String, String>,
     pub icon: Option<String>,
     pub badge: Option<String>,
+    /// Boolean state field of the module while which the navigation item
+    /// shows.
+    pub when: Option<String>,
+    /// A `Tabs` lists the page.
+    pub tab: bool,
     pub component: String,
 }
 

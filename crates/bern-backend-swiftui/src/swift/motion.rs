@@ -151,8 +151,12 @@ impl Generator<'_> {
                         && (element.kind != "Grid"
                             || !matches!(name.as_str(), "min_width" | "gap" | "row_gap"))
                 })
-                .filter_map(|(_, prop)| match prop {
+                .filter_map(|(name, prop)| match prop {
                     Prop::Expr { expr } if matches!(expr.ty, Type::Int | Type::Float) => {
+                        Some(format!("AnyHashable({})", self.expr(expr)))
+                    }
+                    // A text turning bold changes with the motion too.
+                    Prop::Expr { expr } if name == "bold" => {
                         Some(format!("AnyHashable({})", self.expr(expr)))
                     }
                     _ => None,
@@ -188,6 +192,27 @@ impl Generator<'_> {
             out.line(format!(
                 ".tint(BernColor.role({}).color)",
                 crate::names::string(tint)
+            ));
+        }
+        // Blurred first, so the light on top stays sharp; both inside the
+        // element's corner.
+        let corner = || self.length(element, "corner").unwrap_or_else(|| "0".into());
+        if let Some(radius) = self.length(element, "blur") {
+            out.line(format!(".bernBlur({radius}, corner: {})", corner()));
+            // A blur that follows state changes with `animate`'s motion.
+            if let (Some(token), Some(_)) = (element.keyword("animate"), element.expr("blur")) {
+                out.line(format!(
+                    ".animation({}.animation, value: {radius})",
+                    crate::style::motion(self.app, token)
+                ));
+            }
+        }
+        if let Some(radius) = element.number("glow") {
+            out.line(format!(
+                ".bernGlow({}, opacity: {}, corner: {})",
+                double(radius),
+                double(element.number("glow_opacity").unwrap_or(0.4)),
+                corner()
             ));
         }
         if let Some(when) = element.expr("spin") {

@@ -198,6 +198,7 @@ fn check_motion(descriptor: &TargetDescriptor, app: &Application) -> Vec<Diagnos
                     && prop.name != "appearance"
                     && prop.name != "tint"
                     && prop.name != "spin_period"
+                    && prop.name != "glow_opacity"
                     && element.props.contains_key(prop.name)
                     && !descriptor.motion.contains(&prop.name)
                 {
@@ -220,6 +221,16 @@ fn check_motion(descriptor: &TargetDescriptor, app: &Application) -> Vec<Diagnos
         } else if prop == "spin" {
             format!(
                 "target `{}` does not spin: the element stays still",
+                descriptor.id
+            )
+        } else if prop == "glow" {
+            format!(
+                "target `{}` does not light elements under the pointer: `glow` shows nothing",
+                descriptor.id
+            )
+        } else if prop == "blur" {
+            format!(
+                "target `{}` does not blur: the element is drawn sharp",
                 descriptor.id
             )
         } else if prop == "idle_area" {

@@ -25,6 +25,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
@@ -34,6 +35,9 @@ import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.Placeable
+import androidx.compose.ui.layout.SubcomposeLayout
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.unit.toSize
@@ -127,6 +131,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Shape
@@ -1037,6 +1044,7 @@ fun BernImageURL(
     aspect: Float? = null,
     ratio: Float? = null,
     twice: Boolean = false,
+    covers: Boolean = false,
 ) {
     // A frame that fills its container's width is read at the width it
     // was laid out at.
@@ -1061,7 +1069,7 @@ fun BernImageURL(
     val key = if (twice && url != null) BernPictures.twiceKey(url, wide, tall) else url
     var picture by remember(key) { mutableStateOf(key?.let(BernPictures::cached)) }
     val proportion = aspect ?: picture?.ratio ?: ratio ?: url?.let(BernPictures::known)
-    val frame = bernPictureFrame(width, height, proportion, corner)
+    val frame = bernPictureFrame(width, height, proportion, corner, covers)
     val modifier = if (fills) frame.onSizeChanged { laid = it.width } else frame
     if (url != null) {
         val context = LocalContext.current
@@ -1304,7 +1312,7 @@ fun BernDrop(
 /// report their bounds; a fling comes to rest with the item nearest the
 /// anchor (the start or the center) at it, and `position` follows the item
 /// there.
-class BernScrollState(val horizontal: Boolean, val center: Boolean) {
+class BernScrollState(val horizontal: Boolean, val center: Boolean, val anchor: Float = 0f) {
     val scroll = ScrollState(0)
     /// The visible area, in the window.
     var viewport by mutableStateOf(Rect.Zero)
@@ -1341,16 +1349,28 @@ class BernScrollState(val horizontal: Boolean, val center: Boolean) {
     /// Where an item lies in the content, along the axis.
     private fun start(bounds: Rect): Float = along(bounds)
 
+    /// Where along an item and the view they meet: the middle when
+    /// snapping to the center, else the anchor's fraction (0, the start,
+    /// by default).
+    private val fraction get() = if (center) 0.5f else anchor
+
+    /// Where items not composed would be, by key, in the content: grids
+    /// that compose only the rows near the view tell them.
+    val estimates = mutableListOf<(Any) -> Rect?>()
+
+    /// Whether `key`'s item has reported where it is.
+    fun known(key: Any): Boolean = items.containsKey(key)
+
     /// The scroll offset that puts `key`'s item at the anchor.
     fun offset(key: Any): Float? {
-        val bounds = items[key] ?: return null
-        val at = start(bounds) - if (center) (length - size(bounds)) / 2 else 0f
+        val bounds = items[key] ?: estimates.firstNotNullOfOrNull { it(key) } ?: return null
+        val at = start(bounds) - (length - size(bounds)) * fraction
         return at.coerceIn(0f, scroll.maxValue.toFloat())
     }
 
     /// The item nearest the anchor when the view stands at `offset`.
     fun nearest(offset: Float = scroll.value.toFloat()): Any? = items.entries.minByOrNull { (_, bounds) ->
-        val anchor = if (center) start(bounds) + size(bounds) / 2 - length / 2 else start(bounds)
+        val anchor = start(bounds) - (length - size(bounds)) * fraction
         kotlin.math.abs(anchor - offset)
     }?.key
 
@@ -1383,8 +1403,10 @@ private class BernSnapFling(val state: BernScrollState, val decay: DecayAnimatio
 }
 
 /// A scroll view whose items it rests on (`snap`) and whose `position`
-/// follows the item at the anchor; setting `position` scrolls there with
-/// `motion`, and with `arrival` the item gives a nudge once there.
+/// follows the item at the anchor (`anchor` of the way along the view and
+/// the item); setting `position` scrolls there with `motion`, and with
+/// `arrival` the item gives a nudge once there. `onBrowsing` hears when the
+/// person starts scrolling it, a fling included, and when it stops.
 @Composable
 fun BernScroll(
     horizontal: Boolean,
@@ -1395,9 +1417,11 @@ fun BernScroll(
     arrival: BernMotion?,
     gap: Dp,
     modifier: Modifier = Modifier,
+    anchor: Float = 0f,
+    onBrowsing: ((Boolean) -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
-    val state = remember(horizontal) { BernScrollState(horizontal, snap == "center") }
+    val state = remember(horizontal, anchor) { BernScrollState(horizontal, snap == "center", anchor) }
     val decay = rememberSplineBasedDecay<Float>()
     val fling = remember(state, decay) { BernSnapFling(state, decay) }
     val density = LocalDensity.current
@@ -1423,11 +1447,31 @@ fun BernScroll(
     LaunchedEffect(position) {
         val wanted = position ?: return@LaunchedEffect
         if (!state.placed || wanted == state.nearest()) return@LaunchedEffect
+        // An item of a grid not composed yet: near where it would be first,
+        // then to where it is once it is composed there.
+        if (!state.known(wanted)) {
+            val near = state.offset(wanted) ?: return@LaunchedEffect
+            state.scroll.scrollTo(near.toInt())
+            repeat(3) { androidx.compose.runtime.withFrameNanos { } }
+        }
         val target = state.offset(wanted) ?: return@LaunchedEffect
         state.scrolling = true
         if (reduce) state.scroll.scrollTo(target.toInt()) else state.scroll.animateScrollTo(target.toInt(), motion.spec())
         state.scrolling = false
         if (arrival != null) state.arrive(wanted)
+    }
+    // Scrolled by hand: moving, and not to a set position.
+    if (onBrowsing != null) {
+        val browsing by rememberUpdatedState(onBrowsing)
+        LaunchedEffect(state) {
+            var byHand = false
+            snapshotFlow { state.scroll.isScrollInProgress && !state.scrolling }.collect { moving ->
+                if (moving != byHand) {
+                    byHand = moving
+                    browsing(moving)
+                }
+            }
+        }
     }
     // The person's scroll: once it rests, the position follows the item
     // at the anchor.
@@ -1441,8 +1485,18 @@ fun BernScroll(
     val margin = with(density) {
         if (state.center) ((if (horizontal) state.viewport.width else state.viewport.height) - state.largest).coerceAtLeast(0f).toDp() / 2 else 0.dp
     }
-    CompositionLocalProvider(LocalBernScroll provides state, LocalBernArrival provides arrival) {
-        Box(modifier.onGloballyPositioned { state.viewport = it.boundsInRoot() }) {
+    // Room at the end for floating tabs over the bottom of the view.
+    val barTop = LocalBernBarTop.current
+    val under = with(density) {
+        if (horizontal || barTop == null) 0.dp else (state.viewport.bottom - barTop.value).coerceAtLeast(0f).toDp()
+    }
+    val seen = remember { BernViewport() }
+    CompositionLocalProvider(
+        LocalBernScroll provides state,
+        LocalBernArrival provides arrival,
+        LocalBernViewport provides if (horizontal) LocalBernViewport.current else seen,
+    ) {
+        Box(modifier.onGloballyPositioned { state.viewport = it.boundsInRoot(); seen.bounds = state.viewport }) {
             val flinging = if (snap != null) fling else null
             if (horizontal) {
                 Row(
@@ -1459,7 +1513,7 @@ fun BernScroll(
                         .fillMaxWidth()
                         .then(if (flinging != null) Modifier.verticalScroll(state.scroll, flingBehavior = flinging) else Modifier.verticalScroll(state.scroll))
                         .onGloballyPositioned { state.content = it }
-                        .padding(PaddingValues(vertical = margin)),
+                        .padding(PaddingValues(top = margin, bottom = margin + under)),
                     verticalArrangement = Arrangement.spacedBy(gap),
                 ) { CompositionLocalProvider(LocalBernFlex provides this) { content() } }
             }
@@ -1468,6 +1522,193 @@ fun BernScroll(
 }
 
 val LocalBernArrival = compositionLocalOf<BernMotion?> { null }
+
+/// The visible part of the vertical scroll view around, in the window:
+/// grids in it compose only the rows near it.
+class BernViewport {
+    var bounds by mutableStateOf(Rect.Zero)
+}
+
+val LocalBernViewport = compositionLocalOf<BernViewport?> { null }
+
+/// A vertical scroll view: its content in a column that scrolls, the part
+/// in sight told to the grids in it.
+@Composable
+fun BernScrollColumn(modifier: Modifier, state: ScrollState, content: @Composable ColumnScope.() -> Unit) {
+    val viewport = remember { BernViewport() }
+    CompositionLocalProvider(LocalBernViewport provides viewport) {
+        Column(modifier.onGloballyPositioned { viewport.bounds = it.boundsInRoot() }.bernVerticalScroll(state), content = content)
+    }
+}
+
+/// Where a lazy grid's rows are, kept from its last layout for the
+/// estimates a scroll view's position asks for.
+private class BernLazyGeometry {
+    var coordinates: LayoutCoordinates? = null
+    var keys: List<Any> = emptyList()
+    var starts: IntArray = IntArray(1)
+    var columns = 1
+    var cell = 0
+    var spacing = 0
+    var rowSpacing = 0
+}
+
+/// A grid of keyed items that, in a vertical scroll view, composes only the
+/// rows near what is in sight: one view's height before and after it. Rows
+/// out of sight take the height they had when last composed, or that of
+/// the first item composed; outside a scroll view every row is composed.
+/// Laid out as `BernGrid`: `columns` as many as fit at `minWidth`, `gap`
+/// apart, rows `rowGap` apart, and with `cellRatio` every row as tall as
+/// the column width ÷ `cellRatio` + `cellExtra`. With `align` (a list from
+/// a column) each item keeps its own width and stands across the cell as
+/// that says; without, it fills the cell.
+@Composable
+fun <T> BernLazyGrid(
+    items: List<T>,
+    key: (T) -> Any,
+    minWidth: Dp,
+    gap: Dp,
+    rowGap: Dp? = null,
+    cellRatio: Float? = null,
+    cellExtra: Dp = 0.dp,
+    align: Alignment.Horizontal? = null,
+    modifier: Modifier = Modifier,
+    item: @Composable (T) -> Unit,
+) {
+    val viewport = LocalBernViewport.current
+    val scroll = LocalBernScroll.current
+    var top by remember { mutableFloatStateOf(Float.NaN) }
+    val geometry = remember { BernLazyGeometry() }
+    // Heights of composed items by key, at the width they were measured
+    // at; the guess for the rest.
+    val heights = remember { HashMap<Any, Int>() }
+    val guess = remember { intArrayOf(0, -1) }
+    // Each item's content, kept while its value stays, so scrolling does
+    // not compose items again.
+    val contents = remember { HashMap<Any, Pair<T, @Composable () -> Unit>>() }
+    DisposableEffect(scroll) {
+        val estimate: (Any) -> Rect? = estimate@{ wanted ->
+            val content = scroll?.content?.takeIf { it.isAttached } ?: return@estimate null
+            val grid = geometry.coordinates?.takeIf { it.isAttached } ?: return@estimate null
+            val at = geometry.keys.indexOf(wanted).takeIf { it >= 0 } ?: return@estimate null
+            val row = at / geometry.columns
+            val column = at % geometry.columns
+            val origin = content.localPositionOf(grid, Offset.Zero)
+            val y = geometry.starts.getOrElse(row) { 0 }.toFloat()
+            val height = (geometry.starts.getOrElse(row + 1) { 0 } - geometry.rowSpacing - geometry.starts.getOrElse(row) { 0 }).coerceAtLeast(0)
+            Rect(Offset(origin.x + column * (geometry.cell + geometry.spacing), origin.y + y), androidx.compose.ui.geometry.Size(geometry.cell.toFloat(), height.toFloat()))
+        }
+        scroll?.estimates?.add(estimate)
+        onDispose { scroll?.estimates?.remove(estimate) }
+    }
+    SubcomposeLayout(modifier.fillMaxWidth().onGloballyPositioned {
+        geometry.coordinates = it
+        top = it.positionInRoot().y
+    }) { constraints ->
+        val spacing = gap.roundToPx()
+        val rowSpacing = rowGap?.roundToPx() ?: spacing
+        val width = constraints.maxWidth
+        // Another width wraps text otherwise: heights are measured again.
+        if (width != guess[1]) {
+            guess[1] = width
+            guess[0] = 0
+            heights.clear()
+        }
+        val columns = maxOf(1, (width + spacing) / (minWidth.roundToPx() + spacing))
+        val cell = maxOf(0, (width - spacing * (columns - 1)) / columns)
+        val fixed = cellRatio?.takeIf { it > 0f }?.let { (cell / it + cellExtra.toPx()).toInt() }
+        val count = items.size
+        val rows = (count + columns - 1) / columns
+        val keys = items.map(key)
+        val starts = IntArray(rows + 1)
+        val lay = {
+            var at = 0
+            for (row in 0 until rows) {
+                starts[row] = at
+                var tallest = fixed ?: 0
+                if (fixed == null) {
+                    for (i in row * columns until minOf(count, (row + 1) * columns)) {
+                        tallest = maxOf(tallest, heights[keys[i]] ?: guess[0])
+                    }
+                }
+                at += tallest + rowSpacing
+            }
+            starts[rows] = at
+        }
+        lay()
+        // The first row whose bottom is below `y`.
+        fun rowAt(y: Float): Int {
+            var low = 0
+            var high = rows
+            while (low < high) {
+                val mid = (low + high) / 2
+                if (starts[mid + 1] - rowSpacing <= y) low = mid + 1 else high = mid
+            }
+            return low
+        }
+        val known = fixed != null || guess[0] > 0
+        val view = viewport?.bounds
+        val (from, to) = when {
+            viewport == null -> 0 to rows
+            top.isNaN() || !known || view == null || view.height <= 0f -> 0 to minOf(rows, (24 + columns - 1) / columns)
+            else -> {
+                val start = view.top - top - view.height
+                val end = view.bottom - top + view.height
+                val first = rowAt(maxOf(0f, start)).coerceAtMost(rows)
+                first to maxOf(first, minOf(rows, rowAt(maxOf(0f, end)) + 1))
+            }
+        }
+        val composed = ArrayList<Pair<Int, List<Placeable>>>()
+        for (i in from * columns until minOf(count, to * columns)) {
+            val id = keys[i]
+            val value = items[i]
+            val content = contents[id]?.takeIf { it.first == value }?.second ?: run {
+                val made: @Composable () -> Unit = { item(value) }
+                contents[id] = value to made
+                made
+            }
+            val placeables = subcompose(id, content).map {
+                it.measure(Constraints(minWidth = if (align == null) cell else 0, maxWidth = cell, minHeight = 0, maxHeight = Constraints.Infinity))
+            }
+            val height = placeables.maxOfOrNull { it.height } ?: 0
+            heights[id] = height
+            if (guess[0] == 0 && height > 0) guess[0] = height
+            composed.add(i to placeables)
+        }
+        // Items no longer here leave the content kept for them.
+        if (contents.size > count) contents.keys.retainAll(keys.toHashSet())
+        lay()
+        geometry.keys = keys
+        geometry.starts = starts
+        geometry.columns = columns
+        geometry.cell = cell
+        geometry.spacing = spacing
+        geometry.rowSpacing = rowSpacing
+        val total = if (rows > 0) starts[rows] - rowSpacing else 0
+        layout(width, total) {
+            for ((i, placeables) in composed) {
+                val x = (i % columns) * (cell + spacing)
+                val y = starts[i / columns]
+                for (placeable in placeables) {
+                    val across = align?.align(placeable.width, cell, layoutDirection) ?: 0
+                    placeable.place(x + across, y)
+                }
+            }
+        }
+    }
+}
+
+/// A vertical scroll with room at its end for floating tabs over its
+/// bottom, so its last views scroll clear of them.
+@Composable
+fun Modifier.bernVerticalScroll(state: ScrollState): Modifier {
+    val barTop = LocalBernBarTop.current ?: return verticalScroll(state)
+    val bottom = remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    val room = with(LocalDensity.current) { (bottom.floatValue - barTop.value).coerceAtLeast(0f).toDp() }
+    return onGloballyPositioned { bottom.floatValue = it.boundsInRoot().bottom }
+        .verticalScroll(state)
+        .padding(bottom = room)
+}
 
 /// A keyed item of a scroll view that rests on items or follows a
 /// position: it reports where it is, and nudges when a set position
@@ -1516,6 +1757,74 @@ fun Modifier.bernScrollEffect(scale: Float, opacity: Float, originX: Float = 0.5
             alpha = opacity + (1f - opacity) * near
         }
 }
+
+// MARK: - Glow
+
+/// Where an element that glows is in its window, and where the pointer
+/// last lit it.
+private class BernGlowPlace {
+    var origin by mutableStateOf(Offset.Zero)
+    var size by mutableStateOf(androidx.compose.ui.unit.IntSize.Zero)
+    var last = Offset.Zero
+
+    /// The pointer at `at` (window coordinates) in the element, if it is
+    /// over it.
+    fun local(at: Offset?): Offset? {
+        if (at == null) return null
+        val point = at - origin
+        val inside = point.x >= 0f && point.y >= 0f && point.x < size.width && point.y < size.height
+        return if (inside) point else null
+    }
+}
+
+/// `glow`: a white light follows the pointer over the element, `radius`
+/// times its shorter side, `opacity` at the centre, a fifth of that at 55%
+/// of the radius, none at the radius; it adds to what the element draws,
+/// inside `corner`, and fades in and out in 0.18 s. The pointer is read
+/// only while drawing, so a moving pointer recomposes nothing.
+@Composable
+fun Modifier.bernGlow(radius: Float, opacity: Float, corner: Float): Modifier {
+    val pointer = LocalBernPointer.current ?: return this
+    val place = remember { BernGlowPlace() }
+    val shown = remember { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(pointer) {
+        androidx.compose.runtime.snapshotFlow { place.local(pointer.at) != null }.collect { lit ->
+            shown.animateTo(if (lit) 1f else 0f, androidx.compose.animation.core.tween(180))
+        }
+    }
+    return onGloballyPositioned {
+        place.origin = it.localToWindow(Offset.Zero)
+        place.size = it.size
+    }.drawWithContent {
+        drawContent()
+        val strength = shown.value
+        if (strength <= 0f) return@drawWithContent
+        place.local(pointer.at)?.let { place.last = it }
+        val white = androidx.compose.ui.graphics.Color.White
+        val light = androidx.compose.ui.graphics.Brush.radialGradient(
+            0f to white.copy(alpha = opacity * strength),
+            0.55f to white.copy(alpha = opacity * 0.2f * strength),
+            1f to white.copy(alpha = 0f),
+            center = place.last,
+            radius = size.minDimension * radius,
+        )
+        val shape = androidx.compose.ui.graphics.Path().apply {
+            addRoundRect(androidx.compose.ui.geometry.RoundRect(
+                androidx.compose.ui.geometry.Rect(Offset.Zero, size),
+                androidx.compose.ui.geometry.CornerRadius(corner.dp.toPx()),
+            ))
+        }
+        clipPath(shape) { drawRect(light, blendMode = androidx.compose.ui.graphics.BlendMode.Plus) }
+    }
+}
+
+/// `blur`: the element's picture blurred with `radius`, kept inside its
+/// bounds and `corner`. Android draws blur from 12 (API 31) on; before
+/// that the element stays sharp.
+fun Modifier.bernBlur(radius: Dp, corner: Float): Modifier =
+    if (radius <= 0.dp) this
+    else clip(androidx.compose.foundation.shape.RoundedCornerShape(corner.dp))
+        .blur(radius, androidx.compose.ui.draw.BlurredEdgeTreatment.Unbounded)
 
 // MARK: - Spinning
 
@@ -1832,11 +2141,13 @@ fun BernPopoverButton(
     plain: Boolean,
     windowTheme: Boolean = false,
     style: BernStyle? = null,
+    iconSize: Float? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     var own by remember { mutableStateOf(false) }
     val showing = presented ?: own
     val show: (Boolean) -> Unit = { value -> if (onPresented != null) onPresented(value) else own = value }
+    val iconModifier = if (iconSize != null) Modifier.size(bernIconSize(iconSize)) else Modifier
     BernControl(
         target, "popover_button", label,
         actions = BernControlActions(activate = { show(true) }, value = { if (showing) "open" else "closed" }),
@@ -1844,7 +2155,7 @@ fun BernPopoverButton(
     if (shortcut != null) BernShortcut(shortcut) { show(true) }
     Box(Modifier.testTag(target)) {
         when {
-            icon != null -> IconButton(onClick = { show(!showing) }) { Icon(icon, contentDescription = label) }
+            icon != null -> IconButton(onClick = { show(!showing) }) { Icon(icon, contentDescription = label, modifier = iconModifier) }
             plain -> TextButton(onClick = { show(!showing) }) { Text(label) }
             else -> FilledTonalButton(onClick = { show(!showing) }) { Text(label) }
         }

@@ -236,6 +236,11 @@ fn gallery_generates_stagger_rails_popovers_and_four_sizes() {
     assert!(kotlin.contains("bernWindow.tv"));
     // The record in the about window turns.
     assert!(kotlin.contains(".bernSpin(true, 12.0)"), "{kotlin}");
+    // Its picture beneath, blurred and lit under the pointer.
+    assert!(
+        kotlin.contains("Box(Modifier.bernGlow(1f, 0.3f, 12f).bernBlur(16f.dp, 12f))"),
+        "{kotlin}"
+    );
     assert!(kotlin.contains("bernDefaultFocus()"));
     assert!(
         kotlin.contains("BernShortcut(\"escape\", { true }) {"),

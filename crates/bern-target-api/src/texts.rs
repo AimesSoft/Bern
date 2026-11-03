@@ -1614,6 +1614,9 @@ pub(crate) mod tests {
                 platform_icons: Default::default(),
                 alternate_icons: Default::default(),
                 publisher: None,
+                files_folder: false,
+                background_audio: false,
+                overlays: false,
             },
             languages: Languages {
                 supported: vec!["en".into()],

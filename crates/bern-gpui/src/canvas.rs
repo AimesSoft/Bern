@@ -142,11 +142,128 @@ pub(crate) fn outline(
     builder.close();
 }
 
+/// A point of a polygon, in window pixels.
+type Pt = (f32, f32);
+
+/// `bounds` with the corners `round` as a convex polygon, each rounded
+/// corner a quarter circle in eight steps, clockwise on the screen.
+fn rounded_outline(bounds: Bounds<Pixels>, round: crate::ctx::Corners) -> Vec<Pt> {
+    let (x, y) = (f32::from(bounds.origin.x), f32::from(bounds.origin.y));
+    let (w, h) = (f32::from(bounds.size.width), f32::from(bounds.size.height));
+    let limit = w.min(h).max(0.0) / 2.0;
+    let r = round.map(|radius| radius.clamp(0.0, limit));
+    let mut points = Vec::new();
+    for (radius, (cx, cy), start) in [
+        (r[0], (x + r[0], y + r[0]), 180.0_f32),
+        (r[1], (x + w - r[1], y + r[1]), 270.0),
+        (r[2], (x + w - r[2], y + h - r[2]), 0.0),
+        (r[3], (x + r[3], y + h - r[3]), 90.0),
+    ] {
+        if radius <= 0.0 {
+            points.push((cx, cy));
+            continue;
+        }
+        for step in 0..=8 {
+            let angle = (start + 90.0 * step as f32 / 8.0).to_radians();
+            points.push((cx + radius * angle.cos(), cy + radius * angle.sin()));
+        }
+    }
+    points
+}
+
+/// The part of the convex polygon `subject` inside the convex polygon
+/// `clip` (Sutherland–Hodgman).
+fn clip_polygon(subject: &[Pt], clip: &[Pt]) -> Vec<Pt> {
+    let area: f32 = (0..clip.len())
+        .map(|i| {
+            let (a, b) = (clip[i], clip[(i + 1) % clip.len()]);
+            a.0 * b.1 - b.0 * a.1
+        })
+        .sum();
+    let side = area.signum();
+    let cross = |a: Pt, b: Pt, p: Pt| (b.0 - a.0) * (p.1 - a.1) - (b.1 - a.1) * (p.0 - a.0);
+    let mut output = subject.to_vec();
+    for i in 0..clip.len() {
+        if output.is_empty() {
+            break;
+        }
+        let (a, b) = (clip[i], clip[(i + 1) % clip.len()]);
+        let input = std::mem::take(&mut output);
+        let crossing = |s: Pt, e: Pt| {
+            let (ds, de) = (cross(a, b, s), cross(a, b, e));
+            let t = ds / (ds - de);
+            (s.0 + (e.0 - s.0) * t, s.1 + (e.1 - s.1) * t)
+        };
+        for j in 0..input.len() {
+            let (s, e) = (input[(j + input.len() - 1) % input.len()], input[j]);
+            let (s_in, e_in) = (cross(a, b, s) * side >= 0.0, cross(a, b, e) * side >= 0.0);
+            if e_in {
+                if !s_in {
+                    output.push(crossing(s, e));
+                }
+                output.push(e);
+            } else if s_in {
+                output.push(crossing(s, e));
+            }
+        }
+    }
+    output
+}
+
+/// Fill `polygon` clipped to `clip`, if any of it is left.
+fn fill_clipped(
+    polygon: &[Pt],
+    clip: &[Pt],
+    background: impl Into<Background>,
+    window: &mut gpui::Window,
+) {
+    let points = clip_polygon(polygon, clip);
+    if points.len() < 3 {
+        return;
+    }
+    let mut builder = PathBuilder::fill();
+    builder.move_to(point(px(points[0].0), px(points[0].1)));
+    for at in &points[1..] {
+        builder.line_to(point(px(at.0), px(at.1)));
+    }
+    builder.close();
+    if let Ok(path) = builder.build() {
+        window.paint_path(path, background);
+    }
+}
+
+/// A shape's fill: its color, fading toward one edge with `fade`.
+fn background(shape: &ShapeOp, fill: Hsla) -> Background {
+    match shape.fade {
+        Some(edge) => {
+            let angle = match edge {
+                Fade::Up => 0.0,
+                Fade::Right => 90.0,
+                Fade::Down => 180.0,
+                Fade::Left => 270.0,
+            };
+            let mut clear = fill;
+            clear.a = 0.0;
+            linear_gradient(
+                angle,
+                linear_color_stop(fill, 0.0),
+                linear_color_stop(clear, 1.0),
+            )
+        }
+        None => fill.into(),
+    }
+}
+
+fn rect_polygon(bounds: Bounds<Pixels>) -> Vec<Pt> {
+    rounded_outline(bounds, [0.0; 4])
+}
+
 fn paint_shape(
     shape: &ShapeOp,
     fill: Option<Hsla>,
     stroke: Option<(Hsla, f32)>,
     canvas: Bounds<Pixels>,
+    clip: Option<&[Pt]>,
     window: &mut gpui::Window,
 ) {
     let origin: Point<Pixels> = canvas.origin + point(px(shape.x), px(shape.y));
@@ -158,26 +275,18 @@ fn paint_shape(
     if let Some(fill) = fill {
         let mut builder = PathBuilder::fill();
         outline(shape.kind, bounds, shape.corner, &mut builder);
-        if let Ok(path) = builder.build() {
-            let background: Background = match shape.fade {
-                Some(edge) => {
-                    let angle = match edge {
-                        Fade::Up => 0.0,
-                        Fade::Right => 90.0,
-                        Fade::Down => 180.0,
-                        Fade::Left => 270.0,
-                    };
-                    let mut clear = fill;
-                    clear.a = 0.0;
-                    linear_gradient(
-                        angle,
-                        linear_color_stop(fill, 0.0),
-                        linear_color_stop(clear, 1.0),
-                    )
-                }
-                None => fill.into(),
-            };
-            window.paint_path(path, background);
+        // A rectangle on the canvas's rounded corners is cut to them.
+        let polygon = match (clip, shape.kind) {
+            (Some(clip), ShapeKind::Rect | ShapeKind::Rounded) => {
+                Some((rounded_outline(bounds, [shape.corner; 4]), clip))
+            }
+            _ => None,
+        };
+        if let Some((polygon, clip)) = polygon {
+            let background = background(shape, fill);
+            fill_clipped(&polygon, clip, background, window);
+        } else if let Ok(path) = builder.build() {
+            window.paint_path(path, background(shape, fill));
         }
     }
     if let Some((color, width)) = stroke {
@@ -269,6 +378,7 @@ fn paint_pattern(
     twill: bool,
     line: Hsla,
     canvas: Bounds<Pixels>,
+    clip: Option<&[Pt]>,
     window: &mut gpui::Window,
 ) {
     let repeat: f32 = bands.iter().map(|(width, _)| width).sum();
@@ -298,10 +408,15 @@ fn paint_pattern(
                                 gpui::size(px(w), px(end - start)),
                             )
                         };
-                        let mut builder = PathBuilder::fill();
-                        outline(ShapeKind::Rect, bounds, 0.0, &mut builder);
-                        if let Ok(path) = builder.build() {
-                            window.paint_path(path, *color);
+                        match clip {
+                            Some(clip) => fill_clipped(&rect_polygon(bounds), clip, *color, window),
+                            None => {
+                                let mut builder = PathBuilder::fill();
+                                outline(ShapeKind::Rect, bounds, 0.0, &mut builder);
+                                if let Ok(path) = builder.build() {
+                                    window.paint_path(path, *color);
+                                }
+                            }
                         }
                     }
                 }
@@ -310,15 +425,32 @@ fn paint_pattern(
         }
     }
     if twill {
-        let mut builder = PathBuilder::stroke(px(0.5));
-        let mut offset = -h;
-        while offset < w {
-            builder.move_to(point(x0 + px(offset), y0 + px(h)));
-            builder.line_to(point(x0 + px(offset + h), y0));
-            offset += 4.0;
-        }
-        if let Ok(path) = builder.build() {
-            window.paint_path(path, line);
+        if let Some(clip) = clip {
+            // Each line a thin parallelogram, cut to the corners.
+            let (x0, y0) = (f32::from(x0), f32::from(y0));
+            let half = 0.25 * std::f32::consts::SQRT_2;
+            let mut offset = -h;
+            while offset < w {
+                let line_polygon = [
+                    (x0 + offset - half, y0 + h),
+                    (x0 + offset + h - half, y0),
+                    (x0 + offset + h + half, y0),
+                    (x0 + offset + half, y0 + h),
+                ];
+                fill_clipped(&line_polygon, clip, line, window);
+                offset += 4.0;
+            }
+        } else {
+            let mut builder = PathBuilder::stroke(px(0.5));
+            let mut offset = -h;
+            while offset < w {
+                builder.move_to(point(x0 + px(offset), y0 + px(h)));
+                builder.line_to(point(x0 + px(offset + h), y0));
+                offset += 4.0;
+            }
+            if let Ok(path) = builder.build() {
+                window.paint_path(path, line);
+            }
         }
     }
 }
@@ -382,22 +514,32 @@ pub fn canvas_element(c: &Ctx, width: Len, height: Len, ops: Vec<Op>) -> El {
                 }
             })
             .collect();
+    let round = c.round().map(|radius| radius * factor);
     let element = canvas(
         |_, _, _| {},
         move |bounds, _, window, _| {
-            for paint in &paints {
-                match paint {
-                    Paint::Shape(shape, fill, stroke) => {
-                        paint_shape(shape, *fill, *stroke, bounds, window)
-                    }
-                    Paint::Series(series, fill, stroke) => {
-                        paint_series(series, *fill, *stroke, bounds, window)
-                    }
-                    Paint::Pattern(bands, twill, line) => {
-                        paint_pattern(bands, *twill, *line, bounds, window)
+            // What it draws stays on the canvas, cut to the rounded corners
+            // it lies on.
+            let clip = round
+                .iter()
+                .any(|radius| *radius > 0.0)
+                .then(|| rounded_outline(bounds, round));
+            let clip = clip.as_deref();
+            window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
+                for paint in &paints {
+                    match paint {
+                        Paint::Shape(shape, fill, stroke) => {
+                            paint_shape(shape, *fill, *stroke, bounds, clip, window)
+                        }
+                        Paint::Series(series, fill, stroke) => {
+                            paint_series(series, *fill, *stroke, bounds, window)
+                        }
+                        Paint::Pattern(bands, twill, line) => {
+                            paint_pattern(bands, *twill, *line, bounds, clip, window)
+                        }
                     }
                 }
-            }
+            });
         },
     );
     let element = match width {

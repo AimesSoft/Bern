@@ -61,6 +61,14 @@ struct RawPage {
     label: BTreeMap<String, String>,
     icon: Option<String>,
     badge: Option<String>,
+    /// Boolean state field of the module: the page's navigation item shows
+    /// only while it is true.
+    when: Option<String>,
+    /// The slot's selection starts on this page.
+    #[serde(default)]
+    start: bool,
+    /// Whether a tab bar shows the page; `false` leaves it to sidebars.
+    tab: Option<bool>,
     component: String,
 }
 
@@ -131,6 +139,15 @@ pub struct PageConfig {
     pub icon: Option<String>,
     /// Numeric state field of this module shown as the page's live badge.
     pub badge: Option<String>,
+    /// Boolean state field of this module while which the page's
+    /// navigation item shows.
+    pub when: Option<String>,
+    /// The page's variant comes first in the slot's enum, so a selection
+    /// starts on it.
+    pub start: bool,
+    /// A `Tabs` lists the page; `false` leaves it to sidebars, for a page a
+    /// phone reaches some other way.
+    pub tab: bool,
     /// The module component showing the page.
     pub component: String,
 }
@@ -204,6 +221,16 @@ struct RawApp {
     alternate_icons: Option<BTreeMap<String, toml::Spanned<RawIcon>>>,
     /// Who publishes the application, for installers and packages.
     publisher: Option<String>,
+    /// iOS shows the application's Documents folder in Files.
+    #[serde(default)]
+    files_folder: bool,
+    /// The application plays audio on behind the lock screen and in the
+    /// background.
+    #[serde(default)]
+    background_audio: bool,
+    /// The application draws text over other apps (`bern::overlay`).
+    #[serde(default)]
+    overlays: bool,
 }
 
 /// `[app].icon`: one square PNG for every platform, or `[app.icon]` with
@@ -320,6 +347,12 @@ pub struct Config {
     pub alternate_icons: BTreeMap<String, BTreeMap<String, String>>,
     /// `[app].publisher`, trimmed; `None` when absent or blank.
     pub publisher: Option<String>,
+    /// `[app].files_folder`.
+    pub files_folder: bool,
+    /// `[app].background_audio`.
+    pub background_audio: bool,
+    /// `[app].overlays`.
+    pub overlays: bool,
     pub languages: Vec<String>,
     pub default_language: String,
     pub strict: bool,
@@ -1469,6 +1502,9 @@ pub fn load_excluding(path: &Path, excluded: &[String]) -> Result<Config, Vec<Di
             .publisher
             .map(|publisher| publisher.trim().to_string())
             .filter(|publisher| !publisher.is_empty()),
+        files_folder: raw.app.files_folder,
+        background_audio: raw.app.background_audio,
+        overlays: raw.app.overlays,
         languages: raw.languages.supported,
         default_language: raw.languages.default,
         strict: raw.languages.strict,
@@ -1577,13 +1613,15 @@ fn load_module(dir: &Path, written: &str) -> Result<ModuleConfig, Vec<Diagnostic
     .map_err(|error| errors.push(error))
     .ok();
     for page in &raw.pages {
-        if let Some(badge) = &page.badge
-            && !bern_protocol::valid_name(badge)
-        {
-            errors.push(Diagnostic::error(format!(
-                "{}: page badge `{badge}` must name a lower snake case state field",
-                manifest.display()
-            )));
+        for (what, field) in [("badge", &page.badge), ("when", &page.when)] {
+            if let Some(field) = field
+                && !bern_protocol::valid_name(field)
+            {
+                errors.push(Diagnostic::error(format!(
+                    "{}: page {what} `{field}` must name a lower snake case state field",
+                    manifest.display()
+                )));
+            }
         }
         for (what, name) in [("slot", &page.slot), ("page id", &page.id)] {
             if !bern_protocol::valid_name(name) {
@@ -1642,6 +1680,9 @@ fn load_module(dir: &Path, written: &str) -> Result<ModuleConfig, Vec<Diagnostic
                 label: page.label,
                 icon: page.icon,
                 badge: page.badge,
+                when: page.when,
+                start: page.start,
+                tab: page.tab.unwrap_or(true),
                 component: page.component,
             })
             .collect(),

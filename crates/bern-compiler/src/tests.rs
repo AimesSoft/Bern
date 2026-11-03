@@ -2329,6 +2329,196 @@ fn modules_compose_into_one_catalog_and_bind_by_namespace() {
     );
 }
 
+/// Copy the files of `from` into `to`, leaving out build output.
+fn copy_tree(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap().flatten() {
+        let (path, name) = (entry.path(), entry.file_name());
+        if name == "target" {
+            continue;
+        }
+        if path.is_dir() {
+            copy_tree(&path, &to.join(name));
+        } else if let Err(error) = std::fs::copy(&path, to.join(name)) {
+            // Another test's scratch manifest, gone again.
+            assert_eq!(
+                error.kind(),
+                std::io::ErrorKind::NotFound,
+                "{}",
+                path.display()
+            );
+        }
+    }
+}
+
+/// A page can come first in its slot, show only while a field of its
+/// module is true, and stay out of tab bars.
+#[test]
+fn module_pages_start_hide_and_stay_out_of_tabs() {
+    let planner = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/planner");
+    let dir = std::env::temp_dir().join(format!(
+        "bern-pages-test-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    copy_tree(&planner, &dir);
+    let edit = |file: &str, from: &str, to: &str| {
+        let path = dir.join(file);
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains(from), "{file}: {from}");
+        std::fs::write(&path, text.replacen(from, to, 1)).unwrap();
+    };
+    edit(
+        "modules/notes/protocol/src/lib.rs",
+        "pub count: i64,",
+        "pub count: i64,\n        pub any: bool,",
+    );
+    edit(
+        "modules/notes/Bern.toml",
+        "component = \"notes_page\"",
+        "component = \"notes_page\"\nwhen = \"any\"\nstart = true\ntab = false",
+    );
+    // The same pages in a tab bar too, in a compact window.
+    edit(
+        "Bern.toml",
+        "[[modules]]",
+        "[layouts]\ncompact_below = 600\n\n[[modules]]",
+    );
+    edit(
+        "planner-ui/src/lib.rs",
+        "        SplitView {",
+        "        Adaptive(id: shell) { Layout(size: compact) { Tabs(selection: draft.page) {\n            Pages(slot: main)\n            Tab(value: MainPage::Overview, label: tr! { \"zh-Hans\" => \"概览\", \"en\" => \"Overview\" }) { Spacer }\n        } }\n        Layout(size: expanded) { SplitView {",
+    );
+    edit(
+        "planner-ui/src/lib.rs",
+        "                    _ => { PageContent(slot: main, selected: draft.page) }\n                }\n            }\n        }",
+        "                    _ => { PageContent(slot: main, selected: draft.page) }\n                }\n            }\n        } } }",
+    );
+    let config = config::load(&dir.join("Bern.toml")).unwrap();
+    let compiled = compile(&config).unwrap_or_else(|errors| panic!("{errors:?}"));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // Its variant comes first, so a selection starts on it.
+    let pages = compiled.app.types.enum_def("MainPage").unwrap();
+    let variants: Vec<_> = pages.variants.iter().map(|v| v.name.as_str()).collect();
+    assert_eq!(variants, ["Notes", "Overview", "Archive"]);
+
+    /// Each navigation item of `kind` for the notes page, with how many
+    /// conditions stand around it.
+    fn items(nodes: &[ir::Node], kind: &str, around: usize, found: &mut Vec<usize>) {
+        for node in nodes {
+            match node {
+                ir::Node::Element(element) => {
+                    let notes = element
+                        .props
+                        .get("value")
+                        .is_some_and(|value| format!("{value:?}").contains("variant: 0"));
+                    if element.kind == kind && notes {
+                        found.push(around);
+                    }
+                    items(&element.children, kind, around, found);
+                }
+                ir::Node::If(node) => {
+                    for (_, body) in &node.branches {
+                        items(body, kind, around + 1, found);
+                    }
+                    items(&node.otherwise, kind, around, found);
+                }
+                _ => {}
+            }
+        }
+    }
+    let window = compiled
+        .app
+        .components
+        .iter()
+        .find(|component| component.name == "main_window")
+        .unwrap();
+    let (mut sidebar, mut tabs) = (Vec::new(), Vec::new());
+    items(
+        std::slice::from_ref(&window.body),
+        "SidebarItem",
+        0,
+        &mut sidebar,
+    );
+    items(std::slice::from_ref(&window.body), "Tab", 0, &mut tabs);
+    // The sidebar item shows while the module runs and while `any` holds.
+    assert_eq!(sidebar, [2]);
+    assert!(tabs.is_empty(), "no tab for a page with `tab = false`");
+}
+
+/// A module's protocol uses the value types of the modules it depends
+/// on; its descriptor carries a copy, and the application has one.
+#[test]
+fn module_protocols_use_the_types_of_their_dependencies() {
+    let planner = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/planner");
+    let dir = std::env::temp_dir().join(format!(
+        "bern-imports-test-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    copy_tree(&planner, &dir);
+    let protocol = dir.join("modules/tags/protocol/src/lib.rs");
+    let text = std::fs::read_to_string(&protocol).unwrap();
+    let text = text
+        .replacen(
+            "    use bern::prelude::*;",
+            "    use bern::prelude::*;\n    use notes_protocol::notes::Note;",
+            1,
+        )
+        .replacen(
+            "pub labels: Vec<Tag>,",
+            "pub labels: Vec<Tag>,\n        pub last: Option<Note>,",
+            1,
+        );
+    std::fs::write(&protocol, text).unwrap();
+    let config = config::load(&dir.join("Bern.toml")).unwrap();
+    let compiled = compile(&config).unwrap_or_else(|errors| panic!("{errors:?}"));
+    let _ = std::fs::remove_dir_all(&dir);
+    let state = compiled.app.types.record_def("TagsState").unwrap();
+    let last = state
+        .fields
+        .iter()
+        .find(|field| field.name == "last")
+        .unwrap();
+    assert_eq!(
+        last.ty,
+        Type::optional(Type::Record {
+            name: "Note".into()
+        })
+    );
+    let notes = compiled
+        .app
+        .types
+        .records
+        .iter()
+        .filter(|def| def.name == "Note")
+        .count();
+    assert_eq!(notes, 1, "one `Note` in the application");
+
+    // Without the dependency the type is unknown.
+    let undeclared = bern_syntax::items::parse_source_file(
+        r#"
+        #[bern::protocol(namespace = "tags", version = 1)]
+        pub mod tags {
+            use bern::prelude::*;
+            #[state]
+            pub struct State { pub last: Option<Note> }
+            #[commands]
+            pub trait Commands {}
+        }
+        "#,
+    )
+    .unwrap();
+    let error = bern_syntax::lower::protocol_descriptor(&undeclared.protocols[0].1).unwrap_err();
+    assert!(
+        error.to_string().contains("depend on the module"),
+        "{error}"
+    );
+}
+
 #[test]
 fn module_manifests_are_checked() {
     let planner = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/planner");
@@ -2684,6 +2874,51 @@ fn spinning_follows_a_condition() {
             "needs a `spin` condition",
         ),
         ("Text(content: app.title, spin: app.title)", "bool"),
+    ] {
+        let message = errors(body);
+        assert!(message.contains(expected), "{body}: {message}");
+    }
+}
+
+#[test]
+fn glow_and_blur_take_numbers() {
+    let compiled = compile_ui(&wrap(
+        r#"Column {
+            Text(content: app.title, glow: 1.05, glow_opacity: 0.22, blur: 28)
+            Text(content: app.title, glow: 1)
+        }"#,
+    ))
+    .unwrap_or_else(|errors| panic!("{errors:?}"));
+    let page = compiled.app.component("page").unwrap();
+    let mut seen = Vec::new();
+    page.body.walk(&mut |node| {
+        if let ir::Node::Element(element) = node
+            && element.kind == "Text"
+        {
+            seen.push(format!(
+                "{:?} {:?} {:?}",
+                element.number("glow"),
+                element.number("glow_opacity"),
+                element.number("blur")
+            ));
+        }
+    });
+    assert_eq!(
+        seen,
+        ["Some(1.05) Some(0.22) Some(28.0)", "Some(1.0) None None"]
+    );
+
+    for (body, expected) in [
+        ("Text(content: app.title, glow: 0)", "greater than zero"),
+        ("Text(content: app.title, blur: -4)", "greater than zero"),
+        (
+            "Text(content: app.title, glow: 1, glow_opacity: 1.5)",
+            "up to 1",
+        ),
+        (
+            "Text(content: app.title, glow_opacity: 0.3)",
+            "needs a `glow` radius",
+        ),
     ] {
         let message = errors(body);
         assert!(message.contains(expected), "{body}: {message}");
@@ -3540,6 +3775,7 @@ fn transitions_name_a_kind_and_a_motion_token() {
              open: grow(),
              zoom: pop(from: 0.5),
              pop: pop(0.6, bouncy),
+             sheet: move(bottom, wobble),
          }",
     );
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
@@ -3583,15 +3819,20 @@ fn transitions_name_a_kind_and_a_motion_token() {
         (TransitionKind::Grow { edge: Edge::Bottom }, "smooth")
     );
     assert_eq!(kind("zoom"), (TransitionKind::Pop { from: 0.5 }, "smooth"));
+    // A sheet: the whole size from the edge.
+    assert_eq!(
+        kind("sheet"),
+        (TransitionKind::Move { edge: Edge::Bottom }, "wobble")
+    );
     // A built-in transition is replaced, not declared twice.
     assert_eq!(kind("pop"), (TransitionKind::Pop { from: 0.6 }, "bouncy"));
-    assert_eq!(sheet.transitions.len(), 3 + 6);
+    assert_eq!(sheet.transitions.len(), 3 + 7);
 
     for (body, expected) in [
         ("transition { a: fade }", "a transition is `fade(token)`"),
         (
             "transition { a: spin(smooth) }",
-            "`spin` is not a transition; use fade, pop, grow or slide",
+            "`spin` is not a transition; use fade, pop, grow, slide or move",
         ),
         (
             "transition { a: slide(edge: left) }",

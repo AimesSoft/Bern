@@ -38,8 +38,8 @@ pub fn resolve(ty: &TypeRef, types: &TypeTable, span: Span) -> syn::Result<Type>
                 return Err(syn::Error::new(
                     span,
                     format!(
-                        "type `{name}` is not declared in this protocol; protocols are \
-                         self-contained, so declare it here with `#[value]`"
+                        "type `{name}` is not declared in this protocol; declare it here \
+                         with `#[value]`, or depend on the module whose protocol declares it"
                     ),
                 ));
             }
@@ -176,6 +176,26 @@ fn protocol_types(protocol: &ProtocolItem) -> Vec<&TypeRef> {
 
 /// Collect the protocol's types, state and commands into a descriptor.
 pub fn protocol_descriptor(protocol: &ProtocolItem) -> syn::Result<ProtocolDescriptor> {
+    protocol_descriptor_with(protocol, &TypeTable::default())
+}
+
+/// The named types `ty` refers to, in order.
+fn named_types<'a>(ty: &'a Type, names: &mut Vec<&'a str>) {
+    match ty {
+        Type::Record { name } | Type::Enum { name } => names.push(name),
+        Type::Optional { inner } | Type::List { inner } => named_types(inner, names),
+        _ => {}
+    }
+}
+
+/// [`protocol_descriptor`] for the protocol of a module, which may also
+/// use the value types of the protocols of the modules it depends on:
+/// `imported`. Each it uses is copied into its own table, with the types
+/// that one uses in turn, so the descriptor stays self-contained.
+pub fn protocol_descriptor_with(
+    protocol: &ProtocolItem,
+    imported: &TypeTable,
+) -> syn::Result<ProtocolDescriptor> {
     // Names first, so field types can refer to any declared value.
     let mut types = TypeTable::default();
     for value in &protocol.values {
@@ -215,6 +235,32 @@ pub fn protocol_descriptor(protocol: &ProtocolItem) -> syn::Result<ProtocolDescr
                 fields: vec![],
             }),
         }
+    }
+    // The imported types it names, and those they name, after its own.
+    let mut wanted: Vec<String> = Vec::new();
+    for ty in &used {
+        crate::named(ty, &mut |name| wanted.push(name.to_string()));
+    }
+    let mut next = 0;
+    while next < wanted.len() {
+        let name = wanted[next].clone();
+        next += 1;
+        if types.enum_def(&name).is_some() || types.record_def(&name).is_some() {
+            continue;
+        }
+        let mut uses = Vec::new();
+        if let Some(def) = imported.enum_def(&name) {
+            for field in def.variants.iter().flat_map(|variant| &variant.fields) {
+                named_types(&field.ty, &mut uses);
+            }
+            types.enums.push(def.clone());
+        } else if let Some(def) = imported.record_def(&name) {
+            for field in &def.fields {
+                named_types(&field.ty, &mut uses);
+            }
+            types.records.push(def.clone());
+        }
+        wanted.extend(uses.into_iter().map(str::to_string));
     }
     let lookup = types.clone();
     for value in &protocol.values {

@@ -319,6 +319,13 @@ target/bern/linux/Showcase/showcase
 
 验证（2026-10-29，`bern-ubuntu` 虚拟机，Broadway 上运行一个实际应用的 Linux debug 构建）：侧栏换页、表格选中行与搜索框经 `Watch` 到达引擎（切到分组后只列这一组，检查器显示选中的服务器，搜索只留匹配的行）；延迟以绿色显示，日志的错误行带错误类；设置窗口的“登录时启动”打开时写出自启文件、开关读回打开，关掉时删去文件；`bern-gtk` 的 clippy 与 107 个测试通过。
 
+## 歌词页所需的能力与网格宽度（2026-10-31）
+
+- 跟随状态的模糊、条件加粗、滚动定位比例 `anchor` 与手动滚动 `browsing` 已实现，见设计文档。模糊半径经 `bind_number` 按 `animate` 的弹簧变化；加粗加上 `label.bern-bold`（比文字样式的类更具体）；文字的 `animate` 也让绑定的字号按弹簧变化。
+- `Grid(min_width:)` 比可用宽度还宽时（例如用很大的 `min_width` 写成一列、按需构建的长列表），此前每格的最小宽度就是 `min_width`，网格把页面撑到上万像素宽，行尾的内容与同一页下方的播放栏都被挤出窗口。现在网格上方一个高 0 的探针测量可用宽度：`min_width` 放得下时照旧；放不下时每行一格、格子不再要求宽度，与其他目标一样一列铺满。量到之前按放不下处理，探针因此量到的是网格被给的宽度，而不是格子撑出的宽度。
+- 新增 Adwaita 图标：`arrow.clockwise`（view-refresh）、`backward.fill` / `forward.fill`（media-seek-backward / forward）、`chart.bar`（network-cellular-signal-excellent，竖条）、`checkmark.circle.fill`（emblem-ok）、`heart.fill`（emote-love）、`info.circle.fill`（dialog-information）、`iphone`（phone）、`list.bullet`（view-list-bullet）、`music.note.list`（folder-music）、`qrcode`（view-grid，Adwaita 没有二维码）、`qrcode.viewfinder`（camera-photo）、`quote.bubble(.fill)`（audio-input-microphone）、`rectangle.portrait.and.arrow.right`（system-log-out）、`repeat`、`repeat.1`、`shuffle`（media-playlist-*）、`text.bubble.fill`（chat-message-new）。均在 Ubuntu 24.04 的 Adwaita 中核对存在。
+- 实测（Ubuntu 24.04 虚拟机，GTK 经 Broadway）：歌单页行尾的专辑与时长、播放栏的控制、进度与音量都在窗口内；歌词页正在唱的一行加粗放大、两侧逐渐模糊；播放进度推进（应用音量设为 0）。
+
 ## 验证记录
 
 2026-10-11，Ubuntu 24.04（aarch64，GNOME 46 Wayland），经 SSH 驱动虚拟机桌面会话中的应用，截图来自开发快照：

@@ -4,7 +4,7 @@
 
 Updated: 2026-10-29. The tables below are compiled from [bern-target-api](../../crates/bern-target-api/src/lib.rs) and each backend's `TargetDescriptor.features`. macOS and iOS share one SwiftUI list; tvOS shares the SwiftUI generator with them, and its list is given separately in the [tvOS descriptor](../../crates/bern-backend-swiftui/src/tvos.rs).
 
-The optional GPUI target (`ui = "gpui"`, macOS, Windows, Linux) is a first version, built only on macOS, and is not included in the tables below; the components and features it declares are in the [GPUI implementation notes](../Implementation/GPUI.md).
+The optional GPUI target (`ui = "gpui"`, macOS, Windows, Linux) is a first version, built and run on all three platforms, and is not included in the tables below; the components and features it declares are in the [GPUI implementation notes](../Implementation/GPUI.md).
 
 ## Compile-time feature support
 

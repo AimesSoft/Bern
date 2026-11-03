@@ -336,6 +336,7 @@ fn install_menus(def: &'static AppDef, cx: &mut App) {
     cx.on_action(|_: &BringAllToFront, _| {
         crate::native::window_command(crate::native::WindowCommand::BringAllToFront)
     });
+    crate::bar::install(cx);
     cx.bind_keys([
         KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("cmd-h", Hide, None),
@@ -360,7 +361,7 @@ pub(crate) fn menus_follow_language(cx: &mut App) {
 }
 
 /// Set the macOS menus in the current language.
-fn set_menus(def: &AppDef, cx: &mut App) {
+pub(crate) fn set_menus(def: &AppDef, cx: &mut App) {
     MENU_LANGUAGE.with(|current| *current.borrow_mut() = text::language());
     if !cfg!(target_os = "macos") {
         return;
@@ -372,47 +373,102 @@ fn set_menus(def: &AppDef, cx: &mut App) {
             &[("name", crate::protocol::format::Arg::Text(name.clone()))],
         )
     };
+    // The application's `MenuBar` adds to these menus by role, where
+    // SwiftUI puts its command groups.
+    let group = |role: &str| {
+        let items = crate::bar::items(role);
+        let empty = items.is_empty();
+        (items, empty)
+    };
+    let mut app = match group("about") {
+        (_, true) => vec![MenuItem::action(named("bern.menu.about"), About)],
+        (about, false) => about,
+    };
+    app.push(MenuItem::separator());
+    if let (items, false) = group("app") {
+        app.extend(items);
+        app.push(MenuItem::separator());
+    }
+    app.extend([
+        MenuItem::os_submenu(
+            text::tr("bern.menu.services"),
+            gpui::SystemMenuType::Services,
+        ),
+        MenuItem::separator(),
+        MenuItem::action(named("bern.menu.hide"), Hide),
+        MenuItem::action(text::tr("bern.menu.hide_others"), HideOthers),
+        MenuItem::action(text::tr("bern.menu.show_all"), ShowAll),
+        MenuItem::separator(),
+        MenuItem::action(named("bern.menu.quit"), Quit),
+    ]);
+    let mut file = Vec::new();
+    if let (items, false) = group("file") {
+        file.extend(items);
+        file.push(MenuItem::separator());
+    }
+    file.push(MenuItem::action(text::tr("bern.window.close"), CloseWindow));
     // The edit commands are the text fields': enabled while one has the
     // focus, with the shortcuts they bind.
     use gpui::OsAction;
     use gpui_base::input;
-    cx.set_menus(vec![
-        Menu::new(name.clone()).items([
-            MenuItem::action(named("bern.menu.about"), About),
-            MenuItem::separator(),
-            MenuItem::os_submenu(
-                text::tr("bern.menu.services"),
-                gpui::SystemMenuType::Services,
-            ),
-            MenuItem::separator(),
-            MenuItem::action(named("bern.menu.hide"), Hide),
-            MenuItem::action(text::tr("bern.menu.hide_others"), HideOthers),
-            MenuItem::action(text::tr("bern.menu.show_all"), ShowAll),
-            MenuItem::separator(),
-            MenuItem::action(named("bern.menu.quit"), Quit),
-        ]),
-        Menu::new(text::tr("bern.menu.file"))
-            .items([MenuItem::action(text::tr("bern.window.close"), CloseWindow)]),
-        Menu::new(text::tr("bern.menu.edit")).items([
-            MenuItem::os_action(text::tr("bern.menu.undo"), input::Undo, OsAction::Undo),
-            MenuItem::os_action(text::tr("bern.menu.redo"), input::Redo, OsAction::Redo),
-            MenuItem::separator(),
-            MenuItem::os_action(text::tr("bern.menu.cut"), input::Cut, OsAction::Cut),
-            MenuItem::os_action(text::tr("bern.menu.copy"), input::Copy, OsAction::Copy),
-            MenuItem::os_action(text::tr("bern.menu.paste"), input::Paste, OsAction::Paste),
-            MenuItem::os_action(
-                text::tr("bern.menu.select_all"),
-                input::SelectAll,
-                OsAction::SelectAll,
-            ),
-        ]),
-        Menu::new(text::tr("bern.window.switcher")).items([
-            MenuItem::action(text::tr("bern.window.minimize"), Minimize),
-            MenuItem::action(text::tr("bern.menu.zoom"), Zoom),
-            MenuItem::separator(),
-            MenuItem::action(text::tr("bern.menu.front"), BringAllToFront),
-        ]),
-    ]);
+    let mut edit = vec![
+        MenuItem::os_action(text::tr("bern.menu.undo"), input::Undo, OsAction::Undo),
+        MenuItem::os_action(text::tr("bern.menu.redo"), input::Redo, OsAction::Redo),
+        MenuItem::separator(),
+        MenuItem::os_action(text::tr("bern.menu.cut"), input::Cut, OsAction::Cut),
+        MenuItem::os_action(text::tr("bern.menu.copy"), input::Copy, OsAction::Copy),
+        MenuItem::os_action(text::tr("bern.menu.paste"), input::Paste, OsAction::Paste),
+        MenuItem::os_action(
+            text::tr("bern.menu.select_all"),
+            input::SelectAll,
+            OsAction::SelectAll,
+        ),
+    ];
+    if let (items, false) = group("edit") {
+        edit.push(MenuItem::separator());
+        edit.extend(items);
+    }
+    // The system adds Enter Full Screen to the View menu itself, after the
+    // application's items.
+    let mut view = group("view").0;
+    if !view.is_empty() {
+        view.push(MenuItem::separator());
+    }
+    let mut windows = vec![
+        MenuItem::action(text::tr("bern.window.minimize"), Minimize),
+        MenuItem::action(text::tr("bern.menu.zoom"), Zoom),
+        MenuItem::separator(),
+        MenuItem::action(text::tr("bern.menu.front"), BringAllToFront),
+    ];
+    if let (items, false) = group("window") {
+        windows.push(MenuItem::separator());
+        windows.extend(items);
+    }
+    let mut menus = vec![
+        Menu::new(name.clone()).items(app),
+        Menu::new(text::tr("bern.menu.file")).items(file),
+        Menu::new(text::tr("bern.menu.edit")).items(edit),
+        Menu::new(text::tr("bern.menu.view")).items(view),
+    ];
+    menus.extend(crate::bar::own_menus());
+    menus.push(Menu::new(text::tr("bern.window.switcher")).items(windows));
+    let help = group("help").0;
+    let helps = !help.is_empty();
+    if helps {
+        menus.push(Menu::new(text::tr("bern.menu.help")).items(help));
+    }
+    cx.set_menus(menus);
+    // The system's own items: the window list and tiling in the Window
+    // menu, the search field in the Help menu.
+    crate::native::designate_menus(
+        &text::tr("bern.window.switcher"),
+        [
+            text::tr("bern.window.minimize"),
+            text::tr("bern.menu.zoom"),
+            text::tr("bern.menu.front"),
+        ],
+        helps.then(|| text::tr("bern.menu.help")).as_deref(),
+    );
 }
 
 /// The system GPUI draws on, from the platform crate the application

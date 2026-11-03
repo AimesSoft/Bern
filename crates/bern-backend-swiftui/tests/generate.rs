@@ -1802,6 +1802,16 @@ fn alternate_icons_compile_beside_the_primary_and_switch_at_run_time() {
             .any(|file| String::from_utf8_lossy(&file.contents)
                 .contains(".bernSpin(true, period: 12.0)"))
     );
+    // Its picture beneath, blurred and lit under the pointer, inside its
+    // corner.
+    assert!(
+        mac.iter()
+            .filter(|file| file.path.extension().is_some_and(|ext| ext == "swift"))
+            .any(|file| String::from_utf8_lossy(&file.contents)
+                .contains(".bernBlur(16.0, corner: 12.0)\n")
+                && String::from_utf8_lossy(&file.contents)
+                    .contains(".bernGlow(1.0, opacity: 0.3, corner: 12.0)"))
+    );
     let args = actool(&SwiftUiMacos.plan(&compiled.app, &mac_context).unwrap());
     assert!(args.contains("--alternate-app-icon AppIcon-neon"), "{args}");
     assert!(!args.contains("--app-icon"), "{args}");

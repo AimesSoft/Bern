@@ -91,6 +91,7 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 
 // MARK: - Motion
@@ -644,6 +645,17 @@ sealed class BernTransition {
     /// Grows along one axis from nothing, `edge` holding still, without
     /// fading.
     data class Grow(val edge: BernEdge) : BernTransition()
+    /// Moves in from beyond `edge`, its whole size away, without fading,
+    /// as a sheet.
+    data class Move(val edge: BernEdge) : BernTransition()
+}
+
+/// How far beyond `edge` an element `size` large stands, out of sight.
+private fun moveOffset(edge: BernEdge, size: IntSize): IntOffset = when (edge) {
+    BernEdge.Leading -> IntOffset(-size.width, 0)
+    BernEdge.Trailing -> IntOffset(size.width, 0)
+    BernEdge.Top -> IntOffset(0, -size.height)
+    BernEdge.Bottom -> IntOffset(0, size.height)
 }
 
 /// Where a growing element holds still.
@@ -670,6 +682,7 @@ fun bernEnter(transition: BernTransition?, motion: BernMotion?, delay: Double = 
             val distance = with(density) { transition.distance.dp.roundToPx() }
             slideIn(spec()) { slideOffset(transition.edge, distance) } + fadeIn(spec())
         }
+        is BernTransition.Move -> slideIn(spec()) { moveOffset(transition.edge, it) }
         // Where a branch changes, the room grows from the edge; an element
         // that appears on its own scales instead (`BernAppear`).
         is BernTransition.Grow -> when (transition.edge) {
@@ -717,6 +730,7 @@ fun bernExit(transition: BernTransition?, motion: BernMotion?): ExitTransition {
             val distance = with(density) { transition.distance.dp.roundToPx() }
             slideOut(motion.spec()) { slideOffset(transition.edge, distance) } + fadeOut(motion.spec())
         }
+        is BernTransition.Move -> slideOut(motion.spec()) { moveOffset(transition.edge, it) }
         is BernTransition.Grow -> when (transition.edge) {
             BernEdge.Leading -> shrinkHorizontally(motion.spec(), Alignment.Start)
             BernEdge.Trailing -> shrinkHorizontally(motion.spec(), Alignment.End)
@@ -796,9 +810,15 @@ fun BernAppear(
     val density = LocalDensity.current
     val layer = if (!animates) Modifier else Modifier.graphicsLayer {
         val shown = progress.value
-        alpha = shown.coerceIn(0f, 1f)
+        // A sheet moves in whole, without fading.
+        alpha = if (transition is BernTransition.Move && !reduced && motion != null) 1f else shown.coerceIn(0f, 1f)
         if (reduced || motion == null) return@graphicsLayer
         when (transition) {
+            is BernTransition.Move -> {
+                val offset = moveOffset(transition.edge, IntSize(size.width.toInt(), size.height.toInt()))
+                translationX = offset.x * (1 - shown)
+                translationY = offset.y * (1 - shown)
+            }
             is BernTransition.Pop -> {
                 scaleX = transition.from + (1 - transition.from) * shown
                 scaleY = scaleX

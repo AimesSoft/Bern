@@ -508,11 +508,15 @@ inline void Accordion(Parent const& p, Ctx const& ctx, AccordionProps props, Bui
 // ---------------------------------------------------------------------------
 // Flowing rows
 
-/// `Flow`: items at their own width from the leading edge, wrapping onto a
-/// new row where the width runs out; each row as tall as its tallest, its
-/// items centred in it, and a spacer taking the room left on its row.
+/// `Flow`: items at their own width from the leading edge, or from `align`,
+/// wrapping onto a new row where the width runs out; each row as tall as its
+/// tallest, its items centred in it, and a spacer taking the room left on
+/// its row.
 struct FlowPanel : controls::PanelT<FlowPanel> {
     double gap = 8;
+    /// Where a line without a spacer stands in the room left on it: 0 at
+    /// the leading edge, 0.5 centred, 1 at the trailing edge.
+    float align = 0;
 
     /// Lines broken at the width, a spacer taking no room there; then the
     /// spacers of a line share the room left on it.
@@ -549,14 +553,15 @@ struct FlowPanel : controls::PanelT<FlowPanel> {
                 spacers += item.spacer ? 1 : 0;
             }
             float share = spacers && std::isfinite(width) ? (std::max)(0.0f, width - used) / spacers : 0;
-            float at = 0;
+            float lead = !spacers && std::isfinite(width) ? (std::max)(0.0f, width - used) * align : 0;
+            float at = lead;
             for (auto const& item : line) {
                 float w = item.spacer ? share : item.width;
                 float h = item.spacer ? tall : item.height;
                 place(item.child, Rect{at, y + (tall - h) / 2, w, h});
                 at += w + spacing;
             }
-            widest = (std::max)(widest, at - spacing);
+            widest = (std::max)(widest, at - spacing - lead);
             y += tall + (n + 1 < lines.size() ? spacing : 0);
         }
         return Size{widest, y};
@@ -576,6 +581,8 @@ struct FlowPanel : controls::PanelT<FlowPanel> {
 
 struct FlowProps {
     Len gap;
+    /// 0.5 for `align: center`, 1 for `trailing`.
+    float align = 0;
 };
 
 inline void Flow(Parent const& p, Ctx const& ctx, FlowProps props, Build const& children) {
@@ -583,6 +590,7 @@ inline void Flow(Parent const& p, Ctx const& ctx, FlowProps props, Build const& 
     controls::Panel panel = impl.as<controls::Panel>();
     SetRole(panel, L"bern-fill-width");
     FlowPanel* flow = impl.get();
+    flow->align = props.align;
     BindLen(ctx, props.gap, nullptr, [flow, keep = winrt::make_weak(panel)](double v) {
         flow->gap = (std::max)(0.0, v);
         if (auto panel = keep.get()) panel.InvalidateMeasure();
@@ -650,7 +658,9 @@ inline void Modal(Parent const&, Ctx const& ctx, ModalProps props, Build const& 
     resources.Insert(winrt::box_value(L"ContentDialogMaxHeight"), winrt::box_value(100000.0));
     auto content = MakeFlex(false, 0, xaml::Thickness{0, 0, 0, 0}, !height);
     dialog.Content(content);
-    children(Parent::Aligned(content, xaml::HorizontalAlignment::Stretch, std::nullopt), ctx);
+    // What fills spans the card; the rest stands in its middle, as in the
+    // SwiftUI card, not at its leading edge.
+    children(Parent::Aligned(content, xaml::HorizontalAlignment::Center, std::nullopt), ctx);
     // The declared size, within the window's edges, or the whole window.
     bool cover = props.cover;
     auto size = [weak = winrt::make_weak(dialog), content, root, win, width, height, cover] {

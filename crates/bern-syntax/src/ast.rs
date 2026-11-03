@@ -159,6 +159,16 @@ pub struct Prop {
     pub value: Expr,
 }
 
+impl Prop {
+    /// The value when it is a lone keyword, as `cover` in `fit: cover`.
+    pub fn keyword(&self) -> Option<String> {
+        match &self.value {
+            Expr::Path(path) => path.single().map(Ident::to_string),
+            _ => None,
+        }
+    }
+}
+
 /// `receiver.member.method(args)`: an action after `=>`, or the query call
 /// of a `query:` property.
 #[derive(Clone, Debug)]

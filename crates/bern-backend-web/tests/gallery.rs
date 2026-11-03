@@ -85,6 +85,8 @@ fn gallery_generates_television_layouts_shortcuts_and_first_focus() {
         "color: \"accent\"",
         // The record in the about window turns.
         "spin: () => (true), spinPeriod: 12",
+        // Its picture beneath, blurred and lit under the pointer.
+        "glow: 1, glowOpacity: 0.3, blur: 16",
     ] {
         assert!(
             script.contains(expected),

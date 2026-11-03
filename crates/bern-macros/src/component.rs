@@ -525,12 +525,21 @@ impl<'a> Gen<'a> {
     fn element(&mut self, element: &Element, ctx: &Ctx) -> TokenStream {
         let name = element.name.to_string();
         let prop_names: Vec<String> = element.props.iter().map(|p| p.name.to_string()).collect();
+        let keywords: Vec<(String, String)> = element
+            .props
+            .iter()
+            .filter_map(|prop| Some((prop.name.to_string(), prop.keyword()?)))
+            .collect();
         let child_names: Option<Vec<Option<String>>> = element.children.as_ref().map(|children| {
             bern_syntax::child_names(children, spec::DYNAMIC_ITEMS.contains(&name.as_str()))
         });
         let shape = ElementShape {
             name: &name,
             props: prop_names.iter().map(String::as_str).collect(),
+            keywords: keywords
+                .iter()
+                .map(|(name, value)| (name.as_str(), value.as_str()))
+                .collect(),
             has_template: element.template.is_some(),
             children: child_names.as_ref().map(|children| {
                 children

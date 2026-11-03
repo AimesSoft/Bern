@@ -83,7 +83,7 @@ impl Generator<'_> {
         let widens = element.kind == "Button" && widens(&element.children);
         let in_row = (fills || widens) && ctx.scope == Scope::Row;
         let weight = if in_row { ".weight(1f)" } else { "" };
-        if element.kind == "Button" && !element.children.is_empty() {
+        if element.kind == "Button" && element.has_content() {
             // The content is what the button shows; the label names it.
             let style = self
                 .style_of(element)
@@ -186,8 +186,13 @@ impl Generator<'_> {
         let shortcut = self
             .shortcut_keys(element, "shortcut")
             .unwrap_or_else(|| "null".into());
+        let plain = plain || element.keyword("prominence") == Some("plain");
+        let icon_size = element
+            .number("font_size")
+            .map(|size| format!(", iconSize = {}", float(size)))
+            .unwrap_or_default();
         out.open(format!(
-            "BernPopoverButton({}, {label}, {}, {presented}, {on_presented}, {shortcut}, {plain}, windowTheme = {}{}) {{",
+            "BernPopoverButton({}, {label}, {}, {presented}, {on_presented}, {shortcut}, {plain}, windowTheme = {}{}{icon_size}) {{",
             self.target(element, ctx),
             Self::icon(element.icon("icon")),
             bern_target_api::style::popover_window_theme(self.app, "android", element),
@@ -436,11 +441,11 @@ impl Generator<'_> {
         }
         let style = element.keyword("style").unwrap_or("menu");
         // In a flow the picker keeps its own width, and chips are items of
-        // the flow.
-        let flow = if ctx.scope == Scope::Flow {
-            ", inFlow = true"
-        } else {
-            ""
+        // the flow; in a row it keeps its own width beside its neighbours.
+        let flow = match ctx.scope {
+            Scope::Flow => ", inFlow = true",
+            Scope::Row => ", inRow = true",
+            _ => "",
         };
         out.line(format!(
             "BernPicker({label}, {options}, {value}, {option_label}, {{ {change} }}, {}, Modifier.testTag({target}), labelHidden = {}{}{flow})",
@@ -452,8 +457,18 @@ impl Generator<'_> {
 
     pub(super) fn language_picker(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         let label = self.text_prop(element, "label").unwrap_or_default();
+        let hidden = if element.keyword("label_hidden") == Some("true") {
+            ", labelHidden = true"
+        } else {
+            ""
+        };
+        let row = if ctx.scope == Scope::Row {
+            ", inRow = true"
+        } else {
+            ""
+        };
         out.line(format!(
-            "BernLanguagePicker({label}, {})",
+            "BernLanguagePicker({label}, {}{hidden}{row})",
             self.target(element, ctx)
         ));
     }

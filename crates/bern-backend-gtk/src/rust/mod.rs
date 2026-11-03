@@ -186,6 +186,9 @@ impl<'a> Generator<'a> {
                     "b::TransitionKind::Slide(b::Edge::{edge:?}, {})",
                     float(*distance)
                 ),
+                TransitionKind::Move { edge } => {
+                    format!("b::TransitionKind::Move(b::Edge::{edge:?})")
+                }
             };
             out.line(format!(
                 "static {}: b::Transition = b::Transition {{ kind: {kind}, motion: {} }};",

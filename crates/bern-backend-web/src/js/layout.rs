@@ -145,6 +145,9 @@ impl Generator<'_> {
                 self.animate(element).unwrap_or_else(|| "null".into())
             ));
         }
+        if let Some(each) = bern_ir::lazy_grid_items(element) {
+            return self.lazy_grid(out, element, each);
+        }
         self.container_children(
             out,
             element,
@@ -152,6 +155,80 @@ impl Generator<'_> {
             &first,
             ");",
         );
+    }
+
+    /// A grid of one `ForEach`, which in a vertical scroll view builds only
+    /// the rows near the view (`B.LazyGrid`).
+    fn lazy_grid(&self, out: &mut Out, element: &Element, each: &Element) {
+        let (Some(items), Some(template), Some(Prop::Key { name, .. })) =
+            (each.expr("items"), &each.template, each.prop("key"))
+        else {
+            return;
+        };
+        // The rows' lengths bind on the grid of the built rows, the padding
+        // on the whole.
+        let mut inner = self.layout_lines(element, &[("gap", "gap"), ("row_gap", "rowGap")]);
+        let animate = self.animate(element).unwrap_or_else(|| "null".into());
+        let fixed = match element.prop("min_width") {
+            Some(Prop::Expr { .. }) => {
+                inner.push(format!(
+                    "F.bindGridMinWidth(p, {}, {animate});",
+                    self.length(element, "min_width").expect("min width"),
+                ));
+                None
+            }
+            _ => Some(number(element.number("min_width").unwrap_or(0.0))),
+        };
+        if let Some(ratio) = element.number("cell_ratio") {
+            inner.push(format!(
+                "F.bindGridCells(p, {}, {}, {animate});",
+                number(ratio),
+                self.length(element, "cell_extra")
+                    .unwrap_or_else(|| "0".into()),
+            ));
+        }
+        let outer: Vec<String> = [
+            ("padding", "padding"),
+            ("padding_x", "paddingInline"),
+            ("padding_y", "paddingBlock"),
+        ]
+        .iter()
+        .filter_map(|(name, property)| {
+            self.length(element, name)
+                .map(|value| format!("F.bindLength(p, {}, {value}, {animate});", string(property)))
+        })
+        .collect();
+        // Rows built as the grid first shows take turns with `stagger`.
+        let stagger = element.number("stagger").or_else(|| each.number("stagger"));
+        if let Some(step) = stagger {
+            out.open(format!("F.staggered({}, () => {{", number(step)));
+        }
+        let min_width = fixed
+            .map(|width| format!("minWidth: {width}, "))
+            .unwrap_or_default();
+        // A list lowered from a column places its rows as the column would.
+        let align = bern_ir::lowered_list_align(element)
+            .map(|align| format!(", align: {}", string(align)))
+            .unwrap_or_default();
+        out.open(format!(
+            "B.LazyGrid(p, ctx, {{ {min_width}items: () => {}, key: (v) => v.{name}{align} }}, (p) => {{",
+            self.expr(items)
+        ));
+        for line in &inner {
+            out.line(line);
+        }
+        out.close("}, (p) => {");
+        out.indent += 1;
+        for line in &outer {
+            out.line(line);
+        }
+        out.close(format!("}}, (p, ctx, {}) => {{", local(&template.var)));
+        out.indent += 1;
+        self.nodes(out, &each.children);
+        out.close("});");
+        if stagger.is_some() {
+            out.close("});");
+        }
     }
 
     pub(super) fn stack(&self, out: &mut Out, element: &Element) {
@@ -236,6 +313,7 @@ impl Generator<'_> {
             ("corner", self.length(element, "corner")),
             ("animate", self.animate(element)),
             ("cover", Self::keyword(element, "cover")),
+            ("align", Self::keyword(element, "align")),
         ]);
         self.children(
             out,
@@ -247,7 +325,9 @@ impl Generator<'_> {
 
     pub(super) fn scroll_view(&self, out: &mut Out, element: &Element) {
         let position = self.field(element, "position");
-        let snapping = element.keyword("snap").is_some() || position.is_some();
+        let browsing = self.field(element, "browsing");
+        let snapping =
+            element.keyword("snap").is_some() || position.is_some() || browsing.is_some();
         let props = Self::props(vec![
             ("axis", Self::keyword(element, "axis")),
             ("snap", Self::keyword(element, "snap")),
@@ -264,6 +344,8 @@ impl Generator<'_> {
             ),
             ("openAt", element.number("open_at").map(number)),
             ("openCenter", self.length(element, "open_center")),
+            ("anchor", element.number("anchor").map(number)),
+            ("browsing", browsing),
         ]);
         let first = self.layout_lines(element, &[]);
         self.children_with(

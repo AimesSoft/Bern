@@ -44,9 +44,7 @@ bern-adapter-mcp = {{ {mcp_adapter} }}
 {modules}
 [workspace]
 
-[profile.release]
-panic = "unwind"
-{release}"#,
+{profiles}"#,
         version = app.app.version,
         gtk = bern("bern-gtk"),
         svg = {
@@ -77,7 +75,7 @@ panic = "unwind"
         engine = context.engine_package,
         engine_path = path(&context.engine_path),
         modules = module_dependencies(context, true),
-        release = bern_target_api::glue::RELEASE_PROFILE,
+        profiles = bern_target_api::glue::profiles(context, "panic = \"unwind\"\n"),
     )
 }
 

@@ -332,7 +332,7 @@ pub fn Table(
 
     // The row menu.
     if !menu.is_empty() {
-        let popover = row_menu(ctx, &view, menu);
+        let popover = row_menu(ctx, view.upcast_ref(), menu);
         let open_at = {
             let view = view.clone();
             let rows = Rc::clone(&rows);
@@ -532,7 +532,52 @@ fn row_key_at(
 
 /// The popover menu of the rows, with an action per item; each item is
 /// also a control, so external entries reach it while the menu is closed.
-fn row_menu(ctx: &Ctx, view: &gtk::ColumnView, items: Vec<Option<MenuItem>>) -> gtk::PopoverMenu {
+/// A context menu on `widget`: a secondary click, a long touch, or the menu
+/// key or Shift+F10 opens `items` where it happened.
+pub(crate) fn context_menu(ctx: &Ctx, widget: &gtk::Widget, items: Vec<Option<MenuItem>>) {
+    let popover = row_menu(ctx, widget, items);
+    let open_at = Rc::new(move |x: f64, y: f64| {
+        popover.set_pointing_to(Some(&gtk::gdk::Rectangle::new(
+            x.round() as i32,
+            y.round() as i32,
+            1,
+            1,
+        )));
+        popover.popup();
+    });
+    let click = gtk::GestureClick::new();
+    click.set_button(gtk::gdk::BUTTON_SECONDARY);
+    let open = Rc::clone(&open_at);
+    click.connect_pressed(move |gesture, _, x, y| {
+        gesture.set_state(gtk::EventSequenceState::Claimed);
+        open(x, y);
+    });
+    widget.add_controller(click);
+    let press = gtk::GestureLongPress::new();
+    press.set_touch_only(true);
+    let open = Rc::clone(&open_at);
+    press.connect_pressed(move |gesture, x, y| {
+        gesture.set_state(gtk::EventSequenceState::Claimed);
+        open(x, y);
+    });
+    widget.add_controller(press);
+    let keys = gtk::ShortcutController::new();
+    let open = Rc::clone(&open_at);
+    let shown = widget.clone();
+    keys.add_shortcut(gtk::Shortcut::new(
+        gtk::ShortcutTrigger::parse_string("Menu|<Shift>F10"),
+        Some(gtk::CallbackAction::new(move |_, _| {
+            open(
+                f64::from(shown.width()) / 2.0,
+                f64::from(shown.height()) / 2.0,
+            );
+            glib::Propagation::Stop
+        })),
+    ));
+    widget.add_controller(keys);
+}
+
+fn row_menu(ctx: &Ctx, view: &gtk::Widget, items: Vec<Option<MenuItem>>) -> gtk::PopoverMenu {
     let group = gio::SimpleActionGroup::new();
     let mut entries = Vec::new();
     for (index, item) in items.into_iter().enumerate() {

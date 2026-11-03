@@ -184,6 +184,11 @@ struct TextProps {
     Len lineHeight;
     /// `markdown`: the content is inline Markdown.
     bool markdown = false;
+    /// `bold`: the text is bold while this holds, else in its style's
+    /// weight.
+    Get bold;
+    /// `animate`: a size that follows state springs to each new value.
+    Motion const* animate = nullptr;
 };
 
 /// `Text(markdown)` here: the words of inline Markdown without its marks,
@@ -232,7 +237,14 @@ inline void Text(Parent const& p, Ctx const& ctx, TextProps props) {
         block.MaxLines(static_cast<int32_t>((std::max)(1.0, *props.lines)));
         block.TextTrimming(xaml::TextTrimming::CharacterEllipsis);
     }
-    BindLen(ctx, props.fontSize, nullptr, [block](double size) { block.FontSize((std::max)(1.0, size)); });
+    BindLen(ctx, props.fontSize, props.animate, [block](double size) { block.FontSize((std::max)(1.0, size)); });
+    if (props.bold) {
+        auto weight = block.FontWeight();
+        Reactive::Run([bold = props.bold, ctx, weight, weak = winrt::make_weak(block)] {
+            bool on = R::Truthy(bold(ctx));
+            if (auto text = weak.get()) text.FontWeight(on ? WeightNamed("bold") : weight);
+        });
+    }
     if (props.lineHeight.Given()) {
         block.LineStackingStrategy(xaml::LineStackingStrategy::BlockLineHeight);
         BindLen(ctx, props.lineHeight, nullptr, [block](double height) { block.LineHeight((std::max)(0.0, height)); });
@@ -349,11 +361,18 @@ inline std::string ExtensionOf(std::string const& name) {
     return ext;
 }
 
-/// Whether a file named `name` (or at a URL) is one of `kinds`.
+/// Whether a file named `name` (or at a URL) is one of `kinds`; a `file:`
+/// URL of a folder is one only where `kinds` has `folder`.
 inline bool Accepts(std::string const& name, char const* kinds) {
+    auto words = FileWords(kinds);
+    if (std::find(words.begin(), words.end(), "any") != words.end()) return true;
+    if (auto path = Host::FilePath(name)) {
+        DWORD attributes = GetFileAttributesW(path->c_str());
+        if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY))
+            return std::find(words.begin(), words.end(), "folder") != words.end();
+    }
     auto ext = ExtensionOf(name);
-    for (auto const& word : FileWords(kinds)) {
-        if (word == "any") return true;
+    for (auto const& word : words) {
         if (word == "folder") continue;
         if (word[0] == '.') {
             if (ext == word.substr(1)) return true;
@@ -379,6 +398,25 @@ inline void GiveFile(Ctx const& ctx, Field field, std::string const& url) {
 inline winrt::fire_and_forget PickFile(Ctx ctx, char const* kinds, std::function<void(std::string const&)> give);
 inline winrt::fire_and_forget PasteText(Ctx ctx, Field field, std::function<void()> then);
 
+struct MenuItemDef {
+    char const* id = "";
+    Str label;
+    char const* icon = nullptr;
+    char const* role = nullptr;
+    Get enabled;
+    Act action;
+    std::optional<Field> pick;
+    char const* files = nullptr;
+    std::optional<Field> paste;
+    /// Shown beside the item; the shortcut itself is registered on its own.
+    char const* shortcut = nullptr;
+    /// The text the shortcut follows instead of `shortcut`.
+    Str boundShortcut;
+};
+
+/// Sets a context menu of `items` on `element`, defined after the menus.
+inline void ContextMenuOn(Ctx const& ctx, xaml::UIElement const& element, std::vector<std::optional<MenuItemDef>> const& items);
+
 struct ButtonProps {
     char const* id = "";
     Str label;
@@ -399,6 +437,8 @@ struct ButtonProps {
     /// `width: fill`: across its container.
     bool fill = false;
     std::optional<double> iconSize;
+    /// `ContextMenu`: what a secondary click or pressing and holding opens.
+    std::vector<std::optional<MenuItemDef>> menu;
 };
 
 /// What a button does: its action, after asking for a file with `pick` or
@@ -563,6 +603,7 @@ inline void Button(Parent const& p, Ctx const& ctx, ButtonProps props) {
     auto run = RunOf(ctx, props.pick, props.files, props.action, props.paste);
     if (run.activate) button.Click([activate = run.activate](auto&&, auto&&) { activate(); });
     Controls::Register(ctx, props.id, "button", text, isEnabled, Actions{.activate = run.activate, .focus = FocusOf(button), .setFile = run.give, .files = props.files});
+    if (!props.menu.empty()) ContextMenuOn(ctx, button, props.menu);
     xaml::UIElement shown = button;
     ShapeControl(ctx, button, props.shape);
     if (props.fill) {
@@ -627,6 +668,7 @@ inline void ContentButton(Parent const& p, Ctx const& ctx, ButtonProps props, Bu
     auto run = RunOf(ctx, props.pick, props.files, props.action, props.paste);
     if (run.activate) button.Click([activate = run.activate](auto&&, auto&&) { activate(); });
     Controls::Register(ctx, props.id, "button", text, isEnabled, Actions{.activate = run.activate, .focus = FocusOf(button), .setFile = run.give, .files = props.files});
+    if (!props.menu.empty()) ContextMenuOn(ctx, button, props.menu);
     xaml::UIElement shown = button;
     // A capsule clips its content to the button's corners.
     ShapeControl(ctx, button, props.shape);
@@ -1023,8 +1065,10 @@ inline void Search(Parent const& p, Ctx const& ctx, SearchProps props, Build con
     if (!props.field) return;
     auto box = SearchBox(ctx, props);
     if (ctx.toolbar) box.Width(240);
-    // A field standing in the page at its own size.
+    // A field standing in the page at its own size; without one it takes
+    // the free width of its row and spans its column, as a text field does.
     if (props.width) box.Width(*props.width);
+    else if (!ctx.toolbar) SetRole(box, L"bern-fill-width");
     if (props.height) box.Height(*props.height);
     if (props.fontSize) box.FontSize(*props.fontSize);
     if (results) {
@@ -1719,6 +1763,8 @@ struct GridProps {
     Len paddingY;
     std::optional<double> cellRatio;
     Len cellExtra;
+    /// The grid's own `stagger`, for a grid that builds its rows lazily.
+    std::optional<double> stagger;
 };
 
 inline void Grid(Parent const& p, Ctx const& ctx, GridProps props, Build const& children) {
@@ -1772,7 +1818,74 @@ struct LayersProps {
     /// `under_bars`: while shown, the layers fill the window up to its top
     /// edge, under the title bar and the header.
     bool underBars = false;
+    /// Under the bars with controls of its own: a page over the window.
+    bool covers = false;
 };
+
+/// Whether `element`, through the wrappers, holders and one-child
+/// containers around it (an `Adaptive`'s layout holds its content so), is
+/// a stack under the bars.
+inline bool UnderBars(xaml::UIElement element) {
+    for (int depth = 0; element && depth < 8; ++depth) {
+        element = Unwrapped(element);
+        auto framework = element.try_as<xaml::FrameworkElement>();
+        if (!framework) return false;
+        if (framework.Resources().HasKey(winrt::box_value(L"bern.underBars"))) return true;
+        if (auto holder = element.try_as<controls::ContentControl>()) {
+            element = holder.Content().try_as<xaml::UIElement>();
+        } else if (auto border = element.try_as<controls::Border>()) {
+            element = border.Child();
+        } else if (auto panel = element.try_as<controls::Panel>(); panel && panel.Children().Size() == 1) {
+            element = panel.Children().GetAt(0);
+        } else {
+            return false;
+        }
+    }
+    return false;
+}
+
+/// While a layer under the bars has the window's content reach up under
+/// the title bar, the other layers of a stack written in the window stay
+/// below it, as they do on the other targets: each is moved down by the
+/// title bar's height, and back when no such layer is shown.
+inline void KeepBelowBars(controls::Grid const& layers, Win& win) {
+#if BERN_WINUI
+    Win* raw = &win;
+    auto added = winrt::box_value(L"bern.barTop");
+    auto apply = [weak = winrt::make_weak(layers), raw, added] {
+        auto grid = weak.get();
+        if (!grid) return;
+        double top = raw->underBars.Peek() > 0 && !raw->owner && raw->titleBar ? raw->titleBar.ActualHeight() : 0.0;
+        for (auto const& child : grid.Children()) {
+            auto framework = child.try_as<xaml::FrameworkElement>();
+            if (!framework) continue;
+            bool under = UnderBars(child);
+            // A layer found to be under the bars only once its content was
+            // built gives back what it was moved down.
+            double wanted = under ? 0.0 : top;
+            auto resources = framework.Resources();
+            double before = resources.HasKey(added) ? winrt::unbox_value<double>(resources.Lookup(added)) : 0.0;
+            if (before == wanted) continue;
+            auto margin = framework.Margin();
+            margin.Top += wanted - before;
+            framework.Margin(margin);
+            resources.Insert(added, winrt::box_value(wanted));
+        }
+    };
+    Reactive::Run([raw, apply] {
+        raw->underBars.Get();
+        Reactive::Untrack([&] {
+            apply();
+            return 0;
+        });
+    });
+    // Layers shown later, and a title bar that changes height.
+    layers.LayoutUpdated([apply](auto&&, auto&&) { apply(); });
+#else
+    (void)layers;
+    (void)win;
+#endif
+}
 
 /// `Stack`: layers in the one cell of a grid, later ones above earlier
 /// ones, as large as the largest; what fills stretches it.
@@ -1798,9 +1911,20 @@ inline void Layers(Parent const& p, Ctx const& ctx, LayersProps props, Build con
         SetRole(layers, L"bern-layers-wh");
         layers.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
         layers.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+        layers.Resources().Insert(winrt::box_value(L"bern.underBars"), winrt::box_value(true));
         Win* win = ctx.win;
         win->underBars.Set(win->underBars.Peek() + 1);
         Reactive::OnCleanup([win] { win->underBars.Set(win->underBars.Peek() - 1); });
+        if (props.covers) {
+            static uint64_t serial = 0;
+            uint64_t token = ++serial;
+            win->coverings.emplace_back(token, ctx.appearance);
+            win->covering.Set(win->covering.Peek() + 1);
+            Reactive::OnCleanup([win, token] {
+                std::erase_if(win->coverings, [token](auto const& page) { return page.first == token; });
+                win->covering.Set(win->covering.Peek() - 1);
+            });
+        }
     } else if (p.window && !props.width.Given() && !props.height.Given()) {
         // Written directly in a window, a stack without a size fills it and
         // places its smaller layers there by its alignment.
@@ -1809,6 +1933,7 @@ inline void Layers(Parent const& p, Ctx const& ctx, LayersProps props, Build con
         layers.VerticalAlignment(xaml::VerticalAlignment::Stretch);
     }
     children(Parent::Aligned(layers, h, v), ctx);
+    if (p.window && !props.underBars && ctx.win) KeepBelowBars(layers, *ctx.win);
     // Layers that are all backdrops fill where they stand, as one alone
     // would.
     if (layers.Children().Size() > 0 && !props.width.Given() && !props.height.Given()) {
@@ -2440,6 +2565,8 @@ struct ImageProps {
     std::optional<double> aspect;
     /// It flies with `hero`, drawn larger than its size on the way.
     bool flies = false;
+    /// Without a size, it covers the room its container gives, cropped.
+    bool covers = false;
 };
 
 /// A frame as wide as its container and `aspect` as tall.
@@ -2556,6 +2683,7 @@ inline void Image(Parent const& p, Ctx const& ctx, ImageProps props) {
     if (props.height.Given()) picture.height = Reactive::Untrack([&] { return props.height.Now(ctx); });
     // A proportion of its own sets the side not given.
     Len width = props.width, height = props.height;
+    if (props.covers) picture.fills = true;
     if (props.aspect && *props.aspect > 0) {
         double aspect = *props.aspect;
         if (picture.width && !picture.height) {
@@ -2656,6 +2784,14 @@ inline void Image(Parent const& p, Ctx const& ctx, ImageProps props) {
                 return 0;
             });
         });
+    }
+    // A picture that covers takes all the room its container gives, the
+    // rest of it cut off.
+    if (props.covers) {
+        if (!props.corner.Given()) RoundedClip(frame, [](float, float) { return 0.0f; });
+        SetRole(frame, L"bern-fill-width");
+        Place(p, frame);
+        return;
     }
     // A picture with only a proportion takes its container's width.
     if (picture.fills) {
@@ -2875,7 +3011,7 @@ inline void LeadingToolbar(Parent const&, Ctx const& ctx, Build const& children)
     children(Parent::Of(holder), ctx.Toolbar());
 }
 
-inline void LanguagePicker(Parent const& p, Ctx const& ctx, char const* id, Str const& label) {
+inline void LanguagePicker(Parent const& p, Ctx const& ctx, char const* id, Str const& label, bool labelHidden = false) {
     auto const& supported = bern::Text::Supported();
     controls::ComboBox combo;
     combo.MinWidth(160);
@@ -2900,7 +3036,8 @@ inline void LanguagePicker(Parent const& p, Ctx const& ctx, char const* id, Str 
         Host::Post([tag] { bern::Text::SetLanguage(tag); });
     });
     BindName(combo, text);
-    if (p.isList) p.Add(LabeledCard(text, combo));
+    if (labelHidden) p.Add(combo);
+    else if (p.isList) p.Add(LabeledCard(text, combo));
     else p.Add(Stacked(text, combo));
     Controls::Register(ctx, id, "picker", text, nullptr,
         Actions{.select = [](std::string const& tag) { return bern::Text::SetLanguage(tag); },
@@ -2908,21 +3045,6 @@ inline void LanguagePicker(Parent const& p, Ctx const& ctx, char const* id, Str 
 }
 
 /// An item of a menu; empty entries are dividers.
-struct MenuItemDef {
-    char const* id = "";
-    Str label;
-    char const* icon = nullptr;
-    char const* role = nullptr;
-    Get enabled;
-    Act action;
-    std::optional<Field> pick;
-    char const* files = nullptr;
-    std::optional<Field> paste;
-    /// Shown beside the item; the shortcut itself is registered on its own.
-    char const* shortcut = nullptr;
-    /// The text the shortcut follows instead of `shortcut`.
-    Str boundShortcut;
-};
 
 /// A shortcut as Windows writes it: `cmd+shift+k` is Ctrl+Shift+K.
 inline winrt::hstring ShortcutText(char const* keys) {
@@ -2993,6 +3115,14 @@ inline void MenuEntries(Ctx const& ctx, controls::MenuFlyout const& flyout, std:
         flyout.Items().Append(entry);
         Controls::Register(ctx, item->id, "button", itemLabel, isEnabled, Actions{.activate = run.activate, .setFile = run.give, .files = item->files});
     }
+}
+
+/// A context menu: Windows opens the flyout on a secondary click, on the
+/// menu key and on pressing and holding with touch or a pen.
+inline void ContextMenuOn(Ctx const& ctx, xaml::UIElement const& element, std::vector<std::optional<MenuItemDef>> const& items) {
+    controls::MenuFlyout flyout;
+    MenuEntries(ctx, flyout, items);
+    element.ContextFlyout(flyout);
 }
 
 /// A menu button. Each item is registered on its own, so external entries

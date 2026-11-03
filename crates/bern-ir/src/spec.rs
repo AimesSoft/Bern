@@ -200,6 +200,7 @@ impl ComponentSpec {
                 | "CommandItem"
                 | "TableColumn"
                 | "TableMenu"
+                | "ContextMenu"
         )
     }
 }
@@ -323,6 +324,17 @@ pub const MOTION_PROPS: &[PropSpec] = &[
     // with reduced motion.
     opt("spin", PropKind::Bool),
     opt("spin_period", PropKind::Number),
+    // A white light that follows the pointer (a finger while it presses)
+    // over the element, even where other elements lie on top of it: its
+    // radius is the element's shorter side times `glow`, its centre as
+    // opaque as `glow_opacity` (0.4 unless given); it adds to what is
+    // drawn and stays inside the element's bounds and corners.
+    opt("glow", PropKind::Number),
+    opt("glow_opacity", PropKind::Number),
+    // The element's picture blurred with this radius in points, kept
+    // inside its bounds; it may follow state, with `animate` changing it
+    // with that motion.
+    opt("blur", PropKind::Length),
     opt("stagger", PropKind::Number),
     // Seconds a mouse rests over the element, such as a player's picture,
     // before its window goes idle; with such areas on screen a mouse
@@ -658,9 +670,15 @@ pub const COMPONENTS: &[ComponentSpec] = &[
     ),
     spec(
         "Flow",
-        &[opt("gap", PropKind::Length)],
+        &[
+            opt("gap", PropKind::Length),
+            opt(
+                "align",
+                PropKind::Keyword(&["leading", "center", "trailing"]),
+            ),
+        ],
         Children::Any,
-        "Leading-aligned items wrapping onto new rows at the available width; each row centres its items, and a `Spacer` takes the room left at the end of its row",
+        "Items wrapping onto new rows at the available width, each row at the leading edge or at `align`; each row centres its items in its height, and a `Spacer` takes the room left at the end of its row",
     ),
     ComponentSpec {
         action: ActionRule::Required,
@@ -731,6 +749,8 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             opt("axis", PropKind::Keyword(&["vertical", "horizontal"])),
             opt("snap", PropKind::Keyword(&["start", "center"])),
             opt("position", PropKind::PositionField),
+            opt("anchor", PropKind::Number),
+            opt("browsing", PropKind::BoolField),
             opt("arrival", PropKind::Keyword(&["nudge"])),
             opt(
                 "indicators",
@@ -740,7 +760,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             opt("open_center", PropKind::NumberValue),
         ],
         Children::Any,
-        "Scrolling container; `open_at` is where it opens: the point at that fraction of the content at the same fraction of the view, 0 the start, 0.5 the middle at the middle, 1 the end; `open_center` opens with the point at that fraction of the content in the middle of the view, or as near the middle as the content reaches, so the point is always in view; it may be bound, and is read once as the view opens; with `snap`, scrolling comes to rest with an item at the start or center; `position` holds the key of the item there, and setting it scrolls to that item, which with `arrival: nudge` gives a nudge when it arrives; `indicators: hidden` scrolls without showing the scroll bar, for a shelf that has its own paging buttons; `indicators: mouse` shows it only while a mouse is in use, which cannot drag the shelf as a finger does, and hides it for touch",
+        "Scrolling container; `open_at` is where it opens: the point at that fraction of the content at the same fraction of the view, 0 the start, 0.5 the middle at the middle, 1 the end; `open_center` opens with the point at that fraction of the content in the middle of the view, or as near the middle as the content reaches, so the point is always in view; it may be bound, and is read once as the view opens; with `snap`, scrolling comes to rest with an item at the start or center; `position` holds the key of the item there, and setting it scrolls to that item, which with `arrival: nudge` gives a nudge when it arrives; `anchor` is where along the view, as a fraction from 0 at its start to 1 at its end, the item of `position` stands when nothing snaps, as near as the content reaches; `browsing` is a session flag that is true while the person scrolls by hand and false once the scrolling stops, not when setting `position` scrolls; `indicators: hidden` scrolls without showing the scroll bar, for a shelf that has its own paging buttons; `indicators: mouse` shows it only while a mouse is in use, which cannot drag the shelf as a finger does, and hides it for touch",
     ),
     spec(
         "SplitView",
@@ -900,9 +920,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             req("selection", PropKind::SelectionField),
             opt("id", PropKind::Id),
             opt("fallback", PropKind::SelectionValue),
+            opt("bar", PropKind::Keyword(&["standard", "floating"])),
         ],
         Children::Only(&["Tab", "Pages", "TabAccessory"]),
-        "Sibling pages switched by tabs",
+        "Sibling pages switched by tabs; `bar: floating` floats the tab bar on phones as a capsule clear of the screen's edges",
     ),
     ComponentSpec {
         placement: Placement::Within(&["Tabs"]),
@@ -960,12 +981,14 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 req("id", PropKind::Id),
                 req("label", PropKind::DisplayText),
                 opt("icon", PropKind::Icon),
+                opt("font_size", PropKind::Number),
+                opt("prominence", PropKind::Keyword(&["standard", "plain"])),
                 opt("presented", PropKind::BoolField),
                 opt("open", PropKind::Bool),
                 opt("shortcut", PropKind::Shortcut),
             ],
             Children::Any,
-            "A button that shows its children in a popover; `presented` binds a session field, or `open` follows engine state and commits opening and dismissal through its action",
+            "A button that shows its children in a popover; `presented` binds a session field, or `open` follows engine state and commits opening and dismissal through its action; `prominence: plain` draws no background and `font_size` sizes the icon, as on an `IconButton`",
         )
     },
     spec(
@@ -1093,7 +1116,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         )
     },
     ComponentSpec {
-        placement: Placement::Within(&["Menu", "TableMenu"]),
+        placement: Placement::Within(&["Menu", "TableMenu", "ContextMenu"]),
         action: ActionRule::Required,
         interactive: true,
         ..spec(
@@ -1118,9 +1141,13 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         interactive: true,
         ..spec(
             "LanguagePicker",
-            &[req("id", PropKind::Id), req("label", PropKind::DisplayText)],
+            &[
+                req("id", PropKind::Id),
+                req("label", PropKind::DisplayText),
+                opt("label_hidden", PropKind::Flag),
+            ],
             Children::None,
-            "Switches the interface language among the supported languages at run time",
+            "Switches the interface language among the supported languages at run time; `label_hidden: true` keeps the label as its accessible name only, as on a `Picker`",
         )
     },
     ComponentSpec {
@@ -1165,6 +1192,15 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             ],
             Children::One,
             "A column of a `Table`: `title` heads it and its child is the cell of each row, written with the table's row variable; the action runs when the user clicks the heading to sort by it, and `sorted` and `descending` show the order the rows are in",
+        )
+    },
+    ComponentSpec {
+        placement: Placement::Within(&["Button"]),
+        ..spec(
+            "ContextMenu",
+            &[],
+            Children::Only(&["MenuItem", "Divider"]),
+            "The menu its `Button` opens with a secondary click or a long press, such as what can be done with a song in a list; it is not part of the button's content",
         )
     },
     ComponentSpec {
@@ -1215,9 +1251,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             opt("font_size", PropKind::Length),
             opt("line_height", PropKind::Length),
             opt("markdown", PropKind::Flag),
+            opt("bold", PropKind::Bool),
         ],
         Children::None,
-        "Text with a semantic style; `color` draws it in the accent or a status color (`status.success`, `status.warning`, `status.error`); `mark` draws a band of the color under each line; `lines` shows at most that many lines, ending the last with an ellipsis; `line_height` sets the height of each line, the extra split above and below it as in CSS; with `markdown` the content's inline Markdown — `**strong**`, `*emphasis*`, `` `code` ``, `~~struck~~` and `[links](address)`, a backslash taking the next mark literally — shows as the platform styles it",
+        "Text with a semantic style; `color` draws it in the accent or a status color (`status.success`, `status.warning`, `status.error`); `bold` sets it bold while it holds, changing with `animate`; `mark` draws a band of the color under each line; `lines` shows at most that many lines, ending the last with an ellipsis; `line_height` sets the height of each line, the extra split above and below it as in CSS; with `markdown` the content's inline Markdown — `**strong**`, `*emphasis*`, `` `code` ``, `~~struck~~` and `[links](address)`, a backslash taking the next mark literally — shows as the platform styles it",
     ),
     spec(
         "Canvas",
@@ -1615,6 +1652,8 @@ pub struct ShapeError {
 pub struct ElementShape<'a> {
     pub name: &'a str,
     pub props: Vec<&'a str>,
+    /// The properties written as a lone keyword, as `("fit", "cover")`.
+    pub keywords: Vec<(&'a str, &'a str)>,
     pub has_template: bool,
     pub children: Option<Vec<ChildShape<'a>>>,
     pub has_action: bool,
@@ -1693,18 +1732,28 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
             message: "`List` needs both `items:` and `key:` for data rows".into(),
         });
     }
+    // Without a size, a picture that covers takes the room its container
+    // gives.
     if spec.name == "Image"
         && !shape.props.contains(&"width")
         && !shape.props.contains(&"height")
         && !shape.props.contains(&"aspect")
+        && !shape.keywords.contains(&("fit", "cover"))
     {
         errors.push(ShapeError {
             prop: None,
-            message: "`Image` needs `width:`, `height:` or `aspect:`; with one, the other follows the picture's aspect ratio".into(),
+            message: "`Image` needs `width:`, `height:` or `aspect:`, with one the other following the picture's aspect ratio; or `fit: cover` to cover the room its container gives".into(),
         });
     }
-    if spec.name == "Button" && shape.children.is_some() {
-        if shape.children.as_deref().unwrap_or(&[]).len() != 1 {
+    // A `ContextMenu` is not part of what a button shows.
+    let content = shape.children.as_deref().map(|children| {
+        children
+            .iter()
+            .filter(|child| !matches!(child, ChildShape::Element("ContextMenu")))
+            .count()
+    });
+    if spec.name == "Button" && content.is_some_and(|count| count > 0) {
+        if content != Some(1) {
             errors.push(ShapeError {
                 prop: None,
                 message: "a `Button` shows one child; put several in a `Column`, `Row` or `Stack`"
@@ -1798,6 +1847,15 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
         }
     }
     if spec.name == "ScrollView"
+        && shape.props.contains(&"anchor")
+        && (!shape.props.contains(&"position") || shape.props.contains(&"snap"))
+    {
+        errors.push(ShapeError {
+            prop: Some("anchor".into()),
+            message: "`anchor` is where the item of `position` stands without `snap`; add `position: draft.x` and leave out `snap`".into(),
+        });
+    }
+    if spec.name == "ScrollView"
         && shape.props.contains(&"arrival")
         && !shape.props.contains(&"position")
     {
@@ -1831,6 +1889,12 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
         errors.push(ShapeError {
             prop: Some("spin_period".into()),
             message: "`spin_period` needs a `spin` condition".into(),
+        });
+    }
+    if shape.props.contains(&"glow_opacity") && !shape.props.contains(&"glow") {
+        errors.push(ShapeError {
+            prop: Some("glow_opacity".into()),
+            message: "`glow_opacity` needs a `glow` radius".into(),
         });
     }
     if shape.props.contains(&"appear_delay") && !shape.props.contains(&"appear") {
@@ -1991,6 +2055,12 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
             message: "a `Table` needs at least one `TableColumn`".into(),
         });
     }
+    if count("ContextMenu") > 1 {
+        errors.push(ShapeError {
+            prop: None,
+            message: "a `Button` has at most one `ContextMenu`".into(),
+        });
+    }
     if spec.name == "Table" && count("TableMenu") > 1 {
         errors.push(ShapeError {
             prop: None,
@@ -2099,6 +2169,7 @@ mod tests {
         ElementShape {
             name,
             props,
+            keywords: Vec::new(),
             has_template: false,
             children: None,
             has_action,
@@ -2112,6 +2183,20 @@ mod tests {
         assert!(check_shape(&shape("Image", vec!["source", "aspect"], false)).is_empty());
         assert!(!check_shape(&shape("Image", vec!["source"], false)).is_empty());
         assert!(check_shape(&shape("Grid", vec!["min_width", "gap", "row_gap"], false)).is_empty());
+    }
+
+    #[test]
+    fn a_covering_image_needs_no_size() {
+        let cover = ElementShape {
+            keywords: vec![("fit", "cover")],
+            ..shape("Image", vec!["source", "fit"], false)
+        };
+        assert!(check_shape(&cover).is_empty());
+        let contain = ElementShape {
+            keywords: vec![("fit", "contain")],
+            ..shape("Image", vec!["source", "fit"], false)
+        };
+        assert!(!check_shape(&contain).is_empty());
     }
 
     #[test]

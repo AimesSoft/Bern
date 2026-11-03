@@ -149,7 +149,7 @@ fn showcase_generates_a_gtk_application() {
     // The tool strip: in the flow, a spacer takes the rest of its line and
     // the chips are items (the runtime adds them to the flow).
     let strip = &ui[ui
-        .find("b::Flow(p, c, b::FlowProps { gap: Some(b::Num::Fixed(10.0)) }")
+        .find("b::Flow(p, c, b::FlowProps { gap: Some(b::Num::Fixed(10.0)), align: 0.0 }")
         .unwrap()..];
     let spacer = strip.find("b::Spacer(p);").unwrap();
     let chips = strip.find("id: \"strip_filter\"").unwrap();
@@ -793,7 +793,7 @@ fn layout_features_generate_for_gtk() {
         "b::Marquee(p, c, b::MarqueeProps { duration: Some(b::Num::Fixed(8.0)), phase: 0.2, paused: None, opacity: None }",
         "lines: Some(2.0), font_size: Some(b::Num::Fixed(12.0)), line_height: Some(b::Num::Fixed(16.0))",
         "b::Accordion(p, c, b::AccordionProps { count: Some(b::Num::Fixed(3.0)), selected: Some(b::Num::Fixed(1.0))",
-        "b::Flow(p, c, b::FlowProps { gap: Some(b::Num::Fixed(4.0)) }",
+        "b::Flow(p, c, b::FlowProps { gap: Some(b::Num::Fixed(4.0)), align: 0.0 }",
         "icon_only: true",
         "cells: Some((0.667, b::Num::Fixed(20.0)))",
         "corner: Some(b::Num::Fixed(8.0)), template: true, aspect: Some(1.5)",

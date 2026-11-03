@@ -11,6 +11,7 @@
 use bern_protocol::Value;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};
+use std::rc::Rc;
 
 /// A command or event waiting to run.
 #[derive(Clone, Debug, PartialEq)]
@@ -30,11 +31,18 @@ pub enum Pending {
     },
 }
 
+/// Reads the state of a module: its engine's snapshot, taken when asked.
+pub(crate) type Reader = Rc<dyn Fn() -> Vec<Value>>;
+
 #[derive(Default)]
 struct Outbox {
     pending: VecDeque<Pending>,
-    /// State of the modules the running module may read, by namespace.
-    states: BTreeMap<String, Vec<Value>>,
+    /// How to read the modules the running module may read, by namespace:
+    /// a state is only taken when the module asks for it, so a module that
+    /// reads nothing costs nothing.
+    readers: BTreeMap<String, Reader>,
+    /// What was read already while this command runs.
+    read: BTreeMap<String, Vec<Value>>,
 }
 
 thread_local! {
@@ -66,19 +74,42 @@ pub fn emit(namespace: &str, event: &str, params: Vec<Value>) {
 /// The state fields of module `namespace`, while a module that may read it
 /// handles a command; `None` elsewhere or while that module is off.
 pub fn state_of(namespace: &str) -> Option<Vec<Value>> {
-    OUTBOX.with(|outbox| outbox.borrow().states.get(namespace).cloned())
+    let reader = OUTBOX.with(|outbox| {
+        let outbox = outbox.borrow();
+        match outbox.read.get(namespace) {
+            Some(values) => Err(values.clone()),
+            None => Ok(outbox.readers.get(namespace).cloned()),
+        }
+    });
+    let reader = match reader {
+        Err(values) => return Some(values),
+        Ok(reader) => reader?,
+    };
+    let values = reader();
+    OUTBOX.with(|outbox| {
+        outbox
+            .borrow_mut()
+            .read
+            .insert(namespace.to_string(), values.clone())
+    });
+    Some(values)
 }
 
-/// Make `states` readable while the next command runs.
-pub(crate) fn begin(states: BTreeMap<String, Vec<Value>>) {
-    OUTBOX.with(|outbox| outbox.borrow_mut().states = states);
+/// Make the modules of `readers` readable while the next command runs.
+pub(crate) fn begin(readers: BTreeMap<String, Reader>) {
+    OUTBOX.with(|outbox| {
+        let mut outbox = outbox.borrow_mut();
+        outbox.readers = readers;
+        outbox.read.clear();
+    });
 }
 
 /// Everything sent since the last call, which also ends state access.
 pub(crate) fn take() -> Vec<Pending> {
     OUTBOX.with(|outbox| {
         let mut outbox = outbox.borrow_mut();
-        outbox.states.clear();
+        outbox.readers.clear();
+        outbox.read.clear();
         outbox.pending.drain(..).collect()
     })
 }

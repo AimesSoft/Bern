@@ -24,6 +24,8 @@ pub struct Look {
     pub opacity: Option<f32>,
     /// Across and down, drawn about the center.
     pub scale: Option<(f32, f32)>,
+    /// The spring the state's scale moves with.
+    pub motion: Option<crate::Curve>,
     pub none: bool,
 }
 
@@ -36,6 +38,7 @@ impl Look {
         shadow: None,
         opacity: None,
         scale: None,
+        motion: None,
         none: false,
     };
 }
@@ -60,6 +63,8 @@ pub struct ControlStyle {
     pub pressed: Option<Look>,
     pub disabled: Option<Look>,
     pub selected: Option<Look>,
+    /// The spring back to rest (`settle`).
+    pub settle: Option<crate::Curve>,
 }
 
 impl ControlStyle {
@@ -72,6 +77,7 @@ impl ControlStyle {
         pressed: None,
         disabled: None,
         selected: None,
+        settle: None,
     };
 }
 
@@ -154,6 +160,13 @@ pub(crate) fn shadow(shadow: (f32, f32, f32)) -> Vec<BoxShadow> {
     }]
 }
 
+/// The shadow of a control in `colors`: GPUI draws a shadow of the box,
+/// not of what is in it, so a control without a background, whose glyphs
+/// alone would cast it, casts none.
+fn cast(colors: &Colors) -> Option<(f32, f32, f32)> {
+    colors.shadow.filter(|_| colors.background.a > 0.01)
+}
+
 /// Paint `colors` on an element at rest.
 pub(crate) fn paint<E: Styled>(element: E, colors: Colors) -> E {
     let element = element
@@ -164,9 +177,35 @@ pub(crate) fn paint<E: Styled>(element: E, colors: Colors) -> E {
         Some((border, width)) => element.border(px(width)).border_color(border),
         None => element,
     };
-    match colors.shadow {
+    match cast(&colors) {
         Some(lifted) => element.shadow(shadow(lifted)),
         None => element,
+    }
+}
+
+/// Round the corners of `element` that lie on a container's rounded
+/// corners (`Ctx::round`); the others stay square.
+pub(crate) fn round_corners<E: Styled>(element: E, corners: crate::ctx::Corners) -> E {
+    let [top_left, top_right, bottom_right, bottom_left] = corners.map(px);
+    let element = if corners[0] > 0.0 {
+        element.rounded_tl(top_left)
+    } else {
+        element
+    };
+    let element = if corners[1] > 0.0 {
+        element.rounded_tr(top_right)
+    } else {
+        element
+    };
+    let element = if corners[2] > 0.0 {
+        element.rounded_br(bottom_right)
+    } else {
+        element
+    };
+    if corners[3] > 0.0 {
+        element.rounded_bl(bottom_left)
+    } else {
+        element
     }
 }
 
@@ -180,7 +219,7 @@ pub(crate) fn refine(style: gpui::StyleRefinement, colors: Colors) -> gpui::Styl
         Some((border, _)) => style.border_color(border),
         None => style,
     };
-    match colors.shadow {
+    match cast(&colors) {
         Some(lifted) => style.shadow(shadow(lifted)),
         None => style,
     }

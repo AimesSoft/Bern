@@ -133,11 +133,20 @@ pub struct TextProps {
     pub line_height: Option<f32>,
     /// The content is inline Markdown.
     pub markdown: bool,
+    /// The color role of a mark under each line (`mark`).
+    pub mark: Option<&'static str>,
+    /// Bold while its condition holds (`bold`).
+    pub bold: bool,
 }
 
 /// `Text`.
 pub fn text(c: &Ctx, content: String, props: TextProps) -> El {
     let (size, line, weight) = props.style.metrics();
+    let weight = if props.bold {
+        gpui::FontWeight::BOLD
+    } else {
+        weight
+    };
     let (size, line) = match props.size {
         Some(custom) => (custom, (custom * line / size).round()),
         None => (size, line),
@@ -156,18 +165,108 @@ pub fn text(c: &Ctx, content: String, props: TextProps) -> El {
             (None, Emphasis::Primary) => c.foreground(),
             (None, emphasis) => c.color(emphasis.role()),
         });
+    // Never wider than its container: narrower than its single line, it
+    // wraps, or with a number of lines ends in an ellipsis.
+    let element = element.min_w(px(0.0)).max_w(gpui::relative(1.0));
     let element = match props.lines {
-        Some(1) => element.min_w(px(0.0)).truncate(),
-        Some(lines) => element.min_w(px(0.0)).line_clamp(lines),
-        // Never wider than its container: narrower than its single line,
-        // it wraps.
-        None => element.min_w(px(0.0)).max_w(gpui::relative(1.0)),
+        Some(1) => element.truncate(),
+        Some(lines) => element.line_clamp(lines),
+        None => element,
     };
     let element = c.grow().apply(element);
+    // Blurred, the text keeps its place but is drawn as spread copies.
+    let blur = c.blur();
+    if blur > 0.05 {
+        let color = match (props.color, props.emphasis) {
+            (Some(role), _) => c.color(role),
+            (None, Emphasis::Primary) => c.foreground(),
+            (None, emphasis) => c.color(emphasis.role()),
+        };
+        return element
+            .relative()
+            .text_color(gpui::transparent_black())
+            .child(content.clone())
+            .child(crate::filters::blurred_text(
+                content,
+                color,
+                blur,
+                props.lines,
+            ))
+            .into_any_element();
+    }
+    // A mark is drawn behind the text, taking no room.
+    let element = match props.mark {
+        Some(role) => {
+            element
+                .relative()
+                .child(mark(content.clone(), c.color(role), px(line), props.lines))
+        }
+        None => element,
+    };
     if !props.markdown {
         return element.child(content).into_any_element();
     }
     element.child(markdown(c, &content)).into_any_element()
+}
+
+/// `Text(mark:)`: a capsule of `color` under each line of `content`, from
+/// 74 % to 98 % of the line's height and 0.4 em longer than the line, laid
+/// out as the text is, in its font, at the width it is given.
+fn mark(content: String, color: gpui::Rgba, line: gpui::Pixels, lines: Option<usize>) -> El {
+    gpui::canvas(
+        |_, _, _| {},
+        move |bounds, (), window, cx| {
+            let style = window.text_style();
+            let size = style.font_size.to_pixels(window.rem_size());
+            let run = style.to_run(content.len());
+            let wrap = (lines != Some(1)).then_some(bounds.size.width);
+            let Ok(shaped) =
+                window
+                    .text_system()
+                    .shape_text(content.clone().into(), size, &[run], wrap, lines)
+            else {
+                return;
+            };
+            let _ = cx;
+            let mut row = 0usize;
+            for paragraph in shaped.iter() {
+                let layout = &paragraph.unwrapped_layout;
+                let mut start = 0usize;
+                let mut ends: Vec<usize> = paragraph
+                    .wrap_boundaries
+                    .iter()
+                    .map(|boundary| layout.runs[boundary.run_ix].glyphs[boundary.glyph_ix].index)
+                    .collect();
+                ends.push(paragraph.text.len());
+                for end in ends {
+                    let left = layout.x_for_index(start);
+                    let width = (layout.x_for_index(end) - left).min(bounds.size.width);
+                    start = end;
+                    if lines.is_some_and(|lines| row >= lines) {
+                        return;
+                    }
+                    if width > gpui::px(0.0) {
+                        let band = line * 0.24;
+                        let origin = gpui::point(
+                            bounds.origin.x + left - layout.x_for_index(0),
+                            bounds.origin.y + line * row as f32 + line * 0.74,
+                        );
+                        window.paint_quad(
+                            gpui::fill(
+                                gpui::Bounds::new(origin, gpui::size(width + size * 0.4, band)),
+                                color,
+                            )
+                            .corner_radii(band / 2.0),
+                        );
+                    }
+                    row += 1;
+                }
+            }
+        },
+    )
+    .absolute()
+    .size_full()
+    .into_any_element()
 }
 
 /// Inline Markdown as styled text; links open in the browser.
@@ -291,6 +390,7 @@ pub fn image(
     template: bool,
     aspect: Option<f32>,
     spin: Option<(&str, crate::spin::Spin)>,
+    covers: bool,
 ) -> El {
     let name = match dark {
         Some(dark) if c.theme().dark => dark,
@@ -300,17 +400,36 @@ pub fn image(
     // A turning picture draws itself, turned.
     if let Some((element, spin)) = spin {
         let template = template.then(|| c.color("text.primary"));
-        return crate::spin::picture(
+        let picture = crate::spin::picture(
             c, element, &path, template, width, height, corner, fit, aspect, spin,
         );
+        return if covers {
+            div()
+                .absolute()
+                .inset_0()
+                .overflow_hidden()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(picture)
+                .into_any_element()
+        } else {
+            picture
+        };
     }
     // A template's shape in the text color.
-    let source: gpui::ImageSource = match template
+    let (source, picture): (gpui::ImageSource, crate::filters::Picture) = match template
         .then(|| tinted(&path, c.color("text.primary")))
         .flatten()
     {
-        Some(rendered) => rendered.into(),
-        None => path.into(),
+        Some(rendered) => (
+            rendered.clone().into(),
+            crate::filters::Picture::Rendered(rendered),
+        ),
+        None => (
+            path.clone().into(),
+            crate::filters::Picture::Source(gpui::Resource::Path(path.clone().into())),
+        ),
     };
     let element = img(source).object_fit(match fit {
         Fit::Contain => ObjectFit::Contain,
@@ -327,14 +446,85 @@ pub fn image(
     };
     let element = match corner {
         Some(corner) => element.rounded(px(corner)),
-        None => element,
+        None => crate::look::round_corners(element, c.round()),
     };
-    // With one side given, the other follows the shape.
+    // With one side given, the other follows the shape; with neither, it
+    // is as wide as its container.
     let element = match aspect {
+        Some(aspect) if width.is_none() && height.is_none() => {
+            element.aspect_ratio(aspect).w_full().min_w(px(0.0))
+        }
         Some(aspect) => element.aspect_ratio(aspect),
         None => element,
     };
-    element.flex_none().into_any_element()
+    framed(
+        c,
+        element,
+        covers,
+        Blurred {
+            key: resource,
+            picture,
+            fit,
+            corner,
+        },
+    )
+}
+
+/// What a picture is drawn from when it is blurred.
+struct Blurred<'a> {
+    key: &'a str,
+    picture: crate::filters::Picture,
+    fit: Fit,
+    corner: Option<f32>,
+}
+
+/// A picture placed: at its own size, or covering the room its container
+/// gives without asking for any, as a layer of a `Stack` under the rest.
+/// Blurred, it keeps that place and draws itself blurred there.
+fn framed(c: &Ctx, element: gpui::Img, covers: bool, blurred: Blurred<'_>) -> El {
+    let blur = c.blur();
+    if blur > 0.05 {
+        let corners = match blurred.corner {
+            Some(corner) => [corner; 4],
+            None => c.round(),
+        };
+        let key = format!("{}/{}", c.key(blurred.key), blurred.key);
+        let painted =
+            crate::filters::blurred_picture(key, blurred.picture, blurred.fit, blur, corners);
+        let element = element.opacity(0.0);
+        return if covers {
+            div()
+                .absolute()
+                .inset_0()
+                .child(element.size_full())
+                .child(painted)
+                .into_any_element()
+        } else {
+            let filled = c.grow();
+            let element = crate::Grow {
+                flex: false,
+                width: filled.width || filled.flex,
+                height: filled.height || filled.flex,
+            }
+            .apply(element.flex_none());
+            filled
+                .apply(
+                    div()
+                        .relative()
+                        .flex()
+                        .flex_col()
+                        .flex_none()
+                        .child(element)
+                        .child(painted),
+                )
+                .into_any_element()
+        };
+    }
+    if covers {
+        element.absolute().inset_0().size_full().into_any_element()
+    } else {
+        c.grow().apply(element.flex_none()).into_any_element()
+    }
 }
 
 thread_local! {
@@ -382,6 +572,7 @@ pub fn image_url(
     fit: Fit,
     template: bool,
     aspect: Option<f32>,
+    covers: bool,
 ) -> El {
     let sized = |element: gpui::Div| {
         let element = match width {
@@ -404,10 +595,20 @@ pub fn image_url(
         .as_ref()
         .filter(|_| template)
         .and_then(|path| tinted(path, c.color("text.primary")));
-    let source: gpui::ImageSource = match (tinted, file) {
-        (Some(rendered), _) => rendered.into(),
-        (None, Some(path)) => path.into(),
-        (None, None) => url.into(),
+    let key = url.clone();
+    let (source, picture): (gpui::ImageSource, crate::filters::Picture) = match (tinted, file) {
+        (Some(rendered), _) => (
+            rendered.clone().into(),
+            crate::filters::Picture::Rendered(rendered),
+        ),
+        (None, Some(path)) => (
+            path.clone().into(),
+            crate::filters::Picture::Source(gpui::Resource::Path(path.into())),
+        ),
+        (None, None) => (
+            url.clone().into(),
+            crate::filters::Picture::Source(gpui::Resource::Uri(url.clone().into())),
+        ),
     };
     let element = img(source).object_fit(match fit {
         Fit::Contain => ObjectFit::Contain,
@@ -424,14 +625,28 @@ pub fn image_url(
     };
     let element = match corner {
         Some(corner) => element.rounded(px(corner)),
-        None => element,
+        None => crate::look::round_corners(element, c.round()),
     };
-    // With one side given, the other follows the shape.
+    // With one side given, the other follows the shape; with neither, it
+    // is as wide as its container.
     let element = match aspect {
+        Some(aspect) if width.is_none() && height.is_none() => {
+            element.aspect_ratio(aspect).w_full().min_w(px(0.0))
+        }
         Some(aspect) => element.aspect_ratio(aspect),
         None => element,
     };
-    element.flex_none().into_any_element()
+    framed(
+        c,
+        element,
+        covers,
+        Blurred {
+            key: &key,
+            picture,
+            fit,
+            corner,
+        },
+    )
 }
 
 /// How a picture fills its frame (`Image.fit`).
