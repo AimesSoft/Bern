@@ -307,6 +307,7 @@ struct RawTarget {
     #[serde(default)]
     javascript: bool,
     android: Option<bern_target_api::AndroidOptions>,
+    abis: Option<Vec<String>>,
 }
 
 /// A Rust source file listed in the configuration.
@@ -1092,6 +1093,7 @@ fn target_config(name: String, target: RawTarget, errors: &mut Vec<Diagnostic>) 
     }
 
     let frontends = windows_frontends(&name, &target.platform, target.frontends, errors);
+    let abis = android_abis(&name, &target.platform, target.abis, errors);
     for channel in &target.channels {
         if channel != "ipc" {
             errors.push(Diagnostic::error(format!(
@@ -1110,6 +1112,7 @@ fn target_config(name: String, target: RawTarget, errors: &mut Vec<Diagnostic>) 
         webview: target.webview,
         javascript: target.javascript,
         android: target.android,
+        abis,
     }
 }
 
@@ -1162,6 +1165,41 @@ fn check_web_mode(name: &str, target: &RawTarget, errors: &mut Vec<Diagnostic>) 
 
 /// The front ends a target builds. Windows builds both unless the target
 /// names fewer; other platforms take none.
+/// The ABIs of `abis`: Android's, each once.
+fn android_abis(
+    name: &str,
+    platform: &str,
+    abis: Option<Vec<String>>,
+    errors: &mut Vec<Diagnostic>,
+) -> Vec<String> {
+    let Some(abis) = abis else {
+        return Vec::new();
+    };
+    if platform != "android" {
+        errors.push(Diagnostic::error(format!(
+            "target `{name}`: `abis` applies to Android targets only"
+        )));
+        return Vec::new();
+    }
+    if abis.is_empty() {
+        errors.push(Diagnostic::error(format!(
+            "target `{name}`: `abis` lists none; name \"arm64-v8a\", \"armeabi-v7a\" or \"x86_64\""
+        )));
+    }
+    for (index, abi) in abis.iter().enumerate() {
+        if !bern_target_api::ANDROID_ABIS.contains(&abi.as_str()) {
+            errors.push(Diagnostic::error(format!(
+                "target `{name}`: `abis` lists `{abi}`; name \"arm64-v8a\", \"armeabi-v7a\" or \"x86_64\""
+            )));
+        } else if abis[..index].contains(abi) {
+            errors.push(Diagnostic::error(format!(
+                "target `{name}`: `abis` lists `{abi}` twice"
+            )));
+        }
+    }
+    abis
+}
+
 fn windows_frontends(
     name: &str,
     platform: &str,
@@ -1802,6 +1840,29 @@ mod tests {
             toml::from_str::<RawTarget>("platform = 'android'\nandroid = { netwrok = true }")
                 .is_err()
         );
+    }
+
+    #[test]
+    fn android_abis_are_known_listed_once_and_for_android() {
+        let target = |text: &str| {
+            let mut errors = Vec::new();
+            let raw = toml::from_str::<RawTarget>(text).unwrap();
+            let target = target_config("phone".into(), raw, &mut errors);
+            (target.abis, errors.len())
+        };
+        let (abis, errors) = target("platform = 'android'\nabis = ['arm64-v8a', 'x86_64']");
+        assert_eq!(
+            (abis, errors),
+            (vec!["arm64-v8a".into(), "x86_64".into()], 0)
+        );
+        assert_eq!(target("platform = 'android'").0, Vec::<String>::new());
+        assert_eq!(target("platform = 'android'\nabis = []").1, 1);
+        assert_eq!(target("platform = 'android'\nabis = ['mips']").1, 1);
+        assert_eq!(
+            target("platform = 'android'\nabis = ['x86_64', 'x86_64']").1,
+            1
+        );
+        assert_eq!(target("platform = 'macos'\nabis = ['x86_64']").1, 1);
     }
 
     #[test]

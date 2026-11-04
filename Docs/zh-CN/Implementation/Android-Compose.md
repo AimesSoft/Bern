@@ -122,10 +122,10 @@ Rust 引擎的网络访问不能从 UI 推断，使用显式 Android 目标选�
 [targets.android]
 platform = "android"
 channels = ["ipc"]
-android = { network = true, multicast = true }
+android = { network = true, multicast = true, audio_settings = true }
 ```
 
-`network` 生成 `INTERNET` 权限；`multicast` 同时生成 `INTERNET` 与 `CHANGE_WIFI_MULTICAST_STATE`，并在 Activity 的 `onStart` 持有非引用计数的 `WifiManager.MulticastLock`，在 `onStop` 释放，以接收前台局域网发现的 Wi-Fi 组播。两项默认关闭；声明媒体或网络图片的应用仍按原规则获得网络权限。`android` 选项只能用于 Android 目标，未知字段会报错。后台持续接收需另外的 Android 后台服务支持，不由这个锁保持应用运行。
+`audio_settings` 生成 `MODIFY_AUDIO_SETTINGS`，供需要改变系统音频播放方式的引擎使用。`network` 生成 `INTERNET` 权限；`multicast` 同时生成 `INTERNET` 与 `CHANGE_WIFI_MULTICAST_STATE`，并在 Activity 的 `onStart` 持有非引用计数的 `WifiManager.MulticastLock`，在 `onStop` 释放，以接收前台局域网发现的 Wi-Fi 组播。两项默认关闭；声明媒体或网络图片的应用仍按原规则获得网络权限。`android` 选项只能用于 Android 目标，未知字段会报错。后台持续接收需另外的 Android 后台服务支持，不由这个锁保持应用运行。
 
 ```bash
 rustup target add aarch64-linux-android
@@ -138,6 +138,7 @@ bern package --target android
 - 构建步骤：用 NDK 的 clang 为 `aarch64-linux-android` 构建引擎库；复制到 `jniLibs`；镜像随包资源；Gradle 构建 APK；为这台电脑构建 CLI 与 MCP 服务器。第一次构建时 Gradle 从 Google 与 Maven Central 下载插件与库。
 - `bern run --target android` 要求恰好连着一台设备（真机或模拟器），安装 APK、启动 Activity、转发控制通道并显示应用的日志，应用进程结束时返回。
 - **基线配置文件**：生成的工程带 `app/src/main/baseline-prof.txt`，列出 Bern 运行时（`dev/bern/runtime`）与生成的界面代码（应用的包）的全部类与方法；Gradle 把它与 Compose 等库自带的规则一起编进 APK 与 AAB。商店安装时系统按它预先编译；发布版构建另把 Gradle 为 Android 12 及以上生成的 `.dm` 复制为 APK 旁的 `<应用>.dm`，`bern run` 在 Android 12 及以上的设备上用 `adb install-multiple` 把两者一起装上，装完即为 `speed-profile`（设备不接受时只装 APK 并提示）；调试版不编译，构建时删掉旧的 `.dm`。直接装 APK 时由 Compose 带的 ProfileInstaller 在首次启动后写入配置文件，系统在下次后台编译时才用上，在那之前这些代码由解释器与 JIT 运行。
+- 目标写了 `abis = ["arm64-v8a", "armeabi-v7a", "x86_64"]` 时，`bern package` 为每个架构构建引擎，各写出一个 `<应用>-<版本>-android-<架构>.apk`，商店用的 bundle 包含全部架构。`bern build` 和 `bern run` 只用第一个，方便在一台设备上试。不写 `abis` 时只有 64 位 ARM，生成单个 `<应用>-<版本>-android.apk`。
 - `bern package` 在 `target/bern/dist/` 生成 `<应用>-<版本>-android.apk` 与 `.aab`。Gradle 从 `BERN_ANDROID_KEYSTORE`、`BERN_ANDROID_KEYSTORE_PASSWORD`、`BERN_ANDROID_KEY_ALIAS`（可选 `BERN_ANDROID_KEY_PASSWORD`）读取发布密钥，密码不写进任何文件；没有设置时用调试密钥签名，并提示不能上架。
 
 ## 媒体类应用的能力（v0.29）

@@ -248,6 +248,7 @@ fn linux() -> TargetConfig {
         webview: None,
         javascript: false,
         android: None,
+        abis: Vec::new(),
         channels: Vec::new(),
         frontends: Vec::new(),
     }

@@ -719,8 +719,9 @@ impl Target for GtkLinux {
                 other => other,
             };
             let deb = dist.join(format!(
-                "{executable}_{}_{architecture}.deb",
-                app.app.version
+                "{product}-{}-linux-{}.deb",
+                app.app.version,
+                package_architecture()
             ));
             let installed_size: u64 = files
                 .iter()

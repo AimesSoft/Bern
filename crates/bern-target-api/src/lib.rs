@@ -438,7 +438,13 @@ pub struct TargetConfig {
     pub javascript: bool,
     /// Explicit Android host capabilities; absent on other platforms.
     pub android: Option<AndroidOptions>,
+    /// The Android ABIs a release is built for, one APK each; empty for
+    /// the 64-bit ARM alone, and for other platforms.
+    pub abis: Vec<String>,
 }
+
+/// The Android ABIs a release can be built for.
+pub const ANDROID_ABIS: &[&str] = &["arm64-v8a", "armeabi-v7a", "x86_64"];
 
 /// Android capabilities needed by an application's Rust engine, which
 /// cannot be inferred from its UI. Multicast also enables network access.
@@ -447,6 +453,8 @@ pub struct TargetConfig {
 pub struct AndroidOptions {
     pub network: bool,
     pub multicast: bool,
+    /// The engine changes how the system plays its audio.
+    pub audio_settings: bool,
 }
 
 impl TargetConfig {
@@ -804,6 +812,7 @@ mod tests {
             webview: None,
             javascript: false,
             android: None,
+            abis: Vec::new(),
             channels: vec![],
             frontends: vec![],
         }

@@ -196,6 +196,12 @@ fn label(line: &Line) -> gtk::Label {
         wide(b),
     ));
     attributes.insert(gtk::pango::AttrInt::new_foreground_alpha(wide(a)));
+    if let Some(at) = line.faded_from() {
+        let faded = f64::from(wide(a)) * bern_ffi::overlay::FADED;
+        let mut rest = gtk::pango::AttrInt::new_foreground_alpha(faded as u16);
+        rest.set_start_index(at as u32);
+        attributes.insert(rest);
+    }
     label.set_attributes(Some(&attributes));
     label
 }

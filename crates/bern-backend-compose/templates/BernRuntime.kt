@@ -656,7 +656,9 @@ val LocalBernBarsPadding = staticCompositionLocalOf { androidx.compose.foundatio
 
 /// `under_bars`: the layer fills the window to its edges while it is shown,
 /// reaching out over the room the app bar and the system bars take; the
-/// app bar lets it show through.
+/// app bar lets it show through. A touch stops at the first layer that reads
+/// pointers, and pictures and fills do not, so it reads them for nothing:
+/// the pages under it take no touch through it.
 @Composable
 fun Modifier.bernUnderBars(): Modifier {
     val window = LocalBernWindow.current
@@ -677,7 +679,7 @@ fun Modifier.bernUnderBars(): Modifier {
         val width = if (constraints.hasBoundedWidth) constraints.maxWidth + left + right else constraints.maxWidth
         val placeable = measurable.measure(constraints.copy(minWidth = width, maxWidth = width, minHeight = height, maxHeight = height))
         layout(constraints.maxWidth, constraints.maxHeight) { placeable.place(-left, -top) }
-    }
+    }.pointerInput(Unit) {}
 }
 
 // MARK: - Controls
@@ -2655,9 +2657,16 @@ internal object BernOverlay {
             val text = line.optString("text")
             if (text.isEmpty()) continue
             view.addView(android.widget.TextView(context).apply {
-                this.text = text
+                val color = android.graphics.Color.parseColor(line.optString("color", "#ffffffff"))
+                val lit = line.optInt("lit", -1)
+                this.text = if (lit < 0) text else android.text.SpannableString(text).apply {
+                    val from = text.offsetByCodePoints(0, lit.coerceAtMost(text.codePointCount(0, text.length)))
+                    val alpha = (android.graphics.Color.alpha(color) * 0.4).toInt()
+                    val faded = (color and 0x00FFFFFF) or (alpha shl 24)
+                    setSpan(android.text.style.ForegroundColorSpan(faded), from, text.length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
                 setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, line.optDouble("size", 18.0).toFloat())
-                setTextColor(android.graphics.Color.parseColor(line.optString("color", "#ffffffff")))
+                setTextColor(color)
                 if (line.optBoolean("bold")) setTypeface(typeface, android.graphics.Typeface.BOLD)
                 setShadowLayer(4 * density, 0f, 1.5f * density, 0xD9000000.toInt())
                 gravity = android.view.Gravity.CENTER_HORIZONTAL

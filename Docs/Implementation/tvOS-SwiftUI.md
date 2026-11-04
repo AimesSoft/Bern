@@ -22,7 +22,7 @@ This document records what was actually completed for the `swiftui + tvos` targe
 | Remote buttons | Partial | `Shortcut` and a control's `shortcut:` map to back, play/pause and the edges of the touch surface; the arrow keys were measured in the simulator, back and play/pause are not verified (see "Verification log") |
 | App icon | Done | `[app.icon].tvos` accepts a `.brandassets` folder or a square PNG; when none is declared, a layered icon and the Top Shelf image are generated from the default icon |
 | `bern run --target tvos` | Done | Installs into the running tvOS simulator and launches; the generated CLI controls it over IPC |
-| Device build and packaging | Not done | Signing, provisioning profiles, installation and `bern package` are not done; the engine build for `aarch64-apple-tvos` has not been tried |
+| Device build and packaging | Partial | `bern package --target tvos` builds the engine for `aarch64-apple-tvos` and writes an unsigned `<app>-<version>-tvos.ipa` to `target/bern/dist/`, to be signed and installed by whoever has the profile; signing itself is not done |
 
 ## Toolchain
 

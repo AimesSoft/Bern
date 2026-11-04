@@ -29,6 +29,7 @@ impl Generator<'_> {
                     (element.keyword("markdown") == Some("true")).then(|| "true".to_string()),
                 ),
                 ("bold", element.expr("bold").map(|bold| self.getter(bold))),
+                ("lit", self.len(element, "lit")),
                 ("animate", Self::animate(element)),
             ])
         ));

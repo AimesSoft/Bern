@@ -11,6 +11,8 @@ impl Generator<'_> {
         let content = self.text_prop(element, "content").unwrap_or_default();
         if element.keyword("markdown") == Some("true") {
             out.line(format!("SwiftUI.Text(bernMarkdown({content}))"));
+        } else if let Some(lit) = self.length(element, "lit") {
+            out.line(format!("bernLit({content}, {lit})"));
         } else {
             out.line(format!("SwiftUI.Text(verbatim: {content})"));
         }

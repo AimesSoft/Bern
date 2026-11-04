@@ -122,7 +122,7 @@
 | `TableMenu` | 无 | 仅含 ["MenuItem", "Divider"]；无动作；直接位于 ["Table"]；右键或长按一行时打开，该行不在选中行里时先只选中它 |
 | `ContextMenu` | 无 | 仅含 ["MenuItem", "Divider"]；无动作；直接位于 ["Button"]，每个按钮最多一个；不算按钮显示的内容；右键或长按按钮时打开 |
 | `PreviewList` | **`items: Items`**<br>**`key: KeyField`**<br>**`item_height: Number`**<br>`gap: Number`<br>`more_height: Number` | 按可用高度创建能完整放下的前几项；有剩余时为 `+N` 留位，默认高度 22；不滚动，也不创建隐藏项。使用 `\|item\|` 行模板 |
-| `Text` | **`content: DisplayText`**<br>`style: large_title / title / title2 / title3 / headline / subheadline / body / callout / footnote / caption / caption2 / control / code`<br>`emphasis: primary / secondary / tertiary`<br>`color: accent / status.success / status.warning / status.error`<br>`mark: ColorRole`<br>`lines: Number`<br>`font_size: Length`<br>`line_height: Length`<br>`markdown: Flag`<br>`bold: Bool` | 不含子节点；无动作；`color` 与 `emphasis` 二选一 |
+| `Text` | **`content: DisplayText`**<br>`style: large_title / title / title2 / title3 / headline / subheadline / body / callout / footnote / caption / caption2 / control / code`<br>`emphasis: primary / secondary / tertiary`<br>`color: accent / status.success / status.warning / status.error`<br>`mark: ColorRole`<br>`lines: Number`<br>`font_size: Length`<br>`line_height: Length`<br>`markdown: Flag`<br>`bold: Bool`<br>`lit: Length` | 不含子节点；无动作；`color` 与 `emphasis` 二选一 |
 | `Canvas` | `width: Length`<br>`height: Length`<br>`label: DisplayText` | 仅含 ["Shape", "Series", "Pattern"]；无动作 |
 | `Shape` | **`kind: rect / rounded / capsule / ellipse`**<br>`x: Number`<br>`y: Number`<br>`width: Number`<br>`height: Number`<br>`corner: Number`<br>`fill: ColorRole`<br>`fill_from: ImageResource`<br>`fade: up / down / left / right`<br>`stroke: ColorRole`<br>`stroke_width: Number`<br>`dash: Number`<br>`dash_gap: Number`<br>`opacity: Number` | 不含子节点；无动作；直接位于 ["Canvas"] |
 | `Series` | **`values: NumberList`**<br>`kind: area / line`<br>`max: NumberValue`<br>`fill: ColorRole`<br>`stroke: ColorRole`<br>`stroke_width: Number`<br>`opacity: Number` | 不含子节点；无动作；直接位于 ["Canvas"] |
@@ -150,6 +150,8 @@
 `Text(style: code)` 用平台自己的等宽字体，比正文略小，用于代码、命令和文件内容：SwiftUI 的 `.monospaced` 设计，Compose 的 `FontFamily.Monospace`，Web 的 `ui-monospace` 一族，GTK 的 `monospace` 样式类，Windows 的 Cascadia Mono（没有时 Consolas）。`style!` 的 `text` 块可以像其他样式一样给它定字号与字重。
 
 `Svg` 的 `static_source` 是动画结束时的画面，没有 WebView 的构建直接显示它；`data` 是交给文档的一段文字，文档的脚本在 `window.bernSvg.update(state)` 的 `state.data` 中读到，变化时再交一次；`external_links: true` 时，文档里点开的 https 链接交给系统浏览器打开，文档本身始终不离开打包的资源。见[动画 SVG](../Implementation/Animated-SVG.md)。
+
+`Text` 加 `lit` 时，前面这么多个字符保持原色，其余淡显，用于逐字演唱；小于零时全部正常显示。按 Unicode 标量计数。SwiftUI、Compose、WinUI 和 GTK 会绘制这一效果，其他目标显示完整文字。
 
 `Text` 加 `markdown` 时，内容是行内 Markdown：`**粗体**`、`*斜体*` 或 `_斜体_`、`` `代码` ``、`~~删除线~~` 和 `[链接](地址)`，反斜杠让下一个标记照字面显示。SwiftUI 交给系统的 `AttributedString(markdown:)`，Compose 写成带样式与 `LinkAnnotation` 的 `AnnotatedString`，Web 生成元素（不当作 HTML，链接只接受网页和邮件地址），GTK 转成 Pango 标记；Windows 暂时去掉标记只显示文字。整篇文档（标题、列表、表格等）由应用自己分块，每块用这样的文字显示。
 

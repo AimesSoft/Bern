@@ -308,6 +308,13 @@ impl Generator<'_> {
             .unwrap_or_else(|| "null".into());
         let target = self.target(element, ctx);
         let label_hidden = element.keyword("label_hidden") == Some("true");
+        // In a row it takes what the others leave, as on the other targets:
+        // measured first, it would leave them nothing.
+        let weight = if ctx.scope == Scope::Row {
+            ".weight(1f)"
+        } else {
+            ""
+        };
         let icons = format!(
             "{}, {}",
             Self::icon(element.icon("min_icon")),
@@ -328,7 +335,7 @@ impl Generator<'_> {
                 "BernControl({target}, \"slider\", {label}, actions = BernControlActions(setNumber = {{ it: Double -> {change} }}, value = {{ BernText.text({value}) }}))"
             ));
             out.line(format!(
-                "BernControlledSlider({label}, ({value}).toDouble(), {{ it: Double -> {change} }}, {min}, {max}, {step}, {icons}, labelHidden = {label_hidden}, continuous = {}, modifier = Modifier.testTag({target}))",
+                "BernControlledSlider({label}, ({value}).toDouble(), {{ it: Double -> {change} }}, {min}, {max}, {step}, {icons}, labelHidden = {label_hidden}, continuous = {}, modifier = Modifier{weight}.testTag({target}))",
                 element.keyword("continuous") == Some("true")
             ));
             return;
@@ -357,7 +364,7 @@ impl Generator<'_> {
             "BernControl({target}, \"slider\", {label}, actions = BernControlActions(setNumber = {{ {write}{commit} }}, value = {{ BernText.text({field}) }}))"
         ));
         out.line(format!(
-            "BernSlider({label}, {read}, {{ {write} }}, {min}, {max}, {step}, {}, {icons}, labelHidden = {label_hidden}, modifier = Modifier.testTag({target}))",
+            "BernSlider({label}, {read}, {{ {write} }}, {min}, {max}, {step}, {}, {icons}, labelHidden = {label_hidden}, modifier = Modifier{weight}.testTag({target}))",
             action
                 .map(|action| format!("{{ {action} }}"))
                 .unwrap_or_else(|| "null".into()),

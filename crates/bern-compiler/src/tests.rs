@@ -708,6 +708,7 @@ mod independent_target {
                     android: None,
                     channels: vec![],
                     frontends: vec![],
+                    abis: vec![],
                 },
             )
             .iter()
@@ -739,6 +740,7 @@ mod independent_target {
                 android: None,
                 channels: vec![],
                 frontends: vec![],
+                abis: vec![],
             })
             .unwrap();
         // The outline target lacks most components and reports each one

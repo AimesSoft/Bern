@@ -210,14 +210,26 @@ fun bernTextStyle(style: String, size: Float? = null, lineHeight: Float? = null)
 
 /// A `Text`: at most `lines` lines, the last ending with an ellipsis.
 @Composable
-fun BernText(text: String, style: TextStyle, color: Color, lines: Int? = null) {
+fun BernText(text: String, style: TextStyle, color: Color, lines: Int? = null, lit: Int = -1) {
+    val faded = if (color != Color.Unspecified) color
+        else if (style.color != Color.Unspecified) style.color
+        else LocalContentColor.current
     Text(
-        text,
+        if (lit < 0) androidx.compose.ui.text.AnnotatedString(text) else bernLit(text, lit, faded),
         style = style,
         color = color,
         maxLines = lines ?: Int.MAX_VALUE,
         overflow = if (lines != null) TextOverflow.Ellipsis else TextOverflow.Clip,
     )
+}
+
+/// `lit`: the first `lit` characters of `text` as they are, the rest faded.
+private fun bernLit(text: String, lit: Int, color: Color): androidx.compose.ui.text.AnnotatedString {
+    val from = text.offsetByCodePoints(0, lit.coerceAtMost(text.codePointCount(0, text.length)))
+    return androidx.compose.ui.text.buildAnnotatedString {
+        append(text)
+        addStyle(androidx.compose.ui.text.SpanStyle(color = color.copy(alpha = color.alpha * 0.4f)), from, text.length)
+    }
 }
 
 /// `bold`: the style's weight bold while `on` holds.

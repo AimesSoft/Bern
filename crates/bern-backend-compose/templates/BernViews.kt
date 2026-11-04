@@ -1547,7 +1547,8 @@ fun BernSplitView(
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         if (maxWidth >= 600.dp) {
-            BernChrome(title = title)
+            // A detail without a title leaves the bar out, and its room.
+            BernChrome(title = title.ifEmpty { null })
             Row(Modifier.fillMaxSize()) {
                 Box(Modifier.width(sidebarWidth).fillMaxHeight()) { list {} }
                 VerticalDivider()

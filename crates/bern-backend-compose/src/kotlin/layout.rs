@@ -6,6 +6,7 @@ use super::{Ctx, Generator, Out, Scope};
 use crate::names::{double, float, member, string};
 use bern_ir::{Element, LayoutSize, Node, Prop};
 use bern_protocol::Type;
+use std::collections::HashSet;
 
 impl Generator<'_> {
     /// The direct children of a container: with `stagger`, those that
@@ -30,6 +31,41 @@ impl Generator<'_> {
 
     /// `.padding(…)` of a container: `padding` on every edge, `padding_x`
     /// and `padding_y` in its place across and along.
+    /// Whether these fill the height they are given, as a scroll view does,
+    /// also inside stacks, columns, conditions and components.
+    fn fills_height(&self, nodes: &[Node], seen: &mut HashSet<String>) -> bool {
+        nodes.iter().any(|node| match node {
+            Node::Element(element) => match element.kind.as_str() {
+                "ScrollView" | "Table" => true,
+                "Stack" | "Column" => self.fills_height(&element.children, seen),
+                _ => false,
+            },
+            Node::Component(reference) => {
+                seen.insert(reference.component.clone())
+                    && self
+                        .app
+                        .component(&reference.component)
+                        .is_some_and(|component| {
+                            self.fills_height(std::slice::from_ref(&component.body), seen)
+                        })
+            }
+            Node::If(branch) => {
+                branch
+                    .branches
+                    .iter()
+                    .any(|(_, nodes)| self.fills_height(nodes, seen))
+                    || self.fills_height(&branch.otherwise, seen)
+            }
+            Node::IfLet(branch) => {
+                self.fills_height(&branch.then, seen) || self.fills_height(&branch.otherwise, seen)
+            }
+            Node::Match(choice) => choice
+                .arms
+                .iter()
+                .any(|arm| self.fills_height(&arm.body, seen)),
+        })
+    }
+
     fn padding(&self, element: &Element) -> String {
         let all = self.length(element, "padding");
         let x = self.length(element, "padding_x");
@@ -79,6 +115,13 @@ impl Generator<'_> {
                 .any(|node| matches!(node, Node::Element(child) if child.kind == "Spacer"));
         // The root of a component does so in the column or row the
         // component is called in.
+        // So does a row in a row around a slider or a field: they take all
+        // they are given, and what follows the row would get nothing.
+        let spaced = spaced
+            || (!column
+                && ctx.scope == Scope::Row
+                && element.prop("width").is_none()
+                && takes_room(&element.children));
         let along = match (spaced, column, ctx.scope) {
             (true, true, Scope::Column) | (true, false, Scope::Row) => ".weight(1f)",
             (true, true, Scope::Other) => ".bernFlexible(row = false)",
@@ -192,9 +235,16 @@ impl Generator<'_> {
         };
         // In a row, a stack around a field takes the room its neighbours
         // leave, as the field would on its own.
-        let under_bars = if ctx.scope == Scope::Row
+        // In a column, a stack around a scroll view does too, as on the
+        // other targets: it fills what it is given, and what follows the
+        // stack would get nothing.
+        let under_bars = if (ctx.scope == Scope::Row
             && element.prop("width").is_none()
-            && takes_room(&element.children)
+            && takes_room(&element.children))
+            || (ctx.scope == Scope::Column
+                && !ctx.scroll_content
+                && element.prop("height").is_none()
+                && self.fills_height(&element.children, &mut HashSet::new()))
         {
             format!("{under_bars}.weight(1f)")
         } else {
@@ -230,7 +280,17 @@ impl Generator<'_> {
             sized_layers: element.children.iter().any(|node| !backdrop(node)),
             ..ctx.within(Scope::Other)
         };
+        // Inside, the bars are behind: a layer in it reaches no further.
+        let under = element.keyword("under_bars") == Some("true");
+        if under {
+            out.open(
+                "CompositionLocalProvider(LocalBernBarsPadding provides androidx.compose.foundation.layout.PaddingValues()) {",
+            );
+        }
         self.children(out, element, &layers);
+        if under {
+            out.close("}");
+        }
         out.close("}");
     }
 

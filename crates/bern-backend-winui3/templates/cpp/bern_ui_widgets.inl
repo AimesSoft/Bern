@@ -187,9 +187,31 @@ struct TextProps {
     /// `bold`: the text is bold while this holds, else in its style's
     /// weight.
     Get bold;
+    /// `lit`: that many of its first characters as they are, the rest faded;
+    /// below zero, all of it.
+    Len lit;
     /// `animate`: a size that follows state springs to each new value.
     Motion const* animate = nullptr;
 };
+
+/// `lit`: what stands after the first `lit` characters of `text` faded.
+inline void FadeAfter(controls::TextBlock const& block, std::wstring_view text, double lit) {
+    block.TextHighlighters().Clear();
+    if (lit < 0) return;
+    std::size_t at = 0;
+    for (auto left = static_cast<std::int64_t>(lit); left > 0 && at < text.size(); --left) {
+        at += (text[at] >= 0xD800 && text[at] < 0xDC00) ? 2 : 1;
+    }
+    if (at >= text.size()) return;
+    auto color = winrt::Windows::UI::Colors::White();
+    if (auto brush = block.Foreground().try_as<xaml::Media::SolidColorBrush>()) color = brush.Color();
+    color.A = static_cast<std::uint8_t>(color.A * 0.4);
+    xaml::Documents::TextHighlighter faded;
+    faded.Ranges().Append({static_cast<std::int32_t>(at), static_cast<std::int32_t>(text.size() - at)});
+    faded.Foreground(xaml::Media::SolidColorBrush(color));
+    faded.Background(xaml::Media::SolidColorBrush(winrt::Windows::UI::Colors::Transparent()));
+    block.TextHighlighters().Append(faded);
+}
 
 /// `Text(markdown)` here: the words of inline Markdown without its marks,
 /// a link shown by its words; a backslash keeps the next mark.
@@ -243,6 +265,13 @@ inline void Text(Parent const& p, Ctx const& ctx, TextProps props) {
         Reactive::Run([bold = props.bold, ctx, weight, weak = winrt::make_weak(block)] {
             bool on = R::Truthy(bold(ctx));
             if (auto text = weak.get()) text.FontWeight(on ? WeightNamed("bold") : weight);
+        });
+    }
+    if (props.lit.Given()) {
+        Reactive::Run([lit = props.lit, ctx, content, weak = winrt::make_weak(block)] {
+            double count = lit.Now(ctx);
+            auto text = content ? winrt::to_hstring(content()) : winrt::hstring();
+            if (auto shown = weak.get()) FadeAfter(shown, text, count);
         });
     }
     if (props.lineHeight.Given()) {

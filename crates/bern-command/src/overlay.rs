@@ -32,6 +32,29 @@ pub struct Line {
     pub bold: bool,
     /// Red, green, blue and alpha.
     pub color: [u8; 4],
+    /// That many of its first characters in `color`, the rest faded; all of
+    /// it when there is no such count.
+    pub lit: Option<usize>,
+}
+
+/// How much of `Line::color`'s alpha what `Line::lit` leaves out keeps.
+pub const FADED: f64 = 0.4;
+
+impl Line {
+    /// Where what is faded starts in `text`, in bytes.
+    pub fn faded_from(&self) -> Option<usize> {
+        self.text.char_indices().nth(self.lit?).map(|(at, _)| at)
+    }
+
+    /// Where it starts and how long it is, in UTF-16 units.
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    fn faded_range(&self) -> Option<(usize, usize)> {
+        let at = self.faded_from()?;
+        Some((
+            self.text[..at].encode_utf16().count(),
+            self.text[at..].encode_utf16().count(),
+        ))
+    }
 }
 
 /// Where an overlay stands.
@@ -211,10 +234,11 @@ fn as_json(overlay: &Overlay) -> String {
         .map(|line| {
             let [r, g, b, a] = line.color;
             format!(
-                "{{\"text\":{},\"size\":{},\"bold\":{},\"color\":\"#{a:02x}{r:02x}{g:02x}{b:02x}\"}}",
+                "{{\"text\":{},\"size\":{},\"bold\":{},\"color\":\"#{a:02x}{r:02x}{g:02x}{b:02x}\",\"lit\":{}}}",
                 text(&line.text),
                 line.size,
-                line.bold
+                line.bold,
+                line.lit.map_or(-1, |lit| lit as i64)
             )
         })
         .collect();
@@ -262,7 +286,7 @@ mod mac {
         NSWindowCollectionBehavior, NSWindowStyleMask,
     };
     use objc2_foundation::{
-        NSAttributedString, NSMutableDictionary, NSPoint, NSRect, NSSize, NSString,
+        NSMutableAttributedString, NSMutableDictionary, NSPoint, NSRange, NSRect, NSSize, NSString,
     };
     use std::cell::{Cell, RefCell};
     use std::collections::HashMap;
@@ -380,12 +404,24 @@ mod mac {
         }
         // SAFETY: string attributes as AppKit takes them.
         let text = unsafe {
-            NSAttributedString::initWithString_attributes(
-                NSAttributedString::alloc(),
+            NSMutableAttributedString::initWithString_attributes(
+                NSMutableAttributedString::alloc(),
                 &NSString::from_str(&line.text),
                 Some(&attributes),
             )
         };
+        if let Some((start, length)) = line.faded_range() {
+            let faded = NSColor::colorWithSRGBRed_green_blue_alpha(r, g, b, a * super::FADED);
+            // SAFETY: the key is AppKit's name for this value, and the range
+            // lies in the text.
+            unsafe {
+                text.addAttribute_value_range(
+                    NSForegroundColorAttributeName,
+                    &faded,
+                    NSRange::new(start, length),
+                );
+            }
+        }
         let label = NSTextField::labelWithAttributedString(&text, mtm);
         label.sizeToFit();
         label
@@ -669,7 +705,7 @@ mod win {
     };
     use windows::Win32::Graphics::DirectWrite::{
         DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-        DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_METRICS,
+        DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_METRICS, DWRITE_TEXT_RANGE,
         DWriteCreateFactory, IDWriteFactory, IDWriteFontCollection, IDWriteTextLayout,
     };
     use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
@@ -1140,13 +1176,14 @@ mod win {
         unsafe {
             let dpi = GetDpiForWindow(hwnd).max(96);
             let scale = dpi as f32 / 96.0;
-            let lines: Vec<(IDWriteTextLayout, f32, f32, [u8; 4])> = window
+            let lines: Vec<(IDWriteTextLayout, f32, f32, [u8; 4], Option<(usize, usize)>)> = window
                 .overlay
                 .lines
                 .iter()
                 .filter(|line| !line.text.is_empty())
                 .filter_map(|line| {
-                    layout(dwrite, line, scale).map(|(layout, w, h)| (layout, w, h, line.color))
+                    layout(dwrite, line, scale)
+                        .map(|(layout, w, h)| (layout, w, h, line.color, line.faded_range()))
                 })
                 .collect();
             if lines.is_empty() {
@@ -1310,7 +1347,7 @@ mod win {
             }
             let shadow = dark(0.75)?;
             let mut top = margin + bar_height;
-            for (layout, line_width, line_height, [r, g, b, a]) in &lines {
+            for (layout, line_width, line_height, [r, g, b, a], faded) in &lines {
                 let left = (width as f32 - line_width) / 2.0;
                 let brush = target.CreateSolidColorBrush(
                     &D2D1_COLOR_F {
@@ -1333,6 +1370,24 @@ mod win {
                         &shadow,
                         D2D1_DRAW_TEXT_OPTIONS_NONE,
                     );
+                }
+                if let Some((start, length)) = faded {
+                    let rest = target.CreateSolidColorBrush(
+                        &D2D1_COLOR_F {
+                            r: *r as f32 / 255.0,
+                            g: *g as f32 / 255.0,
+                            b: *b as f32 / 255.0,
+                            a: *a as f32 / 255.0 * super::FADED as f32,
+                        },
+                        None,
+                    )?;
+                    layout.SetDrawingEffect(
+                        &rest,
+                        DWRITE_TEXT_RANGE {
+                            startPosition: *start as u32,
+                            length: *length as u32,
+                        },
+                    )?;
                 }
                 target.DrawTextLayout(
                     Vector2 { X: left, Y: top },
@@ -1428,6 +1483,7 @@ mod tests {
                 size: 28.0,
                 bold: true,
                 color: [255, 128, 0, 255],
+                lit: Some(2),
             }],
             place: Place::Taskbar,
             locked: true,
@@ -1439,7 +1495,21 @@ mod tests {
         };
         assert_eq!(
             as_json(&overlay),
-            r##"{"lines":[{"text":"你好 \"world\"","size":28,"bold":true,"color":"#ffff8000"}],"place":"taskbar","locked":true,"buttons":[{"id":"lock","symbol":"lock.open.fill","whileLocked":true}]}"##
+            r##"{"lines":[{"text":"你好 \"world\"","size":28,"bold":true,"color":"#ffff8000","lit":2}],"place":"taskbar","locked":true,"buttons":[{"id":"lock","symbol":"lock.open.fill","whileLocked":true}]}"##
         );
+    }
+
+    #[test]
+    fn what_is_faded_starts_after_the_lit_characters() {
+        let line = |lit| Line {
+            text: "你好 world".into(),
+            size: 20.0,
+            bold: false,
+            color: [255; 4],
+            lit,
+        };
+        assert_eq!(line(None).faded_from(), None);
+        assert_eq!(line(Some(2)).faded_from(), Some(6));
+        assert_eq!(line(Some(99)).faded_from(), None);
     }
 }

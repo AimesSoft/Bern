@@ -1254,9 +1254,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             opt("line_height", PropKind::Length),
             opt("markdown", PropKind::Flag),
             opt("bold", PropKind::Bool),
+            opt("lit", PropKind::Length),
         ],
         Children::None,
-        "Text with a semantic style; `color` draws it in the accent or a status color (`status.success`, `status.warning`, `status.error`); `bold` sets it bold while it holds, changing with `animate`; `mark` draws a band of the color under each line; `lines` shows at most that many lines, ending the last with an ellipsis; `line_height` sets the height of each line, the extra split above and below it as in CSS; with `markdown` the content's inline Markdown — `**strong**`, `*emphasis*`, `` `code` ``, `~~struck~~` and `[links](address)`, a backslash taking the next mark literally — shows as the platform styles it",
+        "Text with a semantic style; `lit` keeps that many of its first characters in its color and fades the rest, or none of it when below zero, for words sung one by one; `color` draws it in the accent or a status color (`status.success`, `status.warning`, `status.error`); `bold` sets it bold while it holds, changing with `animate`; `mark` draws a band of the color under each line; `lines` shows at most that many lines, ending the last with an ellipsis; `line_height` sets the height of each line, the extra split above and below it as in CSS; with `markdown` the content's inline Markdown — `**strong**`, `*emphasis*`, `` `code` ``, `~~struck~~` and `[links](address)`, a backslash taking the next mark literally — shows as the platform styles it",
     ),
     spec(
         "Canvas",

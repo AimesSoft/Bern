@@ -2748,6 +2748,17 @@ struct BernMasonry: Layout {
     }
 }
 
+/// A `Text` with `lit`: its first `lit` characters as they are, the rest
+/// faded; all of it below zero.
+func bernLit(_ text: String, _ lit: Double) -> SwiftUI.Text {
+    let scalars = text.unicodeScalars
+    guard lit >= 0 else { return SwiftUI.Text(verbatim: text) }
+    let at = scalars.index(scalars.startIndex, offsetBy: Int(lit), limitedBy: scalars.endIndex) ?? scalars.endIndex
+    let sung = SwiftUI.Text(verbatim: String(scalars[..<at]))
+    let rest = SwiftUI.Text(verbatim: String(scalars[at...])).foregroundColor(SwiftUI.Color.primary.opacity(0.4))
+    return SwiftUI.Text("\(sung)\(rest)")
+}
+
 /// A `Text` with `markdown`: its inline Markdown as the system styles it,
 /// links opening as the platform opens them; the words as they are where
 /// they do not parse.

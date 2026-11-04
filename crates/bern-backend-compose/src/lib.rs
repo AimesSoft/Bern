@@ -36,6 +36,56 @@ const APP_ICON: &str = include_str!("../templates/BernAppIcon.kt");
 /// of the supported Android versions runs.
 pub const RUST_TARGET: &str = "aarch64-linux-android";
 
+/// An Android ABI: its name, its Rust target, and what the NDK's compilers
+/// start with, which for 32-bit ARM is not the Rust target.
+struct Abi {
+    name: &'static str,
+    rust: &'static str,
+    clang: &'static str,
+}
+
+const ABIS: &[Abi] = &[
+    Abi {
+        name: "arm64-v8a",
+        rust: RUST_TARGET,
+        clang: RUST_TARGET,
+    },
+    Abi {
+        name: "armeabi-v7a",
+        rust: "armv7-linux-androideabi",
+        clang: "armv7a-linux-androideabi",
+    },
+    Abi {
+        name: "x86_64",
+        rust: "x86_64-linux-android",
+        clang: "x86_64-linux-android",
+    },
+];
+
+/// A release for more than one ABI, which makes an APK for each.
+fn split_abis(context: &BuildContext) -> bool {
+    build_abis(context).len() > 1
+}
+
+/// The ABIs of this build: those of `abis` in a release, the first alone
+/// otherwise, for a build to try on one device.
+fn build_abis(context: &BuildContext) -> Vec<&'static Abi> {
+    let named = |name: &str| ABIS.iter().find(|abi| abi.name == name);
+    let mut abis: Vec<&Abi> = context
+        .target
+        .abis
+        .iter()
+        .filter_map(|name| named(name))
+        .collect();
+    if abis.is_empty() {
+        abis.push(&ABIS[0]);
+    }
+    if !context.release {
+        abis.truncate(1);
+    }
+    abis
+}
+
 /// Components not realized yet.
 const UNSUPPORTED: &[&str] = &[];
 
@@ -340,7 +390,17 @@ impl Target for ComposeAndroid {
             GeneratedFile::text("project/settings.gradle.kts", project::settings(&product)),
             GeneratedFile::text("project/build.gradle.kts", project::root_build()),
             GeneratedFile::text("project/gradle.properties", project::GRADLE_PROPERTIES),
-            GeneratedFile::text("project/app/build.gradle.kts", project::app_build(app)),
+            GeneratedFile::text(
+                "project/app/build.gradle.kts",
+                project::app_build(
+                    app,
+                    &build_abis(context)
+                        .iter()
+                        .map(|abi| abi.name)
+                        .collect::<Vec<_>>(),
+                    split_abis(context),
+                ),
+            ),
             GeneratedFile::text(
                 main.join("AndroidManifest.xml"),
                 project::manifest(app, round, context.target.android.as_ref(), &icons),
@@ -458,7 +518,7 @@ impl Target for ComposeAndroid {
             "generator_version": env!("CARGO_PKG_VERSION"),
             "minimum_sdk": MINIMUM_SDK,
             "target_sdk": TARGET_SDK,
-            "abi": "arm64-v8a",
+            "abis": build_abis(context).iter().map(|abi| abi.name).collect::<Vec<_>>(),
             "profile": if context.release { "release" } else { "debug" },
             "engine_deployment": "in-process",
             "ui_bridge": "jni",
@@ -490,41 +550,43 @@ impl Target for ComposeAndroid {
         let gradle_project = output.join("project");
         let profile = if context.release { "release" } else { "debug" };
         let glue_target = context.workspace_dir.join("target/bern-glue");
-        let library = glue_target
-            .join(RUST_TARGET)
-            .join(profile)
-            .join("libbern_app.so");
         let bin = toolchain::ndk_bin(&tools.ndk);
-        let linker = bin.join(format!("{RUST_TARGET}{MINIMUM_SDK}-clang"));
         let path = |path: &PathBuf| path.display().to_string();
-        let env = vec![
-            (
-                "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER".to_string(),
-                path(&linker),
-            ),
-            ("CC_aarch64_linux_android".to_string(), path(&linker)),
-            // C++ in the engine's crates, such as Oboe's audio.
-            (
-                "CXX_aarch64_linux_android".to_string(),
-                path(&bin.join(format!("{RUST_TARGET}{MINIMUM_SDK}-clang++"))),
-            ),
-            (
-                "AR_aarch64_linux_android".to_string(),
-                path(&bin.join("llvm-ar")),
-            ),
-        ];
-        let mut cargo = vec![
-            "build".to_string(),
-            "--manifest-path".into(),
-            path(&output.join("glue/Cargo.toml")),
-            "--target".into(),
-            RUST_TARGET.into(),
-            "--target-dir".into(),
-            path(&glue_target),
-        ];
-        if context.release {
-            cargo.push("--release".into());
-        }
+        let abis = build_abis(context);
+        let engine = |abi: &Abi| {
+            let compiler =
+                |suffix: &str| path(&bin.join(format!("{}{MINIMUM_SDK}-{suffix}", abi.clang)));
+            let target = abi.rust.replace('-', "_");
+            let env = vec![
+                (
+                    format!("CARGO_TARGET_{}_LINKER", target.to_uppercase()),
+                    compiler("clang"),
+                ),
+                (format!("CC_{target}"), compiler("clang")),
+                // C++ in the engine's crates, such as Oboe's audio.
+                (format!("CXX_{target}"), compiler("clang++")),
+                (format!("AR_{target}"), path(&bin.join("llvm-ar"))),
+            ];
+            let mut cargo = vec![
+                "build".to_string(),
+                "--manifest-path".into(),
+                path(&output.join("glue/Cargo.toml")),
+                "--target".into(),
+                abi.rust.into(),
+                "--target-dir".into(),
+                path(&glue_target),
+            ];
+            if context.release {
+                cargo.push("--release".into());
+            }
+            BuildStep::Run {
+                description: format!("Build the Rust engine and bridge for {}", abi.name),
+                program: "cargo".into(),
+                args: cargo,
+                cwd: output.join("glue"),
+                env,
+            }
+        };
         let mut gradle_env = vec![("ANDROID_HOME".to_string(), path(&tools.sdk))];
         if let Some(java_home) = &tools.java_home {
             gradle_env.push(("JAVA_HOME".to_string(), path(java_home)));
@@ -534,12 +596,18 @@ impl Target for ComposeAndroid {
         } else {
             "assembleDebug"
         };
+        // Split by ABI, each APK is named after its ABI, and the first
+        // stands for the build.
+        let built = if split_abis(context) {
+            format!("app-{}-{profile}", abis[0].name)
+        } else {
+            format!("app-{profile}")
+        };
         let apk = gradle_project
             .join("app/build/outputs/apk")
             .join(profile)
-            .join(format!("app-{profile}.apk"));
+            .join(format!("{built}.apk"));
         let product_apk = output.join(format!("{product}.apk"));
-        let jni = gradle_project.join("app/src/main/jniLibs/arm64-v8a");
         // Only this application's Kotlin: every application built here
         // shares the output directory, and sources another one left behind
         // would be compiled into this one.
@@ -566,19 +634,22 @@ impl Target for ComposeAndroid {
             .collect(),
         };
         let assets = gradle_project.join("app/src/main/assets/bern/resources");
-        let mut steps = vec![
-            BuildStep::Run {
-                description: "Build the Rust engine and bridge".into(),
-                program: "cargo".into(),
-                args: cargo,
-                cwd: output.join("glue"),
-                env,
-            },
-            BuildStep::CreateDir { path: jni.clone() },
-            BuildStep::Copy {
-                from: library,
-                to: jni.join("libbern_app.so"),
-            },
+        let mut steps = Vec::new();
+        for abi in &abis {
+            let jni = gradle_project.join("app/src/main/jniLibs").join(abi.name);
+            steps.extend([
+                engine(abi),
+                BuildStep::CreateDir { path: jni.clone() },
+                BuildStep::Copy {
+                    from: glue_target
+                        .join(abi.rust)
+                        .join(profile)
+                        .join("libbern_app.so"),
+                    to: jni.join("libbern_app.so"),
+                },
+            ]);
+        }
+        steps.extend([
             // Declared resources ship as assets, which the runtime unpacks.
             BuildStep::Mirror {
                 dir: assets,
@@ -612,7 +683,7 @@ impl Target for ComposeAndroid {
                 from: apk,
                 to: product_apk.clone(),
             },
-        ];
+        ]);
         // A release build's baseline profile beside the APK, in the form
         // Android 12 and later take at install (Gradle's metadata lists it
         // for API 31 and up): `bern run` installs the two together, so the
@@ -623,7 +694,8 @@ impl Target for ComposeAndroid {
         steps.push(if context.release {
             BuildStep::Copy {
                 from: gradle_project
-                    .join("app/build/outputs/apk/release/baselineProfiles/0/app-release.dm"),
+                    .join("app/build/outputs/apk/release/baselineProfiles/0")
+                    .join(format!("{built}.dm")),
                 to: product_profile,
             }
         } else {
@@ -720,7 +792,7 @@ impl Target for ComposeAndroid {
         if let Some(java_home) = &tools.java_home {
             env.push(("JAVA_HOME".to_string(), path(java_home)));
         }
-        let steps = vec![
+        let mut steps = vec![
             BuildStep::Run {
                 description: "Bundle the app for stores".into(),
                 program: path(&tools.gradle),
@@ -736,14 +808,31 @@ impl Target for ComposeAndroid {
             },
             BuildStep::CreateDir { path: dist.clone() },
             BuildStep::Copy {
-                from: gradle_project.join("app/build/outputs/apk/release/app-release.apk"),
-                to: name("apk"),
-            },
-            BuildStep::Copy {
                 from: gradle_project.join("app/build/outputs/bundle/release/app-release.aab"),
                 to: name("aab"),
             },
         ];
+        let apks = gradle_project.join("app/build/outputs/apk/release");
+        let mut products = vec![name("aab")];
+        if split_abis(context) {
+            for abi in build_abis(context) {
+                let apk = dist.join(format!(
+                    "{product}-{}-android-{}.apk",
+                    app.app.version, abi.name
+                ));
+                steps.push(BuildStep::Copy {
+                    from: apks.join(format!("app-{}-release.apk", abi.name)),
+                    to: apk.clone(),
+                });
+                products.push(apk);
+            }
+        } else {
+            steps.push(BuildStep::Copy {
+                from: apks.join("app-release.apk"),
+                to: name("apk"),
+            });
+            products.push(name("apk"));
+        }
         let mut notes = Vec::new();
         if signing.android_keystore.is_none() {
             notes.push(
@@ -753,7 +842,7 @@ impl Target for ComposeAndroid {
         }
         Ok(BuildPlan {
             steps,
-            products: vec![name("apk"), name("aab")],
+            products,
             run: None,
             notes,
         })

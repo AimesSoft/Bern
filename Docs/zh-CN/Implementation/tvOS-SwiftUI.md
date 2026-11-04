@@ -22,7 +22,7 @@
 | 遥控按键 | 部分 | `Shortcut` 与控件的 `shortcut:` 对应返回、播放/暂停与触控板边缘；方向键在模拟器实测，返回与播放/暂停未验证（见“验证记录”） |
 | 应用图标 | 完成 | `[app.icon].tvos` 接受 `.brandassets` 文件夹或方形 PNG；未声明时由默认图标生成分层图标与顶部货架图 |
 | `bern run --target tvos` | 完成 | 装进正在运行的 tvOS 模拟器并启动；生成的 CLI 经 IPC 控制 |
-| 真机构建与打包 | 未完成 | 签名、描述文件、安装与 `bern package` 未做；`aarch64-apple-tvos` 的引擎构建未试 |
+| 真机构建与打包 | 部分完成 | `bern package --target tvos` 为 `aarch64-apple-tvos` 构建引擎，在 `target/bern/dist/` 写出未签名的 `<应用>-<版本>-tvos.ipa`，由持有描述文件的人签名和安装；签名本身未做 |
 
 ## 工具链
 

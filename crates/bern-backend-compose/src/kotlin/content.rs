@@ -46,6 +46,11 @@ impl Generator<'_> {
             .number("lines")
             .map(|lines| format!(", lines = {}", lines.max(1.0) as i64))
             .unwrap_or_default();
+        let lit = match element.prop("lit") {
+            Some(Prop::Number { value }) => format!(", lit = {}", *value as i64),
+            Some(Prop::Expr { expr }) => format!(", lit = ({}).toInt()", self.expr(expr)),
+            _ => String::new(),
+        };
         match element.keyword("mark") {
             _ if element.keyword("markdown") == Some("true") => out.line(format!(
                 "BernMarkdownText({content}, {style}, {color}{lines})"
@@ -54,7 +59,7 @@ impl Generator<'_> {
                 "BernMarkedText({content}, {style}, {color}, BernColor.Role({}){lines})",
                 string(role)
             )),
-            None => out.line(format!("BernText({content}, {style}, {color}{lines})")),
+            None => out.line(format!("BernText({content}, {style}, {color}{lines}{lit})")),
         }
     }
 
