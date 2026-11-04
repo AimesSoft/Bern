@@ -137,7 +137,11 @@ impl Generator<'_> {
                 && element.prop("width").is_none()
                 && element.prop("height").is_none()
                 && element.keyword("under_bars") != Some("true");
-            let (whole, whole_arg) = if page { (".bernWholeWindow()", ", whole: true") } else { ("", "") };
+            let (whole, whole_arg) = if page {
+                (".bernWholeWindow()", ", whole: true")
+            } else {
+                ("", "")
+            };
             if let Some(edge) = edge("disappear").filter(|_| page) {
                 removal = format!("AnyTransition.bernMoveOut(edge: {edge})");
             }
@@ -246,7 +250,7 @@ impl Generator<'_> {
             out.line(format!(
                 ".bernNudge({}, motion: {})",
                 self.expr(when),
-                crate::style::motion(self.app, "jelly")
+                crate::style::motion(self.app, element.keyword("nudge_motion").unwrap_or("jelly"))
             ));
         }
         if let Some(key) = element.expr("nudge_key") {
@@ -254,7 +258,7 @@ impl Generator<'_> {
                 ".bernNudge(key: {}, scale: {}, motion: {})",
                 self.expr(key),
                 double(element.number("nudge_scale").unwrap_or(1.06)),
-                crate::style::motion(self.app, "jelly")
+                crate::style::motion(self.app, element.keyword("nudge_motion").unwrap_or("jelly"))
             ));
         }
         let (scale, opacity) = (

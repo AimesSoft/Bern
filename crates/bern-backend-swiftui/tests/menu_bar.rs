@@ -97,7 +97,7 @@ pub fn app(app: keys::Client, windows: AppWindows, #[session] draft: Draft) -> i
                     CommandItem(id: keys_help, label: tr! { "en" => "Keys Help" }, shortcut: "cmd+?") => app.back()
                 }
             }
-            StatusItem(icon: "play", label: tr! { "en" => "Keys" }, login_item: true) {
+            StatusItem(shown: app.playing, icon: "play", label: tr! { "en" => "Keys" }, login_item: true) {
                 CommandItem(id: status_play, label: tr! { "en" => "Playing" }, checked: app.playing) => app.toggle()
                 Divider
                 CommandMenu(label: tr! { "en" => "Rate" }) {
@@ -291,7 +291,8 @@ fn the_menu_bar_is_the_macos_commands_and_shortcuts_follow_state() {
         // menu that opens the primary window, the application's items,
         // “Open at Login” and Quit; without windows the application stays
         // in the menu bar.
-        "SwiftUI.MenuBarExtra {",
+        "struct BernStatusScene: Scene {",
+        "SwiftUI.MenuBarExtra(isInserted: BernStatusArea.follow(shown)) {",
         "SwiftUI.Image(systemName: \"play\").accessibilityLabel(",
         "struct BernStatusMenu: View {",
         "SwiftUI.Button(BernText.format(\"bern.window.open\", [BernText.string(",

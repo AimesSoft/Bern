@@ -167,6 +167,7 @@ impl Target for ComposeAndroid {
                 "nudge",
                 "nudge_key",
                 "nudge_scale",
+                "nudge_motion",
                 "reduce_motion",
                 "spin",
                 "spin_period",
@@ -406,6 +407,12 @@ impl Target for ComposeAndroid {
                 GeneratedFile::text("tools/src/cli.rs", glue::cli_rs(context, app)),
                 GeneratedFile::text("tools/src/mcp.rs", glue::mcp_rs(context, app)),
             ]);
+        }
+        if project::for_television(app) {
+            files.push(GeneratedFile::text(
+                main.join("res/drawable/bern_tv_banner.xml"),
+                project::TV_BANNER,
+            ));
         }
         if bern_target_api::svg::used(app) {
             files.push(GeneratedFile::text(

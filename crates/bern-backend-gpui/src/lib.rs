@@ -733,6 +733,7 @@ impl Target for Gpui {
                 "nudge",
                 "nudge_key",
                 "nudge_scale",
+                "nudge_motion",
                 "reduce_motion",
                 "stagger",
                 "spin",

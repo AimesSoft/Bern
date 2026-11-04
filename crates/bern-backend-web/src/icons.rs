@@ -139,6 +139,7 @@ const ICONS: &[(&str, &str, Fill)] = &[
         lucide!("square-arrow-out-up-right"),
         Fill::None,
     ),
+    ("headphones", lucide!("headphones"), Fill::None),
     ("heart", lucide!("heart"), Fill::None),
     ("heart.fill", lucide!("heart"), Fill::All),
     ("arrow.clockwise", lucide!("rotate-cw"), Fill::None),

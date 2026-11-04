@@ -251,6 +251,7 @@ impl Generator<'_> {
             "Shortcut" => self.key_shortcut(out, element),
             "ShortcutInput" => self.shortcut_input(out, element),
             "Svg" => self.svg(out, element),
+            "WebPage" => self.web_page(out, element),
             "Image" => self.image(out, element),
             "Progress" => self.progress(out, element),
             "Spacer" => out.line("B.Spacer(p);"),

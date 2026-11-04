@@ -1780,10 +1780,13 @@ for command in bern::now_playing::take_commands() {
 - `update` 在歌曲、播放与暂停、位置跳变时调用；`None` 表示没有在播放，系统的控制随之收起。系统自己按 `position` 与 `playing` 推算进度，不必每秒更新。
 - 系统送来的命令有播放、暂停、播放或暂停、下一首、上一首与跳到某秒；每来一条就唤醒引擎（`bern::wake`），引擎在下一次处理时用 `take_commands` 取走。
 - `[app].background_audio = true` 让应用在后台与锁屏时继续出声：iOS 声明 `UIBackgroundModes` 的 `audio`，Android 声明前台服务权限，播放时由一个 `mediaPlayback` 类型的前台服务（`BernPlaybackService`）守着进程。桌面平台不需要它。
+- Android 上宿主还替正在播放的内容持有音频焦点，来电或别的应用的音乐会让它停下，而不是一起响。`playing: true` 时申请，暂停或 `None` 时释放。永久失去时引擎收到 `Pause`；短暂失去时先收到 `Pause`，焦点回来后收到 `Play`，通话中按播放也是如此。系统无法在短促声音下压低的播放器（例如 AAudio 的）在这段时间里暂停。耳机拔出时发 `Pause`，音乐不会自己恢复。等焦点期间播放服务留在前台，否则 Android 12 及以上不让它从后台回到前台。同样的原因，音乐停下后它还在前台留 30 秒：引擎在加载下一首时通常报 `playing: false`，过了这段时间才退出前台，通知留着。系统仍然拒绝前台时，通知照常跟着音乐更新；Android 15 及以上此时也不给焦点（用户刚按下播放时除外），引擎会收到 `Pause`。
 
 各平台的实现：macOS 与 iOS 是 MediaPlayer 的 `MPNowPlayingInfoCenter` 与 `MPRemoteCommandCenter`，在主队列上更新；iOS 另把音频会话设为 `playback`。Windows 是系统媒体传输控件（SMTC）：在自己的线程上建一个关掉了命令管理器的 `MediaPlayer`，只借用它的控件。Linux 在会话总线上提供 MPRIS（`org.mpris.MediaPlayer2.<bundle_id 的最后一段>`），由 zbus 实现。Android 由宿主建 `MediaSession`、带 `MediaStyle` 的通知与前台服务，命令经 JNI 的 `nowPlayingCommand` 回到引擎。
 
 实现进度（2026-11-03）：一个实际的音乐应用实测：macOS 上媒体键播放、暂停与下一首有效，系统的正在播放显示歌名、歌手与封面；iOS 模拟器与 Android 模拟器上系统收到正在播放，Android 的通知栏按钮回到引擎；Linux 虚拟机上用 D-Bus 读到 MPRIS 的状态、元数据与位置，`PlayPause`、`Next` 与 `SetPosition` 变成命令。Windows 只编译，未运行。
+
+实现进度（2026-11-04）：在 Android 16 模拟器上实测音频焦点，音乐应用处于其他应用之后：别的应用永久、短暂、可压低地抢走焦点，来电响铃与接听，通话中按播放，结果都如上所述，等待期间服务一直在前台，等待超过 30 秒时也是。应用在后台一分多钟，自然切歌 14 次，服务一直在前台；真正暂停约 30 秒后退出前台，按媒体控件的播放后回到前台。模拟器没有耳机设备，收不到真实的耳机拔出广播：只确认了接收器已注册，并用替代广播走过同一分支。
 
 ### 悬浮文字
 

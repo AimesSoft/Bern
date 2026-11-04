@@ -1513,10 +1513,29 @@ fn a_status_item_builds_its_menu() {
         "let c = &c.with_local(\"entry\", Rc::new(move || row.clone()));",
         "let tag = rt::tag(&value);",
         "status_item: Some(b::StatusItemDef { label: b::str(|c| ",
-        "menu: status_menu, login_item: true, image: &[] }),",
+        "menu: status_menu, login_item: true, shown: None, image: &[] }),",
     ] {
         assert!(ui.contains(expected), "missing `{expected}`:\n{ui}");
     }
+    // With `shown`: what it reads, for the item to follow.
+    let (config, compiled) = stage_project(
+        &root.join("target/bern-test/gtk-status-shown-project"),
+        &STATUS_UI.replace(
+            "StatusItem(icon: \"star\",",
+            "StatusItem(shown: app.count > 0, icon: \"star\",",
+        ),
+    );
+    let output = root.join("target/bern-test/gtk-status-shown");
+    let _ = std::fs::remove_dir_all(&output);
+    let context = stage_context(&config, &compiled, &output);
+    let files = GtkLinux.generate(&compiled.app, &context).unwrap();
+    let ui = &files
+        .iter()
+        .find(|file| file.path == Path::new("app/src/ui.rs"))
+        .unwrap()
+        .contents;
+    let ui = String::from_utf8_lossy(ui);
+    assert!(ui.contains("shown: Some(|c: &b::Ctx| "), "{ui}");
     // With its own picture: the SVG's shape at each size, beside the code
     // that embeds it.
     let (config, compiled) = stage_project_with(

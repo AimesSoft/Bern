@@ -545,16 +545,16 @@ fun BernShortcutInput(
 }
 
 /// A control's keyboard shortcut while it is composed; while `active` is
-/// false the keys go to the shortcuts composed before it. On a phone or a
-/// tablet `escape` is the system's Back as well, its button or gesture:
-/// what closes on Escape elsewhere closes on Back, before Back leaves the
-/// app. A television's remote has its Back as `escape` already.
+/// false the keys go to the shortcuts composed before it. `escape` is the
+/// system's Back as well, a phone's button or gesture and a television's
+/// remote: what closes on Escape elsewhere closes on Back, before Back
+/// leaves the app. Back reaches the app as a callback, never as a key.
 @Composable
 fun BernShortcut(shortcut: String, active: () -> Boolean = { true }, action: () -> Unit) {
     val token = remember { Any() }
     SideEffect { BernShortcuts.register(token, shortcut, action, active) }
     DisposableEffect(token) { onDispose { BernShortcuts.remove(token) } }
-    if (shortcut == "escape" && !BernHost.television) {
+    if (shortcut == "escape") {
         val current by rememberUpdatedState(action)
         androidx.activity.compose.BackHandler(enabled = active()) { current() }
     }
@@ -567,7 +567,13 @@ fun BernShortcut(shortcut: String, active: () -> Boolean = { true }, action: () 
 @Composable
 fun bernDefaultFocus(): Modifier {
     val requester = remember { FocusRequester() }
-    LaunchedEffect(requester) { runCatching { requester.requestFocus() } }
+    LaunchedEffect(requester) {
+        // A control waiting for what it acts on cannot take the focus yet.
+        repeat(50) {
+            if (runCatching { requester.requestFocus() }.getOrDefault(false)) return@LaunchedEffect
+            kotlinx.coroutines.delay(100)
+        }
+    }
     return Modifier.focusRequester(requester)
 }
 
@@ -623,6 +629,7 @@ fun BernContentButton(
         // around a label.
         val height = shape.height
         val sized = (if (height != null) modifier.height(height) else modifier)
+            .bernTelevisionFocus(CircleShape)
             .semantics(mergeDescendants = true) { contentDescription = label }
         val padding = if (height != null) PaddingValues(horizontal = 16.dp, vertical = 0.dp) else ButtonDefaults.ContentPadding
         if (prominent) {
@@ -644,6 +651,7 @@ fun BernContentButton(
         sized
             .bernTransform(look, motion)
             .bernShadow(look, motion, outline)
+            .bernTelevisionFocus(outline)
             .clip(outline)
             .background(look.background?.let(palette::color) ?: Color.Transparent)
             .clickable(interaction, ripple(), enabled = enabled, role = Role.Button, onClick = onClick)

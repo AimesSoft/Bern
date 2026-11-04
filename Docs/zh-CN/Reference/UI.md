@@ -164,6 +164,7 @@ SwiftUI 目标可在 `style!` 中用 `Sidebar { background: color(light: "#FAFAF
 
 | 接口 | 当前语义 |
 | --- | --- |
+| `WebPage(url:, cookies_file:, cookie_domain:, user_agent:, close_on:, label:) => action` | 填满所在位置的网页，会话独立，随组件一起消失。按下 CSS 选择器 `close_on` 找到的元素时，先于页面自己的处理运行动作：为其他应用的 WebView 做的页面可以用它自带的按钮关闭。不跟随 Web 以外的协议。`cookies_file` 指向一个内容为 `name=value; name=value` 的文件，在页面出现时读取并设置到 `cookie_domain` 上：登录 Cookie 不进入状态，命令行读不到。浏览器目标无法给其他站点的框架设置 Cookie。tvOS 没有网页引擎，不可用 |
 | `Modal(width:, height:)` | 窗口内居中面板，尺寸受可用窗口约束，背景遮罩；正文可滚动、页脚可单独放置。不写 `height` 时与内容一样高：正文的 `ScrollView` 取它滚动的内容的高度，超出窗口时面板停在窗口边缘、正文滚动。背景子树使用 `Stack(enabled: false)` 禁用 |
 | `Flow(gap:)` | 按内容固有尺寸从左到右换行；每行的子项竖直居中，`Spacer` 换行时不占宽度，排好后占满所在行余下的宽度 |
 | `Timer(interval:, enabled:) => command()` | 挂载且启用时定期提交命令；卸载、禁用时取消，间隔单位为秒。不能用来驱动逐帧绘制 |
@@ -182,7 +183,7 @@ SwiftUI 目标可在 `style!` 中用 `Sidebar { background: color(light: "#FAFAF
 - `appear` / `disappear` 控制结构变化；`animate` 控制支持的长度变化，`reflow` 让相邻元素让位。动效名称来自 `style!`。
 - `style!` 的 `corner { card: 22 }` 给圆角起名，`#[target(windows)] corner { card: 8 }` 给该平台另定取值；样式规则、`Image` / `Video` / `Shape` / `Accordion` 的 `corner` 与其中的 `if` 表达式都可写名字，构建时换成目标平台的数值。
 - `grow(edge: bottom, bouncy)` 固定某条边展开；`appear_delay` 必须配合 appear，延迟非负，可与 stagger 相加。普通状态更新不会重播入场，卸载取消等待。
-- `nudge` 响应布尔触发；`nudge_key` 让不同事件值触发提示，`nudge_scale` 指定幅度。容器的 `reduce_motion` 与系统减少动态效果偏好合并。
+- `nudge` 响应布尔触发；`nudge_key` 让不同事件值触发提示，`nudge_scale` 指定幅度，`nudge_motion` 指定回到原样的动效。容器的 `reduce_motion` 与系统减少动态效果偏好合并。
 - `spin` 成立时元素绕中心匀速转动，`spin_period` 秒一圈（默认 1，负数逆时针）；不成立时停在当时的角度，减少动态效果时不转。GPUI 只转资源里的 `Image`。
 - `glow: 倍数` 让指针所在处的元素亮起一团白光，半径为元素短边的这个倍数，中心不透明度为 `glow_opacity`（默认 0.4）；鼠标悬停时亮，触屏上手指按住时亮。看的是指针在不在元素的范围内，所以压在封面上的标题不会挡住光。`blur: 半径` 把元素的画面模糊，不越出它的范围与圆角。两者都不影响布局与点按；GPUI 不支持，检查时警告。
 - `Window(idle_after:, idle_enabled:, immersive:)` 控制空闲与沉浸。idle_after 单位为秒，`window.idle` 为只读会话状态。idle_enabled 默认 true；关闭后清除闲置并停用检测，开启后重新计时。SwiftUI 和 Web 已接入此开关（能力 `idle_control`）；其他目标当前未消费该属性，`bern check` 会对它们给出警告，空闲检测在那里始终开启。
@@ -222,7 +223,7 @@ style! {
 
   元素没有这项长度时报错，例如 `Button.x { gap: 4 }`；长度不小于 0，`font_size` 大于 0。
 - 屏幕键盘一类的按键用文字会话动作：`=> draft.query.push_str("A")`、`=> draft.query.pop()`；搜索页想在输入前就列出结果时写 `Search(suggest: true)`。
-- `Tab(display: icon)` 让页签只显示图标，例如电视标签栏里只是放大镜的搜索页；必须写 `icon`，`label` 仍是读屏读出的名称（桌面上也是悬停提示）。关键词与 `Label(display:)` 相同，默认 `title_and_icon`。它不限于电视，六个目标都生成。
+- `Tabs` 中的 `Pages(slot:, all: true)` 也显示声明了 `tab = false` 的页面，用于电视这样没有其他入口的场合。`Tab(display: icon)` 让页签只显示图标，例如电视标签栏里只是放大镜的搜索页；必须写 `icon`，`label` 仍是读屏读出的名称（桌面上也是悬停提示）。关键词与 `Label(display:)` 相同，默认 `title_and_icon`。它不限于电视，六个目标都生成。
 
 ```rust
 Adaptive(id: shell) {
@@ -276,6 +277,8 @@ WindowSet(handle: AppWindows, primary: main) {
 ## 状态栏项（托盘）
 
 `WindowSet` 里的 `StatusItem` 是应用在系统状态区域的一项：Windows 任务栏的通知区域、Linux 桌面的状态区与 macOS 菜单栏右侧。声明了它，关闭最后一个窗口时应用不退出，留在那里。
+
+- `shown` 让驻留变成可选：为假时状态项不显示，关闭最后一个窗口就退出应用，macOS 也一样；为真时应用照上面驻留。它读引擎状态，运行中跟着变化，可用来做“关闭窗口时”这类设置。
 
 - `label` 是提示文字与可访问名称。图标二选一：`icon` 是 Bern 图标名，只给 macOS，菜单栏按系统颜色画这个符号，Windows 与 Linux 显示应用图标；`image` 是 `[resources]` 里的单色 SVG（只看形状、不看颜色，镂空就是挖掉的部分），三个桌面平台都显示它，深色的栏上是白色、浅色的栏上是黑色，跟随系统切换。
 - 菜单第一项打开主窗口、最后一项退出，中间是声明的 `CommandItem`、`CommandMenu` 与 `Divider`，可以写在 `if`、`if let`、`match` 与 `ForEach` 里。Windows 与 Linux 上单击图标打开主窗口，右键是菜单；macOS 上点按就是菜单。

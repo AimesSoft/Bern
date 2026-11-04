@@ -44,6 +44,7 @@ const COMMON: &[&str] = &[
     "nudge",
     "nudge_key",
     "nudge_scale",
+    "nudge_motion",
     "reduce_motion",
     "spin",
     "spin_period",

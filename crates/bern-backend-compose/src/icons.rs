@@ -79,6 +79,7 @@ pub const ICONS: &[(&str, &str)] = &[
     ("hammer", "Icons.Filled.Build"),
     ("hand.tap", "touchApp"),
     ("hand.thumbsup", "Icons.Filled.ThumbUp"),
+    ("headphones", "headphones"),
     ("heart", "Icons.Filled.FavoriteBorder"),
     ("heart.fill", "Icons.Filled.Favorite"),
     ("house", "Icons.Filled.Home"),

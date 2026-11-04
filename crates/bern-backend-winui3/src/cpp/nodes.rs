@@ -109,7 +109,7 @@ impl Generator<'_> {
             (
                 "nudgeMotion",
                 (element.expr("nudge").is_some() || element.expr("nudge_key").is_some())
-                    .then(|| motion_ref("jelly")),
+                    .then(|| motion_ref(element.keyword("nudge_motion").unwrap_or("jelly"))),
             ),
             (
                 "nudgeKey",
@@ -327,6 +327,7 @@ impl Generator<'_> {
             "ControlGroup" => self.control_group(out, element),
             "Rail" => self.rail(out, element),
             "Svg" => self.svg(out, element),
+            "WebPage" => self.web_page(out, element),
             "Image" => self.image(out, element),
             "Progress" => self.progress(out, element),
             "Canvas" => self.canvas(out, element),

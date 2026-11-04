@@ -135,6 +135,28 @@ impl Generator<'_> {
         ));
     }
 
+    pub(super) fn web_page(&self, out: &mut Out, element: &Element) {
+        let text = |name| {
+            self.text_prop(element, name)
+                .unwrap_or_else(|| "\"\"".into())
+        };
+        let close = element
+            .action
+            .as_ref()
+            .map(|action| self.action(action))
+            .unwrap_or_else(|| "Unit".into());
+        out.line(format!(
+            "BernWebPage({}, {}, {}, {}, {}, {}) {{ {close} }}",
+            text("url"),
+            text("cookies_file"),
+            text("cookie_domain"),
+            text("user_agent"),
+            text("close_on"),
+            self.text_prop(element, "label")
+                .unwrap_or_else(|| "null".into()),
+        ));
+    }
+
     pub(super) fn svg(&self, out: &mut Out, element: &Element) {
         let value = |name, default: &str| {
             element
@@ -211,7 +233,8 @@ impl Generator<'_> {
                 "BernProgressRing(({}).toDouble(), {}, {}, {}, {label})",
                 self.expr(value),
                 double(element.number("total").unwrap_or(1.0)),
-                self.length(element, "width").unwrap_or_else(|| "24.dp".into()),
+                self.length(element, "width")
+                    .unwrap_or_else(|| "24.dp".into()),
                 double(element.number("stroke_width").unwrap_or(3.0)),
             ));
             return;

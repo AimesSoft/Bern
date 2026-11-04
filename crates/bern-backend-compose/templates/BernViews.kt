@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -253,6 +254,9 @@ object BernIcons {
     }
     private val history by lazy {
         icon("History", "M13,3c-4.97,0 -9,4.03 -9,9L1,12l3.89,3.89 0.07,0.14L9,12L6,12c0,-3.87 3.13,-7 7,-7s7,3.13 7,7 -3.13,7 -7,7c-1.93,0 -3.68,-0.79 -4.94,-2.06l-1.42,1.42C8.27,19.99 10.51,21 13,21c4.97,0 9,-4.03 9,-9s-4.03,-9 -9,-9zM12,8v5l4.28,2.54 0.72,-1.21 -3.5,-2.08L13.5,8L12,8z")
+    }
+    private val headphones by lazy {
+        icon("Headphones", "M12,1c-4.97,0 -9,4.03 -9,9v7c0,1.66 1.34,3 3,3h3v-8H5v-2c0,-3.87 3.13,-7 7,-7s7,3.13 7,7v2h-4v8h3c1.66,0 3,-1.34 3,-3v-7c0,-4.97 -4.03,-9 -9,-9z")
     }
     private val download by lazy {
         icon("Download", "M19,9h-4V3H9v6H5l7,7 7,-7zM5,18v2h14v-2H5z")
@@ -608,7 +612,7 @@ fun BernButton(
     val height = shape?.height
     if (height != null) padding = PaddingValues(horizontal = 16.dp, vertical = 0.dp)
     val form = if (shape?.capsule == true) CircleShape else ButtonDefaults.shape
-    var sized = modifier
+    var sized = modifier.bernTelevisionFocus(form)
     if (fill) sized = sized.fillMaxWidth()
     if (height != null) sized = sized.height(height)
     val material: @Composable (Modifier, MutableInteractionSource?) -> Unit = { modifier, interaction ->
@@ -666,7 +670,7 @@ fun BernIconButton(
         Icon(icon ?: BernIcons.get(""), contentDescription = label, modifier = iconModifier)
     }
     val material: @Composable (Modifier, MutableInteractionSource?) -> Unit = { modifier, interaction ->
-        val sized = if (diameter != null) modifier.size(diameter) else modifier
+        val sized = (if (diameter != null) modifier.size(diameter) else modifier).bernTelevisionFocus(CircleShape)
         val glyph: @Composable () -> Unit = { Icon(icon ?: BernIcons.get(""), contentDescription = label, modifier = iconModifier) }
         when {
             prominence == BernProminence.Prominent ->
@@ -1300,7 +1304,8 @@ fun bernPictureFrame(width: Dp?, height: Dp?, ratio: Float?, corner: Dp?, covers
         width != null && height != null -> Modifier.size(width, height)
         width != null -> Modifier.width(width).height(width / (ratio ?: (2f / 3f)))
         height != null -> Modifier.height(height).width(height * (ratio ?: (2f / 3f)))
-        ratio != null -> Modifier.fillMaxWidth().aspectRatio(ratio)
+        // As wide as the room, or as much as its height leaves.
+        ratio != null -> Modifier.aspectRatio(ratio)
         else -> Modifier.fillMaxWidth()
     }
     return if (corner != null) frame.clip(RoundedCornerShape(corner)) else frame
@@ -1594,8 +1599,85 @@ val LocalBernFloatingTabs = androidx.compose.runtime.compositionLocalOf { false 
 /// at its end.
 val LocalBernBarTop = androidx.compose.runtime.compositionLocalOf<androidx.compose.runtime.State<Float>?> { null }
 
+/// The tabs of a television's rail, and whether it is open; `null` off one.
+val LocalBernTabRail = androidx.compose.runtime.compositionLocalOf<Boolean?> { null }
+
+/// A rail stands its tabs in a column: what they ask of a row means nothing
+/// there.
+private object BernRailScope : RowScope {
+    override fun Modifier.weight(weight: Float, fill: Boolean): Modifier = this
+    override fun Modifier.align(alignment: Alignment.Vertical): Modifier = this
+    override fun Modifier.alignBy(alignmentLine: androidx.compose.ui.layout.HorizontalAlignmentLine): Modifier = this
+    override fun Modifier.alignByBaseline(): Modifier = this
+    override fun Modifier.alignBy(alignmentLineBlock: (androidx.compose.ui.layout.Measured) -> Int): Modifier = this
+}
+
+/// The tabs as Android TV has them: a rail of icons down the side, showing
+/// their labels while the remote stands in it, the page following the tab
+/// the remote stands on.
+@Composable
+private fun BernTabRail(content: @Composable () -> Unit, bar: @Composable RowScope.() -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val width by androidx.compose.animation.core.animateDpAsState(if (open) 216.dp else 80.dp, label = "rail")
+    Row(Modifier.fillMaxSize()) {
+        Column(
+            Modifier
+                .width(width)
+                .fillMaxHeight()
+                .onFocusChanged { open = it.hasFocus }
+                .padding(horizontal = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterVertically),
+        ) {
+            CompositionLocalProvider(LocalBernTabRail provides open) { BernRailScope.bar() }
+        }
+        Box(Modifier.weight(1f).fillMaxHeight()) { content() }
+    }
+}
+
+/// The floating tabs of a phone on its side, which has width to spare and
+/// no height: a rail of icons beside the pages, the accessory a capsule
+/// over their foot.
+@Composable
+private fun BernSideTabs(content: @Composable () -> Unit, accessory: (@Composable () -> Unit)?, bar: @Composable RowScope.() -> Unit) {
+    val barTop = remember { mutableFloatStateOf(Float.POSITIVE_INFINITY) }
+    // As under the floating bars: the pages reach the screen's bottom edge.
+    val below = LocalBernBarsPadding.current.calculateBottomPadding()
+    CompositionLocalProvider(LocalBernFloatingTabs provides true, LocalBernBarTop provides barTop) {
+        Row(
+            Modifier.fillMaxSize().layout { measurable, constraints ->
+                val extra = below.roundToPx()
+                val tall = if (constraints.hasBoundedHeight) constraints.maxHeight + extra else constraints.maxHeight
+                val placeable = measurable.measure(constraints.copy(minHeight = tall, maxHeight = tall))
+                layout(placeable.width, constraints.maxHeight) { placeable.place(0, 0) }
+            },
+        ) {
+            Column(
+                Modifier.width(72.dp).fillMaxHeight().padding(horizontal = 8.dp).padding(bottom = below),
+                verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterVertically),
+            ) {
+                CompositionLocalProvider(LocalBernTabRail provides false) { BernRailScope.bar() }
+            }
+            Box(Modifier.weight(1f).fillMaxHeight()) {
+                Box(Modifier.fillMaxSize()) { content() }
+                if (accessory != null) {
+                    Box(
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = below)
+                            .widthIn(max = 520.dp)
+                            .fillMaxWidth()
+                            .onGloballyPositioned { barTop.floatValue = it.boundsInRoot().top },
+                    ) { accessory() }
+                }
+            }
+        }
+    }
+}
+
 /// Tab pages above a navigation bar; `floating`, the bar a capsule clear
-/// of the screen's edges, the accessory a capsule above it, as on iOS.
+/// of the screen's edges, the accessory a capsule above it, as on iOS, and
+/// a rail beside them on a phone on its side. On a television, a rail
+/// beside them.
 @Composable
 fun BernTabs(
     floating: Boolean = false,
@@ -1603,7 +1685,11 @@ fun BernTabs(
     accessory: (@Composable () -> Unit)? = null,
     bar: @Composable RowScope.() -> Unit,
 ) {
-    if (floating) {
+    if (BernHost.television) {
+        BernTabRail(content, bar)
+    } else if (floating && LocalBernWindow.current.short) {
+        BernSideTabs(content, accessory, bar)
+    } else if (floating) {
         // The pages run under the floating bars to the screen's bottom, as
         // under iOS's; a scroll view they cover ends with room for them.
         val barTop = remember { mutableFloatStateOf(Float.POSITIVE_INFINITY) }
@@ -1682,6 +1768,44 @@ fun RowScope.BernTabItem(
     iconOnly: Boolean = false,
     onClick: () -> Unit,
 ) {
+    val rail = LocalBernTabRail.current
+    if (rail != null) {
+        var focused by remember { mutableStateOf(false) }
+        val tint = when {
+            focused -> Color.Black
+            selected -> MaterialTheme.colorScheme.primary
+            else -> MaterialTheme.colorScheme.onSurfaceVariant
+        }
+        val backing = when {
+            focused -> Color.White
+            selected -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
+            else -> Color.Transparent
+        }
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(52.dp)
+                .clip(CircleShape)
+                .background(backing)
+                .onFocusChanged {
+                    focused = it.isFocused
+                    // Moving along the rail, not falling into it when what
+                    // had the focus went away.
+                    if (it.isFocused && rail && !selected) onClick()
+                }
+                .clickable(role = androidx.compose.ui.semantics.Role.Tab, onClick = onClick)
+                .semantics { this.selected = selected; contentDescription = label }
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(icon ?: BernIcons.get(""), contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
+            if (rail) {
+                Spacer(Modifier.width(14.dp))
+                Text(label, color = tint, style = MaterialTheme.typography.titleSmall, maxLines = 1)
+            }
+        }
+        return
+    }
     if (LocalBernFloatingTabs.current) {
         val tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
         val backing by androidx.compose.animation.animateColorAsState(

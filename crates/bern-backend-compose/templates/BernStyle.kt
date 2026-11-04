@@ -82,6 +82,7 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -350,6 +351,23 @@ class BernInteractions : MutableInteractionSource {
 
 /// A button the style draws itself, or a Material button whose press and
 /// hover follow the style's transforms.
+/// Where a television's remote stands must show from across the room: the
+/// control grows a little, inside a white outline of its shape. Nothing on
+/// any other device. It goes before the control's `clickable`, to hear of
+/// the focus that takes.
+@Composable
+fun Modifier.bernTelevisionFocus(shape: androidx.compose.ui.graphics.Shape): Modifier {
+    if (!BernHost.television) return this
+    var focused by remember { mutableStateOf(false) }
+    val scale by androidx.compose.animation.core.animateFloatAsState(if (focused) 1.05f else 1f, label = "focus")
+    return onFocusChanged { focused = it.hasFocus }
+        .graphicsLayer {
+            scaleX = scale
+            scaleY = scale
+        }
+        .border(3.dp, if (focused) Color.White else Color.Transparent, shape)
+}
+
 @Composable
 fun BernStyledButton(
     style: BernStyle,
@@ -376,6 +394,7 @@ fun BernStyledButton(
         modifier
             .bernTransform(look, motion)
             .bernShadow(look, motion, shape)
+            .bernTelevisionFocus(shape)
             .clip(shape)
             .background(look.background?.let(palette::color) ?: Color.Transparent)
             .border(look.borderWidth.dp, look.border?.let(palette::color) ?: Color.Transparent, shape)

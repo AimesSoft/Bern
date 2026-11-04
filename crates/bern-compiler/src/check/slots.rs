@@ -85,6 +85,14 @@ impl Checker<'_> {
                 };
                 // In `Tabs`, every page is a tab showing its component.
                 let tabs = ctx.parent.as_deref() == Some("Tabs");
+                // `all` takes in the pages a phone keeps off its tabs too.
+                let all = matches!(
+                    element.prop("all").map(|prop| &prop.value),
+                    Some(ast::Expr::Literal {
+                        value: ast::Literal::Bool(true),
+                        ..
+                    })
+                );
                 let mut failures = Vec::new();
                 let text = pages
                     .pages
@@ -107,7 +115,7 @@ impl Checker<'_> {
                             None => item,
                         };
                         if tabs {
-                            if !page.tab {
+                            if !page.tab && !all {
                                 return None;
                             }
                             return match self.slot_call(&page.component, scope) {

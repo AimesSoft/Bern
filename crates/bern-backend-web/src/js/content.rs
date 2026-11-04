@@ -59,6 +59,16 @@ impl Generator<'_> {
         ));
     }
 
+    pub(super) fn web_page(&self, out: &mut Out, element: &Element) {
+        out.line(format!(
+            "F.WebPage(p, ctx, {});",
+            Self::props(vec![
+                ("url", self.text_prop(element, "url")),
+                ("label", self.text_prop(element, "label")),
+            ])
+        ));
+    }
+
     pub(super) fn svg(&self, out: &mut Out, element: &Element) {
         out.line(format!(
             "F.Svg(p, ctx, {});",

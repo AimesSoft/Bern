@@ -189,10 +189,13 @@ pub fn info_plist_tables(app: &Application) -> BTreeMap<String, String> {
         .iter()
         .map(|language| {
             let name = escape_strings(translation(&app.app.name, language, &app.languages.default));
-            let mut table = format!("CFBundleName = \"{name}\";\nCFBundleDisplayName = \"{name}\";\n");
+            let mut table =
+                format!("CFBundleName = \"{name}\";\nCFBundleDisplayName = \"{name}\";\n");
             if app.app.photos {
                 let usage = escape_strings(framework(PHOTOS_USAGE, language));
-                table.push_str(&format!("NSPhotoLibraryAddUsageDescription = \"{usage}\";\n"));
+                table.push_str(&format!(
+                    "NSPhotoLibraryAddUsageDescription = \"{usage}\";\n"
+                ));
             }
             (language.clone(), table)
         })
@@ -741,18 +744,33 @@ mod tests {
         let mut hello = app("hello");
         let key = "NSPhotoLibraryAddUsageDescription";
         assert!(!info_plist_ios(&hello, "Hello", "17.0").contains(key));
-        assert!(info_plist_tables(&hello).values().all(|table| !table.contains(key)));
+        assert!(
+            info_plist_tables(&hello)
+                .values()
+                .all(|table| !table.contains(key))
+        );
         hello.app.photos = true;
         let plist = info_plist_ios(&hello, "Hello", "17.0");
         let default = framework(PHOTOS_USAGE, &hello.languages.default);
-        assert!(plist.contains(&format!("<key>{key}</key>\n    <string>{default}</string>")), "{plist}");
+        assert!(
+            plist.contains(&format!("<key>{key}</key>\n    <string>{default}</string>")),
+            "{plist}"
+        );
         for (language, table) in info_plist_tables(&hello) {
             let usage = framework(PHOTOS_USAGE, &language);
-            assert!(table.contains(&format!("{key} = \"{usage}\";")), "{language}: {table}");
+            assert!(
+                table.contains(&format!("{key} = \"{usage}\";")),
+                "{language}: {table}"
+            );
         }
         // Every language the runtimes speak has its own words.
         for language in framework_languages() {
-            assert!(PHOTOS_USAGE.iter().any(|(candidate, _)| *candidate == language), "{language}");
+            assert!(
+                PHOTOS_USAGE
+                    .iter()
+                    .any(|(candidate, _)| *candidate == language),
+                "{language}"
+            );
         }
     }
 }

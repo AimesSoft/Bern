@@ -1184,10 +1184,13 @@ inline void Quit() {
 #endif
 }
 
+/// The status item stands in the notification area now.
+inline bool statusShown = false;
+
 /// The application ends with its last window, as Windows applications do,
 /// unless its status item keeps it in the notification area.
 inline void ExitIfDone() {
-    if (!all.empty() || app->statusItem) return;
+    if (!all.empty() || statusShown) return;
     Quit();
 }
 
@@ -2041,6 +2044,7 @@ inline HICON Icon() {
 
 /// Add the icon; again after Explorer restarted.
 inline void Add() {
+    if (!WindowManager::statusShown) return;
     auto data = Data(NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP);
     data.uCallbackMessage = kCallback;
     data.hIcon = Icon();
@@ -2222,6 +2226,19 @@ inline void Show() {
         auto data = Data(NIF_TIP | NIF_SHOWTIP);
         wcsncpy_s(data.szTip, tooltip.c_str(), _TRUNCATE);
         if (!Shell_NotifyIconW(NIM_MODIFY, &data)) Add();
+    });
+    // The icon follows `shown`.
+    Reactive::Run([] {
+        auto shown = app->statusItem->shown;
+        bool now = !shown || shown(Context());
+        if (now == WindowManager::statusShown) return;
+        WindowManager::statusShown = now;
+        if (now) {
+            Add();
+        } else {
+            auto data = Data(0);
+            Shell_NotifyIconW(NIM_DELETE, &data);
+        }
     });
 }
 

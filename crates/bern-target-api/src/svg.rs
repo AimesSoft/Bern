@@ -2,6 +2,8 @@
 use crate::{BuildContext, Diagnostic};
 use bern_ir::{Application, Node};
 
+/// Whether the application shows an `Svg` or a `WebPage`: both live in the
+/// web engine this module brings in.
 pub fn used(app: &Application) -> bool {
     let mut used = false;
     for node in app
@@ -11,7 +13,7 @@ pub fn used(app: &Application) -> bool {
         .chain(app.windows.windows.iter().map(|w| &w.content))
     {
         node.walk(&mut |node| {
-            if matches!(node, Node::Element(e) if e.kind == "Svg") {
+            if matches!(node, Node::Element(e) if e.kind == "Svg" || e.kind == "WebPage") {
                 used = true;
             }
         });

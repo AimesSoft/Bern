@@ -255,8 +255,28 @@ impl Generator<'_> {
         ));
     }
 
-    /// A `Video`: the shared runtime view, bound to a declaration's own
-    /// player or to an application player.
+    pub(super) fn web_page(&self, out: &mut Out, element: &Element) {
+        let text = |name| {
+            self.text_prop(element, name)
+                .unwrap_or_else(|| "\"\"".into())
+        };
+        let close = element
+            .action
+            .as_ref()
+            .map(|action| self.action(action))
+            .unwrap_or_default();
+        out.line(format!(
+            "BernWebPage(url: {}, cookiesFile: {}, cookieDomain: {}, userAgent: {}, closeOn: {}, label: {}) {{ {close} }}",
+            text("url"),
+            text("cookies_file"),
+            text("cookie_domain"),
+            text("user_agent"),
+            text("close_on"),
+            self.text_prop(element, "label")
+                .unwrap_or_else(|| "nil".into()),
+        ));
+    }
+
     pub(super) fn video(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         let label = self
             .text_prop(element, "label")

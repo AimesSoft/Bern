@@ -89,6 +89,7 @@ pub(crate) const FEATURES: &[&str] = &[
     feature::RAILS,
     feature::POPOVER_BUTTON,
     feature::SIDEBAR_HEADER,
+    feature::TEXT_BOLD,
     feature::TEXT_WEIGHTS,
     feature::TEXT_LINES,
     feature::IMAGE_CORNERS,
@@ -124,15 +125,15 @@ pub(crate) const FEATURES: &[&str] = &[
 
 pub struct SwiftUiTvos;
 
-/// The components SwiftUI builds on tvOS: all but `Svg`, whose animated
-/// document needs a web engine, and tvOS has none (no WebKit).
+/// The components SwiftUI builds on tvOS: all but `Svg` and `WebPage`, which
+/// need a web engine, and tvOS has none (no WebKit).
 fn tv_component_names() -> &'static [&'static str] {
     static NAMES: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
     NAMES.get_or_init(|| {
         component_names()
             .iter()
             .copied()
-            .filter(|name| *name != "Svg")
+            .filter(|name| !matches!(*name, "Svg" | "WebPage"))
             .collect()
     })
 }

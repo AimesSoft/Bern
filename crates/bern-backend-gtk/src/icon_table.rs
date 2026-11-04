@@ -54,6 +54,7 @@
     ("gobackward.10", "media-seek-backward-symbolic"),
     ("goforward.10", "media-seek-forward-symbolic"),
     ("hand.tap", "input-touchpad-symbolic"),
+    ("headphones", "audio-headphones-symbolic"),
     ("heart", "emote-love-symbolic"),
     ("heart.fill", "emote-love-symbolic"),
     ("house", "go-home-symbolic"),

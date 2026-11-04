@@ -38,6 +38,19 @@ impl Generator<'_> {
         ));
     }
 
+    pub(super) fn web_page(&self, out: &mut Out, element: &Element) {
+        out.line(format!(
+            "b::WebPage(p, c, b::WebPageProps {{ url: {}, cookies_file: {}, cookie_domain: {}, user_agent: {}, close_on: {}, label: {} }}, {});",
+            some(self.text_prop(element, "url")),
+            some(self.text_prop(element, "cookies_file")),
+            some(self.text_prop(element, "cookie_domain")),
+            some(self.text_prop(element, "user_agent")),
+            some(self.text_prop(element, "close_on")),
+            some(self.text_prop(element, "label")),
+            self.action(element),
+        ));
+    }
+
     pub(super) fn svg(&self, out: &mut Out, element: &Element) {
         out.line(format!(
             "b::Svg(p, c, b::SvgProps {{ source: {}, label: {}, width: {}, height: {}, fit: {}, playing: {}, speed: {}, restart: {}, interactive: {}, data: {}, external_links: {} }});",

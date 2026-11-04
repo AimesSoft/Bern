@@ -50,6 +50,21 @@ impl Generator<'_> {
         ));
     }
 
+    pub(super) fn web_page(&self, out: &mut Out, element: &Element) {
+        out.line(format!(
+            "B::WebPage(p, c, {});",
+            designated(&[
+                ("url", self.text_prop(element, "url")),
+                ("cookiesFile", self.text_prop(element, "cookies_file")),
+                ("cookieDomain", self.text_prop(element, "cookie_domain")),
+                ("userAgent", self.text_prop(element, "user_agent")),
+                ("closeOn", self.text_prop(element, "close_on")),
+                ("label", self.text_prop(element, "label")),
+                ("action", self.action(element)),
+            ])
+        ));
+    }
+
     pub(super) fn svg(&self, out: &mut Out, element: &Element) {
         out.line(format!(
             "B::Svg(p, c, {});",

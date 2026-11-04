@@ -57,6 +57,15 @@ struct SvgProps {
 
 struct SvgView : std::enable_shared_from_this<SvgView> {
     bool externalLinks = false;
+    /// A `WebPage` goes where it likes, on its own background and with its
+    /// own session: this is where it starts, signed in with these cookies.
+    std::wstring page;
+    std::vector<std::pair<std::wstring, std::wstring>> cookies;
+    std::wstring cookieDomain, userAgent;
+    /// A press on what this finds runs `close`, before the page's own
+    /// handlers, which may do nothing outside their own app.
+    std::string closeOn;
+    std::function<void()> close;
     controls::Grid frame;
     std::string html, state;
     bool started = false, loaded = false, disposed = false, visible = false;
@@ -86,6 +95,8 @@ struct SvgView : std::enable_shared_from_this<SvgView> {
     /// Where the presenter stands last: position, size, the visible part
     /// and whether it shows, in pixels of the window.
     std::array<int, 9> placed{};
+    /// The window with this page's place cut out of it.
+    HWND cut = nullptr;
     winrt::event_token renderToken{};
     int still = 0;
 
@@ -135,7 +146,40 @@ struct SvgView : std::enable_shared_from_this<SvgView> {
             SetWindowRgn(window, whole ? nullptr : CreateRectRgn(l, t, r, b), TRUE);
         }
         if (controller) { RECT bounds{0, 0, w, h}; controller->put_Bounds(bounds); controller->put_IsVisible(visible); }
+        if (!page.empty()) Uncover(visible, l, t, r, b);
         return true;
+    }
+    /// The window the XAML is in, around the presenter.
+    HWND Island() const {
+        RECT own{};
+        GetWindowRect(window, &own);
+        for (HWND child = GetWindow(owner->hwnd, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT)) {
+            RECT around{};
+            if (child == window || !IsWindowVisible(child) || !GetWindowRect(child, &around)) continue;
+            if (around.left <= own.left && around.top <= own.top && around.right >= own.right && around.bottom >= own.bottom) return child;
+        }
+        return nullptr;
+    }
+    /// XAML keeps the input of what stands above its window, however high:
+    /// a page people press has its visible part cut out of that window. A
+    /// region as large as regions go still fits when the window grows.
+    void Uncover(bool visible, int l, int t, int r, int b) {
+        if (!visible) {
+            if (cut) SetWindowRgn(cut, nullptr, TRUE);
+            cut = nullptr;
+            return;
+        }
+        if (!cut) cut = Island();
+        if (!cut) return;
+        RECT island{}, own{};
+        GetWindowRect(cut, &island);
+        GetWindowRect(window, &own);
+        int x = own.left - island.left, y = own.top - island.top;
+        HRGN rest = CreateRectRgn(0, 0, 0x7FFF, 0x7FFF);
+        HRGN place = CreateRectRgn(x + l, y + t, x + r, y + b);
+        CombineRgn(rest, rest, place, RGN_DIFF);
+        DeleteObject(place);
+        SetWindowRgn(cut, rest, TRUE);
     }
     /// Follow every frame for a while after a layout, until the frame has
     /// stood still for half a second.
@@ -164,7 +208,7 @@ struct SvgView : std::enable_shared_from_this<SvgView> {
         layoutToken = frame.LayoutUpdated([weak](auto&&, auto&&) {
             if (auto view = weak.lock(); view && !view->disposed) { view->Layout(); view->Follow(); }
         });
-        SvgRuntime::Prepare();
+        if (page.empty()) SvgRuntime::Prepare();
         auto result = CreateCoreWebView2EnvironmentWithOptions(nullptr, SvgRuntime::Cache().c_str(), nullptr,
             Microsoft::WRL::Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
                 [weak](HRESULT result, ICoreWebView2Environment* environment) -> HRESULT {
@@ -179,7 +223,7 @@ struct SvgView : std::enable_shared_from_this<SvgView> {
                                 if (FAILED(result) || !controller) { Report("SVG: could not create WebView2"); return S_OK; }
                                 view->controller.copy_from(controller);
                                 controller->get_CoreWebView2(view->web.put());
-                                if (auto transparent = view->controller.try_as<ICoreWebView2Controller2>())
+                                if (auto transparent = view->controller.try_as<ICoreWebView2Controller2>(); transparent && view->page.empty())
                                     transparent->put_DefaultBackgroundColor(COREWEBVIEW2_COLOR{0, 0, 0, 0});
                                 winrt::com_ptr<ICoreWebView2Settings> settings;
                                 view->web->get_Settings(settings.put());
@@ -187,6 +231,12 @@ struct SvgView : std::enable_shared_from_this<SvgView> {
                                 settings->put_IsWebMessageEnabled(FALSE);
                                 settings->put_AreDevToolsEnabled(FALSE);
                                 EventRegistrationToken token{};
+                                if (!view->page.empty()) {
+                                    view->OpenPage();
+                                    view->placed = {};
+                                    view->Layout();
+                                    return S_OK;
+                                }
                                 view->web->add_NavigationStarting(Microsoft::WRL::Callback<ICoreWebView2NavigationStartingEventHandler>(
                                     [weak](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs* args) -> HRESULT {
                                         auto view = weak.lock();
@@ -222,8 +272,69 @@ struct SvgView : std::enable_shared_from_this<SvgView> {
                 }).Get());
         if (FAILED(result)) Report("SVG requires Microsoft Edge WebView2 Runtime");
     }
+    /// Sign in, then go to the page; what opens a window opens here.
+    void OpenPage() {
+        if (auto second = web.try_as<ICoreWebView2_2>()) {
+            winrt::com_ptr<ICoreWebView2CookieManager> manager;
+            second->get_CookieManager(manager.put());
+            if (manager) {
+                manager->DeleteAllCookies();
+                for (auto const& [name, value] : cookies) {
+                    winrt::com_ptr<ICoreWebView2Cookie> cookie;
+                    if (SUCCEEDED(manager->CreateCookie(name.c_str(), value.c_str(), cookieDomain.c_str(), L"/", cookie.put())) && cookie) {
+                        cookie->put_IsSecure(TRUE);
+                        manager->AddOrUpdateCookie(cookie.get());
+                    }
+                }
+            }
+        }
+        if (!userAgent.empty()) {
+            winrt::com_ptr<ICoreWebView2Settings> settings;
+            web->get_Settings(settings.put());
+            if (auto agent = settings.try_as<ICoreWebView2Settings2>()) agent->put_UserAgent(userAgent.c_str());
+        }
+        EventRegistrationToken token{};
+        if (!closeOn.empty()) {
+            auto listener = "document.addEventListener('click',function(e){var t=e.target;if(t&&t.closest&&t.closest("
+                + SvgJsonString(closeOn)
+                + ")){e.stopPropagation();e.preventDefault();location.href='bern-web-page://close'}},true);";
+            web->AddScriptToExecuteOnDocumentCreated(winrt::to_hstring(listener).c_str(), nullptr);
+        }
+        // The page's own schemes are for its app: only the web and a press
+        // on `closeOn` go on.
+        web->add_NavigationStarting(Microsoft::WRL::Callback<ICoreWebView2NavigationStartingEventHandler>(
+            [weak = weak_from_this()](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs* args) -> HRESULT {
+                LPWSTR uri = nullptr;
+                args->get_Uri(&uri);
+                std::wstring_view address = uri ? uri : L"";
+                bool web = address.starts_with(L"http://") || address.starts_with(L"https://") || address.starts_with(L"about:");
+                if (!web) args->put_Cancel(TRUE);
+                bool closing = address.starts_with(L"bern-web-page:");
+                CoTaskMemFree(uri);
+                if (auto view = weak.lock(); closing && view && view->close) view->close();
+                return S_OK;
+            }).Get(), &token);
+        web->add_NewWindowRequested(Microsoft::WRL::Callback<ICoreWebView2NewWindowRequestedEventHandler>(
+            [weak = weak_from_this()](ICoreWebView2*, ICoreWebView2NewWindowRequestedEventArgs* args) -> HRESULT {
+                args->put_Handled(TRUE);
+                LPWSTR uri = nullptr;
+                args->get_Uri(&uri);
+                if (auto view = weak.lock(); view && uri && view->web) view->web->Navigate(uri);
+                CoTaskMemFree(uri);
+                return S_OK;
+            }).Get(), &token);
+        web->Navigate(page.c_str());
+    }
     void Close() {
+        if (web && !page.empty()) {
+            if (auto second = web.try_as<ICoreWebView2_2>()) {
+                winrt::com_ptr<ICoreWebView2CookieManager> manager;
+                second->get_CookieManager(manager.put());
+                if (manager) manager->DeleteAllCookies();
+            }
+        }
         disposed = true;
+        Uncover(false, 0, 0, 0, 0);
         frame.LayoutUpdated(layoutToken);
         Unfollow();
         if (controller) controller->Close();
@@ -231,6 +342,63 @@ struct SvgView : std::enable_shared_from_this<SvgView> {
         if (window) { DestroyWindow(window); window = nullptr; }
     }
 };
+
+struct WebPageProps {
+    Str url;
+    Str cookiesFile;
+    Str cookieDomain;
+    Str userAgent;
+    Str closeOn;
+    Str label;
+    Act action;
+};
+
+/// `WebPage`: a page of the web in the view of `Svg`, filling its place.
+inline void WebPage(Parent const& p, Ctx const& ctx, WebPageProps props) {
+    auto view = std::make_shared<SvgView>();
+    view->page = props.url ? std::wstring(props.url(ctx)) : std::wstring();
+    view->cookieDomain = props.cookieDomain ? std::wstring(props.cookieDomain(ctx)) : std::wstring();
+    view->userAgent = props.userAgent ? std::wstring(props.userAgent(ctx)) : std::wstring();
+    view->closeOn = props.closeOn ? winrt::to_string(props.closeOn(ctx)) : std::string();
+    view->close = Run(ctx, props.action);
+    if (props.cookiesFile) {
+        std::string bytes;
+        HANDLE file = CreateFileW(std::wstring(props.cookiesFile(ctx)).c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+        if (file != INVALID_HANDLE_VALUE) {
+            bytes.resize(GetFileSize(file, nullptr));
+            DWORD read = 0;
+            ReadFile(file, bytes.data(), static_cast<DWORD>(bytes.size()), &read, nullptr);
+            bytes.resize(read);
+            CloseHandle(file);
+        }
+        std::wstring text(winrt::to_hstring(bytes));
+        size_t at = 0;
+        while (at < text.size()) {
+            size_t end = (std::min)(text.find(L';', at), text.size());
+            auto part = text.substr(at, end - at);
+            at = end + 1;
+            auto from = part.find_first_not_of(L" \t\r\n");
+            auto equals = part.find(L'=');
+            if (from == std::wstring::npos || equals == std::wstring::npos || equals <= from) continue;
+            auto name = part.substr(from, equals - from);
+            if (_wcsicmp(name.c_str(), L"path") == 0 || _wcsicmp(name.c_str(), L"domain") == 0
+                || _wcsicmp(name.c_str(), L"expires") == 0 || _wcsicmp(name.c_str(), L"max-age") == 0) continue;
+            auto value = part.substr(equals + 1);
+            value.erase(value.find_last_not_of(L" \t\r\n") + 1);
+            view->cookies.emplace_back(name, value);
+        }
+    }
+    view->frame.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+    view->frame.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+    MarkFill(view->frame);
+    if (props.label) BindName(view->frame, Bound(ctx, props.label));
+    Place(p, view->frame);
+    std::weak_ptr<SvgView> weak = view;
+    view->frame.Loaded([weak, ctx](auto&&, auto&&) {
+        if (auto v = weak.lock(); v && !v->disposed && !v->started) { v->started = true; v->Start(ctx); }
+    });
+    Reactive::OnCleanup([view] { view->Close(); });
+}
 
 inline void Svg(Parent const& p, Ctx const& ctx, SvgProps props) {
     auto view = std::make_shared<SvgView>();

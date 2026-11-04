@@ -36,6 +36,16 @@ enum BernMenuItems {
 @MainActor
 enum BernStatusArea {
     static var shown = false
+    /// `StatusItem(shown:)` said no: the application ends with its last
+    /// window, as there is nowhere it stays.
+    static var quits = false
+
+    /// What `StatusItem(shown:)` says now, for the scene.
+    static func follow(_ now: Bool) -> SwiftUI.Binding<Bool> {
+        shown = now
+        quits = !now
+        return .constant(now)
+    }
     /// `StatusItem(image:)`: the picture the build drew from the SVG at one
     /// and two pixels per point, which the menu bar tints as a template.
     static let picture: NSImage = {
@@ -758,7 +768,9 @@ enum BernSnapshot {
 }
 
 final class BernAppDelegate: NSObject, NSApplicationDelegate {
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        MainActor.assumeIsolated { BernStatusArea.quits }
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         MainActor.assumeIsolated { BernStatusArea.launched() }

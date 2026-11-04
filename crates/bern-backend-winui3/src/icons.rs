@@ -55,6 +55,7 @@ pub const GLYPHS: &[(&str, u32)] = &[
     ("gobackward.10", 0xED3C),
     ("goforward.10", 0xEB9D),
     ("hand.tap", 0xE7C9),
+    ("headphones", 0xE7F6),
     ("heart", 0xEB51),
     ("heart.fill", 0xEB52),
     ("house", 0xE80F),

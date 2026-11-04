@@ -304,14 +304,20 @@ impl<'a> Generator<'a> {
                     effects.push_str(&format!(
                         ".bernNudge({}, {}, {nudge_scale})",
                         self.expr(when),
-                        crate::style::motion(self.app, "jelly")
+                        crate::style::motion(
+                            self.app,
+                            element.keyword("nudge_motion").unwrap_or("jelly")
+                        )
                     ));
                 }
                 if let Some(key) = element.expr("nudge_key") {
                     effects.push_str(&format!(
                         ".bernNudgeKey({}, {}, {nudge_scale})",
                         self.expr(key),
-                        crate::style::motion(self.app, "jelly")
+                        crate::style::motion(
+                            self.app,
+                            element.keyword("nudge_motion").unwrap_or("jelly")
+                        )
                     ));
                 }
                 let (scale, opacity) = (
@@ -558,6 +564,7 @@ impl<'a> Generator<'a> {
             "SearchItem" => self.search_item(out, element, ctx),
             "Rail" => self.rail(out, element, ctx),
             "Svg" => self.svg(out, element),
+            "WebPage" => self.web_page(out, element),
             "Image" => self.image(out, element),
             "Spacer" => match ctx.scope {
                 Scope::Column | Scope::Row | Scope::Flow => out.line("Spacer(Modifier.weight(1f))"),

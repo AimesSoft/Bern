@@ -27,6 +27,9 @@ pub struct StatusItemDef {
     pub menu: fn(&Ctx, &mut StatusMenu),
     /// The menu has “Open at Login”.
     pub login_item: bool,
+    /// `shown`: whether it stands in the status area now, the application
+    /// staying there; none, always.
+    pub shown: Option<fn(&Ctx) -> bool>,
     /// `StatusItem(image:)`: its shape at each size the build drew, as PNG
     /// in black on clear; empty for the application icon.
     pub image: &'static [(i32, &'static [u8])],
@@ -216,7 +219,13 @@ struct Item {
     scheme: Option<gio::SignalSubscription>,
 }
 
+/// The item stands in the status area now, keeping the application there.
+pub(crate) fn shown() -> bool {
+    SHOWN.get()
+}
+
 thread_local! {
+    static SHOWN: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
     static ITEM: RefCell<Option<Item>> = const { RefCell::new(None) };
     /// Owns the effects that follow the tooltip and the menu.
     static SCOPE: RefCell<Option<Scope>> = const { RefCell::new(None) };
@@ -288,6 +297,22 @@ pub(crate) fn show(def: &'static StatusItemDef) {
         // The menu follows the state its items read.
         effect(|| {
             rebuild();
+        });
+        // Status areas leave out a passive item.
+        effect(move || {
+            let now = def.shown.is_none_or(|shown| shown(&context()));
+            if SHOWN.replace(now) != now
+                && let Some(connection) = with_item(|item| item.connection.clone()).flatten()
+            {
+                let status = if now { "Active" } else { "Passive" };
+                emit(
+                    &connection,
+                    ITEM_PATH,
+                    "org.kde.StatusNotifierItem",
+                    "NewStatus",
+                    Some(&(status,).to_variant()),
+                );
+            }
         });
     });
     SCOPE.with(|owner| *owner.borrow_mut() = Some(scope));
@@ -447,7 +472,7 @@ fn item_property(property: &str) -> Variant {
         "Category" => "ApplicationStatus".to_variant(),
         "Id" => id.to_variant(),
         "Title" => title.to_variant(),
-        "Status" => "Active".to_variant(),
+        "Status" => if shown() { "Active" } else { "Passive" }.to_variant(),
         "WindowId" => 0i32.to_variant(),
         "IconName" if pixmaps.is_empty() => "application-x-executable".to_variant(),
         "IconPixmap" => pixmaps.to_variant(),

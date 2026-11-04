@@ -590,6 +590,15 @@ impl Generator<'_> {
         if accessory.is_some() {
             out.line(".bernTabAccessory(bernAccessoryShown, bernAccessory)");
         }
+        // tvOS's tab bar lays its tabs out once, and draws them over the
+        // wrong places when one comes or goes: it starts over with them.
+        if self.platform == Platform::Tvos {
+            let ty = swift_type(&element.field("selection").expect("selection field").ty);
+            out.line(format!(
+                ".id(String(describing: {}))",
+                self.nav_values(&element.children, "Tab", &ty)
+            ));
+        }
         // The selected tab is one of the system parts the application's
         // accent colors (design 8.1).
         out.line(".bernAccentTint()");

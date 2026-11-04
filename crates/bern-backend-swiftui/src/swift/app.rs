@@ -176,6 +176,15 @@ impl Generator<'_> {
         self.menu_window(&mut out);
         let menu_bar = self.menu_bar(&mut out);
         let status_item = self.status_menu(&mut out);
+        let status_follows = status_item
+            && app
+                .windows
+                .status_item
+                .as_ref()
+                .is_some_and(|item| item.expr("shown").is_some());
+        if status_item {
+            self.status_scene_type(&mut out);
+        }
         out.line("@main");
         out.open("struct BernApplication: App {");
         match self.platform {
@@ -210,7 +219,9 @@ impl Generator<'_> {
         match self.platform {
             Platform::Macos => {
                 self.macos_scenes(&mut out, &order, &initial, menu_bar);
-                if status_item {
+                if status_follows {
+                    out.line("BernStatusScene()");
+                } else if status_item {
                     self.status_scene(&mut out);
                 }
             }

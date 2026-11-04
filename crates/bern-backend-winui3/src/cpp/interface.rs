@@ -114,6 +114,12 @@ impl Generator<'_> {
         if item.resource("image").is_some() {
             out.line("item.image = true;");
         }
+        if let Some(shown) = item.expr("shown") {
+            out.line(format!(
+                "item.shown = [](Ctx const& c) -> bool {{ return {}; }};",
+                self.condition(shown)
+            ));
+        }
         out.line("return item;");
         out.close("}");
     }

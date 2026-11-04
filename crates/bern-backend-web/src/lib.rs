@@ -385,6 +385,7 @@ impl Target for WebBrowser {
                 "appear_delay",
                 "nudge_key",
                 "nudge_scale",
+                "nudge_motion",
                 "reduce_motion",
                 "spin",
                 "spin_period",

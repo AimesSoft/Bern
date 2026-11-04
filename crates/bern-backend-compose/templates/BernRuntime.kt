@@ -74,6 +74,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -665,12 +666,17 @@ fun Modifier.bernUnderBars(): Modifier {
         onDispose { window.underBars -= 1 }
     }
     val density = LocalDensity.current
+    val direction = LocalLayoutDirection.current
     val top = with(density) { padding.calculateTopPadding().roundToPx() }
     val bottom = with(density) { padding.calculateBottomPadding().roundToPx() }
+    // A phone on its side keeps its content off the camera at one end.
+    val left = with(density) { padding.calculateLeftPadding(direction).roundToPx() }
+    val right = with(density) { padding.calculateRightPadding(direction).roundToPx() }
     return this.fillMaxSize().layout { measurable, constraints ->
         val height = if (constraints.hasBoundedHeight) constraints.maxHeight + top + bottom else constraints.maxHeight
-        val placeable = measurable.measure(constraints.copy(minHeight = height, maxHeight = height))
-        layout(constraints.maxWidth, constraints.maxHeight) { placeable.place(0, -top) }
+        val width = if (constraints.hasBoundedWidth) constraints.maxWidth + left + right else constraints.maxWidth
+        val placeable = measurable.measure(constraints.copy(minWidth = width, maxWidth = width, minHeight = height, maxHeight = height))
+        layout(constraints.maxWidth, constraints.maxHeight) { placeable.place(-left, -top) }
     }
 }
 
@@ -2147,6 +2153,114 @@ fun BernWindowRoot(
     }
 }
 
+/// The audio focus of what `bern::now_playing` shows, so that a call or
+/// another app's music stops it instead of sounding over it. Playing takes
+/// the focus and pausing gives it back. Lost for good, the music pauses; lost
+/// for a while, it pauses and the request stays, for the system to say when
+/// the focus is back and the music plays again. Where the system can lower
+/// the music under a short sound it does so without a word; where it cannot
+/// (AAudio's players) it says so here, and with no way to the engine's volume
+/// the music pauses for that while. All of this runs on the main thread.
+internal object BernAudioFocus {
+    val attributes: android.media.AudioAttributes = android.media.AudioAttributes.Builder()
+        .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+        .build()
+    private val request by lazy {
+        android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN)
+            .setAudioAttributes(attributes)
+            .setAcceptsDelayedFocusGain(true)
+            .setOnAudioFocusChangeListener(::changed, android.os.Handler(android.os.Looper.getMainLooper()))
+            .build()
+    }
+    private var manager: android.media.AudioManager? = null
+    /// What the engine showed last.
+    private var playing = false
+    /// Whether the system has the request, the focus given or still to come.
+    private var held = false
+    /// A pause the engine has not shown yet: what it shows until then is
+    /// late, not the user pressing play.
+    private var pausing = false
+    /// Paused until the focus comes back. The playback service stays in the
+    /// foreground meanwhile: from the background the system would not let it
+    /// back when the music plays again.
+    var away = false
+        private set
+
+    private fun send(name: String) = BernNative.nowPlayingCommand(name.toByteArray())
+
+    private fun pause() {
+        if (!playing) return
+        pausing = true
+        send("pause")
+    }
+
+    private fun release() {
+        if (held) manager?.abandonAudioFocusRequest(request)
+        held = false
+        away = false
+    }
+
+    private fun changed(change: Int) {
+        when (change) {
+            android.media.AudioManager.AUDIOFOCUS_GAIN -> if (away) {
+                away = false
+                send("play")
+            }
+            android.media.AudioManager.AUDIOFOCUS_LOSS -> pauseForGood()
+            android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
+            android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> if (playing) {
+                away = true
+                pause()
+            }
+        }
+    }
+
+    /// Pause and stay paused, whatever the focus does: it was lost for good,
+    /// or the headphones came out and the music would go on in the room.
+    fun pauseForGood() {
+        val waited = away && !playing
+        release()
+        pause()
+        // The engine, paused all along, shows nothing new.
+        if (waited) BernNowPlaying.stopWaiting()
+    }
+
+    /// What the engine shows now.
+    fun update(context: Context, now: Boolean) {
+        playing = now
+        if (!now) {
+            pausing = false
+            if (!away) release()
+            return
+        }
+        if (pausing || (held && !away)) return
+        val manager = manager ?: (context.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager).also { manager = it }
+        when (manager.requestAudioFocus(request)) {
+            android.media.AudioManager.AUDIOFOCUS_REQUEST_GRANTED -> {
+                held = true
+                away = false
+            }
+            // A call: the music waits for it to end.
+            android.media.AudioManager.AUDIOFOCUS_REQUEST_DELAYED -> {
+                held = true
+                away = true
+                pause()
+            }
+            // Android 15 and later refuse it to an app behind others with no
+            // foreground service, unless the user just pressed play.
+            else -> pause()
+        }
+    }
+
+    /// Nothing plays any more.
+    fun stop() {
+        playing = false
+        pausing = false
+        release()
+    }
+}
+
 /// The system's now playing (`bern::now_playing`): a media session with
 /// what plays, the media notification the system's media controls show,
 /// and, where the application declares `background_audio`, a foreground
@@ -2172,6 +2286,7 @@ internal object BernNowPlaying {
         if (json.isEmpty()) {
             session?.isActive = false
             playing = false
+            BernAudioFocus.stop()
             BernPlaybackService.running?.stop()
             manager.cancel(ID)
             notification = null
@@ -2187,6 +2302,10 @@ internal object BernNowPlaying {
                 override fun onSkipToPrevious() = send("previous")
                 override fun onSeekTo(position: Long) = send("seek:${position / 1000.0}")
             })
+            // Pressing the song in the system's media controls, on the lock
+            // screen or in a maker's island, opens the application.
+            created.setSessionActivity(launchIntent(context))
+            created.setPlaybackToLocal(BernAudioFocus.attributes)
             session = created
         }
         val artwork = now.optString("artwork").takeIf { it.isNotEmpty() }?.let {
@@ -2201,10 +2320,16 @@ internal object BernNowPlaying {
                 .putString(android.media.MediaMetadata.METADATA_KEY_ARTIST, artist)
                 .putString(android.media.MediaMetadata.METADATA_KEY_ALBUM, now.optString("album"))
                 .putLong(android.media.MediaMetadata.METADATA_KEY_DURATION, (now.optDouble("duration", 0.0) * 1000).toLong())
-                .apply { if (artwork != null) putBitmap(android.media.MediaMetadata.METADATA_KEY_ALBUM_ART, artwork) }
+                .apply {
+                    if (artwork != null) {
+                        putBitmap(android.media.MediaMetadata.METADATA_KEY_ALBUM_ART, artwork)
+                        putBitmap(android.media.MediaMetadata.METADATA_KEY_ART, artwork)
+                    }
+                }
                 .build()
         )
         playing = now.optBoolean("playing")
+        BernAudioFocus.update(context, playing)
         val state = android.media.session.PlaybackState.Builder()
             .setActions(
                 android.media.session.PlaybackState.ACTION_PLAY or android.media.session.PlaybackState.ACTION_PAUSE or
@@ -2238,9 +2363,7 @@ internal object BernNowPlaying {
                 )
             ).build()
         }
-        val launch = context.packageManager.getLaunchIntentForPackage(context.packageName)?.let {
-            android.app.PendingIntent.getActivity(context, 0, it, android.app.PendingIntent.FLAG_IMMUTABLE)
-        }
+        val launch = launchIntent(context)
         val builder = if (android.os.Build.VERSION.SDK_INT >= 26) android.app.Notification.Builder(context, CHANNEL)
             else @Suppress("DEPRECATION") android.app.Notification.Builder(context)
         val shown = builder
@@ -2270,21 +2393,34 @@ internal object BernNowPlaying {
                 manager.notify(ID, shown)
             }
         } else if (service != null) {
-            service.show(shown, playing)
+            service.show(shown, playing || BernAudioFocus.away)
         } else {
             manager.notify(ID, shown)
         }
     }
 
-    /// The notification's buttons, heard by the application alone.
+    /// The music stays paused after all: the service no longer keeps the
+    /// foreground for it.
+    fun stopWaiting() {
+        notification?.let { BernPlaybackService.running?.show(it, false) }
+    }
+
+    private fun launchIntent(context: Context): android.app.PendingIntent? =
+        context.packageManager.getLaunchIntentForPackage(context.packageName)?.let {
+            android.app.PendingIntent.getActivity(context, 0, it, android.app.PendingIntent.FLAG_IMMUTABLE)
+        }
+
+    /// The notification's buttons, heard by the application alone, and the
+    /// system saying the sound is about to leave the headphones.
     private fun listen(context: Context) {
         if (receiver != null) return
         val heard = object : android.content.BroadcastReceiver() {
             override fun onReceive(context: Context, intent: android.content.Intent) {
-                intent.getStringExtra("command")?.let(::send)
+                if (intent.action == android.media.AudioManager.ACTION_AUDIO_BECOMING_NOISY) BernAudioFocus.pauseForGood()
+                else intent.getStringExtra("command")?.let(::send)
             }
         }
-        val filter = android.content.IntentFilter(ACTION)
+        val filter = android.content.IntentFilter(ACTION).apply { addAction(android.media.AudioManager.ACTION_AUDIO_BECOMING_NOISY) }
         if (android.os.Build.VERSION.SDK_INT >= 33) context.registerReceiver(heard, filter, Context.RECEIVER_NOT_EXPORTED)
         else @Suppress("UnspecifiedRegisterReceiverFlag") context.registerReceiver(heard, filter)
         receiver = heard
@@ -2293,10 +2429,15 @@ internal object BernNowPlaying {
 
 /// Keeps the application playing while another app is in front: a
 /// foreground service of the media playback kind, standing on the now
-/// playing notification. Paused, it leaves the foreground and the
-/// notification stays.
+/// playing notification. With the music stopped it stays in the foreground
+/// for a while, since songs change with the music stopped while the next one
+/// loads, and behind other apps the system would not let the service back.
+/// After that it leaves the foreground and the notification stays.
 class BernPlaybackService : android.app.Service() {
     companion object {
+        /// How long the foreground outlasts the music, in milliseconds.
+        private const val STAYS = 30_000L
+
         var running: BernPlaybackService? = null
             private set
 
@@ -2310,6 +2451,15 @@ class BernPlaybackService : android.app.Service() {
         }
     }
 
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var foreground = false
+    private val leave = Runnable {
+        foreground = false
+        if (android.os.Build.VERSION.SDK_INT >= 24) stopForeground(android.app.Service.STOP_FOREGROUND_DETACH)
+        else @Suppress("DEPRECATION") stopForeground(false)
+        BernNowPlaying.notification?.let(::post)
+    }
+
     override fun onBind(intent: android.content.Intent?): android.os.IBinder? = null
 
     override fun onStartCommand(intent: android.content.Intent?, flags: Int, startId: Int): Int {
@@ -2320,17 +2470,28 @@ class BernPlaybackService : android.app.Service() {
     }
 
     fun show(notification: android.app.Notification, playing: Boolean) {
-        if (playing) {
+        handler.removeCallbacks(leave)
+        if (!playing) {
+            if (foreground) handler.postDelayed(leave, STAYS)
+            post(notification)
+            return
+        }
+        try {
             if (android.os.Build.VERSION.SDK_INT >= 29) {
                 startForeground(BernNowPlaying.ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
             } else {
                 startForeground(BernNowPlaying.ID, notification)
             }
-        } else {
-            if (android.os.Build.VERSION.SDK_INT >= 24) stopForeground(android.app.Service.STOP_FOREGROUND_DETACH)
-            else @Suppress("DEPRECATION") stopForeground(false)
-            (getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager).notify(BernNowPlaying.ID, notification)
+            foreground = true
+        } catch (error: Exception) {
+            // Refused behind other apps: the notification still follows the
+            // music.
+            post(notification)
         }
+    }
+
+    private fun post(notification: android.app.Notification) {
+        (getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager).notify(BernNowPlaying.ID, notification)
     }
 
     fun stop() {
@@ -2340,6 +2501,7 @@ class BernPlaybackService : android.app.Service() {
     }
 
     override fun onDestroy() {
+        handler.removeCallbacks(leave)
         running = null
         super.onDestroy()
     }

@@ -317,6 +317,7 @@ pub const MOTION_PROPS: &[PropSpec] = &[
     opt("nudge", PropKind::Bool),
     opt("nudge_key", PropKind::KeyValue),
     opt("nudge_scale", PropKind::Number),
+    opt("nudge_motion", PropKind::MotionToken),
     opt("reduce_motion", PropKind::Bool),
     // While the condition holds the element turns about its center, one
     // turn every `spin_period` seconds (1 unless given), clockwise, or
@@ -472,6 +473,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("icon", PropKind::Icon),
                 opt("image", PropKind::SvgResource),
                 opt("login_item", PropKind::Flag),
+                opt("shown", PropKind::Bool),
             ],
             Children::Only(&["CommandItem", "CommandMenu", "Divider"]),
             "The application's item in the system's status area, where the platform has one. With `icon` the macOS menu bar shows that symbol and the notification area of the Windows taskbar and the status icons of Linux desktops show the application icon; with `image`, a declared one-colour SVG, all three show its shape in the colour of their bar (white on a dark one, black on a light one), as status icons are. `label` is its tooltip and accessible name. Its menu opens the primary window, then has its children, then quits the application; a click on Windows and Linux opens the primary window. With it, closing the last window leaves the application running. `login_item: true` adds “Open at Login” before quitting: while it is checked the system starts the application when the user logs in, with no window, only this item. Its items run without a window: they read engine state and run commands, not drafts. Elsewhere it shows nothing",
@@ -853,7 +855,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         placement: Placement::Within(&["Sidebar", "Section", "Tabs"]),
         ..spec(
             "Pages",
-            &[req("slot", PropKind::SlotName)],
+            &[req("slot", PropKind::SlotName), opt("all", PropKind::Flag)],
             Children::None,
             "One sidebar item, or in `Tabs` one tab showing the page, for every page the modules contribute to a page slot",
         )
@@ -1353,6 +1355,22 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         Children::None,
         "Bundled SVG document with CSS, SMIL and script animation; explicit viewport, playing/speed controls and restart revision; document-local interaction is enabled by default; a document that neither moves nor runs is drawn as a picture when the app is built, with no document engine",
     ),
+    ComponentSpec {
+        action: ActionRule::Optional,
+        ..spec(
+            "WebPage",
+            &[
+                req("url", PropKind::DisplayText),
+                opt("cookies_file", PropKind::DisplayText),
+                opt("cookie_domain", PropKind::DisplayText),
+                opt("user_agent", PropKind::DisplayText),
+                opt("close_on", PropKind::DisplayText),
+                opt("label", PropKind::DisplayText),
+            ],
+            Children::None,
+            "A web page filling its place, its session gone with it; `cookies_file` names a file of `name=value; name=value` to sign in with on `cookie_domain`, kept out of the state; a press on what the CSS selector `close_on` finds runs the action",
+        )
+    },
     spec(
         "Image",
         &[
@@ -1897,6 +1915,15 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
         errors.push(ShapeError {
             prop: Some("nudge_scale".into()),
             message: "`nudge_scale` needs a `nudge_key` event binding".into(),
+        });
+    }
+    if shape.props.contains(&"nudge_motion")
+        && !shape.props.contains(&"nudge")
+        && !shape.props.contains(&"nudge_key")
+    {
+        errors.push(ShapeError {
+            prop: Some("nudge_motion".into()),
+            message: "`nudge_motion` needs `nudge` or `nudge_key`".into(),
         });
     }
     if shape.props.contains(&"nudge") && shape.props.contains(&"nudge_key") {

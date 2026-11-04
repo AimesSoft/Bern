@@ -60,7 +60,7 @@
 | --- | --- | --- |
 | `WindowSet` | **`handle: TypeName`**<br>**`primary: WindowId`**<br>`accent: KeyValue`<br>`palette: KeyValue`<br>`appearance: KeyValue`<br>`icon: KeyValue` | 仅含 ["Window", "MenuBar", "StatusItem"]；无动作；仅根节点 |
 | `MenuBar` | 无 | 仅含 ["CommandMenu"]；无动作；直接位于 ["WindowSet"]，最多一个；只在 macOS 的菜单栏显示 |
-| `StatusItem` | **`label: LocalizedText`**<br>`icon: Icon`<br>`image: SvgResource`<br>`login_item: Flag` | 仅含 ["CommandItem", "CommandMenu", "Divider"]，可在 `if`、`match`、`ForEach` 中；无动作；直接位于 ["WindowSet"]，最多一个；菜单不读写草稿与窗口字段，菜单项不带 `pick`、`shortcut`；`icon` 与 `image` 二选一：`icon` 只在 macOS 显示，Windows 与 Linux 显示应用图标；`image` 是单色 SVG，三个桌面平台都按所在栏的明暗显示成白色或黑色；iOS、tvOS、Android 与网页不显示 |
+| `StatusItem` | **`label: LocalizedText`**<br>`icon: Icon`<br>`image: SvgResource`<br>`login_item: Flag`<br>`shown: Bool` | 仅含 ["CommandItem", "CommandMenu", "Divider"]，可在 `if`、`match`、`ForEach` 中；无动作；直接位于 ["WindowSet"]，最多一个；菜单不读写草稿与窗口字段，菜单项不带 `pick`、`shortcut`；`icon` 与 `image` 二选一：`icon` 只在 macOS 显示，Windows 与 Linux 显示应用图标；`image` 是单色 SVG，三个桌面平台都按所在栏的明暗显示成白色或黑色；iOS、tvOS、Android 与网页不显示 |
 | `CommandMenu` | `label: LocalizedText`<br>`role: app / file / edit / view / window / help` | 仅含 ["CommandItem", "CommandMenu", "Divider"]，可在 `if`、`match`、`ForEach` 中；无动作；直接位于 ["MenuBar", "CommandMenu", "StatusItem"]；`label` 与 `role` 二选一，`role` 只用于菜单栏上的菜单 |
 | `CommandItem` | **`id: Id`**<br>**`label: DisplayText`**<br>`shortcut: Shortcut`<br>`enabled: Bool`<br>`checked: Bool`<br>`pick: FileField`<br>`files: FileKinds`<br>`paste: TextField` | 不含子节点；必须绑定动作；直接位于 ["CommandMenu", "StatusItem"]；菜单栏的项的草稿属于主窗口；`pick` 与 `paste` 二选一 |
 | `Window` | **`id: WindowId`**<br>**`title: LocalizedText`**<br>`initial: open / closed`<br>`presentation: auto / virtual / floating / native_required`<br>`role: standard / settings / dialog`<br>`width: Number`<br>`height: Number`<br>`min_width: Number`<br>`min_height: Number`<br>`confirm_close: Bool`<br>`close_message: LocalizedText`<br>`chrome: standard / unified`<br>`immersive: Bool`<br>`landscape: Bool`<br>`idle_after: Number`<br>`idle_enabled: Bool` | 恰好一个子节点；动作可选；直接位于 ["WindowSet"] |
@@ -99,7 +99,7 @@
 | `Destination` | 无专有属性 | 可含子内容；无动作；直接位于 ["Navigation"] |
 | `NavLink` | **`id: Id`**<br>**`route: Route`** | 可含子内容；无动作 |
 | `ControlGroup` | `label: DisplayText`<br>`height: Length` | 可含子内容；无动作 |
-| `Tabs` | **`selection: SelectionField`**<br>`id: Id`<br>`fallback: SelectionValue`<br>`bar: standard / floating` | 仅含 ["Tab", "Pages", "TabAccessory"]；无动作。选中的标签取应用强调色；`bar: floating` 让手机上的标签栏成为离开屏幕边缘的胶囊：iOS 26 起本来如此，Compose 画成浮起的胶囊（选中的一项另有一块胶囊底），`TabAccessory` 也是胶囊；GTK、WinUI 3 与 Web 保持各自的标签栏 |
+| `Tabs` | **`selection: SelectionField`**<br>`id: Id`<br>`fallback: SelectionValue`<br>`bar: standard / floating` | 仅含 ["Tab", "Pages", "TabAccessory"]；无动作。选中的标签取应用强调色；`bar: floating` 让手机上的标签栏成为离开屏幕边缘的胶囊：iOS 26 起本来如此，Compose 画成浮起的胶囊（选中的一项另有一块胶囊底），`TabAccessory` 也是胶囊；GTK、WinUI 3 与 Web 保持各自的标签栏 在 Android 上，窗口高度低于紧凑断点（`window.short`，如手机横屏）时，浮动标签栏改为页面旁的一列图标，配件是页面底部的胶囊。 |
 | `TabAccessory` | `shown: Bool` | 可含子内容；无动作；直接位于 ["Tabs"]，最多一个，不放在 `if` 或 `ForEach` 里。各页之上常驻的一条，例如正在播放的小播放器；`shown` 为假时收起 |
 | `Tab` | **`value: SelectionValue`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`display: title_and_icon / icon` | 可含子内容；无动作；直接位于 ["Tabs"]。`display: icon` 只显示图标（必须写 `icon`），`label` 仍是可访问名称 |
 | `SplitButton` | **`id: Id`**<br>**`label: DisplayText`**<br>`value: BoolField`<br>`checked: Bool`<br>`icon: Icon`<br>`shape: capsule`<br>`height: Length`<br>`more_label: DisplayText`<br>`shortcut: Shortcut` | 可含子内容；`value` 与 `checked` 二选一，`checked` 须有动作，切换时执行 |
@@ -184,6 +184,7 @@
 | `nudge` | `Bool` |
 | `nudge_key` | `KeyValue` |
 | `nudge_scale` | `Number` |
+| `nudge_motion` | `MotionToken`：提示后元素回到原样的动效，省略时为 `jelly`；需要 `nudge` 或 `nudge_key` |
 | `reduce_motion` | `Bool` |
 | `spin` | `Bool`：成立时绕中心匀速转动，不成立时停在当时的角度 |
 | `spin_period` | `Number`：转一圈的秒数，默认 1，负数逆时针；需要 `spin` |

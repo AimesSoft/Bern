@@ -69,20 +69,25 @@ impl Generator<'_> {
         // A column in a column (a row in a row) holding a spacer takes the
         // room its siblings leave, as on the other targets, instead of all
         // of it: a foot after it stays on screen.
-        let along = element
+        let spaced = element
             .prop(if column { "height" } else { "width" })
             .is_none()
             && !ctx.scroll_content
-            && match (column, ctx.scope) {
-                (true, Scope::Column) | (false, Scope::Row) => element
-                    .children
-                    .iter()
-                    .any(|node| matches!(node, Node::Element(child) if child.kind == "Spacer")),
-                _ => false,
-            };
+            && element
+                .children
+                .iter()
+                .any(|node| matches!(node, Node::Element(child) if child.kind == "Spacer"));
+        // The root of a component does so in the column or row the
+        // component is called in.
+        let along = match (spaced, column, ctx.scope) {
+            (true, true, Scope::Column) | (true, false, Scope::Row) => ".weight(1f)",
+            (true, true, Scope::Other) => ".bernFlexible(row = false)",
+            (true, false, Scope::Other) => ".bernFlexible(column = false)",
+            _ => "",
+        };
         let modifier = format!(
             "Modifier{}{}{}{}",
-            if along { ".weight(1f)" } else { "" },
+            along,
             self.reflow(element),
             self.size_modifiers(element),
             self.padding(element)
@@ -1067,6 +1072,11 @@ fn takes_room(nodes: &[Node]) -> bool {
         Node::Element(element) => match element.kind.as_str() {
             "TextInput" | "Search" | "Slider" => true,
             "Column" | "Stack" => takes_room(&element.children),
+            // A spacer spreads the row across all it is given.
+            "Row" => element
+                .children
+                .iter()
+                .any(|node| matches!(node, Node::Element(child) if child.kind == "Spacer")),
             _ => false,
         },
         Node::If(branch) => {

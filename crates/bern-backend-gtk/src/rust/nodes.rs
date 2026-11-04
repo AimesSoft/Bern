@@ -253,6 +253,7 @@ impl Generator<'_> {
             "ShortcutInput" => self.shortcut_input(out, element),
             "ControlGroup" => self.control_group(out, element),
             "Svg" => self.svg(out, element),
+            "WebPage" => self.web_page(out, element),
             "Image" => self.image(out, element),
             "Progress" => self.progress(out, element),
             "Spacer" => out.line("b::Spacer(p);"),

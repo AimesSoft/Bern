@@ -44,7 +44,7 @@ pub mod theme;
 pub mod value;
 mod widgets;
 #[cfg(feature = "svg")]
-pub use svg::{Svg, SvgProps};
+pub use svg::{Svg, SvgProps, WebPage, WebPageProps};
 mod windows;
 
 pub use bern_ffi;

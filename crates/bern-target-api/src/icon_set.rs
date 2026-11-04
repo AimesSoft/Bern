@@ -50,6 +50,7 @@ pub const NAMES: &[&str] = &[
     "gobackward.10",
     "goforward.10",
     "hand.tap",
+    "headphones",
     "heart",
     "house",
     "info.circle",

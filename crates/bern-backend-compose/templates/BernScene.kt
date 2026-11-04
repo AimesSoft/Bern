@@ -603,7 +603,7 @@ fun BernModal(
                     // The dialog is a window of its own: its elements cannot
                     // pair with the shared elements of the window below,
                     // whose layout is another hierarchy.
-                    Box(if (covering) Modifier.statusBarsPadding().navigationBarsPadding() else Modifier) {
+                    Box(if (covering) Modifier.statusBarsPadding().navigationBarsPadding() else Modifier, contentAlignment = Alignment.TopCenter) {
                         CompositionLocalProvider(LocalBernShared provides null) { content() }
                     }
                 }

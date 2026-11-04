@@ -34,7 +34,11 @@ fn showcase_compiles_to_ir() {
     assert_eq!(widget.module, vec!["showcase_widgets"]);
     let library = &compiled.libraries[0];
     assert_eq!(library.package, "showcase-widgets");
-    assert_eq!(library.version, env!("CARGO_PKG_VERSION"), "the workspace version");
+    assert_eq!(
+        library.version,
+        env!("CARGO_PKG_VERSION"),
+        "the workspace version"
+    );
     assert_eq!(library.descriptor_version, ir::LIBRARY_DESCRIPTOR_VERSION);
     assert!(
         app.component("app").is_none(),

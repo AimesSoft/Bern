@@ -535,8 +535,12 @@ impl<'a> Generator<'a> {
             } else {
                 Vec::new()
             };
+            let shown = item.expr("shown").map_or_else(
+                || "None".to_string(),
+                |shown| format!("Some(|c: &b::Ctx| {})", self.condition(shown)),
+            );
             format!(
-                "b::StatusItemDef {{ label: {}, menu: status_menu, login_item: {}, image: &[{}] }}",
+                "b::StatusItemDef {{ label: {}, menu: status_menu, login_item: {}, shown: {shown}, image: &[{}] }}",
                 self.text_prop(item, "label")
                     .unwrap_or_else(|| "b::str(|_| String::new())".into()),
                 item.keyword("login_item") == Some("true"),

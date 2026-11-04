@@ -89,14 +89,14 @@ impl Generator<'_> {
             entries.push(format!(
                 "nudge: Some(({}, {}))",
                 self.getter(when),
-                self.motion("jelly")
+                self.motion(element.keyword("nudge_motion").unwrap_or("jelly"))
             ));
         }
         if let Some(key) = element.expr("nudge_key") {
             entries.push(format!(
                 "nudge_key: Some(({}, {}))",
                 self.getter(key),
-                self.motion("jelly")
+                self.motion(element.keyword("nudge_motion").unwrap_or("jelly"))
             ));
         }
         if let Some(scale) = element.number("nudge_scale") {

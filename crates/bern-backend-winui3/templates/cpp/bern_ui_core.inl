@@ -81,6 +81,9 @@ struct StatusItemDef {
     void (*menu)(Ctx const&, StatusArea::Menu&) = nullptr;
     bool loginItem = false;
     bool image = false;
+    /// `shown`: whether it stands in the notification area now, the
+    /// application staying there; none, always.
+    bool (*shown)(Ctx const&) = nullptr;
 };
 
 struct AppDef {

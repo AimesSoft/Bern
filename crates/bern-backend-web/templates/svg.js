@@ -39,3 +39,16 @@ export function Svg(p, ctx, { source, label, width, height, fit = "contain", pla
   });
   p.append(frame);
 }
+
+// `WebPage`: another site's page in a frame. Its cookies are that site's own:
+// a page cannot set them for it.
+export function WebPage(p, ctx, { url, label }) {
+  const frame = el("iframe", { referrerpolicy: "no-referrer" });
+  frame.style.border = "0";
+  frame.style.width = "100%";
+  frame.style.height = "100%";
+  frame.style.flex = "1";
+  if (url) B.bindAttr(frame, "src", url);
+  if (label) B.bindAttr(frame, "title", label);
+  p.append(frame);
+}

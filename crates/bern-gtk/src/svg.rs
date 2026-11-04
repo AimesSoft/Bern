@@ -36,6 +36,101 @@ fn update_script(
     format!("window.bernSvg?.update({update})")
 }
 
+pub struct WebPageProps {
+    pub url: Option<Str>,
+    pub cookies_file: Option<Str>,
+    pub cookie_domain: Option<Str>,
+    pub user_agent: Option<Str>,
+    pub close_on: Option<Str>,
+    pub label: Option<Str>,
+}
+
+/// `WebPage`: a page of the web filling its place, in a session of its own
+/// that goes with it, signed in with the cookies of a file.
+#[allow(non_snake_case)]
+pub fn WebPage(p: &Parent, ctx: &Ctx, props: WebPageProps, action: Option<crate::Act>) {
+    let text = |value: &Option<Str>| value.as_ref().map(|get| get(ctx).to_string()).unwrap_or_default();
+    let session = webkit6::NetworkSession::new_ephemeral();
+    let (file, domain) = (text(&props.cookies_file), text(&props.cookie_domain));
+    if let (Some(manager), false) = (session.cookie_manager(), domain.is_empty()) {
+        for part in std::fs::read_to_string(&file).unwrap_or_default().split(';') {
+            let Some((name, value)) = part.trim().split_once('=') else { continue };
+            if matches!(name.to_lowercase().as_str(), "path" | "domain" | "expires" | "max-age") {
+                continue;
+            }
+            let mut cookie = webkit6::soup::Cookie::new(name, value, &domain, "/", -1);
+            cookie.set_secure(true);
+            manager.add_cookie(&mut cookie, None::<&gio::Cancellable>, |_| {});
+        }
+    }
+    let manager = webkit6::UserContentManager::new();
+    let selector = text(&props.close_on);
+    if !selector.is_empty() {
+        // A press on it, before the page's own handlers, which may do
+        // nothing outside their own app.
+        let source = format!(
+            "document.addEventListener('click',function(e){{var t=e.target;if(t&&t.closest&&t.closest({})){{e.stopPropagation();e.preventDefault();location.href='bern-web-page://close'}}}},true);",
+            serde_json::Value::from(selector)
+        );
+        manager.add_script(&webkit6::UserScript::new(
+            &source,
+            webkit6::UserContentInjectedFrames::TopFrame,
+            webkit6::UserScriptInjectionTime::Start,
+            &[],
+            &[],
+        ));
+    }
+    let view = webkit6::WebView::builder()
+        .network_session(&session)
+        .user_content_manager(&manager)
+        .build();
+    let at = ctx.clone();
+    view.connect_decide_policy(move |_, decision, kind| {
+        if kind != webkit6::PolicyDecisionType::NavigationAction {
+            return false;
+        }
+        let Some(navigation) = decision.downcast_ref::<webkit6::NavigationPolicyDecision>() else {
+            return false;
+        };
+        let uri = navigation
+            .navigation_action()
+            .and_then(|action| action.request())
+            .and_then(|request| request.uri())
+            .unwrap_or_default();
+        // The page's own schemes are for its app: only the web and a press
+        // on `close_on` go on.
+        if uri.starts_with("http") || uri.starts_with("about:") {
+            return false;
+        }
+        if uri.starts_with("bern-web-page:")
+            && let Some(action) = &action
+        {
+            action(&at);
+        }
+        decision.ignore();
+        true
+    });
+    view.set_hexpand(true);
+    view.set_vexpand(true);
+    if let Some(settings) = WebViewExt::settings(&view) {
+        settings.set_enable_javascript(true);
+        let agent = text(&props.user_agent);
+        if !agent.is_empty() {
+            settings.set_user_agent(Some(agent.as_str()));
+        }
+    }
+    if let Some(label) = &props.label {
+        view.update_property(&[gtk::accessible::Property::Label(&label(ctx))]);
+    }
+    let url = text(&props.url);
+    if !url.is_empty() {
+        view.load_uri(&url);
+    }
+    crate::widgets::place(p, &view);
+    let shown = view.clone();
+    on_cleanup(move || shown.stop_loading());
+}
+
 fn evaluate(view: &webkit6::WebView, script: &str) {
     view.evaluate_javascript(script, None, None, None::<&gio::Cancellable>, |result| {
         if let Err(error) = result {

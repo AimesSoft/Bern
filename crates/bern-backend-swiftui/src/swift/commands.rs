@@ -194,6 +194,29 @@ impl Generator<'_> {
         true
     }
 
+    /// `BernStatusScene`, the scene that follows `StatusItem(shown:)`.
+    pub(super) fn status_scene_type(&self, out: &mut Out) {
+        let Some(shown) = self
+            .app
+            .windows
+            .status_item
+            .as_ref()
+            .and_then(|item| item.expr("shown"))
+        else {
+            return;
+        };
+        out.line("/// The `StatusItem` while its `shown` says so.");
+        out.open("struct BernStatusScene: Scene {");
+        out.line("private var bernEngine: BernEngine { BernEngine.shared }");
+        out.line("");
+        out.open("var body: some Scene {");
+        out.line(format!("let shown = {}", self.expr(shown)));
+        self.status_scene(out);
+        out.close("}");
+        out.close("}");
+        out.line("");
+    }
+
     /// The `MenuBarExtra` scene of the `StatusItem`: `icon` is a symbol,
     /// `image` the picture the build drew from its SVG; the menu bar draws
     /// either as a template in its own colour.
@@ -209,7 +232,11 @@ impl Generator<'_> {
                 string(item.icon("icon").unwrap_or("circle"))
             )
         };
-        out.open("SwiftUI.MenuBarExtra {");
+        // `shown`: read in the body of a scene of its own, which follows it.
+        match item.expr("shown") {
+            Some(_) => out.open("SwiftUI.MenuBarExtra(isInserted: BernStatusArea.follow(shown)) {"),
+            None => out.open("SwiftUI.MenuBarExtra {"),
+        }
         out.line("BernStatusMenu()");
         out.line("    .environment(BernEngine.shared)");
         out.close("} label: {");

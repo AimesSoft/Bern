@@ -472,6 +472,7 @@ impl<'a> Generator<'a> {
             "CommandMenu" => self.submenu(out, element, ctx),
             "Stack" => self.stack(out, element, ctx),
             "Svg" => self.svg(out, element),
+            "WebPage" => self.web_page(out, element),
             "Image" => self.image(out, element),
             "Progress" => self.progress(out, element),
             // A spacer shrinks to nothing, as on the other targets, not to
