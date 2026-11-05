@@ -110,7 +110,7 @@ pub fn app_build(app: &Application, abis: &[&str], split: bool) -> String {
     };
     let splits = if split {
         format!(
-            "\n    splits {{\n        abi {{\n            isEnable = true\n            reset()\n            include({listed})\n            isUniversalApk = false\n        }}\n    }}\n"
+            "\n    splits {{\n        abi {{\n            // A bundle holds every ABI, and shrunk resources take one output.\n            isEnable = gradle.startParameter.taskNames.none {{ it.contains(\"bundle\", ignoreCase = true) }}\n            reset()\n            include({listed})\n            isUniversalApk = false\n        }}\n    }}\n"
         )
     } else {
         String::new()
@@ -705,6 +705,8 @@ mod tests {
         let single = app_build(&app, &["arm64-v8a"], false);
         assert!(single.contains("abiFilters += \"arm64-v8a\""), "{single}");
         assert!(!single.contains("splits {"), "{single}");
+        // Gradle refuses a bundle from split, shrunk outputs.
+        assert!(split.contains("taskNames.none"), "{split}");
     }
 
     #[test]
