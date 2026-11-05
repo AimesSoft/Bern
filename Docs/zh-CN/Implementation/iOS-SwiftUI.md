@@ -242,7 +242,7 @@ frontends = ["swiftui", "swiftui-16"]
 | `scrollClipDisabled` | 内容在滚动视图边缘被裁切 |
 | iOS 16.4 以前 iPhone 上的弹出框 | 以 sheet 显示 |
 
-验证：在 iOS 17.5 模拟器上，控件展示和一个实际应用的两个前端都从同一个包运行，只有 iOS 17 前端的进程映射了 `BernUI17`。控件展示各页、切换语言、引擎状态、设置窗口，以及实际应用的首页和歌词页的截图，除上表所列之外逐像素一致。实际应用不登录也能播放音乐；跳转进度后，正在唱的一行在两个前端的歌词页上位置相同。尚未在 iOS 16 运行时上运行：Xcode 27 没有 iOS 16 模拟器，CoreSimulator 拒绝在 macOS 26 以后的主机上运行 iOS 15.1 到 16.7。GitHub Actions 的 `macos-26` 任务可以用 `xcodebuild -downloadPlatform iOS -buildVersion 16.4` 安装。尚未安装到真机。
+验证：在 iOS 17.5 模拟器上，控件展示和一个实际应用的两个前端都从同一个包运行，只有 iOS 17 前端的进程映射了 `BernUI17`。控件展示各页、切换语言、引擎状态、设置窗口，以及实际应用的首页和歌词页的截图，除上表所列之外逐像素一致。实际应用不登录也能播放音乐；跳转进度后，正在唱的一行在两个前端的歌词页上位置相同。在 iOS 16.4 上，同一个包在模拟的 iPhone 8 上运行：控件展示各页、引擎状态、切换语言和设置窗口，然后是实际应用的首页、播放、跳转进度和歌词页，都没有崩溃。Xcode 27 没有 iOS 16 模拟器，CoreSimulator 也拒绝在 macOS 26 以后的主机上运行 iOS 15.1 到 16.7，所以这次运行放在 GitHub Actions 的 `macos-26` 任务里，用 `xcodebuild -downloadPlatform iOS -buildVersion 16.4` 安装运行时。更早的 iOS 16 版本和真机都还没有运行过。
 
 ## 未完成与已知限制
 
