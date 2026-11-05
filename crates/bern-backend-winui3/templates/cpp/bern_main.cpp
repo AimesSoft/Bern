@@ -67,23 +67,14 @@ int BernRunIslands();
 #if BERN_WITH_WINUI
 int BernRunWinUI(std::wstring const& resources);
 
-// The Windows App Runtime 2: 2.x releases share one framework package.
+// The Windows App Runtime 2. The application is built against the newest
+// SDK and uses only what every 2.x has, so any 2.x runs it: 2.x releases
+// share one framework package and stay compatible.
 constexpr UINT32 kRuntimeRelease = 0x00020000;
 
-/// The copy that comes with Windows, whichever 2.x that is.
 static PACKAGE_VERSION RuntimeMinimum() {
     PACKAGE_VERSION version{};
     version.Major = 2;
-    return version;
-}
-
-/// One another program installed: as new as the SDK this is built against,
-/// `WINDOWS_APP_SDK` in the backend. An older one can fail to start with
-/// nothing to show for it, and the system XAML runs here without any.
-static PACKAGE_VERSION InstalledMinimum() {
-    PACKAGE_VERSION version{};
-    version.Major = 2;
-    version.Minor = 5;
     return version;
 }
 // The copy Windows 11 ships with, for its own components; ordinary
@@ -108,8 +99,8 @@ static void ReportFailure(char const* what, HRESULT result) {
 /// bootstrapper, which also serves Windows 10. Never asks to install one.
 static bool UseInstalledRuntime() {
     if (!Allowed(L"installed")) return false;
-    HRESULT found = MddBootstrapInitialize2(kRuntimeRelease, L"", InstalledMinimum(), MddBootstrapInitializeOptions_None);
-    if (FAILED(found)) ReportFailure("no installed Windows App Runtime 2.5 or newer", found);
+    HRESULT found = MddBootstrapInitialize2(kRuntimeRelease, L"", RuntimeMinimum(), MddBootstrapInitializeOptions_None);
+    if (FAILED(found)) ReportFailure("no installed Windows App Runtime 2", found);
     return SUCCEEDED(found);
 }
 
