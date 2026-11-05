@@ -300,6 +300,143 @@ export function roleVar(role) {
 
 // MARK: - Pictures
 
+/// Seconds before each further try at a picture, give or take a quarter,
+/// so that pictures that failed together do not all return together.
+const pictureWaits = [1, 2, 4, 8, 16, 32];
+/// Seconds a try may show nothing before it counts as failed, doubling with
+/// each try. A stalled connection reports no error, and the browser reports
+/// no progress: the try may only be queued behind other pictures.
+const pictureSilence = 15;
+/// Addresses the server answered without a picture, on this network.
+const refusedPictures = new Set();
+/// Loads waiting for their next try.
+const pausedPictures = new Set();
+let listeningForNetwork = false;
+
+/// Every load waiting for its next try goes now.
+function tryPicturesAgain() {
+  const waiting = [...pausedPictures];
+  pausedPictures.clear();
+  for (const go of waiting) go();
+}
+
+/// Once the network is back or another, a new way out may answer what the
+/// last one could not; a page shown again tries what it put off.
+function listenForNetwork() {
+  if (listeningForNetwork) return;
+  listeningForNetwork = true;
+  const changed = () => {
+    if (navigator.onLine === false) return;
+    refusedPictures.clear();
+    tryPicturesAgain();
+  };
+  globalThis.addEventListener?.("online", changed);
+  navigator.connection?.addEventListener?.("change", changed);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) tryPicturesAgain();
+  });
+}
+
+/// Why the browser could not show `url`, which an image does not tell:
+/// `refused` when the server answered and another try would only repeat
+/// it, else `unreachable`. An answer from another origin without CORS
+/// cannot be read, so it is tried like a failed network, a limited number
+/// of times.
+async function pictureFailure(url) {
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), pictureSilence * 1000);
+  try {
+    const response = await fetch(url, { cache: "no-store", signal: abort.signal });
+    if (response.ok) return response.headers.get("content-type")?.startsWith("image/") ? "unreachable" : "refused";
+    return [408, 429].includes(response.status) || response.status >= 500 ? "unreachable" : "refused";
+  } catch {
+    return "unreachable";
+  } finally {
+    clearTimeout(timer);
+    abort.abort();
+  }
+}
+
+/// Loads the picture at `url` into `image`, an `<img>` or a probe, through
+/// `show`, and answers what stops it. An address the network could not
+/// reach, or that stays silent, is tried again, each wait longer than the
+/// one before. After the last wait it rests until the network changes or
+/// the page is shown again; a view that appears again starts over at once.
+/// An address the server answered without a picture is not asked again on
+/// the same network. `failed` hears of each failed try, `loaded` of the
+/// picture.
+function loadPicture(image, url, show, { failed, loaded } = {}) {
+  listenForNetwork();
+  let tries = 0;
+  let trying = false;
+  let timer = 0;
+  let go = null;
+  const pause = (seconds) => {
+    go = () => {
+      clearTimeout(timer);
+      pausedPictures.delete(go);
+      start();
+    };
+    pausedPictures.add(go);
+    if (seconds !== undefined) timer = setTimeout(go, seconds * (0.75 + Math.random() / 2) * 1000);
+  };
+  const again = () => {
+    const wait = pictureWaits[tries];
+    tries = wait === undefined ? 0 : tries + 1;
+    pause(wait);
+  };
+  const watch = () => {
+    timer = setTimeout(() => {
+      // Its size has come, so its data is coming.
+      if (image.naturalWidth) return;
+      trying = false;
+      // Waits before asking again: a browser joins a new try to a read of
+      // the same address that it has not let go of yet.
+      image.removeAttribute("src");
+      failed?.();
+      again();
+    }, pictureSilence * 2 ** tries * 1000);
+  };
+  const start = () => {
+    if (refusedPictures.has(url)) return pause();
+    trying = true;
+    show(url);
+    watch();
+  };
+  const stop = () => {
+    trying = false;
+    clearTimeout(timer);
+    pausedPictures.delete(go);
+    image.removeEventListener("load", arrived);
+    image.removeEventListener("error", missed);
+    url = null;
+  };
+  const arrived = () => {
+    const shown = url;
+    stop();
+    loaded?.(shown);
+  };
+  const missed = async () => {
+    if (!trying) return;
+    trying = false;
+    clearTimeout(timer);
+    failed?.();
+    // Only a download can come another time.
+    if (/^(?:data|blob|file):/i.test(url)) return stop();
+    const asked = url;
+    const failure = await pictureFailure(asked);
+    if (url !== asked) return;
+    if (failure === "refused") {
+      refusedPictures.add(url);
+      pause();
+    } else again();
+  };
+  image.addEventListener("load", arrived);
+  image.addEventListener("error", missed);
+  start();
+  return stop;
+}
+
 /// Pictures read at run time, and the average color of each, for shapes
 /// filled from a picture. Each URL is read once.
 const pictures = new Map();
@@ -309,7 +446,7 @@ function picture(url) {
   if (entry) return entry;
   entry = { average: cell(null) };
   pictures.set(url, entry);
-  const image = new window.Image();
+  const image = new globalThis.Image();
   if (/^https?:/.test(url) && !url.startsWith(location.origin)) image.crossOrigin = "anonymous";
   image.decoding = "async";
   image.onload = () => {
@@ -336,7 +473,7 @@ function picture(url) {
       // shape keeps its `fill`.
     }
   };
-  image.src = url;
+  loadPicture(image, url, (value) => { image.src = value; });
   return entry;
 }
 
@@ -2398,8 +2535,9 @@ function nudgeOnce(node, motion) {
 export function Image(p, ctx, { source, darkSource, url, label, width, height, fit, animate, corner, rendering, aspect, adaptive, covers }) {
   const template = rendering === "template";
   const intrinsicRatio = cell(aspect ?? 1);
-  const probe = template && !aspect ? new globalThis.Image() : null;
-  if (probe) {
+  // What tells of a template's picture, which as a mask tells nothing.
+  const probe = template ? new globalThis.Image() : null;
+  if (probe && !aspect) {
     probe.onload = () => {
       if (probe.naturalHeight) intrinsicRatio.set(probe.naturalWidth / probe.naturalHeight);
     };
@@ -2408,13 +2546,21 @@ export function Image(p, ctx, { source, darkSource, url, label, width, height, f
   const node = template ? el("span", { class: "bern-image bern-image-template" })
     : el("img", { class: "bern-image", alt: "", draggable: "false", decoding: "async" });
   node.style.objectFit = fit ?? "contain";
+  const mask = (value) => {
+    node.style.maskImage = value ? `url(${JSON.stringify(value)})` : "none";
+    node.style.webkitMaskImage = node.style.maskImage;
+  };
+  let stopLoading = null;
+  onCleanup(() => stopLoading?.());
   const setSource = (value) => {
+    stopLoading?.();
+    stopLoading = null;
     if (template) {
-      node.style.maskImage = value ? `url(${JSON.stringify(value)})` : "none";
-      node.style.webkitMaskImage = node.style.maskImage;
+      mask(value);
       node.style.maskSize = fit === "cover" ? "cover" : fit === "fill" ? "100% 100%" : "contain";
-      if (probe && value) probe.src = value;
-    } else if (value) node.src = value;
+      // A mask that failed stays failed until it is set again.
+      if (value) stopLoading = loadPicture(probe, value, (shown) => { probe.src = shown; }, { failed: () => mask(null), loaded: mask });
+    } else if (value) stopLoading = loadPicture(node, value, (shown) => { node.src = shown; });
     else node.removeAttribute("src");
   };
   if (source && darkSource) {
