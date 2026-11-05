@@ -2493,7 +2493,10 @@ extension View {
 
     /// Replay feedback on each event revision, even when the selection stays
     /// the same. A new event cancels the previous release; mounting is quiet.
-    func bernNudge<Key: Equatable>(key: Key, scale: Double, motion: BernMotion) -> some View {
+    /// `key` is read in here: what changes it leaves the page around it be.
+    func bernNudge<Key: Equatable>(
+        key: @autoclosure @escaping @MainActor () -> Key, scale: Double, motion: BernMotion
+    ) -> some View {
         modifier(BernKeyedNudge(key: key, peak: scale, motion: motion))
     }
 
@@ -3147,7 +3150,7 @@ private struct BernScrollBrowsing: ViewModifier {
 }
 
 private struct BernKeyedNudge<Key: Equatable>: ViewModifier {
-    let key: Key
+    let key: @MainActor () -> Key
     let peak: Double
     let motion: BernMotion
     @State private var mounted = false
@@ -3157,7 +3160,7 @@ private struct BernKeyedNudge<Key: Equatable>: ViewModifier {
     func body(content: Content) -> some View {
         content
             .scaleEffect(reduce || bernForcedReduceMotion ? 1 : scale)
-            .task(id: key) {
+            .task(id: key()) {
                 guard mounted else { mounted = true; return }
                 guard !(reduce || bernForcedReduceMotion) else { scale = 1; return }
                 withAnimation(.easeOut(duration: 0.09)) { scale = peak }
@@ -5015,13 +5018,30 @@ struct BernRow: Layout {
     var alignment: VerticalAlignment = .center
     var spacing: CGFloat? = nil
 
-    private struct Item {
+    struct Item {
         var ideal: CGFloat
         var least: CGFloat
         var most: CGFloat
         var grows: Bool
         var spacer: Bool
     }
+
+    struct Offer: Hashable {
+        var width: CGFloat?
+        var height: CGFloat?
+    }
+
+    typealias Arranged = (size: CGSize, widths: [CGFloat], tops: [CGFloat], extents: [CGFloat])
+
+    /// What one pass already asked. Each item is asked three widths: without
+    /// this, a row inside a row is asked three times over, and the questions
+    /// multiply with each level.
+    struct Cache {
+        var items: [CGFloat?: [Item]] = [:]
+        var arranged: [Offer: Arranged] = [:]
+    }
+
+    func makeCache(subviews: Subviews) -> Cache { Cache() }
 
     private func gaps(_ subviews: Subviews) -> [CGFloat] {
         guard subviews.count > 1 else { return [] }
@@ -5030,8 +5050,9 @@ struct BernRow: Layout {
         }
     }
 
-    /// The width each item is offered.
-    private func widths(_ width: CGFloat?, _ height: CGFloat?, _ subviews: Subviews) -> [CGFloat] {
+    /// What the items want at `height`.
+    private func items(_ height: CGFloat?, _ subviews: Subviews, _ cache: inout Cache) -> [Item] {
+        if let known = cache.items[height] { return known }
         let items = subviews.map { subview -> Item in
             // A spacer has no least width, as on the other targets; the
             // system's own is a gap of its idiom (60 points on tvOS), which
@@ -5044,6 +5065,13 @@ struct BernRow: Layout {
             let most = subview.sizeThatFits(ProposedViewSize(width: .infinity, height: height)).width
             return Item(ideal: ideal, least: min(least, ideal), most: max(most, ideal), grows: most > ideal + 0.5, spacer: false)
         }
+        cache.items[height] = items
+        return items
+    }
+
+    /// The width each item is offered.
+    private func widths(_ width: CGFloat?, _ height: CGFloat?, _ subviews: Subviews, _ cache: inout Cache) -> [CGFloat] {
+        let items = items(height, subviews, &cache)
         guard let width else { return items.map(\.ideal) }
         var offered = items.map { $0.grows ? $0.least : $0.ideal }
         let room = width - gaps(subviews).reduce(0, +)
@@ -5088,10 +5116,10 @@ struct BernRow: Layout {
         return offered
     }
 
-    private func arrange(_ width: CGFloat?, _ height: CGFloat?, _ subviews: Subviews)
-        -> (size: CGSize, widths: [CGFloat], tops: [CGFloat], extents: [CGFloat])
-    {
-        let offered = widths(width, height, subviews)
+    private func arrange(_ width: CGFloat?, _ height: CGFloat?, _ subviews: Subviews, _ cache: inout Cache) -> Arranged {
+        let offer = Offer(width: width, height: height)
+        if let known = cache.arranged[offer] { return known }
+        let offered = widths(width, height, subviews, &cache)
         let gaps = gaps(subviews)
         var above: CGFloat = 0, below: CGFloat = 0
         var extents: [CGFloat] = [], guides: [CGFloat] = []
@@ -5110,15 +5138,17 @@ struct BernRow: Layout {
         }
         let tops = zip(subviews, guides).map { subview, guide in subview[BernRowSpacer.self] ? 0 : above - guide }
         let length = extents.reduce(0, +) + gaps.reduce(0, +)
-        return (CGSize(width: length, height: above + below), offered, tops, extents)
+        let arranged: Arranged = (CGSize(width: length, height: above + below), offered, tops, extents)
+        cache.arranged[offer] = arranged
+        return arranged
     }
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        arrange(proposal.width, proposal.height, subviews).size
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
+        arrange(proposal.width, proposal.height, subviews, &cache).size
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let layout = arrange(bounds.width, proposal.height, subviews)
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
+        let layout = arrange(bounds.width, proposal.height, subviews, &cache)
         let gaps = gaps(subviews)
         var x = bounds.minX
         for index in subviews.indices {

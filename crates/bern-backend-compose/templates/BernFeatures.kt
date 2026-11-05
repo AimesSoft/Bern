@@ -1930,18 +1930,25 @@ fun Modifier.bernNudge(on: Boolean, motion: BernMotion, size: Float = 1.06f): Mo
     }
 }
 
-/// A nudge each time `key` changes (`nudge_key`), as [bernNudge].
+/// A nudge each time `key` changes (`nudge_key`), as [bernNudge]. `key` is
+/// read apart from composition: what changes it leaves the page around it be.
 @Composable
-fun Modifier.bernNudgeKey(key: Any?, motion: BernMotion, size: Float = 1.06f): Modifier {
+fun Modifier.bernNudgeKey(key: () -> Any?, motion: BernMotion, size: Float = 1.06f): Modifier {
     val scale = remember { Animatable(1f) }
     val reduce = bernReduceMotion()
-    var before by remember { mutableStateOf(key) }
-    LaunchedEffect(key) {
-        if (key != before && !reduce) {
-            scale.animateTo(size, tween(80))
-            scale.animateTo(1f, motion.spec())
+    val current = rememberUpdatedState(key)
+    LaunchedEffect(reduce) {
+        var before = current.value()
+        snapshotFlow { current.value() }.collect { now ->
+            if (now != before && !reduce) {
+                before = now
+                launch {
+                    scale.animateTo(size, tween(80))
+                    scale.animateTo(1f, motion.spec())
+                }
+            }
+            before = now
         }
-        before = key
     }
     return graphicsLayer {
         scaleX = scale.value
