@@ -118,6 +118,10 @@
   width: auto;
 }
 
+.bern-hstack > .bern-keeps-width:not(.bern-sized-width) {
+  flex: 1 1 auto;
+}
+
 .bern-hstack > :is(.bern-fill-height, .bern-layout-height):not(.bern-sized-height) {
   align-self: stretch;
 }

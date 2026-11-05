@@ -2592,19 +2592,46 @@ export function layoutIntent(node, dimension) {
   if (node.classList.contains(`bern-fill-${dimension}`)) return true;
   // `Button(width: fill)` takes the row's or column's width.
   if (dimension === "width" && node.classList.contains("bern-button-fill")) return true;
-  let children = [...node.children];
-  if (node.bernLayoutAxis === "layers") {
-    // As in native BernLayers, rails and canvases without a size cover the
-    // size established by other layers. A progress rail over a fixed image
-    // must not turn the image button into a flexible item, nor a backdrop
-    // a sidebar row into a column's whole height. A stack made only of
-    // such layers can fill.
-    const content = children.filter((child) => !backdropLayer(child));
-    if (content.length) children = content;
-  }
+  const children = layoutChildren(node);
   const axis = dimension === "width" ? "row" : "column";
-  if (node.bernLayoutAxis === axis && children.some((child) => child.classList.contains("bern-spacer"))) return true;
+  if (node.bernLayoutAxis === axis && children.some(isSpacer)) return true;
   return children.some((child) => layoutIntent(child, dimension));
+}
+
+const isSpacer = (node) => node.classList.contains("bern-spacer");
+
+/// The children that decide how `node` fills.
+function layoutChildren(node) {
+  const children = [...node.children];
+  if (node.bernLayoutAxis !== "layers") return children;
+  // As in native BernLayers, rails and canvases without a size cover the
+  // size established by other layers. A progress rail over a fixed image
+  // must not turn the image button into a flexible item, nor a backdrop
+  // a sidebar row into a column's whole height. A stack made only of
+  // such layers can fill.
+  const content = children.filter((child) => !backdropLayer(child));
+  return content.length ? content : children;
+}
+
+/// Whether `node` takes free width only through `Spacer`s inside it: what
+/// it holds still has a width of its own.
+function spacedWidth(node) {
+  if (node.classList.contains("bern-fill-width") || node.classList.contains("bern-button-fill")) return false;
+  const children = layoutChildren(node);
+  let spaced = node.bernLayoutAxis === "row" && children.some(isSpacer);
+  for (const child of children) {
+    if (!layoutIntent(child, "width")) continue;
+    if (!spacedWidth(child)) return false;
+    spaced = true;
+  }
+  return spaced;
+}
+
+/// Whether `node` starts from its own width in its row: `Spacer`s beside
+/// it give way to what it holds, instead of all sharing the row equally.
+export function keepsWidth(node) {
+  const row = node.parentElement;
+  return !!row && row.bernLayoutAxis === "row" && [...row.children].some(isSpacer) && layoutIntent(node, "width") && spacedWidth(node);
 }
 
 /// Whether a stack's layers, rails and backdrops aside, all have a fixed
@@ -2635,6 +2662,8 @@ function trackLayout(node, axis) {
           if (element.classList.contains(fixedClass) !== fixed) element.classList.toggle(fixedClass, fixed);
         }
       }
+      const keeps = keepsWidth(element);
+      if (element.classList.contains("bern-keeps-width") !== keeps) element.classList.toggle("bern-keeps-width", keeps);
     };
     visit(node);
   };

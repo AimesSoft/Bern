@@ -413,3 +413,84 @@ fn motion_props_move_the_elements_they_are_on() {
         assert!(ui.contains(expected), "the gallery lacks `{expected}`");
     }
 }
+
+/// A stack that fills only through spacers inside it starts from its own
+/// length beside a spacer, so that the spacers give way to what it holds.
+#[test]
+fn a_spaced_stack_keeps_its_length_beside_a_spacer() {
+    let root = workspace();
+    let dir = root.join("target/bern-test/gpui-spaced");
+    let _ = std::fs::remove_dir_all(&dir);
+    let copy = dir.join("source");
+    for package in ["hello-core", "hello-protocol", "hello-ui"] {
+        let from = root.join("examples/hello").join(package);
+        for file in ["Cargo.toml", "src/lib.rs"] {
+            let to = copy.join(package).join(file);
+            std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+            std::fs::copy(from.join(file), to).unwrap();
+        }
+    }
+    std::fs::copy(
+        root.join("examples/hello/Bern.toml"),
+        copy.join("Bern.toml"),
+    )
+    .unwrap();
+    std::fs::write(
+        copy.join("hello-ui/src/lib.rs"),
+        r#"use bern::prelude::*;
+use hello_protocol::hello;
+
+#[component]
+pub fn app(app: hello::Client, windows: AppWindows) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "zh-Hans" => "你好", "en" => "Hello" }, initial: open, width: 480, height: 320) {
+                Column {
+                    Row {
+                        Spacer
+                        Column {
+                            Row { Spacer Text(content: tr! { "zh-Hans" => "一", "en" => "One" }) Spacer }
+                        }
+                        Spacer
+                    }
+                    Row {
+                        Column {
+                            Row { Spacer Text(content: tr! { "zh-Hans" => "二", "en" => "Two" }) }
+                        }
+                        Column {
+                            Row { Spacer Text(content: tr! { "zh-Hans" => "三", "en" => "Three" }) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+"#,
+    )
+    .unwrap();
+    let config = bern_compiler::config::load(&copy.join("Bern.toml")).unwrap();
+    let compiled = bern_compiler::compile(&config).unwrap();
+    let context = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: dir.join("out"),
+        target: gpui_macos(),
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    let files = Gpui::MACOS.generate(&compiled.app, &context).unwrap();
+    let ui = files
+        .iter()
+        .find(|file| file.path == Path::new("app/src/ui.rs"))
+        .map(|file| String::from_utf8_lossy(&file.contents).into_owned())
+        .unwrap();
+    assert_eq!(ui.matches("keep: true").count(), 1, "{ui}");
+}

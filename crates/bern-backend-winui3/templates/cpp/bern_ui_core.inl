@@ -508,6 +508,28 @@ inline bool FillsRow(xaml::UIElement const& element) {
     return false;
 }
 
+/// Whether `element` takes free room along a row (a column when not
+/// `horizontal`) only through `Spacer`s inside it: what it holds still has
+/// a length of its own.
+inline bool Spaced(xaml::UIElement const& element, bool horizontal) {
+    auto inner = Unwrapped(element);
+    auto role = std::wstring(RoleOf(inner));
+    bool along = role == (horizontal ? L"bern-row" : L"bern-column");
+    bool across = role == (horizontal ? L"bern-column" : L"bern-row");
+    if ((!along && !across && !role.starts_with(L"bern-layers")) || (horizontal && FullWidth(inner))) return false;
+    bool spaced = false;
+    for (auto child : inner.as<controls::Panel>().Children()) {
+        if (child.Visibility() != xaml::Visibility::Visible) continue;
+        if (RoleOf(Unwrapped(child)) == L"bern-spacer") {
+            spaced = spaced || along;
+        } else if (horizontal ? FillsRow(child) : FillsColumn(child)) {
+            if (!Spaced(child, horizontal)) return false;
+            spaced = true;
+        }
+    }
+    return spaced;
+}
+
 /// The role of an element that holds `inner` alone, such as a button with
 /// content: it fills the way the inner element does.
 inline void Mirror(xaml::FrameworkElement const& holder, xaml::UIElement const& inner) {
@@ -598,6 +620,26 @@ struct FlexPanel : controls::PanelT<FlexPanel> {
     /// fills it (a scroll view, a spacer) is as tall as its own content,
     /// until the column has less room than that.
     bool fits = false;
+    /// The length each filling child starts from, in order: its own for a
+    /// stack that fills only through spacers inside it, beside a spacer of
+    /// this panel, and none for the others.
+    std::vector<float> kept;
+
+    /// The lengths of the filling children sharing `free`: what each keeps
+    /// and an equal part of what is left. With too little room spacers
+    /// take nothing, and what is kept shrinks in proportion.
+    std::vector<float> Shares(float free) const {
+        auto lengths = kept;
+        float wanted = 0;
+        for (float length : kept) wanted += length;
+        if (wanted >= free) {
+            if (wanted > 0) for (float& length : lengths) length *= free / wanted;
+            return lengths;
+        }
+        float spare = (free - wanted) / static_cast<float>(kept.size());
+        for (float& length : lengths) length += spare;
+        return lengths;
+    }
 
     bool Fills(xaml::UIElement const& child) const {
         if (horizontal) return FillsRow(child);
@@ -671,9 +713,24 @@ struct FlexPanel : controls::PanelT<FlexPanel> {
             }
         }
         float free = std::isinf(space) ? INFINITY : (std::max)(0.0f, space - used - gaps);
+        bool spacers = false;
+        for (auto child : Children())
+            spacers = spacers || (child.Visibility() == xaml::Visibility::Visible && RoleOf(Unwrapped(child)) == L"bern-spacer");
+        kept.clear();
         for (auto child : Children()) {
             if (child.Visibility() != xaml::Visibility::Visible || !Fills(child)) continue;
-            child.Measure(Make(std::isinf(free) ? INFINITY : free / filling, Across(child, cross).second));
+            float own = 0;
+            if (spacers && Spaced(child, horizontal)) {
+                child.Measure(Make(INFINITY, Across(child, cross).second));
+                own = Main(child.DesiredSize());
+            }
+            kept.push_back(own);
+        }
+        auto shares = Shares(free);
+        size_t next = 0;
+        for (auto child : Children()) {
+            if (child.Visibility() != xaml::Visibility::Visible || !Fills(child)) continue;
+            child.Measure(Make(shares[next++], Across(child, cross).second));
             filled += Main(child.DesiredSize());
             thickness = (std::max)(thickness, (std::min)(Cross(child.DesiredSize()), cross));
         }
@@ -699,7 +756,9 @@ struct FlexPanel : controls::PanelT<FlexPanel> {
             else used += Main(child.DesiredSize());
         }
         float gaps = static_cast<float>(spacing) * (std::max)(0, visible - 1);
-        float share = filling > 0 ? (std::max)(0.0f, space - used - gaps) / filling : 0;
+        kept.resize(filling);
+        auto shares = Shares((std::max)(0.0f, space - used - gaps));
+        size_t next = 0;
         float position = 0;
         std::vector<std::pair<xaml::UIElement, winrt::Windows::Foundation::Point>> now;
         std::vector<std::pair<xaml::UIElement, Rect>> placed;
@@ -708,7 +767,7 @@ struct FlexPanel : controls::PanelT<FlexPanel> {
                 child.Arrange(Rect{0, 0, 0, 0});
                 continue;
             }
-            float length = Fills(child) ? share : Main(child.DesiredSize());
+            float length = Fills(child) ? shares[next++] : Main(child.DesiredSize());
             auto left = static_cast<float>(padding.Left), top = static_cast<float>(padding.Top);
             auto [offset, side] = Across(child, cross);
             Rect rect = horizontal ? Rect{left + position, top + offset, length, side} : Rect{left + offset, top + position, side, length};

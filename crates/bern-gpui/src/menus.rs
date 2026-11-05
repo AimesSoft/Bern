@@ -218,6 +218,7 @@ pub fn context_menu(
         flex: false,
         width: grow.width || grow.flex,
         height: grow.height || grow.flex,
+        keep: false,
     }));
     let open = crate::overlay::is_open(&target);
     let opener = target.clone();
