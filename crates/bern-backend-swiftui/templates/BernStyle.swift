@@ -5147,6 +5147,26 @@ struct BernRow: Layout {
         arrange(proposal.width, proposal.height, subviews, &cache).size
     }
 
+    // The default answers these two by placing every item, and a stack asks
+    // for its alignment each time it lays a row out.
+    func explicitAlignment(
+        of guide: HorizontalAlignment, in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews,
+        cache: inout Cache
+    ) -> CGFloat? {
+        nil
+    }
+
+    func explicitAlignment(
+        of guide: VerticalAlignment, in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews,
+        cache: inout Cache
+    ) -> CGFloat? {
+        guard guide == .firstTextBaseline || guide == .lastTextBaseline else { return nil }
+        let layout = arrange(bounds.width, proposal.height, subviews, &cache)
+        guard let index = subviews.indices.first(where: { !subviews[$0][BernRowSpacer.self] }) else { return nil }
+        let offer = ProposedViewSize(width: layout.widths[index], height: proposal.height)
+        return bounds.minY + layout.tops[index] + subviews[index].dimensions(in: offer)[guide]
+    }
+
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
         let layout = arrange(bounds.width, proposal.height, subviews, &cache)
         let gaps = gaps(subviews)
