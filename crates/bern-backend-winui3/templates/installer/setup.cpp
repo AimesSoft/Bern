@@ -1,32 +1,57 @@
 // Bern installer. Puts the application in the user's own programs folder
 // (%LOCALAPPDATA%\Programs), with a Start menu shortcut and an entry in
 // Settings > Apps, and removes it again. No administrator rights; nothing
-// is downloaded; the files travel inside this program as resources.
+// is downloaded; the files travel inside this program, compressed by
+// pack.cpp into one resource.
 //
-//   setup.exe              install, asking first
+//   setup.exe              install, from a small window
 //   setup.exe /S           install silently
-//   uninstall.exe          remove, asking first (a copy of this program in
-//                          the installed folder)
+//   uninstall.exe          remove, from the same window (a copy of this
+//                          program in the installed folder)
 //   uninstall.exe /S       remove silently
 //
 // Generated build input; do not edit.
 
 #include <windows.h>
+#include <commctrl.h>
+#include <compressapi.h>
+#include <d2d1.h>
+#include <dwmapi.h>
+#include <dwrite.h>
 #include <knownfolders.h>
 #include <objbase.h>
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shobjidl.h>
 #include <tlhelp32.h>
+#include <wincodec.h>
+#include <windowsx.h>
+#include <wrl/client.h>
 
+#include <atomic>
+#include <cstdint>
+#include <cstring>
 #include <cwchar>
+#include <iterator>
 #include <string>
+#include <thread>
+#include <vector>
 
 #include "setup_info.h"
 
 namespace {
 
+using Microsoft::WRL::ComPtr;
+
+constexpr int kPayload = 1001;
+
 bool silent = false;
+bool removing = false;
+
+/// How far the work has come, from 0 to 1. The bar eases toward it.
+std::atomic<float> reached{0};
+
+enum class Outcome { Finished, CloseFirst, Failed };
 
 /// The texts in the user's interface language, else English.
 Texts const& Text() {
@@ -45,25 +70,14 @@ Texts const& Text() {
     return kTexts[0];
 }
 
-/// `text` with `{name}` and `{version}` filled in.
+/// `text` with `{name}` filled in.
 std::wstring Fill(wchar_t const* text) {
     std::wstring out(text);
-    for (auto [key, value] : {std::pair{L"{name}", Text().name}, std::pair{L"{version}", kVersion}}) {
-        std::wstring const pattern(key);
-        for (size_t at = out.find(pattern); at != std::wstring::npos; at = out.find(pattern, at + std::wcslen(value)))
-            out.replace(at, pattern.size(), value);
-    }
+    std::wstring const key(L"{name}");
+    std::wstring const name(Text().name);
+    for (size_t at = out.find(key); at != std::wstring::npos; at = out.find(key, at + name.size()))
+        out.replace(at, key.size(), name);
     return out;
-}
-
-std::wstring Title() { return Fill(Text().title); }
-
-bool Ask(wchar_t const* text) {
-    return silent || MessageBoxW(nullptr, Fill(text).c_str(), Title().c_str(), MB_YESNO | MB_ICONQUESTION | MB_SETFOREGROUND) == IDYES;
-}
-
-void Tell(wchar_t const* text, UINT icon = MB_ICONINFORMATION) {
-    if (!silent) MessageBoxW(nullptr, Fill(text).c_str(), Title().c_str(), MB_OK | icon | MB_SETFOREGROUND);
 }
 
 std::wstring KnownFolder(KNOWNFOLDERID const& id) {
@@ -132,18 +146,38 @@ bool Running(std::wstring const& folder) {
     return running;
 }
 
-bool WriteResource(int id, std::wstring const& path) {
-    HRSRC found = FindResourceW(nullptr, MAKEINTRESOURCEW(id), RT_RCDATA);
-    if (!found) return false;
-    HGLOBAL loaded = LoadResource(nullptr, found);
-    void const* data = loaded ? LockResource(loaded) : nullptr;
-    DWORD size = SizeofResource(nullptr, found);
-    if (!data && size) return false;
+/// The files this program carries, one after the other, and their sizes.
+struct Unpacked {
+    std::vector<uint64_t> sizes;
+    std::vector<BYTE> bytes;
+};
+
+bool Unpack(Unpacked& files) {
+    HRSRC found = FindResourceW(nullptr, MAKEINTRESOURCEW(kPayload), RT_RCDATA);
+    HGLOBAL loaded = found ? LoadResource(nullptr, found) : nullptr;
+    auto const* data = static_cast<BYTE const*>(loaded ? LockResource(loaded) : nullptr);
+    size_t const size = found ? SizeofResource(nullptr, found) : 0;
+    size_t const head = std::size(kFiles) * sizeof(uint64_t);
+    if (!data || size < head) return false;
+    files.sizes.resize(std::size(kFiles));
+    std::memcpy(files.sizes.data(), data, head);
+    uint64_t total = 0;
+    for (uint64_t file : files.sizes) total += file;
+    files.bytes.resize(total);
+    DECOMPRESSOR_HANDLE decompressor = nullptr;
+    if (!CreateDecompressor(COMPRESS_ALGORITHM_LZMS, nullptr, &decompressor)) return false;
+    SIZE_T written = 0;
+    bool ok = Decompress(decompressor, data + head, size - head, files.bytes.data(), files.bytes.size(), &written) && written == total;
+    CloseDecompressor(decompressor);
+    return ok;
+}
+
+bool WriteBytes(BYTE const* data, uint64_t size, std::wstring const& path) {
     SHCreateDirectoryExW(nullptr, FolderOf(path).c_str(), nullptr);
     HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file == INVALID_HANDLE_VALUE) return false;
     DWORD written = 0;
-    bool ok = WriteFile(file, data, size, &written, nullptr) && written == size;
+    bool ok = WriteFile(file, data, static_cast<DWORD>(size), &written, nullptr) && written == size;
     CloseHandle(file);
     return ok;
 }
@@ -189,77 +223,478 @@ bool Register(std::wstring const& folder) {
     return true;
 }
 
-int Install() {
-    if (!Ask(Text().install)) return 1;
-    std::wstring folder = InstallFolder();
-    // A version already there goes first, unless it runs.
-    bool present = GetFileAttributesW(folder.c_str()) != INVALID_FILE_ATTRIBUTES;
-    if (present && (Running(folder) || !RemoveTree(folder))) {
-        Tell(Text().close_first, MB_ICONWARNING);
-        return 1;
-    }
-    for (auto const& file : kFiles) {
-        if (!WriteResource(file.id, folder + L"\\" + file.path)) {
-            Tell(Text().failed, MB_ICONERROR);
-            return 1;
-        }
-    }
-    std::wstring executable = folder + L"\\" + kExecutable;
-    if (!CopyFileW(ThisProgram().c_str(), (folder + L"\\uninstall.exe").c_str(), FALSE) || !Register(folder)) {
-        Tell(Text().failed, MB_ICONERROR);
-        return 1;
-    }
-    MakeShortcut(executable, folder);
-    if (!silent && MessageBoxW(nullptr, Fill(Text().installed).c_str(), Title().c_str(), MB_YESNO | MB_ICONINFORMATION | MB_SETFOREGROUND) == IDYES)
-        ShellExecuteW(nullptr, L"open", executable.c_str(), nullptr, folder.c_str(), SW_SHOWNORMAL);
-    return 0;
+/// The version in Settings > Apps, if one is installed.
+std::wstring InstalledVersion() {
+    wchar_t version[64] = {};
+    DWORD size = sizeof version;
+    if (RegGetValueW(HKEY_CURRENT_USER, UninstallKey().c_str(), L"DisplayVersion", RRF_RT_REG_SZ, nullptr, version, &size) != ERROR_SUCCESS)
+        return {};
+    return version;
 }
 
-int Uninstall() {
+Outcome Install() {
     std::wstring folder = InstallFolder();
-    std::wstring self = ThisProgram();
-    // A program cannot remove itself: the copy in the installed folder
-    // hands over to a copy in the temporary folder.
-    if (_wcsicmp(FolderOf(self).c_str(), folder.c_str()) == 0) {
-        wchar_t temp[MAX_PATH] = {};
-        GetTempPathW(MAX_PATH, temp);
-        std::wstring copy = std::wstring(temp) + kKey + L"-uninstall.exe";
-        if (!CopyFileW(self.c_str(), copy.c_str(), FALSE)) {
-            Tell(Text().failed, MB_ICONERROR);
-            return 1;
-        }
-        std::wstring arguments = silent ? L"/uninstall /S" : L"/uninstall";
-        SHELLEXECUTEINFOW run{sizeof run};
-        run.lpFile = copy.c_str();
-        run.lpParameters = arguments.c_str();
-        run.nShow = SW_SHOWNORMAL;
-        return ShellExecuteExW(&run) ? 0 : 1;
+    bool present = GetFileAttributesW(folder.c_str()) != INVALID_FILE_ATTRIBUTES;
+    if (present && Running(folder)) return Outcome::CloseFirst;
+    reached = 0.1f;
+    Unpacked files;
+    if (!Unpack(files)) return Outcome::Failed;
+    reached = 0.6f;
+    // A version already there goes only now that the new one is at hand.
+    if (present && !RemoveTree(folder)) return Outcome::CloseFirst;
+    BYTE const* next = files.bytes.data();
+    for (size_t i = 0; i < std::size(kFiles); ++i) {
+        if (!WriteBytes(next, files.sizes[i], folder + L"\\" + kFiles[i])) return Outcome::Failed;
+        next += files.sizes[i];
+        reached = 0.6f + 0.35f * static_cast<float>(next - files.bytes.data()) / static_cast<float>(files.bytes.size());
     }
-    if (!Ask(Text().uninstall)) return 1;
+    if (!CopyFileW(ThisProgram().c_str(), (folder + L"\\uninstall.exe").c_str(), FALSE) || !Register(folder)) return Outcome::Failed;
+    MakeShortcut(folder + L"\\" + kExecutable, folder);
+    reached = 1;
+    return Outcome::Finished;
+}
+
+Outcome Uninstall() {
+    std::wstring folder = InstallFolder();
     // Nothing is removed while the application runs. The uninstaller goes
     // last, so a removal that stops halfway can be tried again.
-    if (Running(folder) || !RemoveTree(folder, L"uninstall.exe")) {
-        Tell(Text().close_first, MB_ICONWARNING);
-        return 1;
-    }
+    if (Running(folder) || !RemoveTree(folder, L"uninstall.exe")) return Outcome::CloseFirst;
+    reached = 0.7f;
     // The copy in the folder that handed over may still be ending.
     bool removed = false;
     for (int attempt = 0; attempt < 20 && !removed; ++attempt) {
         removed = GetFileAttributesW(folder.c_str()) == INVALID_FILE_ATTRIBUTES || RemoveTree(folder);
         if (!removed) Sleep(250);
     }
-    if (!removed) {
-        Tell(Text().failed, MB_ICONERROR);
-        return 1;
-    }
+    if (!removed) return Outcome::Failed;
     DeleteFileW(Shortcut().c_str());
     RegDeleteTreeW(HKEY_CURRENT_USER, UninstallKey().c_str());
     // “Open at Login” of the application's status item, and Task Manager's
     // note on it.
     RegDeleteKeyValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", kKey);
     RegDeleteKeyValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run", kKey);
-    Tell(Text().uninstalled);
-    return 0;
+    reached = 1;
+    return Outcome::Finished;
+}
+
+/// A program cannot remove itself: the copy in the installed folder hands
+/// over to a copy in the temporary folder. True when it has.
+bool HandOver(int& code) {
+    std::wstring self = ThisProgram();
+    if (_wcsicmp(FolderOf(self).c_str(), InstallFolder().c_str()) != 0) return false;
+    wchar_t temp[MAX_PATH] = {};
+    GetTempPathW(MAX_PATH, temp);
+    std::wstring copy = std::wstring(temp) + kKey + L"-uninstall.exe";
+    code = 1;
+    if (!CopyFileW(self.c_str(), copy.c_str(), FALSE)) return true;
+    std::wstring arguments = silent ? L"/uninstall /S" : L"/uninstall";
+    SHELLEXECUTEINFOW run{sizeof run};
+    run.lpFile = copy.c_str();
+    run.lpParameters = arguments.c_str();
+    run.nShow = SW_SHOWNORMAL;
+    if (ShellExecuteExW(&run)) code = 0;
+    return true;
+}
+
+// The window: one quiet surface drawn with Direct2D, and one real button,
+// which brings the keyboard and screen readers with it. All sizes are in
+// device-independent pixels.
+
+constexpr float kWidth = 400;
+constexpr float kHeight = 340;
+constexpr float kPicture = 96;
+constexpr float kPictureTop = 50;
+constexpr float kNameTop = 162;
+constexpr float kLineTop = 194;
+constexpr float kActionTop = 250;
+constexpr float kActionWidth = 168;
+constexpr float kActionHeight = 38;
+constexpr float kBarHeight = 3;
+/// Around the button, for the ring that shows the keyboard is on it.
+constexpr float kRing = 4;
+constexpr float kCloseSize = 32;
+constexpr float kCloseInset = 10;
+
+constexpr UINT kFinished = WM_APP;
+constexpr UINT_PTR kTick = 1;
+
+enum class Phase { Ready, Working, Done, Failed };
+
+struct Colors {
+    D2D1_COLOR_F surface, text, soft, faint, action, hover, pressed, on_action;
+};
+
+HWND window = nullptr;
+HWND button = nullptr;
+UINT dpi = 96;
+bool dark = false;
+Phase phase = Phase::Ready;
+Outcome outcome = Outcome::Failed;
+bool ended = false;
+int code = 1;
+std::wstring line;
+float shown = 0;
+bool over_action = false;
+bool over_close = false;
+
+ComPtr<ID2D1Factory> d2d;
+ComPtr<IDWriteFactory> dwrite;
+ComPtr<ID2D1DCRenderTarget> target;
+ComPtr<ID2D1Bitmap> picture;
+ComPtr<IDWriteTextFormat> name_format;
+ComPtr<IDWriteTextFormat> line_format;
+ComPtr<IDWriteTextFormat> action_format;
+
+int Px(float dip) { return static_cast<int>(dip * static_cast<float>(dpi) / 96.0f + 0.5f); }
+float Dip(LONG px) { return static_cast<float>(px) * 96.0f / static_cast<float>(dpi); }
+
+Colors Palette() {
+    using D2D1::ColorF;
+    if (dark)
+        return {ColorF(0x202023), ColorF(0xF5F5F7), ColorF(0xF5F5F7, 0.58f), ColorF(0xF5F5F7, 0.14f),
+                ColorF(0xF5F5F7), ColorF(0xFFFFFF), ColorF(0xC8C8CD), ColorF(0x1C1C1F)};
+    return {ColorF(0xFDFDFD), ColorF(0x1C1C1F), ColorF(0x1C1C1F, 0.56f), ColorF(0x1C1C1F, 0.09f),
+            ColorF(0x1C1C1F), ColorF(0x3A3A40), ColorF(0x000000), ColorF(0xFFFFFF)};
+}
+
+bool SystemIsDark() {
+    DWORD light = 1;
+    DWORD size = sizeof light;
+    RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUseLightTheme", RRF_RT_REG_DWORD,
+                 nullptr, &light, &size);
+    return light == 0;
+}
+
+ComPtr<ID2D1SolidColorBrush> Brush(D2D1_COLOR_F const& color) {
+    ComPtr<ID2D1SolidColorBrush> brush;
+    target->CreateSolidColorBrush(color, brush.GetAddressOf());
+    return brush;
+}
+
+D2D1_RECT_F CloseArea() {
+    return {kWidth - kCloseInset - kCloseSize, kCloseInset, kWidth - kCloseInset, kCloseInset + kCloseSize};
+}
+
+bool OnClose(POINT point) {
+    D2D1_RECT_F area = CloseArea();
+    float x = Dip(point.x), y = Dip(point.y);
+    return phase != Phase::Working && x >= area.left && x < area.right && y >= area.top && y < area.bottom;
+}
+
+ComPtr<IDWriteTextFormat> Format(wchar_t const* family, DWRITE_FONT_WEIGHT weight, float size) {
+    ComPtr<IDWriteTextFormat> format;
+    dwrite->CreateTextFormat(family, nullptr, weight, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, size, Text().language, format.GetAddressOf());
+    format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+    return format;
+}
+
+bool HasFont(wchar_t const* family) {
+    ComPtr<IDWriteFontCollection> fonts;
+    UINT32 index = 0;
+    BOOL exists = FALSE;
+    return SUCCEEDED(dwrite->GetSystemFontCollection(fonts.GetAddressOf())) && SUCCEEDED(fonts->FindFamilyName(family, &index, &exists)) && exists;
+}
+
+bool StartGraphics() {
+    if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, d2d.GetAddressOf()))) return false;
+    if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(dwrite.GetAddressOf())))) return false;
+    auto properties = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE));
+    if (FAILED(d2d->CreateDCRenderTarget(&properties, target.GetAddressOf()))) return false;
+    // Soft text in color fringes looks dirty on a surface this quiet.
+    target->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+    bool variable = HasFont(L"Segoe UI Variable Text");
+    wchar_t const* display = variable ? L"Segoe UI Variable Display" : L"Segoe UI";
+    wchar_t const* text = variable ? L"Segoe UI Variable Text" : L"Segoe UI";
+    name_format = Format(display, DWRITE_FONT_WEIGHT_SEMI_BOLD, 22);
+    line_format = Format(text, DWRITE_FONT_WEIGHT_NORMAL, 13);
+    action_format = Format(text, DWRITE_FONT_WEIGHT_MEDIUM, 14);
+    action_format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    // A long name ends in an ellipsis rather than pushing the rest down.
+    name_format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+    ComPtr<IDWriteInlineObject> ellipsis;
+    dwrite->CreateEllipsisTrimmingSign(name_format.Get(), ellipsis.GetAddressOf());
+    DWRITE_TRIMMING trimming{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
+    name_format->SetTrimming(&trimming, ellipsis.Get());
+    return true;
+}
+
+/// The application's icon, at the size it is drawn on this screen.
+void LoadPicture() {
+    picture.Reset();
+    HICON icon = nullptr;
+    int size = Px(kPicture);
+    if (FAILED(LoadIconWithScaleDown(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(1), size, size, &icon))) return;
+    ComPtr<IWICImagingFactory> images;
+    ComPtr<IWICBitmap> bitmap;
+    ComPtr<IWICFormatConverter> converter;
+    if (SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(images.GetAddressOf()))) &&
+        SUCCEEDED(images->CreateBitmapFromHICON(icon, bitmap.GetAddressOf())) && SUCCEEDED(images->CreateFormatConverter(converter.GetAddressOf())) &&
+        SUCCEEDED(converter->Initialize(bitmap.Get(), GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, nullptr, 0, WICBitmapPaletteTypeMedianCut)))
+        target->CreateBitmapFromWicBitmap(converter.Get(), picture.GetAddressOf());
+    DestroyIcon(icon);
+}
+
+void PlaceButton() {
+    float left = (kWidth - kActionWidth) / 2 - kRing;
+    SetWindowPos(button, nullptr, Px(left), Px(kActionTop - kRing), Px(kActionWidth + 2 * kRing), Px(kActionHeight + 2 * kRing), SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+/// What suits this screen's density.
+void Scale() {
+    target->SetDpi(static_cast<float>(dpi), static_cast<float>(dpi));
+    LoadPicture();
+    PlaceButton();
+}
+
+void ApplyTheme() {
+    dark = SystemIsDark();
+    BOOL value = dark;
+    DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE, &value, sizeof value);
+    InvalidateRect(window, nullptr, FALSE);
+    InvalidateRect(button, nullptr, FALSE);
+}
+
+void Paint(HDC dc) {
+    RECT area;
+    GetClientRect(window, &area);
+    Colors const colors = Palette();
+    target->BindDC(dc, &area);
+    target->BeginDraw();
+    target->Clear(colors.surface);
+
+    if (picture) {
+        float left = (kWidth - kPicture) / 2;
+        target->DrawBitmap(picture.Get(), {left, kPictureTop, left + kPicture, kPictureTop + kPicture}, 1, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+    }
+    std::wstring name(Text().name);
+    float inset = 28;
+    target->DrawText(name.c_str(), static_cast<UINT32>(name.size()), name_format.Get(), {inset, kNameTop, kWidth - inset, kNameTop + 30}, Brush(colors.text).Get());
+    target->DrawText(line.c_str(), static_cast<UINT32>(line.size()), line_format.Get(), {inset, kLineTop, kWidth - inset, kActionTop - 4}, Brush(colors.soft).Get());
+
+    if (phase == Phase::Working) {
+        float left = (kWidth - kActionWidth) / 2;
+        float top = kActionTop + (kActionHeight - kBarHeight) / 2;
+        float radius = kBarHeight / 2;
+        target->FillRoundedRectangle({{left, top, left + kActionWidth, top + kBarHeight}, radius, radius}, Brush(colors.faint).Get());
+        float width = kActionWidth * shown;
+        if (width >= kBarHeight)
+            target->FillRoundedRectangle({{left, top, left + width, top + kBarHeight}, radius, radius}, Brush(colors.text).Get());
+    } else {
+        D2D1_RECT_F close = CloseArea();
+        if (over_close) target->FillRoundedRectangle({close, 6, 6}, Brush(colors.faint).Get());
+        float x = (close.left + close.right) / 2, y = (close.top + close.bottom) / 2, arm = 4.5f;
+        auto mark = Brush(colors.soft);
+        target->DrawLine({x - arm, y - arm}, {x + arm, y + arm}, mark.Get(), 1);
+        target->DrawLine({x - arm, y + arm}, {x + arm, y - arm}, mark.Get(), 1);
+    }
+    target->EndDraw();
+}
+
+void DrawAction(DRAWITEMSTRUCT const& item) {
+    Colors const colors = Palette();
+    target->BindDC(item.hDC, &item.rcItem);
+    target->BeginDraw();
+    target->Clear(colors.surface);
+    float width = Dip(item.rcItem.right - item.rcItem.left);
+    float height = Dip(item.rcItem.bottom - item.rcItem.top);
+    D2D1_RECT_F face{kRing, kRing, width - kRing, height - kRing};
+    float radius = 9;
+    bool pressed = item.itemState & ODS_SELECTED;
+    target->FillRoundedRectangle({face, radius, radius}, Brush(pressed ? colors.pressed : over_action ? colors.hover : colors.action).Get());
+    if ((item.itemState & ODS_FOCUS) && !(item.itemState & ODS_NOFOCUSRECT)) {
+        D2D1_RECT_F ring{1.5f, 1.5f, width - 1.5f, height - 1.5f};
+        target->DrawRoundedRectangle({ring, radius + 2.5f, radius + 2.5f}, Brush(colors.text).Get(), 1.5f);
+    }
+    wchar_t label[64] = {};
+    int length = GetWindowTextW(item.hwndItem, label, 64);
+    target->DrawText(label, static_cast<UINT32>(length), action_format.Get(), face, Brush(colors.on_action).Get());
+    target->EndDraw();
+}
+
+void Start() {
+    phase = Phase::Working;
+    ended = false;
+    shown = 0;
+    reached = 0;
+    line = removing ? Text().uninstalling : Text().installing;
+    ShowWindow(button, SW_HIDE);
+    SetFocus(window);
+    SetTimer(window, kTick, 15, nullptr);
+    InvalidateRect(window, nullptr, FALSE);
+    std::thread([] {
+        CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        Outcome result = removing ? Uninstall() : Install();
+        CoUninitialize();
+        PostMessageW(window, kFinished, static_cast<WPARAM>(result), 0);
+    }).detach();
+}
+
+/// The work is over and the bar has shown it.
+void Settle() {
+    KillTimer(window, kTick);
+    bool fine = outcome == Outcome::Finished;
+    phase = fine ? Phase::Done : Phase::Failed;
+    code = fine ? 0 : 1;
+    if (fine) {
+        line = removing ? Text().uninstalled : Text().installed;
+        SetWindowTextW(button, removing ? Text().done : Text().open);
+    } else {
+        line = Fill(outcome == Outcome::CloseFirst ? Text().close_first : Text().failed);
+        SetWindowTextW(button, Text().retry);
+    }
+    ShowWindow(button, SW_SHOW);
+    SetFocus(button);
+    InvalidateRect(window, nullptr, FALSE);
+}
+
+void Act() {
+    if (phase == Phase::Ready || phase == Phase::Failed) {
+        Start();
+    } else if (phase == Phase::Done) {
+        if (!removing) {
+            std::wstring folder = InstallFolder();
+            ShellExecuteW(nullptr, L"open", (folder + L"\\" + kExecutable).c_str(), nullptr, folder.c_str(), SW_SHOWNORMAL);
+        }
+        DestroyWindow(window);
+    }
+}
+
+LRESULT CALLBACK ButtonProc(HWND self, UINT message, WPARAM wide, LPARAM wide_too, UINT_PTR, DWORD_PTR) {
+    if (message == WM_MOUSEMOVE && !over_action) {
+        over_action = true;
+        TRACKMOUSEEVENT track{sizeof track, TME_LEAVE, self, 0};
+        TrackMouseEvent(&track);
+        InvalidateRect(self, nullptr, FALSE);
+    } else if (message == WM_MOUSELEAVE) {
+        over_action = false;
+        InvalidateRect(self, nullptr, FALSE);
+    }
+    return DefSubclassProc(self, message, wide, wide_too);
+}
+
+LRESULT CALLBACK WindowProc(HWND self, UINT message, WPARAM wide, LPARAM wide_too) {
+    switch (message) {
+    // The whole window is the surface: no title bar, the system's corners
+    // and shadow, and a move from anywhere but the controls.
+    case WM_NCCALCSIZE:
+        if (wide) return 0;
+        break;
+    case WM_NCACTIVATE:
+        return DefWindowProcW(self, message, wide, -1);
+    case WM_NCHITTEST: {
+        POINT point{GET_X_LPARAM(wide_too), GET_Y_LPARAM(wide_too)};
+        ScreenToClient(self, &point);
+        return OnClose(point) ? HTCLIENT : HTCAPTION;
+    }
+    case WM_MOUSEMOVE:
+        if (!over_close) {
+            over_close = true;
+            TRACKMOUSEEVENT track{sizeof track, TME_LEAVE, self, 0};
+            TrackMouseEvent(&track);
+            InvalidateRect(self, nullptr, FALSE);
+        }
+        return 0;
+    case WM_MOUSELEAVE:
+        over_close = false;
+        InvalidateRect(self, nullptr, FALSE);
+        return 0;
+    case WM_LBUTTONUP:
+        PostMessageW(self, WM_CLOSE, 0, 0);
+        return 0;
+    case WM_ERASEBKGND:
+        return 1;
+    case WM_PAINT: {
+        PAINTSTRUCT paint;
+        HDC dc = BeginPaint(self, &paint);
+        Paint(dc);
+        EndPaint(self, &paint);
+        return 0;
+    }
+    case WM_DRAWITEM:
+        DrawAction(*reinterpret_cast<DRAWITEMSTRUCT const*>(wide_too));
+        return TRUE;
+    case WM_COMMAND:
+        if (LOWORD(wide) == IDOK) Act();
+        if (LOWORD(wide) == IDCANCEL) PostMessageW(self, WM_CLOSE, 0, 0);
+        return 0;
+    case WM_TIMER:
+        shown += (reached.load() - shown) * 0.14f;
+        if (ended && shown > 0.995f) Settle();
+        else InvalidateRect(self, nullptr, FALSE);
+        return 0;
+    case kFinished:
+        outcome = static_cast<Outcome>(wide);
+        ended = true;
+        if (outcome != Outcome::Finished) Settle();
+        return 0;
+    case WM_DPICHANGED: {
+        dpi = HIWORD(wide);
+        auto const* area = reinterpret_cast<RECT const*>(wide_too);
+        SetWindowPos(self, nullptr, area->left, area->top, area->right - area->left, area->bottom - area->top, SWP_NOZORDER | SWP_NOACTIVATE);
+        Scale();
+        return 0;
+    }
+    case WM_SETTINGCHANGE:
+        if (wide_too && std::wcscmp(reinterpret_cast<wchar_t const*>(wide_too), L"ImmersiveColorSet") == 0) ApplyTheme();
+        break;
+    case WM_CLOSE:
+        // Half an installation helps nobody.
+        if (phase != Phase::Working) DestroyWindow(self);
+        return 0;
+    case WM_DESTROY:
+        PostQuitMessage(0);
+        return 0;
+    }
+    return DefWindowProcW(self, message, wide, wide_too);
+}
+
+int ShowWindowAndWait() {
+    if (!StartGraphics()) return 1;
+    HINSTANCE instance = GetModuleHandleW(nullptr);
+    WNDCLASSEXW kind{sizeof kind};
+    kind.lpfnWndProc = WindowProc;
+    kind.hInstance = instance;
+    kind.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    kind.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(1));
+    kind.lpszClassName = L"BernSetup";
+    RegisterClassExW(&kind);
+    std::wstring title = Fill(Text().title);
+    window = CreateWindowExW(0, kind.lpszClassName, title.c_str(), WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_CLIPCHILDREN,
+                             CW_USEDEFAULT, CW_USEDEFAULT, 400, 340, nullptr, nullptr, instance, nullptr);
+    if (!window) return 1;
+    dpi = GetDpiForWindow(window);
+
+    std::wstring installed = removing ? L"" : InstalledVersion();
+    bool update = !installed.empty() && installed != kVersion;
+    line = update ? installed + L"  →  " + kVersion : kVersion;
+    wchar_t const* action = removing ? Text().uninstall : update ? Text().update : installed.empty() ? Text().install : Text().reinstall;
+    button = CreateWindowExW(0, L"BUTTON", action, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW, 0, 0, 0, 0, window,
+                             reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDOK)), instance, nullptr);
+    SetWindowSubclass(button, ButtonProc, 0, 0);
+    Scale();
+    ApplyTheme();
+    DWM_WINDOW_CORNER_PREFERENCE round = DWMWCP_ROUND;
+    DwmSetWindowAttribute(window, DWMWA_WINDOW_CORNER_PREFERENCE, &round, sizeof round);
+    // The keyboard's ring shows only once the keyboard is used.
+    SendMessageW(window, WM_CHANGEUISTATE, MAKEWPARAM(UIS_SET, UISF_HIDEFOCUS), 0);
+
+    MONITORINFO monitor{sizeof monitor};
+    GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTOPRIMARY), &monitor);
+    RECT const& work = monitor.rcWork;
+    int width = Px(kWidth), height = Px(kHeight);
+    SetWindowPos(window, nullptr, work.left + (work.right - work.left - width) / 2, work.top + (work.bottom - work.top - height) / 2, width, height,
+                 SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    ShowWindow(window, SW_SHOW);
+    SetForegroundWindow(window);
+    SetFocus(button);
+
+    MSG message;
+    while (GetMessageW(&message, nullptr, 0, 0) > 0) {
+        if (IsDialogMessageW(window, &message)) continue;
+        TranslateMessage(&message);
+        DispatchMessageW(&message);
+    }
+    return code;
 }
 
 }  // namespace
@@ -267,18 +702,20 @@ int Uninstall() {
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     int count = 0;
     LPWSTR* arguments = CommandLineToArgvW(GetCommandLineW(), &count);
-    bool uninstall = false;
     for (int i = 1; i < count; ++i) {
         if (_wcsicmp(arguments[i], L"/S") == 0) silent = true;
-        if (_wcsicmp(arguments[i], L"/uninstall") == 0) uninstall = true;
+        if (_wcsicmp(arguments[i], L"/uninstall") == 0) removing = true;
     }
     LocalFree(arguments);
     // The copy in the installed folder removes, whatever its arguments.
     std::wstring self = ThisProgram();
     std::wstring name = self.substr(self.find_last_of(L'\\') + 1);
-    if (_wcsicmp(name.c_str(), L"uninstall.exe") == 0) uninstall = true;
+    if (_wcsicmp(name.c_str(), L"uninstall.exe") == 0) removing = true;
+    int result = 0;
+    if (removing && HandOver(result)) return result;
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-    int code = uninstall ? Uninstall() : Install();
+    if (silent) result = (removing ? Uninstall() : Install()) == Outcome::Finished ? 0 : 1;
+    else result = ShowWindowAndWait();
     CoUninitialize();
-    return code;
+    return result;
 }
