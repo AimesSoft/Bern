@@ -277,10 +277,14 @@ final class BernLanguage: @unchecked Sendable {
             declared.append(language)
         }
         supported = declared
-        let initial = Bundle.main.preferredLocalizations.first ?? declared.first ?? "en"
+        let kept = UserDefaults.standard.string(forKey: Self.keptLanguage).flatMap { declared.contains($0) ? $0 : nil }
+        let initial = kept ?? Bundle.main.preferredLocalizations.first ?? declared.first ?? "en"
         current = initial
         bundle = Self.bundle(for: initial)
     }
+
+    /// Where the language chosen in the app is kept: it stays through a restart.
+    private static let keptLanguage = "bern.language"
 
     private static func bundle(for language: String) -> Bundle {
         Bundle.main.path(forResource: language, ofType: "lproj").flatMap(Bundle.init(path:)) ?? .main
@@ -292,6 +296,7 @@ final class BernLanguage: @unchecked Sendable {
         guard supported.contains(language) else { return false }
         bundle = Self.bundle(for: language)
         current = language
+        UserDefaults.standard.set(language, forKey: Self.keptLanguage)
         return true
     }
 

@@ -207,9 +207,13 @@ object BernLanguage {
     var current by mutableStateOf("en")
         private set
 
-    internal fun setup(supported: List<String>, default: String) {
+    /// Where the language chosen in the app is kept: it stays through a restart.
+    private var kept: android.content.SharedPreferences? = null
+
+    internal fun setup(context: Context, supported: List<String>, default: String) {
         this.supported = supported
-        current = initial(supported) ?: default
+        kept = context.getSharedPreferences("bern", Context.MODE_PRIVATE)
+        current = kept?.getString("language", null)?.takeIf { it in supported } ?: initial(supported) ?: default
     }
 
     /// The first system language the app supports: by full tag, by
@@ -241,6 +245,7 @@ object BernLanguage {
     fun select(language: String): Boolean {
         if (language !in supported) return false
         current = language
+        kept?.edit()?.putString("language", language)?.apply()
         return true
     }
 
@@ -1275,7 +1280,7 @@ object BernHost {
             Configuration.UI_MODE_TYPE_TELEVISION ||
             context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
         BernText.load(context, languages)
-        BernLanguage.setup(languages, defaultLanguage)
+        BernLanguage.setup(context, languages, defaultLanguage)
         this.kinds = kinds
         this.primary = primary
         this.apply = apply

@@ -320,6 +320,11 @@ let allStrings = {};
 /// first: an earlier tag wins over a closer match of a later one, so
 /// `de-DE, en` chooses `de` over `en`.
 function chooseLanguage(supported, fallback) {
+  // The language chosen in the app stays through a reload.
+  try {
+    const kept = localStorage.getItem("bern.language");
+    if (supported.includes(kept)) return kept;
+  } catch {}
   const wanted = [...(navigator.languages || []), navigator.language].filter(Boolean);
   for (const tag of wanted) {
     const match = matchingLanguage(supported, tag);
@@ -356,6 +361,9 @@ function setLanguage(tag) {
   }
   batch(() => {
     languageCell.set(tag);
+    try {
+      localStorage.setItem("bern.language", tag);
+    } catch {}
     stringsCell.set(allStrings[tag] ?? {});
   });
 }

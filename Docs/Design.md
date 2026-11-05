@@ -1256,7 +1256,7 @@ Locale-specific number notation (thousands separators, decimal point), currency,
 
 The display language belongs to the UI session: the interface of a macOS app is one session, and each Web page is a session of its own. When a session starts, it picks a language from the supported list according to the system or browser language preferences, and the language can then be switched while the app runs:
 
-- The `LanguagePicker(id: …, label: …)` component lists the supported languages, each shown under its own name (such as "简体中文", "English", "日本語"); choosing one switches to it.
+- The `LanguagePicker(id: …, label: …)` component lists the supported languages, each shown under its own name (such as "简体中文", "English", "日本語"); choosing one switches to it, and the app keeps that language through a restart.
 - The session command `ui.set_language` (whose argument is a language tag) is for the CLI, JSON and MCP and takes the same switching path as the component; `ui.language` returns the current language. A tag not in the supported list returns `unsupported_language`.
 
 On a switch, all localized text (including window titles, labels, hints and the framework's own strings) is recomputed in the same update. Engine state, session drafts, navigation paths, open windows and players are unaffected, and windows are not rebuilt. System strings managed by the platform (for example the items the system provides in the macOS menu bar) follow the system language and are outside the scope of the switch; this must be stated in the backend documentation.
