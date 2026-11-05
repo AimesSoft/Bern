@@ -26,6 +26,7 @@ The registered targets are `gpui-macos`, `gpui-windows` and `gpui-linux`, each b
 | `gpui-pre-macos`, `gpui-pre-linux`, `gpui-pre-windows` | `=0.3.10`, optional | Platform crates, see below |
 | `gpui-base` | `=0.8.1` | The unstyled layer of GPUI Kit: editing, selection and input methods for text inputs |
 | `gpui-pre-reqwest-client`, `gpui-pre-http-client` | `=0.3.10` | http(s) images in state; downloads for image average colors |
+| `futures-timer`, `if-addrs` | 3, 0.13 | Waits between tries at a picture; noticing that the network changed |
 | `image` | 0.25 (png, jpeg, webp, gif) | Tinting template images, image average colors |
 | `objc2`, `objc2-app-kit`, `objc2-quartz-core`, `objc2-core-graphics`, `objc2-foundation` | macOS only | App icon, hiding the pointer, Reduce Motion, the About panel, window commands, the Metal layer for video |
 | `windows` (referenced as `win32`) | 0.62, Windows only | The same version as GPUI's Windows platform crate: the DirectComposition tree for video, moving the window offscreen, hiding the pointer, the animation setting, the performance counter |
@@ -202,6 +203,19 @@ With RustSend 1.0's UI declarations unchanged and the `gpui_macos` target added,
 - `ui select` switches pages and settings categories, `ui activate` opens the network info popover, `ui set-bool` turns on quick save, after `ui edit` changes the name "Save" becomes enabled, and after saving with `ui activate` the name in the engine changes accordingly;
 - `ui set-language` switches to English, and the dark appearance is switched on through the engine state; the monochrome accent color is correct in both appearances;
 - with the compact breakpoint temporarily set to 400, the desktop layout (title row, large page titles) displays as well.
+
+### Pictures from the network (2026-11-05)
+
+GPUI's image loader keeps what a load gave, a failure too, and has no timeout. So the application's HTTP client is `Patient` (`pictures.rs`), which only the loader uses: its answer comes once there is one worth giving, and until then the picture is loading.
+
+- After a failed network or a 408, 429 or 5xx answer it waits about 1, 2, 4, 8, 16 and 32 seconds, give or take a quarter, then rests until the network changes or a window comes to the front.
+- A try may hear nothing for 15 seconds (reqwest's read timeout, which runs only on its own runtime, so a try runs there). After a failed try the client is replaced: requests to one server share a connection, and the next try would join one that stalled.
+- An address the server answered without a picture stays failed in GPUI's cache. When the network changes, those are removed from the cache and fills ask again.
+- A view that leaves stops the tries, and one that appears starts over at once. An `Image` from the network is an `ImageSource::Custom` holding a `Watch` in its element state, which GPUI drops with the element.
+- GPUI has no word on the network. After the first failure a thread compares the network's addresses every 5 seconds.
+- A blurred picture looks again every frame while it loads, but not between tries: each try draws again.
+
+Checked in a real application on macOS 27, with a test server: the tries came at those waits and then rested, a healed server was not asked until the view came back, and then every frame had the picture (`frame: picture 600 × 400`, logged from a scratch copy; the offscreen window screenshots came out white). Over HTTPS through a proxy whose first two connections stalled after their first data, the picture came through new connections. `cargo test --features macos` runs `pictures.rs` against a server that fails on purpose. Windows and Linux were not run: the code there is the same, except the platform crates.
 
 ### Minimal app (2026-10-30)
 

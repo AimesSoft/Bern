@@ -43,6 +43,8 @@ enum Event {
     Query(u64, Vec<u8>),
     /// Interface state changed: every window renders again.
     Redraw,
+    /// The network changed: what it refused may come now.
+    PicturesChanged,
     /// A window command of an action.
     Window(WindowOp, &'static str),
 }
@@ -74,6 +76,11 @@ fn send(event: Event) {
 /// Have every window render again once the current event is handled.
 pub(crate) fn redraw() {
     send(Event::Redraw);
+}
+
+/// Ask again for the pictures the network refused.
+pub(crate) fn pictures_changed() {
+    send(Event::PicturesChanged);
 }
 
 pub(crate) struct Host {
@@ -498,7 +505,7 @@ pub(crate) fn run(def: &'static AppDef, start: StartEngine) {
     let start = RefCell::new(Some(start));
     gpui::Application::with_platform(platform())
         .with_assets(crate::icons::Assets(def.icons))
-        .with_http_client(std::sync::Arc::new(reqwest_client::ReqwestClient::new()))
+        .with_http_client(std::sync::Arc::new(crate::pictures::Patient))
         .run(move |cx: &mut App| {
             gpui_base::init(cx);
             install_menus(def, cx);
@@ -533,6 +540,10 @@ pub(crate) fn run(def: &'static AppDef, start: StartEngine) {
                             }
                         }
                         Event::Redraw => windows::changed(cx),
+                        Event::PicturesChanged => {
+                            crate::pictures::forget_refused(cx);
+                            windows::changed(cx);
+                        }
                         Event::Window(op, window) => windows::command(cx, op, window),
                     });
                 }

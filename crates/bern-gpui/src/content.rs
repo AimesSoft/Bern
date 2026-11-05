@@ -608,7 +608,7 @@ pub fn image_url(
             crate::filters::Picture::Source(gpui::Resource::Path(path.into())),
         ),
         (None, None) => (
-            url.clone().into(),
+            crate::pictures::source(&url),
             crate::filters::Picture::Source(gpui::Resource::Uri(url.clone().into())),
         ),
     };

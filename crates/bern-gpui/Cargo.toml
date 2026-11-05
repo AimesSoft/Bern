@@ -25,6 +25,9 @@ gpui = { package = "gpui-pre", version = "=0.3.10" }
 # Pictures from http(s) addresses in state, fetched by GPUI's image loader.
 reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.10" }
 http_client = { package = "gpui-pre-http-client", version = "=0.3.10" }
+# When to try a failed picture again: the waits, and the network changing.
+futures-timer = "3"
+if-addrs = "0.13"
 # The platform window under a GPUI window: where videos are composed.
 raw-window-handle = "0.6"
 # Template pictures, recolored in the text color.
