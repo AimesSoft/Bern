@@ -219,9 +219,14 @@ pub(crate) fn blurred_picture(
                     match window.use_asset::<gpui::ImgResourceLoader>(resource, cx) {
                         Some(Ok(image)) => image,
                         // A canvas is not drawn again when it arrives:
-                        // look again next frame while it loads.
+                        // look again next frame while it loads. Between
+                        // tries nothing can arrive, and each try redraws.
                         None => {
-                            window.request_animation_frame();
+                            let waits = matches!(resource, gpui::Resource::Uri(url)
+                                if crate::pictures::paused(url.as_ref()));
+                            if !waits {
+                                window.request_animation_frame();
+                            }
                             return;
                         }
                         Some(Err(_)) => return,

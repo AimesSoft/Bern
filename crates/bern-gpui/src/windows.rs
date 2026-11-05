@@ -414,6 +414,13 @@ fn open(kind: usize, def: &'static WindowDef, cx: &mut App) -> Result<(), crate:
             // Colors follow the window's light or dark appearance.
             cx.observe_window_appearance(window, |_, _, cx| cx.notify())
                 .detach();
+            // A window coming to the front tries what the network failed.
+            cx.observe_window_activation(window, |_, window, _| {
+                if window.is_window_active() {
+                    crate::pictures::try_again();
+                }
+            })
+            .detach();
             WindowView { def, win }
         });
         VIEWS.with(|views| views.borrow_mut().push(view.downgrade()));
