@@ -1424,7 +1424,11 @@ fn closed(win: &Rc<Win>) {
     // SAFETY: the handle is live while the application runs.
     unsafe { bern_ffi::bern_window_closed(host().app(), win.kind as u32, win.generation) };
     // `StatusItem(shown:)` said no: nothing keeps the application running.
-    let follows = host().def.status_item.as_ref().is_some_and(|item| item.shown.is_some());
+    let follows = host()
+        .def
+        .status_item
+        .as_ref()
+        .is_some_and(|item| item.shown.is_some());
     if follows && !crate::status::shown() && all().is_empty() {
         if let Some(application) = host().application.get() {
             application.quit();

@@ -49,13 +49,26 @@ pub struct WebPageProps {
 /// that goes with it, signed in with the cookies of a file.
 #[allow(non_snake_case)]
 pub fn WebPage(p: &Parent, ctx: &Ctx, props: WebPageProps, action: Option<crate::Act>) {
-    let text = |value: &Option<Str>| value.as_ref().map(|get| get(ctx).to_string()).unwrap_or_default();
+    let text = |value: &Option<Str>| {
+        value
+            .as_ref()
+            .map(|get| get(ctx).to_string())
+            .unwrap_or_default()
+    };
     let session = webkit6::NetworkSession::new_ephemeral();
     let (file, domain) = (text(&props.cookies_file), text(&props.cookie_domain));
     if let (Some(manager), false) = (session.cookie_manager(), domain.is_empty()) {
-        for part in std::fs::read_to_string(&file).unwrap_or_default().split(';') {
-            let Some((name, value)) = part.trim().split_once('=') else { continue };
-            if matches!(name.to_lowercase().as_str(), "path" | "domain" | "expires" | "max-age") {
+        for part in std::fs::read_to_string(&file)
+            .unwrap_or_default()
+            .split(';')
+        {
+            let Some((name, value)) = part.trim().split_once('=') else {
+                continue;
+            };
+            if matches!(
+                name.to_lowercase().as_str(),
+                "path" | "domain" | "expires" | "max-age"
+            ) {
                 continue;
             }
             let mut cookie = webkit6::soup::Cookie::new(name, value, &domain, "/", -1);
