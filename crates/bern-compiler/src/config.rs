@@ -2,7 +2,7 @@
 //! configuration.
 
 use bern_ir::{LayoutConfig, ResourceDef, SourceLocation, Srgb, SvgPicture, ThemeMode};
-use bern_target_api::{Diagnostic, TargetConfig, WINDOWS_FRONTENDS};
+use bern_target_api::{Diagnostic, IOS_FRONTENDS, TargetConfig, WINDOWS_FRONTENDS};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -303,6 +303,9 @@ struct RawTarget {
     #[serde(default)]
     channels: Vec<String>,
     frontends: Option<Vec<String>>,
+    /// iOS front ends in one `.ipa` (`one`, the default) or each in its own
+    /// (`separate`).
+    packages: Option<String>,
     webview: Option<bool>,
     #[serde(default)]
     javascript: bool,
@@ -1092,7 +1095,22 @@ fn target_config(name: String, target: RawTarget, errors: &mut Vec<Diagnostic>) 
         )));
     }
 
-    let frontends = windows_frontends(&name, &target.platform, target.frontends, errors);
+    let frontends = target_frontends(&name, &target.platform, target.frontends, errors);
+    let separate_packages = match target.packages.as_deref() {
+        None | Some("one") => false,
+        Some("separate") => true,
+        Some(other) => {
+            errors.push(Diagnostic::error(format!(
+                "target `{name}`: unknown `packages` value `{other}`; use \"one\" or \"separate\""
+            )));
+            false
+        }
+    };
+    if target.packages.is_some() && frontends.len() < 2 {
+        errors.push(Diagnostic::error(format!(
+            "target `{name}`: `packages` needs an iOS target of both front ends"
+        )));
+    }
     let abis = android_abis(&name, &target.platform, target.abis, errors);
     for channel in &target.channels {
         if channel != "ipc" {
@@ -1109,6 +1127,7 @@ fn target_config(name: String, target: RawTarget, errors: &mut Vec<Diagnostic>) 
         web_extension: target.web_extension,
         channels: target.channels,
         frontends,
+        separate_packages,
         webview: target.webview,
         javascript: target.javascript,
         android: target.android,
@@ -1200,24 +1219,31 @@ fn android_abis(
     abis
 }
 
-fn windows_frontends(
+fn target_frontends(
     name: &str,
     platform: &str,
     frontends: Option<Vec<String>>,
     errors: &mut Vec<Diagnostic>,
 ) -> Vec<String> {
+    let known: &[&str] = match platform {
+        "windows" => &WINDOWS_FRONTENDS,
+        "ios" => &IOS_FRONTENDS,
+        _ => &[],
+    };
     match (platform, frontends) {
         ("windows", None) => WINDOWS_FRONTENDS.map(str::to_string).to_vec(),
-        ("windows", Some(frontends)) => {
+        ("ios", None) => vec![IOS_FRONTENDS[0].to_string()],
+        ("windows" | "ios", Some(frontends)) => {
+            let [first, second] = [known[0], known[1]];
             if frontends.is_empty() {
                 errors.push(Diagnostic::error(format!(
-                    "target `{name}`: `frontends` lists none; name \"winui3\", \"xaml-islands\" or both"
+                    "target `{name}`: `frontends` lists none; name \"{first}\", \"{second}\" or both"
                 )));
             }
             for (index, frontend) in frontends.iter().enumerate() {
-                if !WINDOWS_FRONTENDS.contains(&frontend.as_str()) {
+                if !known.contains(&frontend.as_str()) {
                     errors.push(Diagnostic::error(format!(
-                        "target `{name}`: unknown front end `{frontend}`; use \"winui3\" or \"xaml-islands\""
+                        "target `{name}`: unknown front end `{frontend}`; use \"{first}\" or \"{second}\""
                     )));
                 } else if frontends[..index].contains(frontend) {
                     errors.push(Diagnostic::error(format!(
@@ -1229,7 +1255,7 @@ fn windows_frontends(
         }
         (_, Some(_)) => {
             errors.push(Diagnostic::error(format!(
-                "target `{name}`: `frontends` applies to Windows targets only"
+                "target `{name}`: `frontends` applies to iOS and Windows targets only"
             )));
             Vec::new()
         }

@@ -36,7 +36,7 @@ This document records what was actually completed for the `swiftui + ios` target
 
 The generated app bundle has the flat iOS structure: the executable, `Info.plist`, each language's `.lproj` and the bundled resources are all at the top level of the bundle. `actool` compiles the 1024-pixel PNG icon into `Assets.car` (with no icon declared it is a square version of the Bern logo, and a smaller declared icon is first enlarged with `sips`; when `[app.icon].ios` is an `.appiconset` folder it is compiled as is, and its dark and tinted variants take effect with it; when it is an Icon Composer `.icon` folder it is handed to `actool` as `AppIcon.icon` together with the asset catalog, iOS 26 and later show the Liquid Glass icon, and earlier systems use the light, dark and tinted flat images drawn from it). `Info.plist` declares a launch screen (otherwise the app is shown in compatibility mode and does not fill the screen), multiple scenes (multiple windows on iPad; iPhone always has only one scene), iPhone and iPad, all four orientations on iPad, and a minimum of iOS 17.0.
 
-Minimum iOS 17: the same generation as macOS 14; Observation, `ContentUnavailableView` and other APIs the runtime uses are available from this version on.
+Minimum iOS 17, or iOS 16 with a second front end (see "The iOS 16 front end"): the same generation as macOS 14; Observation, `ContentUnavailableView` and other APIs the runtime uses are available from this version on.
 
 ## Differences from macOS
 
@@ -199,6 +199,50 @@ The generator is shared with macOS (see the macOS implementation notes): `Table`
 `bern package --target ios` first builds the simulator app as usual, then copies the bundle into `target/bern/ios/package/Payload/` and replaces the parts built for devices there: the engine and the bridge are compiled for `aarch64-apple-ios` (`IPHONEOS_DEPLOYMENT_TARGET` is the minimum system version), `actool` recompiles the icon for `iphoneos`, `swiftc` recompiles and links the frontend with the `iphoneos` SDK and `arm64-apple-ios17.0`, and symbols are stripped for release; `plutil` changes `CFBundleSupportedPlatforms` to `iPhoneOS`, `codesign --sign -` signs it ad hoc, and `ditto` packs it into `target/bern/dist/<product>-<version>-ios.ipa`. Resources, localizations and the other Info.plist keys are taken over from the simulator bundle.
 
 Verification: an app produced an `.ipa` on this Mac and on macOS 26 in GitHub Actions; the program in the bundle is arm64 with `platform IOS` and `minos 17.0`, the signature verifies, and the archive contains no resource forks. Not installed or run on a device.
+
+## The iOS 16 front end (2026-11-04)
+
+The target reaches iOS 16 with a second front end, as Windows has two over one source. Without `frontends` nothing changes: the app is the front end every Apple target shares, from iOS 17.
+
+```toml
+[targets.ios]
+platform = "ios"
+frontends = ["swiftui", "swiftui-16"]
+# packages = "separate"
+```
+
+| `frontends` | `packages` | What `bern package` makes | Earliest system |
+| --- | --- | --- | --- |
+| Not written, or `["swiftui"]` | | One `.ipa`, as before | iOS 17 |
+| `["swiftui-16"]` | | One `.ipa` of the iOS 16 front end, which also runs on later systems | iOS 16 |
+| Both | `one`, or not written | One `.ipa` that chooses as the app starts | iOS 16 |
+| Both | `separate` | `<product>-<version>-ios.ipa` and `<product>-<version>-ios16.ipa` | iOS 17 and iOS 16 |
+
+**One source.** `ios16.rs` rewrites the Swift once it is generated, and `BernCompat16.swift` holds the stand-ins the rewritten source calls; the generator and the runtime templates know nothing of it. A test fails when a rewrite no longer finds its call, and the generation test compiles both front ends as far as the compiler's own checks go.
+
+**One package.** The executable is the iOS 16 front end, because it has to load on the earliest system. The other front end is `Frameworks/BernUI17.framework`, loaded with `dlopen` on iOS 17 and later: what it links does not exist on iOS 16, so iOS 16 never loads it. The engine is `Frameworks/BernEngine.framework`, shared by both and showing only the bridge's `bern_*` functions. With one front end the engine stays linked in as a static library. Starting the app with `BERN_FRONT_END=16` runs the iOS 16 front end on any system, which is how it is tested on later simulators.
+
+**Following state.** From iOS 17 SwiftUI notices by itself what a view reads. On iOS 16:
+
+- Engine state, drafts and the objects views keep are `ObservableObject`s, followed by the views that declare them. Any change draws every view that holds the object, where iOS 17 draws only those that read the property.
+- What any view may read without declaring it (language, theme, keyboard, the host's windows) changes seldom, so every view follows one signal, sent at most once per turn of the main loop.
+- Video state and picture colors are followed by the views that read them.
+
+**What iOS 16 does not have.**
+
+| Feature | On iOS 16 |
+| --- | --- |
+| `ScrollView(position:)` | Implemented with `ScrollViewReader`; the view scrolls to the item and follows it as on iOS 17 |
+| `ScrollView(snap:)` | Scrolling stops where it stops |
+| `scroll_scale`, `scroll_opacity` | The element stays as it is, as on the targets without them |
+| Hardware keys through `onKeyPress` (sidebar arrows, search palette keys, shortcut recording) | Not read |
+| Windows of their own on iPad | Windows are virtual, as on iPhone |
+| Inspector | A sheet |
+| HDR pictures | SDR |
+| `scrollClipDisabled` | Content is clipped at the edge of the scroll view |
+| Popovers on iPhone before iOS 16.4 | Shown as sheets |
+
+Verification: on the iOS 17.5 simulator both front ends of the control showcase and of a real app ran from one bundle, the process mapping `BernUI17` only for the front end of iOS 17. Screenshots of each showcase page, a language change, engine state, the settings window and a real app's home and lyrics pages match pixel for pixel, apart from what the table above lists. The real app played music without signing in; on its lyrics page the sung line stood at the same position in both front ends after seeking. Not yet run on an iOS 16 runtime: Xcode 27 has no iOS 16 simulator, and CoreSimulator refuses iOS 15.1 to 16.7 on hosts after macOS 26. A GitHub Actions job on `macos-26` can install it with `xcodebuild -downloadPlatform iOS -buildVersion 16.4`. Not installed on a device.
 
 ## Incomplete work and known limitations
 

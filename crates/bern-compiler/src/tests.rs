@@ -188,6 +188,44 @@ platform = "macos"
 }
 
 #[test]
+fn ios_builds_the_current_front_end_unless_told_otherwise() {
+    let load = |table: &str| {
+        let dir = write_project(
+            PROTOCOL,
+            "",
+            &format!("\n[targets.ios]\nplatform = \"ios\"\n{table}"),
+        );
+        let result = config::load(&dir.join("Bern.toml"));
+        let _ = std::fs::remove_dir_all(&dir);
+        result
+    };
+    let ios = |config: &config::Config| {
+        let target = config
+            .targets
+            .iter()
+            .find(|target| target.name == "ios")
+            .unwrap();
+        (target.frontends.clone(), target.separate_packages)
+    };
+    assert_eq!(
+        ios(&load("").unwrap()),
+        (vec!["swiftui".to_string()], false)
+    );
+    let both = "frontends = [\"swiftui\", \"swiftui-16\"]\n";
+    assert_eq!(
+        ios(&load(both).unwrap()),
+        (vec!["swiftui".to_string(), "swiftui-16".to_string()], false)
+    );
+    assert!(ios(&load(&format!("{both}packages = \"separate\"\n")).unwrap()).1);
+    assert!(!ios(&load(&format!("{both}packages = \"one\"\n")).unwrap()).1);
+
+    let message = |table: &str| load(table).unwrap_err()[0].message.clone();
+    assert!(message("frontends = [\"uikit\"]").contains("unknown front end `uikit`"));
+    assert!(message(&format!("{both}packages = \"many\"\n")).contains("`many`"));
+    assert!(message("packages = \"separate\"\n").contains("both front ends"));
+}
+
+#[test]
 fn windows_builds_both_front_ends_unless_told_otherwise() {
     let load = |table: &str| {
         let dir = write_project(
@@ -708,6 +746,7 @@ mod independent_target {
                     android: None,
                     channels: vec![],
                     frontends: vec![],
+                    separate_packages: false,
                     abis: vec![],
                 },
             )
@@ -740,6 +779,7 @@ mod independent_target {
                 android: None,
                 channels: vec![],
                 frontends: vec![],
+                separate_packages: false,
                 abis: vec![],
             })
             .unwrap();
