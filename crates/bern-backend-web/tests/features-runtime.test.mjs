@@ -26,6 +26,7 @@ function runtime(search = "") {
     set className(value) { this.classes = new Set(value.split(/\s+/)); }
     get className() { return [...this.classes].join(" "); }
     setAttribute(name, value) { this.attributes[name] = String(value); }
+    getAttribute(name) { return this.attributes[name] ?? null; }
     removeAttribute(name) { delete this.attributes[name]; }
     hasAttribute(name) { return name in this.attributes; }
     addEventListener(name, callback) { (this.events[name] ??= []).push(callback); }
@@ -90,11 +91,16 @@ function runtime(search = "") {
   }
   const probes = [];
   class Probe {
-    constructor() { probes.push(this); }
+    constructor() { probes.push(this); this.events = {}; }
+    addEventListener(name, callback) { (this.events[name] ??= []).push(callback); }
+    removeEventListener(name, callback) { this.events[name] = this.events[name]?.filter((one) => one !== callback); }
+    removeAttribute(name) { delete this[name]; }
+    dispatch(name) { for (const callback of [...(this.events[name] ?? [])]) callback({}); }
     load(width, height) {
       this.naturalWidth = width;
       this.naturalHeight = height;
       this.onload?.();
+      this.dispatch("load");
     }
   }
   const queries = new Map();
@@ -110,7 +116,12 @@ function runtime(search = "") {
     disconnect() { this.targets.clear(); this.disconnected = true; }
   }
   let blobs = 0;
+  const fetches = [];
+  const listeners = {};
   const globals = {
+    AbortController,
+    fetch: (url, options) => new Promise((resolve, reject) => fetches.push({ url, options, resolve, reject })),
+    addEventListener(name, callback) { (listeners[name] ??= []).push(callback); },
     TextEncoder, TextDecoder, URLSearchParams, performance, innerWidth: 1280, innerHeight: 800, HTMLElement: Element,
     URL: { createObjectURL: () => `blob:page/${++blobs}`, revokeObjectURL() {} }, Blob: class {},
     navigator: { platform: "MacIntel" }, location: { search }, Image: Probe, screen: {},
@@ -157,8 +168,43 @@ function runtime(search = "") {
     vm.runInContext(`globalThis.${name === "bern" ? "B" : "F"} = (() => { ${plain}\nreturn { ${[...exported, ...extra].join(", ")} }; })();`, context, { filename: `${name}.js` });
   }
   const flushMicrotasks = () => { while (microtasks.length) microtasks.shift()(); };
-  return { B: context.B, F: context.F, Element, document: globals.document, navigator: globals.navigator, screen: globals.screen, probes, queries, timers, frames, flushMicrotasks, resizeObservers, mutationObservers };
+  return { B: context.B, F: context.F, Element, document: globals.document, navigator: globals.navigator, screen: globals.screen, probes, queries, timers, frames, flushMicrotasks, resizeObservers, mutationObservers, fetches, listeners };
 }
+
+/// An `<img>` of `url` in a scope of its own, with what a test does to it:
+/// `failAsked` is the browser failing a try and `fetch` answering why.
+function picture(env, url = "https://pictures.test/a.png") {
+  const { B, F, Element, fetches, timers } = env;
+  const settle = () => new Promise((done) => setImmediate(done));
+  const root = new Element("root");
+  const scope = new B.Scope();
+  B.within(scope, () => F.Image(root, {}, { url: () => url, width: 24, height: 24 }));
+  const image = root.childNodes[0];
+  // Tries after the first, which `F.Image` began.
+  const tries = [];
+  Object.defineProperty(image, "src", { get: () => tries.at(-1), set: (value) => tries.push(value) });
+  return {
+    image, scope, tries, settle,
+    /// The next wait: the one timer left running.
+    wait() { const live = timers.filter((one) => !one.cancelled && !one.done); assert.equal(live.length, 1); return live[0]; },
+    run(timer) { timer.done = true; timer.callback(); },
+    async failAsked(...answers) {
+      image.dispatch("error");
+      for (const answer of answers) {
+        const asked = fetches.shift();
+        assert.equal(asked.url, url);
+        if (answer instanceof Error) asked.reject(answer);
+        else asked.resolve(answer);
+        await settle();
+      }
+    },
+  };
+}
+
+const answer = (status, type = "text/html") => ({
+  status, ok: status >= 200 && status < 300, headers: { get: () => type },
+});
+const unreachable = new TypeError("failed");
 
 test("preview creates only rows fitting the viewport and releases rows when it shrinks", () => {
   const { B, Element, flushMicrotasks, resizeObservers } = runtime();
@@ -406,6 +452,164 @@ test("template images derive their missing side from the source aspect ratio", (
   assert.equal(probes[0].onload, null);
   const css = readFileSync(new URL("../templates/features.css", import.meta.url), "utf8");
   assert.match(css, /\.bern-image-template\s*\{[^}]*background:\s*currentColor/);
+});
+
+test("a picture the network failed is tried again, each wait longer, then rests until the network changes", async () => {
+  const env = runtime();
+  const shown = picture(env);
+  const tries = [];
+  for (const expected of [1, 2, 4, 8, 16, 32]) {
+    await shown.failAsked(unreachable);
+    const wait = shown.wait();
+    assert.ok(wait.delay >= expected * 750 && wait.delay <= expected * 1250, `${wait.delay} for ${expected}`);
+    shown.run(wait);
+    tries.push(shown.tries.length);
+    assert.equal(shown.tries.at(-1), "https://pictures.test/a.png");
+  }
+  assert.deepEqual(tries, [1, 2, 3, 4, 5, 6]);
+  await shown.failAsked(unreachable);
+  assert.equal(env.timers.filter((one) => !one.cancelled && !one.done).length, 0, "it rests");
+  env.listeners.online[0]();
+  assert.equal(shown.tries.length, 7);
+  shown.image.dispatch("load");
+  assert.equal(env.timers.filter((one) => !one.cancelled && !one.done).length, 0, "a picture that came is left alone");
+  shown.scope.dispose();
+});
+
+test("a page shown again tries at once what it put off", async () => {
+  const env = runtime();
+  const shown = picture(env);
+  await shown.failAsked(unreachable);
+  env.document.hidden = true;
+  for (const callback of env.document.listeners.visibilitychange) callback();
+  assert.equal(shown.tries.length, 0);
+  env.document.hidden = false;
+  for (const callback of env.document.listeners.visibilitychange) callback();
+  assert.equal(shown.tries.length, 1);
+  shown.scope.dispose();
+});
+
+test("a server that cannot answer now is asked again, and one that refused is not", async () => {
+  for (const status of [408, 429, 500, 503]) {
+    const env = runtime();
+    const shown = picture(env);
+    await shown.failAsked(answer(status));
+    shown.run(shown.wait());
+    assert.equal(shown.tries.length, 1, `after ${status}`);
+    shown.scope.dispose();
+  }
+  for (const refusal of [answer(404), answer(403), answer(200)]) {
+    const env = runtime();
+    const shown = picture(env);
+    await shown.failAsked(refusal);
+    assert.equal(env.timers.filter((one) => !one.cancelled).length, 0);
+    shown.scope.dispose();
+    // Nor by a view that appears later, until the network changes.
+    const later = picture(env);
+    await later.settle();
+    assert.equal(env.timers.filter((one) => !one.cancelled).length, 0);
+    assert.equal(later.image.src, undefined);
+    env.listeners.online[0]();
+    assert.equal(later.tries.length, 1);
+    later.scope.dispose();
+  }
+});
+
+test("a picture that came broken is tried again", async () => {
+  const env = runtime();
+  const shown = picture(env);
+  await shown.failAsked(answer(200, "image/png"));
+  shown.run(shown.wait());
+  assert.equal(shown.tries.length, 1);
+  shown.scope.dispose();
+});
+
+test("a try that shows nothing counts as failed, unless the picture has begun to come", async () => {
+  const env = runtime();
+  const shown = picture(env);
+  const first = shown.wait();
+  assert.equal(first.delay, 15000);
+  shown.image.attributes.src = "https://pictures.test/a.png";
+  shown.run(first);
+  assert.equal(shown.image.attributes.src, undefined, "the stalled read is let go");
+  const wait = shown.wait();
+  assert.ok(wait.delay >= 750 && wait.delay <= 1250);
+  shown.run(wait);
+  assert.equal(shown.tries.length, 1);
+  // Each try has longer: a slow network is not a stalled one.
+  const second = shown.wait();
+  assert.equal(second.delay, 30000);
+  shown.image.naturalWidth = 300;
+  shown.image.attributes.src = "https://pictures.test/a.png";
+  shown.run(second);
+  assert.equal(shown.image.attributes.src, "https://pictures.test/a.png");
+  assert.equal(env.timers.filter((one) => !one.cancelled && !one.done).length, 0);
+  shown.scope.dispose();
+});
+
+test("a view that leaves stops trying, and one that appears starts over at once", async () => {
+  const env = runtime();
+  const shown = picture(env);
+  await shown.failAsked(unreachable);
+  const wait = shown.wait();
+  shown.scope.dispose();
+  assert.equal(wait.cancelled, true);
+  env.listeners.online?.[0]();
+  assert.equal(shown.tries.length, 0);
+  const again = picture(env);
+  assert.equal(again.wait().delay, 15000, "its first try is under way");
+  again.scope.dispose();
+});
+
+test("a view that leaves while the reason is asked for does not try again", async () => {
+  const env = runtime();
+  const shown = picture(env);
+  shown.image.dispatch("error");
+  shown.scope.dispose();
+  env.fetches.shift().resolve(answer(503));
+  await shown.settle();
+  assert.equal(env.timers.filter((one) => !one.cancelled && !one.done).length, 0);
+});
+
+test("only a download is tried again", async () => {
+  const env = runtime();
+  const shown = picture(env, "blob:page/1");
+  shown.image.dispatch("error");
+  await shown.settle();
+  assert.equal(env.fetches.length, 0);
+  assert.equal(env.timers.filter((one) => !one.cancelled).length, 0);
+  shown.scope.dispose();
+});
+
+test("a template whose picture failed shows it once a later try brings it", async () => {
+  const { B, F, Element, probes, fetches, timers } = runtime();
+  const root = new Element("root");
+  const scope = new B.Scope();
+  B.within(scope, () => F.Image(root, {}, { rendering: "template", width: 24, height: 24, aspect: 1, url: () => "https://pictures.test/a.png" }));
+  const node = root.childNodes[0];
+  assert.match(node.style.maskImage, /a\.png/);
+  probes[0].dispatch("error");
+  assert.equal(node.style.maskImage, "none");
+  fetches.shift().resolve(answer(503));
+  await new Promise((done) => setImmediate(done));
+  const wait = timers.filter((one) => !one.cancelled).at(-1);
+  wait.callback();
+  probes[0].load(10, 10);
+  assert.match(node.style.maskImage, /a\.png/);
+  scope.dispose();
+});
+
+test("a fill waits for its picture through failed tries", async () => {
+  const { F, probes, fetches, timers } = runtime();
+  assert.equal(F.averageColor("https://pictures.test/a.png"), null);
+  const image = probes[0];
+  assert.equal(image.src, "https://pictures.test/a.png");
+  image.src = "";
+  image.dispatch("error");
+  fetches.shift().resolve(answer(503));
+  await new Promise((done) => setImmediate(done));
+  timers.filter((one) => !one.cancelled).at(-1).callback();
+  assert.equal(image.src, "https://pictures.test/a.png");
 });
 
 test("pictures with a dark one show it where they are dark, once laid out", () => {
