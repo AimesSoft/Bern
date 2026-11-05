@@ -2634,6 +2634,21 @@ export function keepsWidth(node) {
   return !!row && row.bernLayoutAxis === "row" && [...row.children].some(isSpacer) && layoutIntent(node, "width") && spacedWidth(node);
 }
 
+/// Whether `node` gives up width in a row too narrow for it: text, and
+/// what holds text, but not controls.
+function yieldsWidth(node) {
+  if (node.classList.contains("bern-text") || node.classList.contains("bern-label")) return true;
+  return node.tagName !== "BUTTON" && [...node.children].some(yieldsWidth);
+}
+
+/// Whether `node`, a stack of controls in a row, keeps its width when the
+/// row is too narrow: its controls would be cut off or run into their
+/// neighbours, as stacks otherwise shrink to nothing.
+export function firmWidth(node) {
+  const row = node.parentElement;
+  return !!row && row.bernLayoutAxis === "row" && !!node.bernLayoutAxis && !layoutIntent(node, "width") && !yieldsWidth(node);
+}
+
 /// Whether a stack's layers, rails and backdrops aside, all have a fixed
 /// size in `dimension`: a native stack then keeps that size in a row or
 /// column, where only its flexible neighbours give way.
@@ -2664,6 +2679,8 @@ function trackLayout(node, axis) {
       }
       const keeps = keepsWidth(element);
       if (element.classList.contains("bern-keeps-width") !== keeps) element.classList.toggle("bern-keeps-width", keeps);
+      const firm = firmWidth(element);
+      if (element.classList.contains("bern-firm-width") !== firm) element.classList.toggle("bern-firm-width", firm);
     };
     visit(node);
   };

@@ -59,7 +59,7 @@ frontends = ["winui3"]   # 或 ["xaml-islands"]；不写则两个都编译
 | 样式覆盖（`style!`）：`Button`、`IconButton`、`SidebarItem` | 完成 | 颜色与边框写成控件自己的轻量样式资源，状态由控件模板的视觉状态切换；圆角、内边距、尺寸档直接设置；阴影由 Direct2D 画成位图垫在按钮下；缩放、位移与透明度用运行时的弹簧。选中侧栏项的 `indicator` 不列出。见“样式覆盖” |
 | 动效：`appear`、`disappear`、`reflow`、`hero`、`animate`、`stagger`、`nudge`、`scroll_scale`、`scroll_opacity` | 完成 | 弹簧每帧在界面线程上推进，写到元素的 `Translation`、`Scale` 与 `Opacity`，不影响布局；滚动联动是 Composition 表达式动画。见“动效” |
 | 自绘：`Canvas`、`Shape`、`Series`、`Pattern`，`Text(mark:)`，`fill_from` 与 `fade` | 完成 | Direct2D 画进 WIC 位图后交给 `Image`，两种前端同一套代码；颜色按元素所在部分的主题解析 |
-| 窗口：`chrome`、`immersive`、`idle_after` 与 `window.idle`，`role: dialog`，`window.compact` 等尺寸档 | 完成 | 对话框窗口是主窗口上的 `ContentDialog`；标题栏显示窗口标题（`chrome: unified` 不改变它），Islands 下保留系统标题栏。见“窗口外框、静置与对话框” |
+| 窗口：`chrome`、`immersive`、`idle_after` 与 `window.idle`，`role: dialog`，`window.compact` 等尺寸档 | 完成 | 对话框窗口是主窗口上的 `ContentDialog`；标题栏显示窗口标题（`chrome: unified` 不改变它），Islands 下保留系统标题栏（盖住窗口的页面除外）。见“窗口外框、静置与对话框” |
 | 静置区 `idle_area` | 完成，未实测 | 鼠标停在静置区上才静置；两种前端经 MSVC 编译，未运行。见“窗口外框、静置与对话框” |
 | 可增减的侧栏项与页签 | 完成 | 侧栏项是 `NavigationView.MenuItems` 中的项，随 `if`、`match`、`ForEach` 增减；选中项离开时选中移到 `fallback` 或剩下的第一项 |
 | v0.29 的 `features` 与媒体类组件 | 完成 | `SidebarFooter`（`PaneFooter`）、`Inspector`（右侧的 `SplitView` 窗格）、`Toast`、`SplitButton`（`ToggleSplitButton`）、`PopoverButton`（`Flyout`）、`Drop`、`Pinch`、`Swipe`、`Rail`；工具栏搜索与结果、会话动作、开关按钮、绑定长度、`appearance`、快捷键（`KeyboardAccelerator`）、运行时强调色与明暗、运行时图片、取色填充、`pick`（`FileOpenPicker`/`FolderPicker`）、滚动停靠与位置；会话命令 `ui.focus`、`ui.set_file`。描述中列出 `features` 的全部 18 项 |
@@ -174,6 +174,7 @@ HDR 图片（PQ 或 HLG 的 PNG、带增益图的 JPEG）不经过 XAML 的 `Ima
 - `idle_after`：窗口根元素上（含已处理的事件）的指针移动、按下、滚轮与按键重新计时，到时 `window.idle` 为真。指针移动只在屏幕上的光标位置确实改变时才算：沉浸式窗口改变外框时，系统会在原位置再报告一次指针移动，否则会立即被自己唤醒。
 - `idle_area`（2026-10-24）：带它的元素在装饰时登记为窗口的静置区。根元素上鼠标的移动与按下记下它在窗口内容中的位置（`GetCurrentPoint(nullptr)`），触摸与触控笔不记；离开时根元素也收到各部分冒泡上来的离开事件，所以只有位置落在内容之外的离开才记为在窗口外。屏幕上有已加载且可见的静置区、最近的指针又是鼠标时，开始计时与到时都用 `VisualTreeHelper::FindElementsInHostCoordinates` 取那个位置最上面的元素，沿父元素找到它所在的静置区，按那个区的秒数计时；不在任何静置区上或在窗口外时不计时。命中测试与输入是同一套规则，立在静置区上面、可命中的控件会把鼠标从静置区拿走；到时再命中一次，唤醒时出现在静止鼠标下的控制条因此不会立刻隐藏。静置区加载、卸载或离开界面时，投递到界面线程重新计时。按键、触摸与触控笔仍按 `idle_after`。两种前端用同一份代码。
 - `window_landscape`（2026-10-24）声明为不适用：桌面窗口没有方向；平板旋转的是整个屏幕，与 iPad 上 `landscape` 保持设备方向相同。检查不再警告。
+- Islands 下盖住窗口的页面（带自身控件的 `under_bars`）：系统标题栏下面放不了内容，所以这样的页面显示时窗口没有标题栏。`WM_NCCALCSIZE` 把标题栏的位置交给客户区，其他三边的边框不变，`WS_CAPTION` 保留，贴靠、阴影和系统菜单照常工作。页面和 WinUI 3 下一样到达窗口顶边，上面只留标题栏按钮：三个 XAML 按钮，大小和字形与系统一致，跟随页面的外观，名称取自系统菜单。顶部一条透明子窗口（`BernDragBar`，否则下面的 XAML Island 会收走所有消息）用来移动窗口，从顶边调整大小，双击最大化，右键打开系统菜单。写在窗口里的 `Stack` 的其他层下移标题栏的高度（`KeepBelowBars`），页面下面的内容不会跳动。全屏和 `immersive` 时不使用。
 - `immersive`：为真时隐藏标题栏与详情页头。WinUI 3 下 `TitleBar` 收起，`OverlappedPresenter.SetBorderAndTitleBar(true, false)` 去掉系统标题栏与标题按钮；Islands 下去掉窗口样式中的 `WS_CAPTION`（保留可调整大小的边框）。同时静置时指针隐藏（`ShowCursor`）。
 - `chrome: unified`：WinUI 3 下内容本来就延伸到标题栏，标题栏在图标旁显示窗口标题（设计稿的 Fluent 窗口如此），`unified` 不改变它；Islands 下保留系统标题栏。
 - `role: dialog`：没有自己的顶层窗口，是主窗口（或打开时第一个普通窗口）上的 `ContentDialog`，宽度按声明的尺寸在对话框允许的范围内设置；对话框的关闭（包括 Esc）都经关闭协议。对话框窗口报告所属窗口的位置，`minimize`、`maximize`、`move`、`resize` 返回 `target_unavailable`。
@@ -213,7 +214,7 @@ HDR 图片（PQ 或 HLG 的 PNG、带增益图的 JPEG）不经过 XAML 的 `Ima
 ### 布局与页面结构
 
 - `padding_x`、`padding_y` 在 `padding` 之上分别覆盖左右与上下。`Row(align: baseline)`：各子元素先顶对齐排布，再按各自第一个文字块的 `BaselineOffset`（经 `TransformToVisual` 换算到子元素内）下移到同一条基线，多占的高度在下一轮测量中计入。
-- `Row` 与 `Column`（`FlexPanel`）：填充的元素平分剩余空间，但只因内部的 `Spacer` 才填充的容器，在同一面板的 `Spacer` 旁先占自身长度，只参与平分余下的空间，与通用规则一致；空间不够时 `Spacer` 为零，这些容器按比例收缩。此前这样的容器被算作又一个填充项：380 宽弹窗里的 `Row { Spacer  Column { …  Row { Spacer  …  Spacer } }  Spacer }`，列只分到一行的三分之一，即 100 宽，固定宽度的卡片和一排标签都被截断（2026-11-05 修改）。输入框、滚动视图这类自身填充的元素仍然平分。
+- `Row` 与 `Column`（`FlexPanel`）：填充的元素平分剩余空间，但只因内部的 `Spacer` 才填充的容器，在同一面板的 `Spacer` 旁先占自身长度，只参与平分余下的空间，与通用规则一致；空间不够时 `Spacer` 为零，这些容器按比例收缩。此前这样的容器被算作又一个填充项：380 宽弹窗里的 `Row { Spacer  Column { …  Row { Spacer  …  Spacer } }  Spacer }`，列只分到一行的三分之一，即 100 宽，固定宽度的卡片和一排标签都被截断（2026-11-05 修改）。输入框、滚动视图这类自身填充的元素仍然平分。行放不下时，只有文字和包含文字的容器让出宽度（`Yields`），只放控件的 `Stack` 保持宽度；此前它会承担全部缺口，和其他按钮并排的 `Stack` 里的按钮被压到看不见（2026-11-05）。
 - `Grid(row_gap:)` 单独设置行距；`Grid(cell_ratio:, cell_extra:)` 每行高为列宽 ÷ `cell_ratio` + `cell_extra`，各格从格子顶部排，内容更高时伸进下面的行距。`Flow` 是换行面板（`FlowPanel`）：子项在行内竖直居中，`Spacer`（角色 `bern-spacer`）换行时不占宽度，排好后分得所在行余下的宽度。
 - `ScaleBox`：子元素在声明的逻辑尺寸中层叠，整体以一个 `CompositeTransform`（缩放加居中平移）适配所得空间，超出部分裁掉；图片、文字与点击区域保持对齐。`Positioned` 在所在层叠中占满，内容按（可弹簧的）`x`、`y`、`width`、`height` 放置并居中。`Positioned(bleed:)`：`ScaleBox` 的上下文带着它的场景空白（`Ctx::scene`，图层里面的内容不再带），排布时按所得尺寸算出画布四周的空白（场景点）；有 `bleed` 的图层测量与排布内容时把到达的每条画布边延伸到空白的边缘，四条边各是一个随图层 `animate` 的弹簧，碰到哪条边按图层要去的位置判断。盒子换了形状时场景本身的尺寸不变，XAML 不会重新排布同样大小的子元素，所以空白一变，盒子让登记过的延伸图层 `InvalidateMeasure`，延伸量随即跳到新值。`Marquee`：内容按自然宽度每帧（`CompositionTarget.Rendering`）从右缘外跑到左缘外，`paused` 时停住，减少动态效果时静止在宽度 28% 处；其中的文字由 Composition 的 `DropShadow`（以文字自己的 `GetAlphaMask` 为蒙版）带 1 点黑色阴影。
 - `Accordion`：每列一个 0 到 1 的权重弹簧，列宽由权重分配，总宽不变，每列按 `corner` 圆角裁剪（裁剪在每次排布时按列的大小设置）。

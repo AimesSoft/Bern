@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
-import { Timer, Scope, within, cell, accordionWidths, layoutIntent, fixedSize, keepsWidth } from "../templates/bern.js";
+import { Timer, Scope, within, cell, accordionWidths, layoutIntent, fixedSize, keepsWidth, firmWidth } from "../templates/bern.js";
 
 function layoutNode(classes, children = [], axis = null, tagName = "DIV", attributes = []) {
   const names = new Set(classes.split(" "));
@@ -84,6 +84,17 @@ test("a stack that fills only through spacers keeps its width beside a spacer", 
   const right = inRow(layoutNode("bern-stack bern-vstack", [steps], "column"));
   inRow(layoutNode("bern-stack bern-hstack", [left, right], "row"));
   assert.equal(keepsWidth(left), false, "with no spacer beside them, columns stay equal");
+});
+
+test("a stack of controls keeps its width in a row too narrow for it", () => {
+  const inRow = (parent) => { for (const child of parent.children) child.parentElement = parent; return parent; };
+  const button = layoutNode("bern-icon-button", [layoutNode("bern-text")], null, "BUTTON");
+  const controls = layoutNode("bern-layers", [button], "layers");
+  const words = layoutNode("bern-layers", [layoutNode("bern-text")], "layers");
+  inRow(layoutNode("bern-stack bern-hstack", [controls, words], "row"));
+  assert.equal(firmWidth(controls), true);
+  assert.equal(firmWidth(words), false, "text gives up width, wrapping in it");
+  assert.equal(firmWidth(button), false, "only stacks need telling");
 });
 
 test("image and text layers determine their size while rails only cover them", () => {

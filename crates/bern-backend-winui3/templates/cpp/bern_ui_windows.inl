@@ -287,6 +287,83 @@ inline void UpdateFrameTheme(Win const& win) {
     if (FAILED(DwmSetWindowAttribute(win.hwnd, 20, &dark, sizeof dark))) DwmSetWindowAttribute(win.hwnd, 19, &dark, sizeof dark);
 }
 
+/// The system's caption buttons stand only on its title bar: these are as
+/// large, in logical units, and show the same glyphs.
+inline constexpr double kCaptionButtonWidth = 46, kCaptionButtonHeight = 32;
+inline wchar_t const* const kDragBarClass = L"BernDragBar";
+/// Asks a window for the menu of its title bar, at a point on the screen.
+inline constexpr UINT kSystemMenuMessage = 0x0313;
+
+/// What the title bar does, for the bar taking its place: the window moves
+/// by it, its top edge sizes the window, a double click zooms it and a
+/// right click shows the window's menu. A window of its own, because the
+/// island below takes every message of the client area.
+inline LRESULT CALLBACK DragBarProc(HWND bar, UINT message, WPARAM wparam, LPARAM lparam) {
+    HWND window = GetParent(bar);
+    auto onEdge = [&](int y) { return !IsZoomed(window) && y < MulDiv(5, GetDpiForWindow(bar), 96); };
+    auto screen = [&] {
+        POINT at{static_cast<short>(LOWORD(lparam)), static_cast<short>(HIWORD(lparam))};
+        ClientToScreen(bar, &at);
+        return MAKELPARAM(at.x, at.y);
+    };
+    switch (message) {
+    case WM_SETCURSOR: {
+        POINT at{};
+        GetCursorPos(&at);
+        ScreenToClient(bar, &at);
+        SetCursor(LoadCursorW(nullptr, onEdge(at.y) ? IDC_SIZENS : IDC_ARROW));
+        return TRUE;
+    }
+    case WM_LBUTTONDOWN: {
+        WPARAM part = onEdge(static_cast<short>(HIWORD(lparam))) ? HTTOP : HTCAPTION;
+        ReleaseCapture();
+        SendMessageW(window, WM_NCLBUTTONDOWN, part, screen());
+        return 0;
+    }
+    case WM_LBUTTONDBLCLK:
+        if (GetWindowLongPtrW(window, GWL_STYLE) & WS_MAXIMIZEBOX) PostMessageW(window, WM_SYSCOMMAND, IsZoomed(window) ? SC_RESTORE : SC_MAXIMIZE, 0);
+        return 0;
+    case WM_RBUTTONUP:
+        SendMessageW(window, kSystemMenuMessage, 0, screen());
+        return 0;
+    }
+    return DefWindowProcW(bar, message, wparam, lparam);
+}
+
+/// The bar along the window's top edge up to its caption buttons, or none
+/// while the window has its title bar.
+inline void PlaceDragBar(Win const& win) {
+    if (!win.dragBar) return;
+    RECT client{};
+    GetClientRect(win.hwnd, &client);
+    int buttons = win.captionButtons ? static_cast<int>(win.captionButtons.Children().Size()) : 0;
+    int width = client.right - static_cast<int>(std::lround(buttons * kCaptionButtonWidth * win.Scale()));
+    SetWindowPos(win.dragBar, HWND_TOP, 0, 0, (std::max)(0, width), static_cast<int>(std::lround(kCaptionButtonHeight * win.Scale())),
+        SWP_NOACTIVATE | (win.bare ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
+}
+
+/// What the system's menu calls `command`, without its access key and
+/// shortcut, for the button that does the same.
+inline winrt::hstring SystemName(HWND hwnd, UINT command) {
+    wchar_t text[96]{};
+    GetMenuStringW(GetSystemMenu(hwnd, FALSE), command, text, 96, MF_BYCOMMAND);
+    std::wstring name(text);
+    name = name.substr(0, name.find(L'\t'));
+    if (auto open = name.find(L"(&"); open != std::wstring::npos) name = name.substr(0, open);
+    std::erase(name, L'&');
+    return winrt::hstring(name);
+}
+
+/// The middle caption button as the window stands: maximize, or restore.
+inline void ShowZoom(Win const& win) {
+    if (!win.zoomButton) return;
+    bool zoomed = IsZoomed(win.hwnd);
+    win.zoomButton.Content().as<controls::FontIcon>().Glyph(zoomed ? L"\uE923" : L"\uE922");
+    auto name = SystemName(win.hwnd, zoomed ? SC_RESTORE : SC_MAXIMIZE);
+    controls::ToolTipService::SetToolTip(win.zoomButton, winrt::box_value(name));
+    xaml::Automation::AutomationProperties::SetName(win.zoomButton, name);
+}
+
 inline LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
     LRESULT result = 0;
     auto win = OfHwnd(hwnd);
@@ -294,6 +371,24 @@ inline LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wparam, LPARA
         switch (message) {
         case WM_SIZE:
             if (win->island) SetWindowPos(win->island, nullptr, 0, 0, LOWORD(lparam), HIWORD(lparam), SWP_SHOWWINDOW | SWP_NOZORDER | SWP_NOACTIVATE);
+            PlaceDragBar(*win);
+            ShowZoom(*win);
+            break;
+        case WM_NCCALCSIZE:
+            // The client area keeps the frame's other sides and takes the
+            // title bar's place; a maximized window's top edge lies past
+            // the screen's by the frame.
+            if (wparam && win->bare) {
+                auto* sizes = reinterpret_cast<NCCALCSIZE_PARAMS*>(lparam);
+                LONG top = sizes->rgrc[0].top;
+                result = DefWindowProcW(hwnd, message, wparam, lparam);
+                if (IsZoomed(hwnd)) {
+                    UINT dpi = GetDpiForWindow(hwnd);
+                    top += GetSystemMetricsForDpi(SM_CYFRAME, dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+                }
+                sizes->rgrc[0].top = top;
+                return result;
+            }
             break;
         case WM_SETFOCUS:
             if (win->island) SetFocus(win->island);
@@ -320,6 +415,12 @@ inline void RegisterClassOnce() {
     type.hIcon = LoadIconW(type.hInstance, MAKEINTRESOURCEW(1));
     type.hIconSm = type.hIcon;
     RegisterClassExW(&type);
+    WNDCLASSEXW bar{sizeof(bar)};
+    bar.style = CS_DBLCLKS;
+    bar.lpfnWndProc = DragBarProc;
+    bar.hInstance = type.hInstance;
+    bar.lpszClassName = kDragBarClass;
+    RegisterClassExW(&bar);
 }
 #endif
 
@@ -719,6 +820,13 @@ inline void ShowCaptionTheme(Win& win) {
     } catch (...) {
     }
 }
+#else
+/// The caption buttons on a page in the page's appearance.
+inline void ShowCaptionTheme(Win& win) {
+    if (!win.captionButtons) return;
+    std::string mode = !win.coverings.empty() ? win.coverings.back().second : "";
+    win.captionButtons.RequestedTheme(mode == "dark" ? xaml::ElementTheme::Dark : mode == "light" ? xaml::ElementTheme::Light : xaml::ElementTheme::Default);
+}
 #endif
 
 /// `WindowSet(accent:, appearance:)` for one window: its appearance, and the
@@ -821,10 +929,80 @@ inline void PlaceHeader(Win& win) {
         top = win.titleBar.ActualHeight();
         if (scale > 0) trailing = win.window.AppWindow().TitleBar().RightInset() / scale + 12;
     }
+#else
+    top += B::TitleBarHeight(win);
 #endif
     auto margin = win.header.Margin();
     if (margin.Top != top || margin.Right != trailing) win.header.Margin(xaml::Thickness{16, top, trailing, 8});
 }
+
+#if !BERN_WINUI
+/// The caption buttons over a page that covers the window: the system's
+/// own stand only on the title bar, and the system XAML has none.
+inline void MakeCaptionButtons(Win& win) {
+    controls::StackPanel panel;
+    panel.Orientation(controls::Orientation::Horizontal);
+    panel.HorizontalAlignment(xaml::HorizontalAlignment::Right);
+    panel.VerticalAlignment(xaml::VerticalAlignment::Top);
+    panel.Visibility(xaml::Visibility::Collapsed);
+    HWND hwnd = win.hwnd;
+    auto add = [&](wchar_t const* glyph, std::function<UINT()> command) {
+        controls::FontIcon icon;
+        icon.FontFamily(media::FontFamily(L"Segoe MDL2 Assets"));
+        icon.Glyph(glyph);
+        icon.FontSize(10);
+        controls::Button button;
+        button.Content(icon);
+        Styles::MakeSubtle(button);
+        button.Width(kCaptionButtonWidth);
+        button.Height(kCaptionButtonHeight);
+        button.MinWidth(0);
+        button.MinHeight(0);
+        button.Padding(xaml::Thickness{0, 0, 0, 0});
+        button.BorderThickness(xaml::Thickness{0, 0, 0, 0});
+        button.CornerRadius(xaml::CornerRadius{0, 0, 0, 0});
+        button.IsTabStop(false);
+        button.Click([hwnd, command](auto&&, auto&&) { PostMessageW(hwnd, WM_SYSCOMMAND, command(), 0); });
+        panel.Children().Append(button);
+        return button;
+    };
+    auto named = [&](controls::Button const& button, UINT command) {
+        auto name = SystemName(hwnd, command);
+        controls::ToolTipService::SetToolTip(button, winrt::box_value(name));
+        xaml::Automation::AutomationProperties::SetName(button, name);
+    };
+    if (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_MINIMIZEBOX) named(add(L"\uE921", [] { return SC_MINIMIZE; }), SC_MINIMIZE);
+    if (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_MAXIMIZEBOX)
+        win.zoomButton = add(L"\uE922", [hwnd] { return IsZoomed(hwnd) ? SC_RESTORE : SC_MAXIMIZE; });
+    auto close = add(L"\uE8BB", [] { return SC_CLOSE; });
+    Styles::Restyle(close, LR"(<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">)"
+        LR"(<SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#E81123" /><SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#F1707A" />)"
+        LR"(<SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="White" /><SolidColorBrush x:Key="ButtonForegroundPressed" Color="White" /></ResourceDictionary>)");
+    named(close, SC_CLOSE);
+    win.root.Children().Append(panel);
+    win.captionButtons = panel;
+    ShowZoom(win);
+}
+
+/// Take the title bar away while a page covers the window, or bring it
+/// back: the page reaches the window's top edge as it does under WinUI 3's
+/// title bar, and only the caption buttons stay, in the page's appearance.
+inline void ShowBare(Win& win, bool bare) {
+    if (win.bare == bare) return;
+    win.bare = bare;
+    if (!win.dragBar) {
+        // Draws nothing: what is below shows through it.
+        win.dragBar = CreateWindowExW(WS_EX_LAYERED | WS_EX_NOREDIRECTIONBITMAP, kDragBarClass, L"", WS_CHILD, 0, 0, 0, 0, win.hwnd, nullptr,
+            GetModuleHandleW(nullptr), nullptr);
+        if (win.dragBar) SetLayeredWindowAttributes(win.dragBar, 0, 255, LWA_ALPHA);
+    }
+    if (!win.captionButtons) MakeCaptionButtons(win);
+    win.captionButtons.Visibility(bare ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
+    SetWindowPos(win.hwnd, nullptr, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    PlaceDragBar(win);
+    PlaceHeader(win);
+}
+#endif
 
 /// The window's content, title, failure bar and window-level behavior, in
 /// `root`; for every kind of window.
@@ -894,6 +1072,16 @@ inline void Mount(std::shared_ptr<Win> const& win, controls::Grid const& host, s
             bool covered = raw->covering.Get() > 0;
             Reactive::Untrack([&] {
                 if (raw->titleBar && !raw->owner) ShowTitleBarContent(raw->titleBar, !covered);
+                ShowCaptionTheme(*raw);
+                return 0;
+            });
+        });
+#else
+        Reactive::Run([raw] {
+            bool bare = raw->covering.Get() > 0 && !raw->fullscreen.Get() && !raw->immersive.Get();
+            Reactive::Untrack([&] {
+                if (raw->owner) return 0;
+                ShowBare(*raw, bare);
                 ShowCaptionTheme(*raw);
                 return 0;
             });

@@ -26,7 +26,8 @@ pub struct Grow {
     pub height: bool,
     /// With `flex`, it starts from its own length rather than from nothing:
     /// a stack that fills only through spacers inside it, beside a spacer
-    /// of its container.
+    /// of its container. Without, it does not shrink: a stack of controls
+    /// in a row too narrow for them.
     pub keep: bool,
 }
 
@@ -48,7 +49,8 @@ impl Grow {
         let element = match (self.flex, self.keep) {
             (true, true) => element.flex_auto().min_w(px(0.0)).min_h(px(0.0)),
             (true, false) => element.flex_1().min_w(px(0.0)).min_h(px(0.0)),
-            (false, _) => element,
+            (false, true) => element.flex_shrink_0(),
+            (false, false) => element,
         };
         let element = if self.width {
             element.w_full()

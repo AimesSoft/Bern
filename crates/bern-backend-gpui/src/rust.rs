@@ -1710,10 +1710,61 @@ pub fn app() -> b::AppDef {{
     }
 
     /// Statements that push the elements of `node` onto `v`.
-    /// Whether `node`, being pushed, starts from its own length: `Spacer`s
-    /// beside it give way to what it holds.
+    /// Whether `node`, being pushed, keeps its own length: `Spacer`s beside
+    /// it give way to what it holds, and a stack of controls does not
+    /// shrink in a row too narrow for them, which would cut them off.
     fn keeps(&self, node: &Node, axis: Axis) -> bool {
-        self.spacer.get() && self.spaced(node, axis)
+        if self.greed(node, axis).along(axis) {
+            self.spacer.get() && self.spaced(node, axis)
+        } else {
+            axis == Axis::Row && self.stacked(node) && !self.yields(node)
+        }
+    }
+
+    /// Whether `node` is a column, row or stack.
+    fn stacked(&self, node: &Node) -> bool {
+        match node {
+            Node::Element(element) => matches!(element.kind.as_str(), "Column" | "Row" | "Stack"),
+            Node::Component(reference) => self
+                .app
+                .component(&reference.component)
+                .is_some_and(|component| self.stacked(&component.body)),
+            _ => false,
+        }
+    }
+
+    /// Whether `node` gives up width in a row too narrow for it: text and
+    /// what holds it.
+    fn yields(&self, node: &Node) -> bool {
+        match node {
+            Node::Element(element) => match element.kind.as_str() {
+                "Text" | "Label" => true,
+                "Column" | "Row" | "Stack" | "ForEach" => {
+                    element.children.iter().any(|child| self.yields(child))
+                }
+                _ => false,
+            },
+            Node::Component(reference) => self
+                .app
+                .component(&reference.component)
+                .is_some_and(|component| self.yields(&component.body)),
+            Node::If(node) => node
+                .branches
+                .iter()
+                .flat_map(|(_, body)| body.iter())
+                .chain(node.otherwise.iter())
+                .any(|node| self.yields(node)),
+            Node::IfLet(node) => node
+                .then
+                .iter()
+                .chain(node.otherwise.iter())
+                .any(|node| self.yields(node)),
+            Node::Match(node) => node
+                .arms
+                .iter()
+                .flat_map(|arm| arm.body.iter())
+                .any(|node| self.yields(node)),
+        }
     }
 
     fn push(&self, out: &mut String, node: &Node, axis: Axis) {

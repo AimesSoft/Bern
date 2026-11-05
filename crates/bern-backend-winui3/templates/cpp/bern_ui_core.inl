@@ -603,7 +603,10 @@ inline bool Yields(xaml::UIElement const& element) {
     auto inner = Unwrapped(element);
     if (inner.try_as<controls::TextBlock>()) return true;
     auto role = std::wstring(RoleOf(inner));
-    return role == L"bern-column" || role == L"bern-row" || role.starts_with(L"bern-layers");
+    if (role != L"bern-column" && role != L"bern-row" && !role.starts_with(L"bern-layers")) return false;
+    for (auto child : inner.as<controls::Panel>().Children())
+        if (child.Visibility() == xaml::Visibility::Visible && Yields(child)) return true;
+    return false;
 }
 
 struct FlexPanel : controls::PanelT<FlexPanel> {
@@ -1468,6 +1471,12 @@ struct Win {
     /// Where the window was before it filled the screen, and its style.
     WINDOWPLACEMENT restorePlacement{sizeof(WINDOWPLACEMENT)};
     LONG_PTR restoreStyle = 0;
+    /// While a page covers the window, its content reaches the window's top
+    /// edge: the title bar is gone, and these stand in for it on the page.
+    bool bare = false;
+    HWND dragBar = nullptr;
+    controls::StackPanel captionButtons{nullptr};
+    controls::Button zoomButton{nullptr};
 #endif
 
     /// `window.idle`: no input for the window's `idle_after` seconds.

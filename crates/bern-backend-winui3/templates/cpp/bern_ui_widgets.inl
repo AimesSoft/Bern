@@ -1873,18 +1873,31 @@ inline bool UnderBars(xaml::UIElement element) {
     return false;
 }
 
+/// How far the title bar reaches over the window's content, while the
+/// content reaches up under it or into its place.
+inline double TitleBarHeight(Win const& win) {
+#if BERN_WINUI
+    return win.underBars.Peek() > 0 && !win.owner && win.titleBar ? win.titleBar.ActualHeight() : 0.0;
+#else
+    if (!win.bare) return 0;
+    UINT dpi = GetDpiForWindow(win.hwnd);
+    int caption = GetSystemMetricsForDpi(SM_CYCAPTION, dpi);
+    if (!IsZoomed(win.hwnd)) caption += GetSystemMetricsForDpi(SM_CYFRAME, dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+    return caption / win.Scale();
+#endif
+}
+
 /// While a layer under the bars has the window's content reach up under
 /// the title bar, the other layers of a stack written in the window stay
 /// below it, as they do on the other targets: each is moved down by the
 /// title bar's height, and back when no such layer is shown.
 inline void KeepBelowBars(controls::Grid const& layers, Win& win) {
-#if BERN_WINUI
     Win* raw = &win;
     auto added = winrt::box_value(L"bern.barTop");
     auto apply = [weak = winrt::make_weak(layers), raw, added] {
         auto grid = weak.get();
         if (!grid) return;
-        double top = raw->underBars.Peek() > 0 && !raw->owner && raw->titleBar ? raw->titleBar.ActualHeight() : 0.0;
+        double top = TitleBarHeight(*raw);
         for (auto const& child : grid.Children()) {
             auto framework = child.try_as<xaml::FrameworkElement>();
             if (!framework) continue;
@@ -1910,10 +1923,6 @@ inline void KeepBelowBars(controls::Grid const& layers, Win& win) {
     });
     // Layers shown later, and a title bar that changes height.
     layers.LayoutUpdated([apply](auto&&, auto&&) { apply(); });
-#else
-    (void)layers;
-    (void)win;
-#endif
 }
 
 /// `Stack`: layers in the one cell of a grid, later ones above earlier
