@@ -21,6 +21,7 @@
 //! [`ask`]), Linux through the GTK host, which installs itself with
 //! [`install`].
 
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, RwLock};
 
 /// One line of an overlay.
@@ -117,6 +118,10 @@ pub fn press(overlay: &str, button: &str) {
 /// A host that draws overlays itself (the GTK host on Linux).
 pub trait Host: Send + Sync {
     fn show(&self, id: &str, overlay: &Overlay);
+    /// Only how far the lines are lit changed since `show`.
+    fn lit(&self, id: &str, overlay: &Overlay) {
+        self.show(id, overlay);
+    }
     fn hide(&self, id: &str);
 }
 
@@ -156,20 +161,85 @@ pub fn ask() {
     let _ = crate::platform::request("overlay_ask", "", "");
 }
 
+/// What each overlay shows now.
+static SHOWN: Mutex<BTreeMap<String, Overlay>> = Mutex::new(BTreeMap::new());
+
+/// What an overlay needs for what it shows next.
+#[derive(Debug, PartialEq, Eq)]
+enum Change {
+    Nothing,
+    /// Words sung advance many times a second: this has to stay cheap.
+    Lit,
+    All,
+}
+
+impl Overlay {
+    fn change_to(&self, next: &Overlay) -> Change {
+        if self == next {
+            return Change::Nothing;
+        }
+        let same = |line: &Line, other: &Line| {
+            Line {
+                lit: None,
+                ..line.clone()
+            } == Line {
+                lit: None,
+                ..other.clone()
+            } && line.lit.is_some() == other.lit.is_some()
+        };
+        let lines = self.lines.len() == next.lines.len()
+            && self.lines.iter().zip(&next.lines).all(|(a, b)| same(a, b));
+        let rest = Overlay {
+            lines: Vec::new(),
+            ..self.clone()
+        } == Overlay {
+            lines: Vec::new(),
+            ..next.clone()
+        };
+        if lines && rest {
+            Change::Lit
+        } else {
+            Change::All
+        }
+    }
+}
+
 /// Show `overlay` as the overlay `id`, putting it up when it is not.
 pub fn show(id: &str, overlay: &Overlay) {
-    match host() {
-        Some(host) => host.show(id, overlay),
-        None => show_here(id, overlay),
+    let was = SHOWN
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(id.to_string(), overlay.clone());
+    let change = was.map_or(Change::All, |was| was.change_to(overlay));
+    match (change, host()) {
+        (Change::Nothing, _) => {}
+        (Change::Lit, Some(host)) => host.lit(id, overlay),
+        (Change::All, Some(host)) => host.show(id, overlay),
+        (Change::Lit, None) => lit_here(id, overlay),
+        (Change::All, None) => show_here(id, overlay),
     }
 }
 
 /// Take the overlay `id` down.
 pub fn hide(id: &str) {
+    SHOWN.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
     match host() {
         Some(host) => host.hide(id),
         None => hide_here(id),
     }
+}
+
+/// Change how far an overlay of this system's own windows is lit.
+fn lit_here(id: &str, overlay: &Overlay) {
+    #[cfg(target_os = "macos")]
+    mac::lit(id.to_string(), overlay.clone());
+    // One bitmap: it is drawn whole.
+    #[cfg(target_os = "windows")]
+    win::show(id.to_string(), overlay.clone());
+    #[cfg(target_os = "android")]
+    let _ = crate::platform::request("overlay_lit", id, &as_json(overlay));
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "android")))]
+    let _ = (id, overlay);
 }
 
 /// Show an overlay with this system's own windows.
@@ -208,6 +278,14 @@ pub fn saved_place(id: &str) -> Option<(f64, f64)> {
 
 /// Keep where the user left the overlay `id`.
 pub fn save_place(id: &str, x: f64, y: f64) {
+    static KEPT: Mutex<BTreeMap<String, (f64, f64)>> = Mutex::new(BTreeMap::new());
+    let was = KEPT
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(id.to_string(), (x, y));
+    if was == Some((x, y)) {
+        return;
+    }
     let _ = crate::storage::Store::host()
         .write(&format!("overlay.{id}"), format!("{x},{y}").as_bytes());
 }
@@ -311,6 +389,45 @@ mod mac {
         /// Each button's round, and the button.
         buttons: Vec<(Retained<NSBox>, Retained<NSButton>)>,
         locked: bool,
+        /// What is lit of each line that shows, for those that light up.
+        lit: Vec<Option<Lit>>,
+    }
+
+    /// What is lit of a line: the view that cuts it off.
+    struct Lit {
+        line: Line,
+        clip: Retained<NSView>,
+        size: NSSize,
+        /// The width of the beginnings of the line measured so far, by
+        /// where they end.
+        widths: HashMap<usize, f64>,
+    }
+
+    impl Lit {
+        fn width_to(&mut self, at: usize, mtm: MainThreadMarker) -> f64 {
+            let line = &self.line;
+            *self
+                .widths
+                .entry(at)
+                .or_insert_with(|| styled(line, &line.text[..at], 1.0, mtm).frame().size.width)
+        }
+
+        /// Cut the line off where `Line::lit` says.
+        fn show(&mut self, mtm: MainThreadMarker) {
+            let width = match self.line.lit_to() {
+                Some((at, part)) => {
+                    let sung = self.width_to(at, mtm);
+                    let next = self.line.text[at..]
+                        .chars()
+                        .next()
+                        .map_or(0, char::len_utf8);
+                    // A label keeps two points on either side of its text.
+                    sung - 2.0 + (self.width_to(at + next, mtm) - sung) * part
+                }
+                None => self.size.width,
+            };
+            self.clip.setFrameSize(NSSize::new(width, self.size.height));
+        }
     }
 
     thread_local! {
@@ -363,6 +480,32 @@ mod mac {
         });
     }
 
+    /// Only how far the lines are lit changed: the panel stays as it is.
+    pub fn lit(id: String, overlay: Overlay) {
+        DispatchQueue::main().exec_async(move || {
+            let Some(mtm) = MainThreadMarker::new() else {
+                return;
+            };
+            let done = PANELS.with(|panels| {
+                let mut panels = panels.borrow_mut();
+                let Some(shown) = panels.get_mut(&id) else {
+                    return false;
+                };
+                let lines = overlay.lines.iter().filter(|line| !line.text.is_empty());
+                for (lit, line) in shown.lit.iter_mut().zip(lines) {
+                    if let Some(lit) = lit {
+                        lit.line.lit = line.lit;
+                        lit.show(mtm);
+                    }
+                }
+                true
+            });
+            if !done {
+                put(mtm, &id, &overlay);
+            }
+        });
+    }
+
     pub fn hide(id: String) {
         DispatchQueue::main().exec_async(move || {
             PANELS.with(|panels| {
@@ -382,25 +525,34 @@ mod mac {
 
     /// A line: faded, and over it what is lit, cut off inside the character
     /// `Line::lit` stops in.
-    fn label(line: &Line, mtm: MainThreadMarker) -> Retained<NSTextField> {
-        let Some((at, part)) = line.lit_to() else {
-            return styled(line, &line.text, 1.0, mtm);
-        };
+    fn label(line: &Line, mtm: MainThreadMarker) -> (Retained<NSTextField>, Option<Lit>) {
+        if !line.lit.is_some_and(|lit| lit >= 0.0) {
+            return (styled(line, &line.text, 1.0, mtm), None);
+        }
         let label = styled(line, &line.text, super::FADED, mtm);
-        let width = |text: &str| styled(line, text, 1.0, mtm).frame().size.width;
-        let sung = width(&line.text[..at]);
-        let next = line.text[at..].chars().next().map_or(0, char::len_utf8);
-        // A label keeps two points on either side of its text.
-        let lit = sung - 2.0 + (width(&line.text[..at + next]) - sung) * part;
-        let size = NSSize::new(lit, label.frame().size.height);
+        let size = label.frame().size;
         let clip = NSView::initWithFrame(
             NSView::alloc(mtm),
             NSRect::new(NSPoint::new(0.0, 0.0), size),
         );
         clip.setClipsToBounds(true);
-        clip.addSubview(&styled(line, &line.text, 1.0, mtm));
+        // The text, with its blurred shadow, is drawn once: moving the cut
+        // only changes the bounds of a layer.
+        clip.setWantsLayer(true);
+        let bright = styled(line, &line.text, 1.0, mtm);
+        bright.setWantsLayer(true);
+        // SAFETY: `NSViewLayerContentsRedrawNever` is 0.
+        let _: () = unsafe { msg_send![&*clip, setLayerContentsRedrawPolicy: 0isize] };
+        clip.addSubview(&bright);
         label.addSubview(&clip);
-        label
+        let mut lit = Lit {
+            line: line.clone(),
+            clip,
+            size,
+            widths: HashMap::new(),
+        };
+        lit.show(mtm);
+        (label, Some(lit))
     }
 
     /// `text` in the style of `line`, its alpha scaled by `alpha`.
@@ -512,6 +664,10 @@ mod mac {
                 panel.setMovableByWindowBackground(true);
                 panel.setHidesOnDeactivate(false);
                 panel.setBecomesKeyOnlyIfNeeded(true);
+                // It is put back from the place kept for it; left restorable,
+                // each change has AppKit encode the whole app's windows.
+                // SAFETY: `setRestorable:` takes a BOOL.
+                let _: () = unsafe { msg_send![&*panel, setRestorable: false] };
                 // SAFETY: the panel stays in `PANELS` and is never closed.
                 unsafe { panel.setReleasedWhenClosed(false) };
                 panel
@@ -525,12 +681,12 @@ mod mac {
         } else {
             super::saved_place(id)
         };
-        let labels: Vec<Retained<NSTextField>> = overlay
+        let (labels, lit): (Vec<Retained<NSTextField>>, Vec<Option<Lit>>) = overlay
             .lines
             .iter()
             .filter(|line| !line.text.is_empty())
             .map(|line| label(line, mtm))
-            .collect();
+            .unzip();
         // None on the taskbar. Locked, only the buttons that unlock it, each
         // where it is when unlocked.
         let buttons: Vec<&super::Button> = if overlay.place == super::Place::Free {
@@ -620,6 +776,7 @@ mod mac {
             plate,
             buttons,
             locked: overlay.locked,
+            lit,
         };
         hover(&shown);
         PANELS.with(|panels| panels.borrow_mut().insert(id.to_string(), shown));
@@ -1390,8 +1547,7 @@ mod win {
                 let at = Vector2 { X: left, Y: top };
                 if let Some((start, part)) = lit {
                     // What is lit and what is not, the edge inside the
-                    // character, moving from before its left side to past
-                    // its right.
+                    // character.
                     let (mut x, mut y) = (0.0, 0.0);
                     let mut metrics = DWRITE_HIT_TEST_METRICS::default();
                     layout.HitTestTextPosition(
@@ -1401,8 +1557,7 @@ mod win {
                         &mut y,
                         &mut metrics,
                     )?;
-                    let edge = (metrics.width / 2.0).max(0.5);
-                    let end = left + x + (metrics.width + edge) * *part as f32;
+                    let end = left + x + metrics.width * *part as f32;
                     let color = |alpha: f32| D2D1_COLOR_F {
                         r: *r as f32 / 255.0,
                         g: *g as f32 / 255.0,
@@ -1426,10 +1581,13 @@ mod win {
                     let lit = target.CreateLinearGradientBrush(
                         &D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
                             startPoint: Vector2 {
-                                X: end - edge,
+                                X: end - 0.5,
                                 Y: 0.0,
                             },
-                            endPoint: Vector2 { X: end, Y: 0.0 },
+                            endPoint: Vector2 {
+                                X: end + 0.5,
+                                Y: 0.0,
+                            },
                         },
                         None,
                         &stops,
@@ -1551,6 +1709,21 @@ mod tests {
             color: [255; 4],
             lit,
         };
+        let overlay = |text: &str, lit| Overlay {
+            lines: vec![Line {
+                text: text.into(),
+                size: 10.0,
+                bold: false,
+                color: [0; 4],
+                lit,
+            }],
+            ..Overlay::default()
+        };
+        let shown = overlay("a", Some(1.0));
+        assert_eq!(shown.change_to(&overlay("a", Some(1.0))), Change::Nothing);
+        assert_eq!(shown.change_to(&overlay("a", Some(1.5))), Change::Lit);
+        assert_eq!(shown.change_to(&overlay("a", None)), Change::All);
+        assert_eq!(shown.change_to(&overlay("b", Some(1.5))), Change::All);
         assert_eq!(line(None).lit_to(), None);
         assert_eq!(line(Some(-1.0)).lit_to(), None);
         assert_eq!(line(Some(2.0)).lit_to(), Some((6, 0.0)));

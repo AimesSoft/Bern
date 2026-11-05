@@ -2359,17 +2359,19 @@ private struct BernMarkRenderer: TextRenderer {
 
 extension View {
     /// `Text(lit:)`: lit as far as `lit`, into a character from its left.
-    func bernLitting(_ lit: Double) -> some View {
+    /// Read in here and not by the view around it, which would lay itself
+    /// out again every time the value moves.
+    func bernLitting(_ lit: @escaping @MainActor () -> Double) -> some View {
         modifier(BernLitting(lit: lit))
     }
 }
 
 private struct BernLitting: ViewModifier {
-    let lit: Double
+    let lit: @MainActor () -> Double
 
     func body(content: Content) -> some View {
         if #available(macOS 15, iOS 18, tvOS 18, *) {
-            content.textRenderer(BernLitRenderer(lit: lit))
+            content.textRenderer(BernLitRenderer(lit: lit()))
         } else {
             content
         }
@@ -2396,8 +2398,7 @@ private struct BernLitRenderer: TextRenderer {
         }
     }
 
-    /// One glyph faded, and over it the same glyph as far as `part`, with a
-    /// soft edge that travels from before its left side to past its right.
+    /// One glyph faded, and over it the same glyph cut off at `part`.
     private func draw(_ glyph: Text.Layout.RunSlice, part: Double, in context: GraphicsContext) {
         guard part < 1 else {
             context.draw(glyph)
@@ -2407,18 +2408,9 @@ private struct BernLitRenderer: TextRenderer {
         faded.opacity *= 0.4
         faded.draw(glyph)
         guard part > 0 else { return }
-        let rect = glyph.typographicBounds.rect.insetBy(dx: -2, dy: -2)
-        let edge = rect.width / 2
-        let end = rect.minX + (rect.width + edge) * part
+        let rect = glyph.typographicBounds.rect.insetBy(dx: 0, dy: -2)
         var lit = context
-        lit.clipToLayer { layer in
-            layer.fill(
-                Path(rect),
-                with: .linearGradient(
-                    Gradient(colors: [.white, .clear]),
-                    startPoint: CGPoint(x: end - edge, y: rect.midY),
-                    endPoint: CGPoint(x: end, y: rect.midY)))
-        }
+        lit.clip(to: Path(CGRect(x: rect.minX, y: rect.minY, width: rect.width * part, height: rect.height)))
         lit.draw(glyph)
     }
 }

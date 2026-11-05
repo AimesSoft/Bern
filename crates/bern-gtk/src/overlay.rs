@@ -20,6 +20,11 @@ impl Host for Overlays {
         glib::MainContext::default().invoke(move || show(&id, &overlay));
     }
 
+    fn lit(&self, id: &str, overlay: &Overlay) {
+        let (id, overlay) = (id.to_string(), overlay.clone());
+        glib::MainContext::default().invoke(move || lit(&id, &overlay));
+    }
+
     fn hide(&self, id: &str) {
         let id = id.to_string();
         glib::MainContext::default().invoke(move || {
@@ -198,6 +203,19 @@ fn label(line: &Line) -> gtk::Label {
     attributes.insert(gtk::pango::AttrInt::new_foreground_alpha(wide(a)));
     label.set_attributes(Some(&attributes));
     label
+}
+
+/// Only how far the lines are lit changed: they draw again.
+fn lit(id: &str, overlay: &Overlay) {
+    let Parts { lines, .. } = parts(id);
+    let mut child = lines.first_child();
+    for line in overlay.lines.iter().filter(|line| !line.text.is_empty()) {
+        let Some(widget) = child else { break };
+        if let (Some(value), Some(shown)) = (line.lit, widget.downcast_ref::<crate::lit::Lit>()) {
+            shown.set(value);
+        }
+        child = widget.next_sibling();
+    }
 }
 
 fn show(id: &str, overlay: &Overlay) {

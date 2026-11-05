@@ -972,6 +972,7 @@ class BernBridge(context: Context) {
             "overlay_allowed" -> if (BernOverlay.allowed(application)) "yes" else "no"
             "overlay_ask" -> onMain { BernOverlay.ask(application); "" }
             "overlay_show" -> onMain { BernOverlay.show(application, first, second); "" }
+            "overlay_lit" -> onMain { BernOverlay.lit(first, second); "" }
             "overlay_hide" -> onMain { BernOverlay.hide(application, first); "" }
             "import_folder" -> importFolder(Uri.parse(first), File(second)).absolutePath
             "export_path" -> exportPath(File(first), Uri.parse(second)).toString()
@@ -2680,6 +2681,22 @@ internal object BernOverlay {
         manager.updateViewLayout(view, layout)
     }
 
+    /// Only how far the lines are lit changed: they draw again.
+    fun lit(id: String, json: String) {
+        shown[id] = json
+        val view = views[id] ?: return
+        val lines = org.json.JSONObject(json).optJSONArray("lines") ?: return
+        var child = 0
+        for (i in 0 until lines.length()) {
+            val line = lines.getJSONObject(i)
+            if (line.optString("text").isEmpty()) continue
+            while (child < view.childCount && view.getChildAt(child) !is BernLitLine) child += 1
+            if (child == view.childCount) return
+            (view.getChildAt(child) as BernLitLine).light(line.optDouble("lit", -1.0))
+            child += 1
+        }
+    }
+
     fun hide(context: Context, id: String) {
         main.removeCallbacksAndMessages(id)
         barred(context, id, false)
@@ -2752,11 +2769,15 @@ internal class BernOverlaySymbol(private val symbol: String) : android.graphics.
 }
 
 /// A line of an overlay: as far as `lit` in `color`, the rest faded, the edge
-/// inside the character `lit` stops in, moving from before its left side to
-/// past its right. All of it below zero.
+/// inside the character `lit` stops in. All of it below zero.
 private class BernLitLine(
-    context: android.content.Context, private val lit: Double, private val color: Int,
+    context: android.content.Context, private var lit: Double, private val color: Int,
 ) : android.widget.TextView(context) {
+    fun light(value: Double) {
+        lit = value
+        invalidate()
+    }
+
     override fun onDraw(canvas: android.graphics.Canvas) {
         val shown = text.toString()
         val lines = layout
@@ -2765,11 +2786,10 @@ private class BernLitLine(
             val at = shown.offsetByCodePoints(0, whole)
             val left = lines.getPrimaryHorizontal(at)
             val right = if (at < shown.length) lines.getPrimaryHorizontal(shown.offsetByCodePoints(at, 1)) else left
-            val edge = ((right - left) / 2).coerceAtLeast(0.5f)
-            val end = left + (right - left + edge) * (lit - lit.toInt()).toFloat()
+            val end = left + (right - left) * (lit - lit.toInt()).toFloat()
             val faded = (color and 0x00FFFFFF) or ((android.graphics.Color.alpha(color) * 0.4).toInt() shl 24)
             paint.shader = android.graphics.LinearGradient(
-                end - edge, 0f, end, 0f, color, faded, android.graphics.Shader.TileMode.CLAMP,
+                end - 0.5f, 0f, end + 0.5f, 0f, color, faded, android.graphics.Shader.TileMode.CLAMP,
             )
         }
         super.onDraw(canvas)

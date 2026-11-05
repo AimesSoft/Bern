@@ -2913,8 +2913,12 @@ struct BernMasonry: Layout {
 /// A `Text` with `lit`: as far as `lit` as it is, the rest faded; all of it
 /// below zero. Where text renderers exist, `bernLitting` does this and goes
 /// into a character from its left; before them a character comes up whole.
-func bernLit(_ text: String, _ lit: Double) -> SwiftUI.Text {
+/// `lit` is read only then: it changes many times a second, and whatever
+/// reads it is drawn again each time.
+@MainActor
+func bernLit(_ text: String, _ lit: @autoclosure () -> Double) -> SwiftUI.Text {
     if #available(macOS 15, iOS 18, tvOS 18, *) { return SwiftUI.Text(verbatim: text) }
+    let lit = lit()
     let scalars = text.unicodeScalars
     guard lit >= 0 else { return SwiftUI.Text(verbatim: text) }
     let at = scalars.index(scalars.startIndex, offsetBy: Int(lit), limitedBy: scalars.endIndex) ?? scalars.endIndex
