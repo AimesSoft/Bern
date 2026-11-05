@@ -157,6 +157,20 @@ fn showcase_generates_video_queries_and_windows() {
 /// The showcase's tool strip: a segmented picker at its own width, a
 /// spacer taking the rest of its line, and chips that are items of the
 /// `FlowRow`; labelled chips elsewhere wrap in a flow of their own.
+/// A release keeps only the resources its code reaches, and a name looked up
+/// at run time reaches none: the rounded picture would lose its clipping.
+#[test]
+fn a_rounded_video_reaches_its_layout() {
+    let (config, compiled) = compile("gallery");
+    let files = ComposeAndroid
+        .generate(&compiled.app, &context(&config, &compiled))
+        .unwrap();
+    let media = file(&files, "dev/bern/runtime/BernMedia.kt");
+    assert!(media.contains("dev.bern.gallery.R.layout.bern_player_texture"));
+    assert!(!media.contains("getIdentifier"));
+    assert!(!media.contains("__APP_PACKAGE__"));
+}
+
 #[test]
 fn chip_pickers_are_items_of_their_flow() {
     let (config, compiled) = compile("showcase");

@@ -486,9 +486,9 @@ private fun BernVideoSurface(playerID: String, window: String, fit: BernVideoFit
     val token = remember { java.util.UUID.randomUUID().toString() }
     val context = LocalContext.current
     val view = remember(clipped) {
-        // A rounded frame clips a TextureView only.
-        val layout = if (clipped) context.resources.getIdentifier("bern_player_texture", "layout", context.packageName) else 0
-        val inflated = if (layout != 0) android.view.LayoutInflater.from(context).inflate(layout, null) as? PlayerView else null
+        // A rounded frame clips a TextureView only. The layout is named, not
+        // looked up: a release keeps only the resources its code reaches.
+        val inflated = if (clipped) android.view.LayoutInflater.from(context).inflate(__APP_PACKAGE__.R.layout.bern_player_texture, null) as? PlayerView else null
         (inflated ?: PlayerView(context)).apply {
             useController = false
             setShutterBackgroundColor(android.graphics.Color.BLACK)
