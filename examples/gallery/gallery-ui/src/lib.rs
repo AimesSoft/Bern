@@ -146,6 +146,7 @@ pub fn about(app: gallery::Client, windows: AppWindows, #[session] draft: AboutD
                         Image(source: "media/poster.jpg", width: 72, height: 72, fit: cover, corner: 36, spin: true, spin_period: 12)
                     }
                     Text(content: tr! { "zh-Hans" => "图案集", "en" => "Gallery" }, style: title)
+                    Text(content: tr! { "zh-Hans" => "版本 {version}", "en" => "Version {version}"; version: window.app_version }, style: footnote, emphasis: secondary)
                     Text(content: tr! { "zh-Hans" => "一面会浮起的图案墙。", "en" => "A wall of patterns that lift." }, emphasis: secondary)
                     Text(content: tr! { "zh-Hans" => "预览版", "en" => "Preview" }, style: footnote, color: accent)
                     Button(id: done, label: tr! { "zh-Hans" => "好", "en" => "OK" }, prominence: prominent, default_focus: true) => windows.about.close()
