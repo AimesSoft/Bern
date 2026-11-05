@@ -59,6 +59,16 @@ pub trait EngineProtocol: Send + 'static {
     }
     /// Current value of every state field, in descriptor order.
     fn snapshot(&self) -> Vec<Value>;
+    /// The fields `wake` may have changed, with their positions; `None` for
+    /// all of them. A snapshot of a large state costs too much for an
+    /// engine woken many times a second.
+    fn woken_fields(&mut self) -> Option<Vec<(usize, Value)>> {
+        None
+    }
+    /// `wake` took in nothing, so the last snapshot still holds.
+    fn quiet(&self) -> bool {
+        false
+    }
     /// The optional modules the application starts with, as saved by
     /// [`EngineProtocol::modules_changed`]; `None` keeps each module's
     /// default.
@@ -622,12 +632,26 @@ impl<E: EngineProtocol> Worker<E> {
         if self.poisoned {
             return;
         }
+        let _span = trace::Span::enter("engine.wake");
         let engine = &mut self.engine;
         if catch_unwind(AssertUnwindSafe(|| engine.wake())).is_err() {
             self.poisoned = true;
             return;
         }
-        publish(&self.shared, self.engine.snapshot());
+        let _span = trace::Span::enter("engine.wake.publish");
+        match self.engine.woken_fields() {
+            Some(fields) if self.published() => {
+                publish_fields(&self.shared, fields);
+            }
+            _ => {
+                publish(&self.shared, self.engine.snapshot());
+            }
+        }
+    }
+
+    /// Whether every field has been published once.
+    fn published(&self) -> bool {
+        !self.shared.state.lock().expect("state lock").1.is_empty()
     }
 
     /// Run one job; `false` once the engine should stop.
@@ -753,6 +777,34 @@ fn publish(shared: &Shared, next: Vec<Value>) -> u64 {
     publish_with(shared, next, |_, previous, value| previous != Some(value)).0
 }
 
+/// Publish these fields, the others staying as they are.
+fn publish_fields(shared: &Shared, fields: Vec<(usize, Value)>) -> u64 {
+    let update = {
+        let mut state = shared.state.lock().expect("state lock");
+        let mut changes = Vec::new();
+        for (index, value) in fields {
+            if state
+                .1
+                .get(index)
+                .is_some_and(|previous| *previous != value)
+            {
+                state.1[index] = value.clone();
+                changes.push((index, value));
+            }
+        }
+        if changes.is_empty() {
+            return state.0;
+        }
+        state.0 += 1;
+        StateUpdate {
+            revision: state.0,
+            changes,
+        }
+    };
+    tell(shared, &update);
+    update.revision
+}
+
 /// `publish` for a traced job: the snapshot, each field's comparison and
 /// the whole publication, listeners included, are recorded.
 fn publish_traced(shared: &Shared, engine: &impl EngineProtocol) -> u64 {
@@ -801,6 +853,11 @@ fn publish_with(
             changes,
         }
     };
+    tell(shared, &update);
+    (update.revision, true)
+}
+
+fn tell(shared: &Shared, update: &StateUpdate) {
     let listeners: Vec<Listener> = shared
         .listeners
         .lock()
@@ -809,9 +866,8 @@ fn publish_with(
         .map(|(_, listener)| Arc::clone(listener))
         .collect();
     for listener in listeners {
-        listener(&update);
+        listener(update);
     }
-    (update.revision, true)
 }
 
 #[cfg(test)]

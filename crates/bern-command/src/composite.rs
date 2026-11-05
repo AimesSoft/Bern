@@ -74,6 +74,8 @@ pub struct Composite {
     switch: Option<usize>,
     /// `namespace.event` to the commands answering it, in catalog order.
     subscribers: BTreeMap<String, Vec<usize>>,
+    /// The last wake ran commands, which can change any part.
+    followed: bool,
 }
 
 impl Composite {
@@ -134,6 +136,7 @@ impl Composite {
             offsets,
             switch,
             subscribers,
+            followed: false,
         };
         // A running module's dependencies run too.
         let running: Vec<String> = composite
@@ -433,7 +436,30 @@ impl EngineProtocol for Composite {
             }
             sent.extend(outbox::take());
         }
+        // What they sent can change any part.
+        self.followed = !sent.is_empty();
         self.follow(sent, "wake");
+    }
+
+    /// The shell, and the modules that took something in. Only commands
+    /// change the rest.
+    fn woken_fields(&mut self) -> Option<Vec<(usize, Value)>> {
+        if std::mem::take(&mut self.followed) {
+            return None;
+        }
+        let mut fields: Vec<(usize, Value)> =
+            self.shell.snapshot().into_iter().enumerate().collect();
+        let first = fields.len();
+        for (index, module) in self.modules.iter().enumerate() {
+            let Some(engine) = &module.engine else {
+                continue;
+            };
+            let engine = lock(engine);
+            if !engine.quiet() {
+                fields.push((first + index, Value::Record(engine.snapshot())));
+            }
+        }
+        Some(fields)
     }
 
     fn query(&self, invocation: &Invocation, answer: QueryAnswer) {
