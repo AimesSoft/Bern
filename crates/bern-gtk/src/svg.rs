@@ -73,7 +73,7 @@ pub fn WebPage(p: &Parent, ctx: &Ctx, props: WebPageProps, action: Option<crate:
             }
             let mut cookie = webkit6::soup::Cookie::new(name, value, &domain, "/", -1);
             cookie.set_secure(true);
-            manager.add_cookie(&mut cookie, None::<&gio::Cancellable>, |_| {});
+            manager.add_cookie(&cookie, None::<&gio::Cancellable>, |_| {});
         }
     }
     let manager = webkit6::UserContentManager::new();

@@ -1429,10 +1429,12 @@ fn closed(win: &Rc<Win>) {
         .status_item
         .as_ref()
         .is_some_and(|item| item.shown.is_some());
-    if follows && !crate::status::shown() && all().is_empty() {
-        if let Some(application) = host().application.get() {
-            application.quit();
-        }
+    if follows
+        && !crate::status::shown()
+        && all().is_empty()
+        && let Some(application) = host().application.get()
+    {
+        application.quit();
     }
 }
 
