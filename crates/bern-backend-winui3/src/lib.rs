@@ -703,16 +703,20 @@ impl Target for WinUi3Windows {
                 keep: vec![],
             },
             text("setup.cpp", installer::SETUP_CPP.to_string()),
+            text("pack.cpp", installer::PACK_CPP.to_string()),
             text(
                 "setup_info.h",
                 installer::setup_info(app, &executable, &payload),
             ),
             text(
                 "setup.rc",
-                installer::setup_rc(app, &output.join("app/app.ico"), &payload),
+                installer::setup_rc(app, &output.join("app/app.ico")),
             ),
             text("setup.manifest", installer::SETUP_MANIFEST.to_string()),
-            text("package.bat", installer::package_script(&programs, &setup)),
+            text(
+                "package.bat",
+                installer::package_script(&programs, &staged, &setup),
+            ),
             BuildStep::CreateDir { path: dist.clone() },
             BuildStep::RemoveIfExists {
                 path: setup.clone(),

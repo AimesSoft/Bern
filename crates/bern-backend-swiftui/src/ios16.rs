@@ -572,9 +572,10 @@ mod tests {
         for dir in ["templates", "src/swift"] {
             for entry in std::fs::read_dir(root.join(dir)).unwrap() {
                 let path = entry.unwrap().path();
-                if path
-                    .file_name()
-                    .is_some_and(|name| name != "BernCompat16.swift")
+                if path.is_file()
+                    && path
+                        .file_name()
+                        .is_some_and(|name| name != "BernCompat16.swift")
                 {
                     known.push_str(&std::fs::read_to_string(path).unwrap());
                 }

@@ -6,6 +6,7 @@
 //! unless the app declares style overrides. The engine runs in the app
 //! process; the build links it as a static library.
 
+mod dmg;
 mod glue;
 pub mod ios;
 mod ios16;
@@ -953,44 +954,149 @@ impl Target for SwiftUiMacos {
                 path(&volume.join("Applications")),
             ],
         ));
-        // `diskutil image` where macOS has it; `hdiutil create`, which newer
-        // systems call deprecated, before that.
+        // The window the image opens to. `.DS_Store` goes in once the volume
+        // exists: `diskutil image create` leaves such files out.
+        let writable = stage.join("writable.dmg");
+        let mount = stage.join("mount");
+        let layout = stage.join("layout");
+        steps.push(BuildStep::Write {
+            path: volume.join(dmg::BACKGROUND_PATH),
+            contents: dmg::BACKGROUND.to_vec(),
+        });
+        steps.push(BuildStep::Copy {
+            from: staged.join("Contents/Resources").join(ICON_FILE),
+            to: volume.join(dmg::VOLUME_ICON),
+        });
+        steps.push(BuildStep::Write {
+            path: layout.clone(),
+            contents: dmg::ds_store(&name, &format!("{product}.app")),
+        });
+        steps.push(BuildStep::CreateDir {
+            path: mount.clone(),
+        });
+        // `diskutil image` where macOS has it; `hdiutil`, which newer systems
+        // call deprecated, before that.
         let diskutil = std::process::Command::new("diskutil")
             .args(["image", "create", "from", "--help"])
             .output()
             .is_ok_and(|output| output.status.success());
-        steps.push(if diskutil {
-            run(
-                "Make the disk image",
-                "diskutil",
-                vec![
-                    "image".into(),
-                    "create".into(),
-                    "from".into(),
-                    "--format".into(),
-                    "UDZO".into(),
-                    "--volumeName".into(),
-                    name,
-                    path(&volume),
-                    path(&image),
-                ],
-            )
+        let strings = |args: &[&str]| args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>();
+        steps.extend(if diskutil {
+            vec![
+                run(
+                    "Make the volume",
+                    "diskutil",
+                    strings(&[
+                        "image",
+                        "create",
+                        "from",
+                        "--format",
+                        "RAW",
+                        "--volumeName",
+                        &name,
+                        &path(&volume),
+                        &path(&writable),
+                    ]),
+                ),
+                run(
+                    "Mount the volume",
+                    "diskutil",
+                    strings(&[
+                        "image",
+                        "attach",
+                        "--nobrowse",
+                        "--mountPoint",
+                        &path(&mount),
+                        &path(&writable),
+                    ]),
+                ),
+            ]
         } else {
-            run(
-                "Make the disk image",
-                "hdiutil",
-                vec![
-                    "create".into(),
-                    "-volname".into(),
-                    name,
-                    "-srcfolder".into(),
-                    path(&volume),
-                    "-ov".into(),
-                    "-format".into(),
-                    "UDZO".into(),
-                    path(&image),
-                ],
-            )
+            vec![
+                run(
+                    "Make the volume",
+                    "hdiutil",
+                    strings(&[
+                        "create",
+                        "-volname",
+                        &name,
+                        "-srcfolder",
+                        &path(&volume),
+                        "-ov",
+                        "-format",
+                        "UDRW",
+                        &path(&writable),
+                    ]),
+                ),
+                run(
+                    "Mount the volume",
+                    "hdiutil",
+                    strings(&[
+                        "attach",
+                        "-nobrowse",
+                        "-noautoopen",
+                        "-mountpoint",
+                        &path(&mount),
+                        &path(&writable),
+                    ]),
+                ),
+            ]
+        });
+        steps.push(BuildStep::Copy {
+            from: layout,
+            to: mount.join(".DS_Store"),
+        });
+        steps.push(run(
+            "Give the volume its icon",
+            "xattr",
+            strings(&[
+                "-wx",
+                "com.apple.FinderInfo",
+                dmg::CUSTOM_ICON,
+                &path(&mount),
+            ]),
+        ));
+        steps.extend(if diskutil {
+            vec![
+                run(
+                    "Unmount the volume",
+                    "diskutil",
+                    strings(&["eject", &path(&mount)]),
+                ),
+                run(
+                    "Make the disk image",
+                    "diskutil",
+                    strings(&[
+                        "image",
+                        "create",
+                        "from",
+                        "--format",
+                        "UDZO",
+                        &path(&writable),
+                        &path(&image),
+                    ]),
+                ),
+            ]
+        } else {
+            vec![
+                run(
+                    "Unmount the volume",
+                    "hdiutil",
+                    strings(&["detach", &path(&mount)]),
+                ),
+                run(
+                    "Make the disk image",
+                    "hdiutil",
+                    strings(&[
+                        "convert",
+                        &path(&writable),
+                        "-format",
+                        "UDZO",
+                        "-o",
+                        &path(&image),
+                    ]),
+                ),
+            ]
         });
         let mut notes = Vec::new();
         match (&signing.macos_identity, &signing.macos_notary_profile) {
