@@ -436,8 +436,8 @@ bool StartGraphics() {
     place_format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
     ComPtr<IDWriteInlineObject> dots;
     dwrite->CreateEllipsisTrimmingSign(place_format.Get(), dots.GetAddressOf());
-    DWRITE_TRIMMING trimming{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
-    place_format->SetTrimming(&trimming, dots.Get());
+    DWRITE_TRIMMING place_trimming{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
+    place_format->SetTrimming(&place_trimming, dots.Get());
     // A long name ends in an ellipsis rather than pushing the rest down.
     name_format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
     ComPtr<IDWriteInlineObject> ellipsis;
