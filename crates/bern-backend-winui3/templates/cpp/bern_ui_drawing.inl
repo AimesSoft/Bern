@@ -83,19 +83,6 @@ struct Surface {
 
 namespace Pictures {
 
-/// Read a picture's bytes: a `file:` URL from disk, an http(s) one over
-/// the network.
-inline winrt::Windows::Foundation::IAsyncOperation<winrt::Windows::Storage::Streams::IBuffer> Read(std::string url) {
-    if (auto path = Host::FilePath(url)) {
-        auto file = co_await winrt::Windows::Storage::StorageFile::GetFileFromPathAsync(*path);
-        co_return co_await winrt::Windows::Storage::FileIO::ReadBufferAsync(file);
-    }
-    auto reference = winrt::Windows::Storage::Streams::RandomAccessStreamReference::CreateFromUri(winrt::Windows::Foundation::Uri(Wide(url)));
-    auto stream = co_await reference.OpenReadAsync();
-    winrt::Windows::Storage::Streams::Buffer buffer(static_cast<uint32_t>(stream.Size()));
-    co_return co_await stream.ReadAsync(buffer, buffer.Capacity(), winrt::Windows::Storage::Streams::InputStreamOptions::None);
-}
-
 /// The mean color of encoded picture bytes, over a 32 × 32 copy.
 inline std::optional<winrt::Windows::UI::Color> Average(uint8_t const* bytes, size_t size) {
     auto wic = Draw::Imaging();
@@ -123,6 +110,32 @@ inline std::optional<winrt::Windows::UI::Color> Average(uint8_t const* bytes, si
     }
     uint64_t count = pixels.size() / 4;
     return winrt::Windows::UI::Color{255, static_cast<uint8_t>(red / count), static_cast<uint8_t>(green / count), static_cast<uint8_t>(blue / count)};
+}
+
+/// Whether encoded bytes are a picture this system can decode.
+inline bool Decodable(uint8_t const* bytes, size_t size) {
+    auto wic = Draw::Imaging();
+    if (!wic || !bytes || !size) return false;
+    winrt::com_ptr<IStream> stream;
+    stream.attach(SHCreateMemStream(bytes, static_cast<UINT>(size)));
+    winrt::com_ptr<IWICBitmapDecoder> decoder;
+    return stream && SUCCEEDED(wic->CreateDecoderFromStream(stream.get(), nullptr, WICDecodeMetadataCacheOnDemand, decoder.put()));
+}
+
+/// The bytes at an http(s) address once they come, for as long as `waiter`
+/// waits; nothing after that.
+inline winrt::Windows::Foundation::IAsyncOperation<winrt::Windows::Storage::Streams::IBuffer> Download(std::string url, std::shared_ptr<bern::pictures::Waiter> waiter) {
+    co_return co_await bern::pictures::Until(std::move(url), std::move(waiter), [](auto const& bytes) { return Decodable(bytes.data(), bytes.Length()); });
+}
+
+/// Read a picture's bytes: a `file:` URL from disk, an http(s) one over
+/// the network, as long as that takes.
+inline winrt::Windows::Foundation::IAsyncOperation<winrt::Windows::Storage::Streams::IBuffer> Read(std::string url) {
+    if (auto path = Host::FilePath(url)) {
+        auto file = co_await winrt::Windows::Storage::StorageFile::GetFileFromPathAsync(*path);
+        co_return co_await winrt::Windows::Storage::FileIO::ReadBufferAsync(file);
+    }
+    co_return co_await Download(std::move(url), std::make_shared<bern::pictures::Waiter>());
 }
 
 struct Entry {

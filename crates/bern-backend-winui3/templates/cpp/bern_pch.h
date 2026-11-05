@@ -111,6 +111,8 @@ struct __declspec(uuid("d5a2f60c-37b2-44a2-937b-8d8eb9726821")) IBernIslandsSwap
 #include <windows.ui.xaml.hosting.desktopwindowxamlsource.h>
 #endif
 
+#include "bern_pictures.h"
+
 #if BERN_WITH_WINUI
 namespace bern::winui {
 namespace xaml = winrt::Microsoft::UI::Xaml;

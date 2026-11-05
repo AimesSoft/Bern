@@ -241,7 +241,10 @@ inline bool Handle(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam, LRESUL
     case WM_ACTIVATE:
         win->focused = LOWORD(wparam) != WA_INACTIVE;
         win->ScheduleReport();
-        if (win->focused) Snapshot::Schedule();
+        if (win->focused) {
+            Snapshot::Schedule();
+            bern::pictures::TryAgain();
+        }
         return false;
     case WM_SIZE:
     case WM_MOVE:
