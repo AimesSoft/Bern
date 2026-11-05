@@ -414,12 +414,11 @@ fn motion_props_move_the_elements_they_are_on() {
     }
 }
 
-/// A stack that fills only through spacers inside it starts from its own
-/// length beside a spacer, so that the spacers give way to what it holds.
-#[test]
-fn a_spaced_stack_keeps_its_length_beside_a_spacer() {
+/// The generated interface of the hello world with `body` as its window's
+/// content.
+fn hello_with(name: &str, body: &str) -> String {
     let root = workspace();
-    let dir = root.join("target/bern-test/gpui-spaced");
+    let dir = root.join("target/bern-test").join(name);
     let _ = std::fs::remove_dir_all(&dir);
     let copy = dir.join("source");
     for package in ["hello-core", "hello-protocol", "hello-ui"] {
@@ -437,36 +436,22 @@ fn a_spaced_stack_keeps_its_length_beside_a_spacer() {
     .unwrap();
     std::fs::write(
         copy.join("hello-ui/src/lib.rs"),
-        r#"use bern::prelude::*;
+        format!(
+            r#"use bern::prelude::*;
 use hello_protocol::hello;
 
 #[component]
-pub fn app(app: hello::Client, windows: AppWindows) -> impl View {
-    ui! {
-        WindowSet(handle: AppWindows, primary: main) {
-            Window(id: main, title: tr! { "zh-Hans" => "你好", "en" => "Hello" }, initial: open, width: 480, height: 320) {
-                Column {
-                    Row {
-                        Spacer
-                        Column {
-                            Row { Spacer Text(content: tr! { "zh-Hans" => "一", "en" => "One" }) Spacer }
-                        }
-                        Spacer
-                    }
-                    Row {
-                        Column {
-                            Row { Spacer Text(content: tr! { "zh-Hans" => "二", "en" => "Two" }) }
-                        }
-                        Column {
-                            Row { Spacer Text(content: tr! { "zh-Hans" => "三", "en" => "Three" }) }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-"#,
+pub fn app(app: hello::Client, windows: AppWindows) -> impl View {{
+    ui! {{
+        WindowSet(handle: AppWindows, primary: main) {{
+            Window(id: main, title: tr! {{ "zh-Hans" => "你好", "en" => "Hello" }}, initial: open, width: 480, height: 320) {{
+                {body}
+            }}
+        }}
+    }}
+}}
+"#
+        ),
     )
     .unwrap();
     let config = bern_compiler::config::load(&copy.join("Bern.toml")).unwrap();
@@ -487,10 +472,54 @@ pub fn app(app: hello::Client, windows: AppWindows) -> impl View {
         release: false,
     };
     let files = Gpui::MACOS.generate(&compiled.app, &context).unwrap();
-    let ui = files
+    files
         .iter()
         .find(|file| file.path == Path::new("app/src/ui.rs"))
         .map(|file| String::from_utf8_lossy(&file.contents).into_owned())
-        .unwrap();
+        .unwrap()
+}
+
+/// A stack that fills only through spacers inside it starts from its own
+/// length beside a spacer, so that the spacers give way to what it holds.
+#[test]
+fn a_spaced_stack_keeps_its_length_beside_a_spacer() {
+    let ui = hello_with(
+        "gpui-spaced",
+        r#"Column {
+                    Row {
+                        Spacer
+                        Column {
+                            Row { Spacer Text(content: tr! { "zh-Hans" => "一", "en" => "One" }) Spacer }
+                        }
+                        Spacer
+                    }
+                    Row {
+                        Column {
+                            Row { Spacer Text(content: tr! { "zh-Hans" => "二", "en" => "Two" }) }
+                        }
+                        Column {
+                            Row { Spacer Text(content: tr! { "zh-Hans" => "三", "en" => "Three" }) }
+                        }
+                    }
+                }"#,
+    );
+    assert_eq!(ui.matches("keep: true").count(), 1, "{ui}");
+}
+
+/// A stack of controls in a row too narrow for them keeps its width, while
+/// a stack of text gives it up and wraps.
+#[test]
+fn a_stack_of_controls_does_not_shrink_in_a_row() {
+    let ui = hello_with(
+        "gpui-firm",
+        r#"Row {
+                    Stack {
+                        IconButton(id: down, icon: "arrow.down.circle", label: tr! { "zh-Hans" => "下载", "en" => "Download" }) => app.wave()
+                    }
+                    Stack {
+                        Text(content: tr! { "zh-Hans" => "一", "en" => "One" })
+                    }
+                }"#,
+    );
     assert_eq!(ui.matches("keep: true").count(), 1, "{ui}");
 }
