@@ -1,7 +1,8 @@
 //! Bern icon names (SF Symbols naming) as glyphs of the system icon fonts:
 //! Segoe Fluent Icons on Windows 11 and Segoe MDL2 Assets on Windows 10,
-//! which share these code points. The table is the one source: the catalog
-//! carries it to the runtime, and the check rejects names it lacks.
+//! which share these code points except for `WINDOWS_10_GLYPHS`. The tables
+//! are the one source: the catalog carries them to the runtime, and the
+//! check rejects names they lack.
 //! The fonts have no quote bubble, so `quote.bubble`, the lyrics button of
 //! Apple's music apps, is the captions box with a speaker: words that go
 //! with the sound. (A microphone, which it was, reads as recording.)
@@ -133,6 +134,19 @@ pub const GLYPHS: &[(&str, u32)] = &[
     ("xmark.circle.fill", 0xE894),
 ];
 
+/// Where Windows 10 needs another code point, sorted by name. Its Segoe MDL2
+/// Assets lacks U+ED1A, U+E93A and U+ED37 (compared with the font of build
+/// 19045), and its U+E8B7 is a tall page, not a folder. The font has no eye
+/// with a slash, so `eye.slash` is its half-closed eye; `sparkles` is the
+/// star, as on GTK. All of these are in Segoe Fluent Icons too, so a Windows
+/// 10 with that font installed draws them as well.
+pub const WINDOWS_10_GLYPHS: &[(&str, u32)] = &[
+    ("eye.slash", 0xE890),
+    ("folder", 0xF12B),
+    ("pip.enter", 0xE944),
+    ("sparkles", 0xE734),
+];
+
 /// The glyph of `name`, if the fonts have one.
 pub fn glyph(name: &str) -> Option<u32> {
     GLYPHS
@@ -155,6 +169,20 @@ mod tests {
         );
         assert_eq!(glyph("folder"), Some(0xE8B7));
         assert_eq!(glyph("no.such.symbol"), None);
+    }
+
+    #[test]
+    fn windows_10_only_replaces_names_of_the_table() {
+        assert!(
+            WINDOWS_10_GLYPHS
+                .windows(2)
+                .all(|pair| pair[0].0 < pair[1].0)
+        );
+        for (name, code) in WINDOWS_10_GLYPHS {
+            assert!((0xE000..=0xF8FF).contains(code), "{name}");
+            assert_ne!(glyph(name), Some(*code), "{name} is the same in both");
+            assert!(glyph(name).is_some(), "{name} is not in the table");
+        }
     }
 
     #[test]

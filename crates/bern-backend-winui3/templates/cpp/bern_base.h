@@ -501,10 +501,13 @@ struct Catalog {
     std::vector<std::tuple<std::string, std::string, std::optional<double>>> textStyles;
 };
 
-/// The glyph of a Bern icon name (SF Symbols naming) in Segoe Fluent Icons
-/// and Segoe MDL2 Assets, which share these code points; empty when there
-/// is none. Generated with the catalog.
+/// The glyph of a Bern icon name (SF Symbols naming) in the system's icon
+/// font, Segoe Fluent Icons on Windows 11 and Segoe MDL2 Assets on Windows
+/// 10; empty when there is none. Generated with the catalog.
 wchar_t const* IconGlyph(std::string_view name);
+
+/// Whether this is Windows 11 or later.
+bool OnWindows11();
 
 /// The generated application catalog (`app_catalog.cpp`).
 Catalog BernCatalog();
