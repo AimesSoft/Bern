@@ -73,7 +73,7 @@
 
 | 组件 | SwiftUI | 说明 |
 | --- | --- | --- |
-| `Image` | 运行时视图 `BernImage` | 状态里的图片（`MediaSource` 的文件或 http(s) 地址）在后台任务里读取并解码，宽高写死时与声明的图片一样按画框像素的两倍解码（`kCGImageSourceThumbnailMaxPixelSize`），按地址与解码尺寸缓存；解码都带 `kCGImageSourceShouldCacheImmediately`，在解码的线程上完成，而不是留到第一次绘制时在界面线程上做（2026-10-27，此前状态里的图片按原图大小解码）。声明的图片用 ImageIO 从 `Contents/Resources` 解码（按名称缓存）：macOS 15 起按 HDR 解码，带增益图的 JPEG 应用增益图，PQ 与 HLG 的 PNG 保留原有范围；EXIF 方向由 `Image(decorative:scale:orientation:)` 应用。`resizable()` 后按 `fit` 用 `.fit`、`.fill` 或直接拉伸，`frame` 后 `clipped()`，并允许高动态范围（`.allowedDynamicRange(.high)`）；只写一边时另一边按图片比例。有 `label` 时是带名称的图片元素，没有时对辅助技术隐藏 |
+| `Image` | 运行时视图 `BernImage` | 状态里的图片（`MediaSource` 的文件或 http(s) 地址）在后台任务里读取并解码，宽高写死时与声明的图片一样按画框像素的两倍解码（`kCGImageSourceThumbnailMaxPixelSize`），按地址与解码尺寸缓存；解码都带 `kCGImageSourceShouldCacheImmediately`，在解码的线程上完成，而不是留到第一次绘制时在界面线程上做（2026-10-27，此前状态里的图片按原图大小解码）。下载因网络失败、15 秒没有任何数据，或服务器此时答不了（408、429、5xx）时，只要视图还在等，就在约 1、2、4、8、16、32 秒后再试，没有数据的那次之后换新连接，否则 HTTP/2 的请求会回到卡住的连接上；之后暂停，等网络变化或应用回到前台，视图重新出现时立刻从头再试。服务器答了但不是图片的地址（其他状态码、不是图片的数据、证书错误）在同一网络上只问一次，网络变化后还在等的视图再问一次（2026-11-05，此前下载失败后一直空着，直到地址变化）。iOS 与 tvOS 共用这段代码。声明的图片用 ImageIO 从 `Contents/Resources` 解码（按名称缓存）：macOS 15 起按 HDR 解码，带增益图的 JPEG 应用增益图，PQ 与 HLG 的 PNG 保留原有范围；EXIF 方向由 `Image(decorative:scale:orientation:)` 应用。`resizable()` 后按 `fit` 用 `.fit`、`.fill` 或直接拉伸，`frame` 后 `clipped()`，并允许高动态范围（`.allowedDynamicRange(.high)`）；只写一边时另一边按图片比例。有 `label` 时是带名称的图片元素，没有时对辅助技术隐藏 |
 | `Progress` | `ProgressView` | 有 `value` 时为 `ProgressView(value:total:)`，数值先限制在 0 到 `total`；没有时为不确定的 `ProgressView()`（转圈）；`label` 是它的标签 |
 | `Grid` | `LazyVGrid` | 一列 `GridItem(.adaptive(minimum: min_width), spacing: gap)`，行距同为 `gap` |
 | `Stack` | `ZStack(alignment:)` | 九个方位对应 `.topLeading` 到 `.bottomTrailing` |

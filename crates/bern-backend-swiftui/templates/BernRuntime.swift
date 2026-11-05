@@ -11,6 +11,7 @@
 
 import GameController
 import ImageIO
+import Network
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -2263,10 +2264,33 @@ struct BernImage: View {
 /// background and kept while the app runs, by URL and the size they are
 /// decoded at, with the average color of each for fills drawn from a
 /// picture.
+///
+/// An address the network could not reach, or that stays silent, is tried
+/// again, each wait longer than the one before, for as long as something
+/// waits for its picture.
+/// After the last wait it rests until the network changes or the app comes
+/// back to the front; a view that appears again starts over at once. An
+/// address the server answered without a picture is not asked again on
+/// the same network.
 @MainActor
 @Observable
 final class BernPictures {
     static let shared = BernPictures()
+
+    /// Seconds before each further try, give or take a quarter, so that
+    /// pictures that failed together do not all return together.
+    private static let waits: [Double] = [1, 2, 4, 8, 16, 32]
+    /// Seconds a try may hear nothing before it counts as failed. A stalled
+    /// connection reports no error, and the system would wait a minute.
+    private static let silence: TimeInterval = 15
+    /// Errors another try would only repeat. Any other is worth one.
+    private nonisolated static let lasting: Set<URLError.Code> = [
+        .badURL, .unsupportedURL, .appTransportSecurityRequiresSecureConnection,
+        .httpTooManyRedirects, .redirectToNonExistentLocation,
+        .userAuthenticationRequired, .userCancelledAuthentication,
+        .serverCertificateUntrusted, .serverCertificateHasBadDate,
+        .serverCertificateHasUnknownRoot, .serverCertificateNotYetValid,
+    ]
 
     /// A picture from `url`, decoded at twice the pixels of `width` ×
     /// `height` points on a display of `scale` (`0`: as it is).
@@ -2278,10 +2302,50 @@ final class BernPictures {
         var scale: CGFloat = 0
     }
 
+    /// What one try at an address gave.
+    private enum Reading: Sendable {
+        case picture(BernImage.Picture)
+        /// The network failed, or the server could not answer now.
+        case unreachable
+        /// Nothing came for `silence` seconds.
+        case silent
+        /// The server answered, and not with a picture.
+        case refused
+        /// No such file, or no address at all. Looking again costs nothing,
+        /// so nothing is remembered.
+        case absent
+    }
+
     @ObservationIgnored private var pictures: [Request: BernImage.Picture] = [:]
-    @ObservationIgnored private var loading: [Request: Task<BernImage.Picture?, Never>] = [:]
+    @ObservationIgnored private var loading: [Request: Task<Reading, Never>] = [:]
+    @ObservationIgnored private var session = BernPictures.newSession()
+    /// Addresses the server refused on this network.
+    @ObservationIgnored private var refused: Set<String> = []
+    /// Addresses a fill waits for: fills ask on every drawing.
+    @ObservationIgnored private var averaging: Set<String> = []
+    /// Loads waiting for their next try.
+    @ObservationIgnored private var pauses: [UUID: CheckedContinuation<Void, Never>] = [:]
+    /// Whether the network was there when last heard of; nil before that.
+    @ObservationIgnored private var online: Bool?
+    private let network = NWPathMonitor()
     /// Average colors as 0xRRGGBB, by URL; observed, so fills follow.
     private(set) var averages: [String: UInt32] = [:]
+
+    private init() {
+        network.pathUpdateHandler = { path in
+            let online = path.status == .satisfied
+            Task { @MainActor in BernPictures.shared.networkChanged(online: online) }
+        }
+        network.start(queue: DispatchQueue(label: "bern.pictures.network", qos: .utility))
+        #if os(macOS)
+        let front = NSApplication.didBecomeActiveNotification
+        #else
+        let front = UIApplication.didBecomeActiveNotification
+        #endif
+        NotificationCenter.default.addObserver(forName: front, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { BernPictures.shared.tryAgain() }
+        }
+    }
 
     func cached(_ request: Request) -> BernImage.Picture? { pictures[request] }
 
@@ -2304,30 +2368,120 @@ final class BernPictures {
         await load(Request(url: url))
     }
 
+    /// The picture of `request`, when it has come; nil when there is no such
+    /// file or the caller stopped waiting. A view's task ends with the view,
+    /// and a view that appears again starts over.
     func load(_ request: Request) async -> BernImage.Picture? {
-        if let picture = pictures[request] { return picture }
-        let task = loading[request] ?? Task.detached(priority: .userInitiated) { () -> BernImage.Picture? in
-            guard let location = URL(string: request.url) else { return nil }
-            let data: Data?
-            if location.isFileURL {
-                data = try? Data(contentsOf: location)
-            } else {
-                data = try? await URLSession.shared.data(from: location).0
+        var tries = 0
+        while !Task.isCancelled {
+            if let picture = pictures[request] { return picture }
+            if refused.contains(request.url) {
+                await pause(nil)
+                continue
             }
-            guard let data, let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
-            let pixels = BernImage.sampledPixels(source, width: request.width, height: request.height, fit: request.fit, scale: request.scale)
-            return BernImage.decode(source, pixels: pixels)
-        }
-        loading[request] = task
-        let picture = await task.value
-        loading[request] = nil
-        if let picture {
-            pictures[request] = picture
-            if averages[request.url] == nil {
-                averages[request.url] = Self.average(picture.image)
+            let used = session
+            let task = loading[request] ?? Task.detached(priority: .userInitiated) { await Self.read(request, through: used) }
+            loading[request] = task
+            let reading = await task.value
+            loading[request] = nil
+            switch reading {
+            case let .picture(picture):
+                pictures[request] = picture
+                if averages[request.url] == nil {
+                    averages[request.url] = Self.average(picture.image)
+                }
+                return picture
+            case .silent:
+                // Requests to one server share a connection, and the next
+                // try would join the one that stalled. A session shares
+                // nothing with another; the old one goes with its last task.
+                if used === session {
+                    used.finishTasksAndInvalidate()
+                    session = Self.newSession()
+                }
+                fallthrough
+            case .unreachable:
+                let wait = tries < Self.waits.count ? Self.waits[tries] : nil
+                await pause(wait.map { $0 * .random(in: 0.75...1.25) })
+                tries = wait == nil ? 0 : tries + 1
+            case .refused:
+                refused.insert(request.url)
+            case .absent:
+                return nil
             }
         }
-        return picture
+        return nil
+    }
+
+    private static func newSession() -> URLSession {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = silence
+        return URLSession(configuration: configuration)
+    }
+
+    /// One try at `request`'s picture, off the interface thread.
+    private nonisolated static func read(_ request: Request, through session: URLSession) async -> Reading {
+        guard let location = URL(string: request.url) else { return .absent }
+        let data: Data
+        if location.isFileURL {
+            guard let contents = try? Data(contentsOf: location) else { return .absent }
+            data = contents
+        } else {
+            do {
+                let (contents, response) = try await session.data(from: location)
+                if let status = (response as? HTTPURLResponse)?.statusCode, !(200..<300).contains(status) {
+                    return status == 408 || status == 429 || status >= 500 ? .unreachable : .refused
+                }
+                data = contents
+            } catch let error as URLError where lasting.contains(error.code) {
+                return .refused
+            } catch let error as URLError where error.code == .timedOut {
+                return .silent
+            } catch {
+                return .unreachable
+            }
+        }
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let picture = BernImage.decode(source, pixels: BernImage.sampledPixels(
+                source, width: request.width, height: request.height, fit: request.fit, scale: request.scale))
+        else { return location.isFileURL ? .absent : .refused }
+        return .picture(picture)
+    }
+
+    /// Waits `seconds`, or with nil for as long as it takes, until the
+    /// network changes, the app comes to the front or the caller stops.
+    private func pause(_ seconds: Double?) async {
+        let id = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                guard !Task.isCancelled else { return continuation.resume() }
+                pauses[id] = continuation
+                guard let seconds else { return }
+                Task {
+                    try? await Task.sleep(for: .seconds(seconds))
+                    pauses.removeValue(forKey: id)?.resume()
+                }
+            }
+        } onCancel: {
+            Task { @MainActor in pauses.removeValue(forKey: id)?.resume() }
+        }
+    }
+
+    /// Every load waiting for its next try goes now.
+    private func tryAgain() {
+        let waiting = pauses.values
+        pauses = [:]
+        waiting.forEach { $0.resume() }
+    }
+
+    /// The system's word on the network: once it is there after a change, a
+    /// new way out may answer what the last one could not.
+    private func networkChanged(online now: Bool) {
+        let first = online == nil
+        online = now
+        guard now, !first else { return }
+        refused = []
+        tryAgain()
     }
 
     /// The average color of `url`'s picture, loading it when needed.
@@ -2335,8 +2489,11 @@ final class BernPictures {
         guard let url else { return nil }
         if let value = averages[url] { return .fixed(light: value, dark: value) }
         let request = Request(url: url)
-        if pictures[request] == nil, loading[request] == nil {
-            Task { _ = await load(request) }
+        if pictures[request] == nil, averaging.insert(url).inserted {
+            Task {
+                _ = await load(request)
+                averaging.remove(url)
+            }
         }
         return nil
     }
