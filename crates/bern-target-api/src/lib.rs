@@ -428,9 +428,12 @@ pub struct TargetConfig {
     /// Browser extension entry and optional build command (receives the output directory).
     pub web_extension: Option<WebExtension>,
     pub channels: Vec<String>,
-    /// Windows front ends to build, from [`WINDOWS_FRONTENDS`]; both unless
-    /// the target names fewer. Empty for other platforms.
+    /// Front ends to build: on Windows from [`WINDOWS_FRONTENDS`], both
+    /// unless the target names fewer; on iOS from [`IOS_FRONTENDS`], the
+    /// first unless the target names more. Empty for other platforms.
     pub frontends: Vec<String>,
+    /// iOS with both front ends: one `.ipa` for each instead of one for all.
+    pub separate_packages: bool,
     /// Override the target's web document capability. False removes all
     /// WebView dependencies and compiles SVGs into static pictures.
     pub webview: Option<bool>,
@@ -494,6 +497,10 @@ pub struct WebExtension {
 /// The Windows front ends: WinUI 3 on the Windows App Runtime, and the
 /// system XAML through XAML Islands, which every Windows 10 and 11 has.
 pub const WINDOWS_FRONTENDS: [&str; 2] = ["winui3", "xaml-islands"];
+
+/// The iOS front ends: the SwiftUI of iOS 17 and later, which every Apple
+/// target shares, and the same source rewritten for iOS 16.
+pub const IOS_FRONTENDS: [&str; 2] = ["swiftui", "swiftui-16"];
 
 /// Where the Bern crates come from: the source of the project's own `bern`
 /// dependency. Generated crates take every Bern crate from it, so the
@@ -815,6 +822,7 @@ mod tests {
             abis: Vec::new(),
             channels: vec![],
             frontends: vec![],
+            separate_packages: false,
         }
     }
 

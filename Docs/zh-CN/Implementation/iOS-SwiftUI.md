@@ -36,7 +36,7 @@
 
 生成的应用包是 iOS 的扁平结构：可执行文件、`Info.plist`、各语言的 `.lproj` 与随包资源都在包的顶层。图标由 `actool` 把 1024 像素的 PNG 编译进 `Assets.car`（未声明图标时是 Bern 标志的方形版本，声明的较小图标先用 `sips` 放大；`[app.icon].ios` 为 `.appiconset` 文件夹时原样编译，其中的深色、着色版随之生效；为 Icon Composer 的 `.icon` 文件夹时以 `AppIcon.icon` 与资源目录一起交给 `actool`，iOS 26 起显示液态玻璃图标，更早的系统用从它画出的浅色、深色、着色平面图）。`Info.plist` 声明启动屏（否则应用以兼容模式显示，不铺满屏幕）、多场景（iPad 的多窗口；iPhone 始终只有一个场景）、iPhone 与 iPad、iPad 上的全部四个方向、最低 iOS 17.0。
 
-最低 iOS 17：与 macOS 14 同一代，运行时用到的 Observation、`ContentUnavailableView` 等从这一版起提供。
+最低 iOS 17，用第二个前端时为 iOS 16（见“iOS 16 前端”）：与 macOS 14 同一代，运行时用到的 Observation、`ContentUnavailableView` 等从这一版起提供。
 
 ## 与 macOS 的差异
 
@@ -199,6 +199,50 @@ iPhone 17 模拟器（iOS 26.1），一个真实应用首次启动即显示全�
 `bern package --target ios` 先照常构建模拟器应用，再把包复制到 `target/bern/ios/package/Payload/`，在其中替换按真机构建的部分：引擎与桥按 `aarch64-apple-ios` 编译（`IPHONEOS_DEPLOYMENT_TARGET` 为最低系统版本），`actool` 按 `iphoneos` 重编图标，`swiftc` 用 `iphoneos` SDK 与 `arm64-apple-ios17.0` 重新编译链接前端，release 时剥去符号；`plutil` 把 `CFBundleSupportedPlatforms` 改为 `iPhoneOS`，`codesign --sign -` 临时签名，`ditto` 打成 `target/bern/dist/<产品>-<版本>-ios.ipa`。资源、本地化与其余 Info.plist 键沿用模拟器的包。
 
 验证：一个应用在本机与 GitHub Actions 的 macOS 26 上打出 `.ipa`；包里的程序是 `platform IOS`、`minos 17.0` 的 arm64，签名校验通过，压缩包里没有资源分叉。未在真机上安装运行。
+
+## iOS 16 前端（2026-11-04）
+
+目标用第二个前端支持 iOS 16，和 Windows 用一份源码出两个前端的做法相同。不写 `frontends` 时什么都不变：应用是所有 Apple 目标共用的前端，最低 iOS 17。
+
+```toml
+[targets.ios]
+platform = "ios"
+frontends = ["swiftui", "swiftui-16"]
+# packages = "separate"
+```
+
+| `frontends` | `packages` | `bern package` 的产物 | 最低系统 |
+| --- | --- | --- | --- |
+| 不写，或 `["swiftui"]` | | 一个 `.ipa`，与之前相同 | iOS 17 |
+| `["swiftui-16"]` | | iOS 16 前端的一个 `.ipa`，也能在之后的系统上运行 | iOS 16 |
+| 两个都写 | `one` 或不写 | 一个 `.ipa`，启动时选择前端 | iOS 16 |
+| 两个都写 | `separate` | `<产品>-<版本>-ios.ipa` 与 `<产品>-<版本>-ios16.ipa` | iOS 17 与 iOS 16 |
+
+**一份源码。** `ios16.rs` 在 Swift 生成之后改写它，`BernCompat16.swift` 放改写后的源码调用的替代实现；生成器和运行时模板不知道这件事。改写找不到原来的调用时测试失败，生成测试把两个前端都编译到编译器自身的检查通过为止。
+
+**一个包。** 可执行文件是 iOS 16 前端，因为它要能在最低的系统上加载。另一个前端是 `Frameworks/BernUI17.framework`，在 iOS 17 及以后用 `dlopen` 加载：它链接的内容在 iOS 16 上不存在，所以 iOS 16 根本不加载它。引擎是 `Frameworks/BernEngine.framework`，两个前端共用，只导出桥的 `bern_*` 函数。只有一个前端时，引擎仍以静态库链入。用 `BERN_FRONT_END=16` 启动应用时，在任何系统上都运行 iOS 16 前端，在较新的模拟器上就是这样测试的。
+
+**跟随状态。** iOS 17 起 SwiftUI 自己知道视图读了什么。在 iOS 16 上：
+
+- 引擎状态、草稿和视图持有的对象是 `ObservableObject`，由声明它们的视图跟随。任何改动都会重绘持有该对象的所有视图，iOS 17 只重绘读了那个属性的视图。
+- 视图不声明也可能读到的内容（语言、主题、键盘、宿主的窗口）很少变化，所以所有视图跟随同一个信号，主循环每一轮最多发一次。
+- 视频状态和图片颜色由读它们的视图跟随。
+
+**iOS 16 没有的功能。**
+
+| 功能 | 在 iOS 16 上 |
+| --- | --- |
+| `ScrollView(position:)` | 用 `ScrollViewReader` 实现，滚动到某项并跟随，与 iOS 17 相同 |
+| `ScrollView(snap:)` | 滚动在哪停就停在哪 |
+| `scroll_scale`、`scroll_opacity` | 元素保持原样，与没有这两项的目标相同 |
+| 通过 `onKeyPress` 读硬件按键（侧边栏方向键、搜索面板按键、录制快捷键） | 读不到 |
+| iPad 上的独立窗口 | 窗口是虚拟窗口，与 iPhone 相同 |
+| 检查器 | 用 sheet 显示 |
+| HDR 图片 | SDR |
+| `scrollClipDisabled` | 内容在滚动视图边缘被裁切 |
+| iOS 16.4 以前 iPhone 上的弹出框 | 以 sheet 显示 |
+
+验证：在 iOS 17.5 模拟器上，控件展示和一个实际应用的两个前端都从同一个包运行，只有 iOS 17 前端的进程映射了 `BernUI17`。控件展示各页、切换语言、引擎状态、设置窗口，以及实际应用的首页和歌词页的截图，除上表所列之外逐像素一致。实际应用不登录也能播放音乐；跳转进度后，正在唱的一行在两个前端的歌词页上位置相同。在 iOS 16.4 上，同一个包在模拟的 iPhone 8 上运行：控件展示各页、引擎状态、切换语言和设置窗口，然后是实际应用的首页、播放、跳转进度和歌词页，都没有崩溃。Xcode 27 没有 iOS 16 模拟器，CoreSimulator 也拒绝在 macOS 26 以后的主机上运行 iOS 15.1 到 16.7，所以这次运行放在 GitHub Actions 的 `macos-26` 任务里，用 `xcodebuild -downloadPlatform iOS -buildVersion 16.4` 安装运行时。更早的 iOS 16 版本和真机都还没有运行过。
 
 ## 未完成与已知限制
 

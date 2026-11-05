@@ -874,6 +874,119 @@ fn showcase_generates_ios_swift_that_type_checks() {
     typecheck_ios(&root, &output);
 }
 
+/// An app of both iOS front ends: the executable is the rewritten source,
+/// from iOS 16, and the source as it is a framework from iOS 17.
+#[test]
+fn both_ios_front_ends_compile_from_one_source() {
+    let root = workspace();
+    let (config, compiled) = showcase();
+    let output = root.join("target/bern-test/swiftui-ios-both");
+    let _ = std::fs::remove_dir_all(&output);
+    let mut context = context(&config, &compiled, "ios", &output);
+    context.target.frontends = vec!["swiftui".into(), "swiftui-16".into()];
+    let files = SwiftUiIos.generate(&compiled.app, &context).unwrap();
+    for file in &files {
+        let path = output.join(&file.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, &file.contents).unwrap();
+    }
+    let plist = std::fs::read_to_string(output.join("Showcase.app/Info.plist")).unwrap();
+    assert!(
+        plist.contains("<key>MinimumOSVersion</key>\n    <string>16.0</string>"),
+        "{plist}"
+    );
+    let runtime = std::fs::read_to_string(output.join("Sources/BernRuntime.swift")).unwrap();
+    assert!(!runtime.contains("@Observable"));
+    let current = std::fs::read_to_string(output.join("Sources17/BernRuntime.swift")).unwrap();
+    assert!(current.contains("@Observable"));
+
+    let plan = SwiftUiIos.plan(&compiled.app, &context).unwrap();
+    let compiled_for: Vec<String> = plan
+        .steps
+        .iter()
+        .filter_map(|step| match step {
+            BuildStep::Run { args, .. } if args.iter().any(|arg| arg == "swiftc") => args
+                .iter()
+                .position(|arg| arg == "-target")
+                .map(|at| args[at + 1].clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(compiled_for.len(), 2, "{compiled_for:?}");
+    assert!(compiled_for[0].contains("ios17.0"), "{compiled_for:?}");
+    assert!(compiled_for[1].contains("ios16.0"), "{compiled_for:?}");
+
+    check_front_end(
+        &root,
+        &output.join("Sources"),
+        &output.join("Sources/bern.h"),
+        "16.0",
+        &["BernCompat16.swift", "BernLaunch16.swift"],
+    );
+    check_front_end(
+        &root,
+        &output.join("Sources17"),
+        &output.join("Sources/bern.h"),
+        MINIMUM_IOS,
+        &["BernEntry17.swift"],
+    );
+}
+
+/// Compile a front end as far as the compiler's own checks go, which is
+/// further than type-checking: it decides, for example, whether a stored
+/// property is initialized.
+fn check_front_end(root: &Path, sources: &Path, header: &Path, minimum: &str, extra: &[&str]) {
+    if !Command::new("xcrun")
+        .args(["--sdk", "iphonesimulator", "--show-sdk-path"])
+        .output()
+        .is_ok_and(|o| o.status.success())
+    {
+        eprintln!("no iOS simulator SDK; skipping the check");
+        return;
+    }
+    let architecture = if std::env::consts::ARCH == "x86_64" {
+        "x86_64"
+    } else {
+        "arm64"
+    };
+    let mut command = Command::new("xcrun");
+    command
+        .args([
+            "--sdk",
+            "iphonesimulator",
+            "swiftc",
+            "-wmo",
+            "-emit-sil",
+            "-o",
+            "/dev/null",
+        ])
+        .args(["-swift-version", "6", "-parse-as-library"])
+        .arg("-target")
+        .arg(format!("{architecture}-apple-ios{minimum}-simulator"))
+        .arg("-module-cache-path")
+        .arg(root.join("target/bern-swift-module-cache"))
+        .arg("-import-objc-header")
+        .arg(header);
+    for file in [
+        "BernRuntime.swift",
+        "BernMedia.swift",
+        "BernStyle.swift",
+        "BernUIKit.swift",
+        "BernGenerated.swift",
+    ]
+    .iter()
+    .chain(extra)
+    {
+        command.arg(sources.join(file));
+    }
+    let result = command.output().unwrap();
+    assert!(
+        result.status.success(),
+        "swiftc rejected the front end for iOS {minimum}:\n{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
+
 /// Type-check generated iOS Swift against the simulator SDK, when it is
 /// installed.
 fn typecheck_ios(root: &Path, output: &Path) {
