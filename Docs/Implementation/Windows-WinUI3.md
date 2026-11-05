@@ -433,9 +433,11 @@ Measured after the fixes:
 - A try may hear nothing for 15 seconds. `HttpClient` has no such timeout: a timer cancels the request, and the body's progress keeps it waiting.
 - An address the server answered without a picture is not asked again on the same network; bytes that WIC cannot decode count as such an answer.
 - A view that leaves (`Unloaded`) stops trying, and one that appears (`Loaded`) starts over at once.
-- All the clients of a process share their connections, and over HTTP/2 a server has one. Measured on Windows 11 through a relay that stalled TLS and HTTP/2: three requests shared one connection, and 18 tries over 70 seconds all went back to it, with a new `HttpClient` and filter each time. After a stall the new client keeps to HTTP/1.1 (`MaxVersion`), which cannot join that connection: the same three requests then came over two new connections within a second of the timeout.
+- All the clients of a process share their connections, and over HTTP/2 a server has one. Measured on Windows 11 through a relay that stalled TLS and HTTP/2: three requests shared one connection, and 18 tries over 70 seconds all went back to it, with a new `HttpClient` and filter each time. After a stall the new client keeps to HTTP/1.1 (`MaxVersion`), which cannot join that connection: on Windows 11 ARM and Windows 10 x64 the same three requests then came over two new connections about a second after the timeout.
 
-`tests/picture_retry.rs` compiles `bern_pictures.h` with the Visual Studio tools and runs it against a server that fails on purpose. Both front ends compile with it. Not yet seen in a real window: a XAML application cannot start without a desktop session.
+`tests/picture_retry.rs` compiles `bern_pictures.h` with the Visual Studio tools and runs it against a server that fails on purpose. Both front ends compile with it.
+
+Checked in a real window on Windows 10 x64 (XAML Islands), with an `Image` and a fill from a test server: the tries came at those waits and then rested, a healed server was not asked until the view came back or another window gave the front back, and the picture then showed. A 404 cost each of the two one request, and a view coming back asked nothing more. After a silent try the picture came with the next one, 16 seconds on. The network changing was not triggered, and the WinUI 3 front end was not run in a window: the two share this code.
 
 ## Verification log
 
