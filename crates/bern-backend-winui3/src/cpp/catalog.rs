@@ -308,6 +308,15 @@ impl Generator<'_> {
             out.line(format!("{{{}, L\"\\x{code:04X}\"}},", string(name)));
         }
         out.close("};");
+        out.open("static std::unordered_map<std::string_view, wchar_t const*> const windows10 = {");
+        for (name, code) in crate::icons::WINDOWS_10_GLYPHS {
+            out.line(format!("{{{}, L\"\\x{code:04X}\"}},", string(name)));
+        }
+        out.close("};");
+        out.open("if (!OnWindows11()) {");
+        out.line("auto found = windows10.find(name);");
+        out.line("if (found != windows10.end()) return found->second;");
+        out.close("}");
         out.line("auto found = glyphs.find(name);");
         out.line("return found == glyphs.end() ? L\"\" : found->second;");
         out.close("}");

@@ -564,6 +564,7 @@ fn gallery_generates_without_warnings() {
         "c.mediumBelow = 1024.0;",
         "c.fileKinds.push_back({\"video\", {\"mp4\"",
         "wchar_t const* IconGlyph(",
+        "if (!OnWindows11()) {",
     ] {
         assert!(catalog.contains(expected), "missing `{expected}`");
     }

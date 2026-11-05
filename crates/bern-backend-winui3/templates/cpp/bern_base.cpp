@@ -22,7 +22,18 @@
 #include <winrt/Windows.Storage.Streams.h>
 #include <winrt/Windows.System.UserProfile.h>
 
+// In ntdll and the driver kit's headers only. `GetVersionEx` is deprecated.
+extern "C" LONG WINAPI RtlGetVersion(OSVERSIONINFOW* version);
+
 namespace bern {
+
+bool OnWindows11() {
+    static bool const newer = [] {
+        OSVERSIONINFOW version{sizeof(version)};
+        return RtlGetVersion(&version) == 0 && version.dwBuildNumber >= 22000;
+    }();
+    return newer;
+}
 
 void Report(std::string_view message) {
     std::fprintf(stderr, "bern: %.*s\n", static_cast<int>(message.size()), message.data());

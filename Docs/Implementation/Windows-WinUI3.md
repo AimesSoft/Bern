@@ -108,7 +108,7 @@ HDR images (PQ or HLG PNGs, JPEGs with a gain map) do not go through XAML's `Ima
 
 `Image` and `Stack` each have an outer `Grid`, so in columns that stretch their children they keep their own size and sit at the leading edge. Verified on the showcase app's "Images and layout" page with both frontends: the result matches macOS, and `contain` images are centered in their box; the grid has three columns; after the CLI changes volume and brightness, both progress bars update immediately.
 
-Icons keep Bern's SF Symbols naming and map to the glyphs at the same code points in Segoe Fluent Icons (Windows 11) and Segoe MDL2 Assets (Windows 10). There is only one glyph table (`icons.rs`; the code points were confirmed by rendering and comparing the font files on the PC), which the generated catalog hands to the runtime; names missing from the table are reported as errors at check time instead of showing up blank at runtime; this check shares `bern_target_api::icon_set::check` with Web, Compose and GTK, and a test confirms that the glyph table contains every name in Bern's icon set (`icon_set::NAMES`).
+Icons keep Bern's SF Symbols naming and map to the glyphs at the same code points in Segoe Fluent Icons (Windows 11) and Segoe MDL2 Assets (Windows 10). There is only one glyph table (`icons.rs`; the code points were confirmed by rendering and comparing the font files on the PC), which the generated catalog hands to the runtime; names missing from the table are reported as errors at check time instead of showing up blank at runtime; this check shares `bern_target_api::icon_set::check` with Web, Compose and GTK, and a test confirms that the glyph table contains every name in Bern's icon set (`icon_set::NAMES`). Four names differ on Windows 10, in `WINDOWS_10_GLYPHS`, chosen at run time by `OnWindows11`: its Segoe MDL2 Assets lacks the code points of `eye.slash`, `pip.enter` and `sparkles`, and draws `folder` as a tall page.
 
 ## Runtime structure
 
@@ -414,6 +414,8 @@ Until now the Islands front end had only been forced on Windows 11. The first ru
 
 - **Applications did not start.** `WindowsXamlManager::InitializeForCurrentThread` failed with `0x8000FFFF`, saying XAML Islands needs an app targeting 10.0.18226 or later, although the manifest declared `maxversiontested` 10.0.26100.0. The value itself was the cause. Measured on 19045: 18362, 19041 and 19045 pass; 22000, 22621 and 26100 fail. The manifest now declares `MINIMUM_WINDOWS`, 10.0.19041.0.
 - **Grids in a scroll view were empty.** There `EffectiveViewportChanged` only reports the empty rectangle (`inf, inf, -inf, -inf`), so `LazyGridPanel` found no row near the view and dropped them all. While the effective viewport is empty, the grid now reads what the scroll view shows, and reads it again on `ViewChanged` and `SizeChanged`, because the event is not raised while the view scrolls.
+
+- **Some icons were boxes.** Comparing the icon table with the font of build 19045 showed three code points missing from Segoe MDL2 Assets, drawn as the missing-glyph box: `eye.slash` (U+ED1A), `pip.enter` (U+E93A) and `sparkles` (U+ED37). `folder` (U+E8B7) is there, but as a tall page. On Windows 10 these now use U+E890, U+E944, U+E734 and U+F12B. The font has no eye with a slash, so `eye.slash` is a half-closed eye there.
 
 Measured after the fixes:
 

@@ -108,7 +108,7 @@ HDR 图片（PQ 或 HLG 的 PNG、带增益图的 JPEG）不经过 XAML 的 `Ima
 
 `Image` 与 `Stack` 外面各有一层 `Grid`，所以在会拉伸子元素的列中保持自身尺寸并靠前缘。在展示应用的“图片与布局”页按两种前端验证：效果与 macOS 相同，`contain` 的图片在框内居中；网格三列；CLI 修改音量与亮度后两个进度条立即更新。
 
-图标沿用 Bern 的 SF Symbols 命名，映射到 Segoe Fluent Icons（Windows 11）与 Segoe MDL2 Assets（Windows 10）中码位相同的字形。字形表只有一份（`icons.rs`，码位从 PC 上的字体文件渲染比对确认），生成的目录把它交给运行时；表中没有的名称检查时报错，不在运行时显示空白；这项检查与 Web、Compose、GTK 共用 `bern_target_api::icon_set::check`，测试核对字形表包含 Bern 图标集（`icon_set::NAMES`）的全部名字。
+图标沿用 Bern 的 SF Symbols 命名，映射到 Segoe Fluent Icons（Windows 11）与 Segoe MDL2 Assets（Windows 10）中码位相同的字形。字形表只有一份（`icons.rs`，码位从 PC 上的字体文件渲染比对确认），生成的目录把它交给运行时；表中没有的名称检查时报错，不在运行时显示空白；这项检查与 Web、Compose、GTK 共用 `bern_target_api::icon_set::check`，测试核对字形表包含 Bern 图标集（`icon_set::NAMES`）的全部名字。有四个名字在 Windows 10 上不同，放在 `WINDOWS_10_GLYPHS` 里，运行时由 `OnWindows11` 选择：那里的 Segoe MDL2 Assets 缺 `eye.slash`、`pip.enter` 和 `sparkles` 的码位，`folder` 画出来是一张竖着的页面。
 
 ## 运行结构
 
@@ -414,6 +414,8 @@ Windows App SDK 没有表格控件（DataGrid 在社区工具包里），`B::Tab
 
 - **应用无法启动。** `WindowsXamlManager::InitializeForCurrentThread` 以 `0x8000FFFF` 失败，提示 XAML Islands 要求应用面向 10.0.18226 或更新版本，而 manifest 声明的 `maxversiontested` 是 10.0.26100.0。原因就在这个值本身。在 19045 上实测：18362、19041、19045 通过；22000、22621、26100 失败。manifest 现在声明 `MINIMUM_WINDOWS`，即 10.0.19041.0。
 - **滚动视图里的网格是空的。** 这里 `EffectiveViewportChanged` 只报告空矩形（`inf, inf, -inf, -inf`），`LazyGridPanel` 于是认为没有一行靠近视野，把所有行都丢掉了。现在有效视口为空时，网格改读滚动视图实际显示的范围，并在 `ViewChanged` 和 `SizeChanged` 时重新读取，因为视图滚动时这个事件不会触发。
+
+- **部分图标是方框。** 把图标表和 build 19045 的字体比对后发现，Segoe MDL2 Assets 缺三个码位，显示成缺字方框：`eye.slash`（U+ED1A）、`pip.enter`（U+E93A）和 `sparkles`（U+ED37）。`folder`（U+E8B7）有字形，但画出来是一张竖着的页面。现在 Windows 10 上这四个分别用 U+E890、U+E944、U+E734 和 U+F12B。这个字体没有带斜线的眼睛，所以 `eye.slash` 在那里是半睁的眼睛。
 
 修复后实测：
 
