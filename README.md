@@ -422,7 +422,7 @@ bern 0.1.0 on macOS (aarch64)
 - **macOS**: Xcode 26 or later. After installing it from the App Store, run `sudo xcode-select --switch /Applications/Xcode.app`.
 - **iOS**: Xcode's iOS platform and an iOS simulator, plus `rustup target add aarch64-apple-ios-sim`. Builds are for the simulator for now; device signing and packages are not done yet.
 - **Windows**: Visual Studio 2022 or later with “Desktop development with C++” (the Build Tools are enough) and a Windows 11 SDK; Rust on the MSVC toolchain. The first build generates the C++/WinRT headers with the Windows SDK's `cppwinrt` and precompiles them with the runtime (about 2.4 GB per profile, under `target`); later builds compile only the app's own code, about 5 s for a new app and 9 s for the showcase. The app folder holds only the executable, a 400 KB bootstrapper DLL and the resources: no .NET, no bundled Windows App SDK.
-- **Linux**: GTK 4.14 and libadwaita 1.5 development packages, for example `sudo apt install libgtk-4-dev libadwaita-1-dev gstreamer1.0-libav`.
+- **Linux**: GTK 4.14 and libadwaita 1.5 development packages, for example `sudo apt install libgtk-4-dev libadwaita-1-dev libsoup-3.0-dev gstreamer1.0-libav`.
 - **Android**: Android Studio with the SDK and the NDK (SDK Manager → SDK Tools → NDK), Gradle 9.4 or newer, and `rustup target add aarch64-linux-android`. The first build has Gradle download the Android plugin and the Compose libraries.
 - **Web**: `rustup target add wasm32-unknown-unknown`. A `web_app` build compiles the engine to WebAssembly and runs it in the page; a `web_ui` build makes the page the UI of a separate engine host, which `bern run` starts before opening its address.
 

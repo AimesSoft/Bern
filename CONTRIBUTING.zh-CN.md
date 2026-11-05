@@ -13,7 +13,7 @@ cargo test --workspace
 node --test crates/bern-svg/tests/*.test.mjs crates/bern-backend-web/tests/*.test.mjs
 ```
 
-GTK 运行时 `crates/bern-gtk` 不是工作区成员，要单独检查。它需要 GTK 4.14、libadwaita 1.5 和 WebKitGTK 6 的开发包（Debian 与 Ubuntu 上是 `libgtk-4-dev libadwaita-1-dev libwebkitgtk-6.0-dev`）：
+GTK 运行时 `crates/bern-gtk` 不是工作区成员，要单独检查。它需要 GTK 4.14、libadwaita 1.5、libsoup 3 和 WebKitGTK 6 的开发包（Debian 与 Ubuntu 上是 `libgtk-4-dev libadwaita-1-dev libsoup-3.0-dev libwebkitgtk-6.0-dev`）：
 
 ```sh
 cd crates/bern-gtk

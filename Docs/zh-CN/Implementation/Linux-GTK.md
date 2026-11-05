@@ -151,6 +151,7 @@
 
 - `Canvas` 是 `BernCanvas`：纯色的 `Shape` 画成渲染器自己的节点，填充是同一轮廓的圆角裁剪下的颜色，描边是向轮廓两侧各伸出半个线宽的边框（与 cairo 的描边重合）；只有 `fade`、虚线、`Series` 与图案用 cairo，各自画进一张图，空的 `Canvas` 什么也不画。此前它是 `GtkDrawingArea`：每次绘制都在界面线程上把整块区域栅格化成一张 cairo 图再上传，作间隔用的空 `Canvas` 也一样。绘图元素在一个绑定中读取，状态、尺寸或颜色（系统明暗、对比度、应用的强调色与明暗）变化时重绘；颜色在绘制时按控件所在部分的外观解析。图案按条带逐条绘制，`twill` 叠 45° 细线，不缓存位图。
 - `fill_from` 的图片在后台读取（`GFile`，本地文件或 http(s)），按 EXIF 方向转正后缩到 32×32 取平均色，按 URL 缓存；读到之前用 `fill`。`fade` 是向一侧渐隐为透明的线性渐变。
+- 网络图片没有下载下来时会重试（2026-11-05，`pictures.rs`）。网络失败或服务器回 408、429、5xx 后，约 1、2、4、8、16、32 秒再试，每次上下浮动四分之一；之后暂停，直到网络变化（`GNetworkMonitor`）或窗口回到前台。服务器答了但不是图片的地址，同一网络上不再问。视图取消映射时停止，重新映射时立刻从头再试。取图片平均色的填充走同一条路。http(s) 地址改用 libsoup 读取，不再经过 `GFile`：gvfs 没有超时，不告诉回答的状态码，而且不一定安装，所以 `.deb` 现在依赖 `libsoup-3.0-0`。session 的 `timeout` 设为 15 秒，用来发现卡住的连接。用 libsoup 3.4.4 和 3.6.6 实测，走 TLS 和 HTTP/2，经过一个会卡住的中转：共用连接的三个请求都以 `G_IO_ERROR_TIMED_OUT` 失败，libsoup 关闭了这条连接，同一 session 的下一个请求用的是新连接，所以不用换 session。`cargo test` 让 `pictures.rs` 连接故意出错的服务器。在 Ubuntu 24.04 的真实应用里用 Broadway 验证：重试按上面的间隔进行，然后暂停；服务器恢复后不会自己再问，视图回来才问，之后快照里显示了图片。窗口回到前台和网络变化只测了它们调用的函数。
 - `Image(source: app.x)` 在后台读取后显示，`None` 时不显示；只写一边时另一边按图片比例。
 
 ### 窗口外框、静置与对话框
@@ -240,7 +241,7 @@ cargo run -p bern-cli -- build --manifest examples/showcase/Bern.toml --target l
 target/bern/linux/Showcase/showcase
 ```
 
-需要 GTK 4.14 与 libadwaita 1.5 的开发包（Ubuntu：`libgtk-4-dev`、`libadwaita-1-dev`）。产物位于 `target/bern/linux/`：`Showcase/showcase`（界面程序）、`Showcase/resources/`（随包资源，程序按自身位置查找）、`Showcase/dev.bern.showcase.desktop`、`bin/showcase` 与 `bin/showcase-mcp`、应用 crate `app/`、构建清单 `build.json`（记录 GTK 与 libadwaita 最低版本、媒体后端与呈现、资源名称）。Rust 编译目录为 `target/bern-glue-linux/`。
+需要 GTK 4.14、libadwaita 1.5 与 libsoup 3 的开发包（Ubuntu：`libgtk-4-dev`、`libadwaita-1-dev`、`libsoup-3.0-dev`）。产物位于 `target/bern/linux/`：`Showcase/showcase`（界面程序）、`Showcase/resources/`（随包资源，程序按自身位置查找）、`Showcase/dev.bern.showcase.desktop`、`bin/showcase` 与 `bin/showcase-mcp`、应用 crate `app/`、构建清单 `build.json`（记录 GTK 与 libadwaita 最低版本、媒体后端与呈现、资源名称）。Rust 编译目录为 `target/bern-glue-linux/`。
 
 应用图标在 `Showcase/icons/dev.bern.showcase.png`（没有声明 `[app].icon` 时为 512 像素的 Bern 标志）。启动时这个目录加入图标主题的搜索路径，窗口的默认图标名为 `bundle_id`；找不到时在标准错误报告。生成的 `.desktop` 文件以绝对路径指向它。`[app.icon].linux` 为图标主题文件夹时，其中最大的 PNG 作为这个文件，全部图标改名为 `bundle_id` 后放在 `Showcase/icons/hicolor/` 下，`.deb` 把它们装进 `/usr/share/icons/hicolor`。GNOME 在 Wayland 下从已安装的 `.desktop` 文件取程序坞图标，把生成的文件复制到 `~/.local/share/applications/` 后程序坞显示标志；构建不会写入用户目录。
 

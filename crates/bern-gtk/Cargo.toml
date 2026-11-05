@@ -28,3 +28,6 @@ gtk = { package = "gtk4", version = "0.11", features = ["v4_14"] }
 adw = { package = "libadwaita", version = "0.9", features = ["v1_5"] }
 glib = "0.22"
 gio = "0.22"
+# Pictures from http(s) addresses: gio only reaches them through gvfs, which
+# has no timeouts and shares one connection pool for all of a user's programs.
+soup = { package = "soup3", version = "0.9" }
