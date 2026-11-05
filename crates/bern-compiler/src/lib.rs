@@ -914,6 +914,7 @@ pub fn compile_library(
         library.strict,
         &no_contracts,
         None,
+        None,
     );
     let mut lowered = Vec::new();
     for component in &components {
@@ -2175,6 +2176,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
         config.strict,
         &contract_features,
         config.layouts,
+        Some(&config.version),
     );
     checker.contributions = contributions;
     use_style(&mut checker, &style);

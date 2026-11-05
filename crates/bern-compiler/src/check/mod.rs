@@ -212,6 +212,8 @@ pub struct Checker<'a> {
     pub contracts: &'a BTreeMap<String, Vec<String>>,
     /// Breakpoints from `[layouts]`, if declared.
     pub layouts: Option<ir::LayoutConfig>,
+    /// `version` of `[app]`; a library belongs to no application.
+    pub app_version: Option<&'a str>,
     /// What modules contribute to slots, expanded where the shell places
     /// `Slot`, `Pages` and `PageContent`.
     pub contributions: Contributions,
@@ -246,10 +248,12 @@ impl<'a> Checker<'a> {
         strict: bool,
         contracts: &'a BTreeMap<String, Vec<String>>,
         layouts: Option<ir::LayoutConfig>,
+        app_version: Option<&'a str>,
     ) -> Self {
         Self {
             contracts,
             layouts,
+            app_version,
             types,
             protocol,
             sessions,

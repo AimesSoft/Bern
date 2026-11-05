@@ -2125,6 +2125,27 @@ fn sessions_read_directly_in_a_window_belong_to_it() {
 }
 
 #[test]
+fn window_app_version_is_the_version_of_the_app() {
+    let compiled = compile_ui(&wrap(
+        r#"Column {
+            Text(content: window.app_version)
+            Text(content: tr! { "en" => "Version {version}", "ja" => "バージョン {version}"; version: window.app_version })
+        }"#,
+    ))
+    .unwrap_or_else(|errors| panic!("{errors:?}"));
+    let page = serde_json::to_string(&compiled.app.component("page").unwrap().body).unwrap();
+    assert_eq!(page.matches("\"0.1.0\"").count(), 2, "{page}");
+    // Decided here: no target has it to read.
+    assert!(!page.contains("app_version"), "{page}");
+}
+
+#[test]
+fn only_the_version_passes_for_content_as_fixed_text() {
+    let text = errors(r#"Text(content: tr! { "en" => "{a}", "ja" => "{a}"; a: "0.2.0" })"#);
+    assert!(text.contains("B105"), "{text}");
+}
+
+#[test]
 fn window_expressions_read_only_sessions_the_window_owns() {
     for props in [
         ", immersive: draft.on",

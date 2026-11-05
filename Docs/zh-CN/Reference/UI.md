@@ -206,6 +206,7 @@ bern run --target web_app --port 4173
 - `Shortcut(key:, enabled:) => 动作` 是没有控件的快捷键，键的写法与控件的 `shortcut` 相同。电视上 `escape`、`space` 与方向键分别是遥控器的返回、播放/暂停与触控板方向（方向只在焦点无处可移时到达）。Android 手机与平板上，系统的返回（按钮或手势）先运行最后生效的 `escape` 快捷键，没有时才离开应用：按 Esc 关闭的页面或图层，按返回也会关闭。
 - `Button` / `IconButton` 的 `default_focus: true` 让界面出现时焦点从它开始；电视上每个页面都应给出一个。
 - `window.keyboard` 是否连着实体键盘：电脑上总是成立，手机与平板跟随键盘的连接与断开。只对键盘有用的内容（如快捷键设置）写在 `if window.keyboard { … }` 里，没接键盘的手机上就不出现。
+- `window.app_version` 是 `Bern.toml` 里 `[app]` 的 `version`，也就是各平台安装包上的版本号：`Text(content: tr! { "zh-Hans" => "版本 {version}"; version: window.app_version })`。它在构建时确定，所有目标都一样。组件库不属于任何应用，要用时通过参数传入。
 - macOS 窗口统一隐藏系统焦点框，包括按钮、输入框、滑块、工具栏和弹出面板；键盘焦点、文本编辑和快捷键仍正常工作。
 - `style!` 的 `text` 块可以给电视另定字号：`body: font(size: 13, tv: 16)`。
 - 元素自己写的长度也可以交给样式按平台给出，元素用 `variant` 选择：`Row`、`Column` 的 `gap`、`padding`、`padding_x`、`padding_y`、`width`、`height`，`Stack` 的 `width`、`height`，`Form` 的 `gap`、`padding_x`、`padding_y`、`row_height`，`IconButton` 的 `font_size`、`height`。`width: fit` 与 `height: fit` 去掉写下的尺寸，元素取内容的大小。构建某个平台时，适用于它的规则（不带 `#[target]` 的在前，带的在后）替换元素写下的值，所以设计在各平台尺寸不同的地方不需要在界面里判断平台：
