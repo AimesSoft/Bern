@@ -99,7 +99,7 @@ frontends = ["winui3"]   # 或 ["xaml-islands"]；不写则两个都编译
 
 | Bern | 两种前端 |
 | --- | --- |
-| `Image` | `Image` 显示 `BitmapImage`：从可执行文件旁的 `resources` 读出资源字节，写入内存流后回到界面线程 `SetSourceAsync`（未打包的应用没有 `ms-appx`）；给出的边都是数字、不飞行的图片在后台按显示像素的两倍解成 `SoftwareBitmap`，显示 `SoftwareBitmapSource`（见下面的性能一节）。两边都写时外面是声明尺寸的 `Grid`，`contain` 为 `Uniform` 并居中，`cover` 为 `UniformToFill`，`fill` 为 `Fill`；只写一边时为 `Uniform`，另一边按图片比例。`label` 为自动化名称，没有时 `AccessibilityView` 为 `Raw` |
+| `Image` | `Image` 显示 `BitmapImage`：从可执行文件旁的 `resources` 读出资源字节，写入内存流后回到界面线程 `SetSourceAsync`（未打包的应用没有 `ms-appx`）；给出的边都是数字、不飞行的图片在后台按显示像素的两倍解成 `SoftwareBitmap`，显示 `SoftwareBitmapSource`（见下面的性能一节）。两边都写时外面是声明尺寸的 `Grid`，`contain` 为 `Uniform` 并居中，`cover` 为 `UniformToFill`，`fill` 为 `Fill`；只写一边时为 `Uniform`，另一边按图片比例。`label` 为自动化名称，没有时 `AccessibilityView` 为 `Raw`。网络图片先下载，再像文件一样从字节显示，见“网络图片” |
 | `Progress` | 有 `value` 时为标签下的 `ProgressBar`（`Minimum` 0，`Maximum` 为 `total`）；没有时为 20 px 的 `ProgressRing` 加次要文字 |
 | `Grid` | 自定义面板 `GridPanel`：列数为放得下的最大值，列宽平分，每行与该行最高的单元格一样高 |
 | `Stack` | 单格 `Grid`，子元素叠放，按 `align` 设对齐 |
@@ -424,6 +424,18 @@ Windows App SDK 没有表格控件（DataGrid 在社区工具包里），`B::Tab
 
 - Windows 10：gallery 在系统 XAML 上启动，图案正常显示。临时换成 120 个图案后，用代码滚到底能看到 Swatch 115 到 120，超过了最先生成的 24 项。`gallery.exe` 加载了 VMware 的 3D 驱动（`vm3dum64_10.dll`）。
 - Windows 11：用新的 manifest，gallery 在 WinUI 3 和强制回退的系统 XAML 上都能启动，并显示图案。
+
+## 网络图片（2026-11-05）
+
+`BitmapImage.UriSource` 失败时没有人知道，也只试一次。所以网络图片现在由 `bern_pictures.h` 下载，它不知道界面的存在：`Windows.Web.Http` 读出字节，再像文件一样显示，后台解码和 HDR 都一样，也进最近读过的图片缓存。取图片平均色的填充走同一条路。
+
+- 网络失败或服务器回 408、429、5xx 后，约 1、2、4、8、16、32 秒再试，每次上下浮动四分之一；之后暂停，直到网络变化（`NetworkStatusChanged`）或窗口回到前台（`WM_ACTIVATE`）。
+- 一次尝试最多 15 秒收不到数据。`HttpClient` 没有这种超时：由定时器取消请求，收到正文进度时重新计时。
+- 服务器答了但不是图片的地址，同一网络上不再问；WIC 解不了的字节也算这种回答。
+- 视图离开（`Unloaded`）时停止，重新出现（`Loaded`）时立刻从头再试。
+- 同一进程的所有客户端共用连接，HTTP/2 下一个服务器只有一条。在 Windows 11 上实测，走 TLS 和 HTTP/2，经过一个会卡住的中转：三个请求共用一条连接，70 秒里 18 次尝试全都回到这条连接上，每次都换了新的 `HttpClient` 和 filter 也没用。所以卡住之后，新客户端限定用 HTTP/1.1（`MaxVersion`），它搭不上那条连接：同样的三个请求在超时后一秒内从两条新连接下载下来。
+
+`tests/picture_retry.rs` 用 Visual Studio 工具编译 `bern_pictures.h`，连接故意出错的服务器运行。两个前端都能带着它编译通过。还没有在真实窗口里看过：没有桌面会话时，XAML 应用启动不了。
 
 ## 验证记录
 

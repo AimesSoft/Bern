@@ -43,6 +43,10 @@ const RUNTIME: &[(&str, &str)] = &[
     ),
     ("bern_pch.h", include_str!("../templates/cpp/bern_pch.h")),
     (
+        "bern_pictures.h",
+        include_str!("../templates/cpp/bern_pictures.h"),
+    ),
+    (
         "bern_pch.cpp",
         include_str!("../templates/cpp/bern_pch.cpp"),
     ),

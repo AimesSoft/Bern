@@ -2162,7 +2162,7 @@ inline winrt::fire_and_forget DecodePicture(winrt::weak_ref<controls::Image> wea
 
 /// The XAML picture: SDR pictures, and HDR ones where they cannot be drawn
 /// as HDR. `framed` when both sides are given.
-inline controls::Image SdrImage(PictureProps const& props, std::vector<uint8_t> bytes, TextFn const& name, std::optional<std::string> uri = std::nullopt) {
+inline controls::Image SdrImage(PictureProps const& props, std::vector<uint8_t> bytes, TextFn const& name) {
     controls::Image image;
     std::string_view fit = props.fit ? props.fit : "contain";
     bool framed = props.fills || (props.width && props.height);
@@ -2178,13 +2178,12 @@ inline controls::Image SdrImage(PictureProps const& props, std::vector<uint8_t> 
         image.HorizontalAlignment(xaml::HorizontalAlignment::Left);
         image.VerticalAlignment(xaml::VerticalAlignment::Top);
     }
-    if (props.fixed && !uri && !bytes.empty()) {
+    if (props.fixed && !bytes.empty()) {
         DecodePicture(winrt::make_weak(image), std::move(bytes), props.source, props);
     } else {
         media::Imaging::BitmapImage bitmap;
         image.Source(bitmap);
-        if (uri) bitmap.UriSource(winrt::Windows::Foundation::Uri(Wide(*uri)));
-        else if (!bytes.empty()) LoadPicture(bitmap, std::move(bytes), props.source);
+        if (!bytes.empty()) LoadPicture(bitmap, std::move(bytes), props.source);
     }
     if (name) BindName(image, name);
     else xaml::Automation::AutomationProperties::SetAccessibilityView(image, xaml::Automation::Peers::AccessibilityView::Raw);
@@ -2699,6 +2698,27 @@ inline void ShowRead(controls::Grid const& frame, Ctx const& ctx, std::wstring k
     ShowLater(winrt::make_weak(frame), ctx, std::move(key), std::move(read), std::move(label), picture, name, LaterScope());
 }
 
+/// Download the picture at `url` and show it in the frame within `owner`,
+/// unless that has ended meanwhile. A view that leaves stops trying, and
+/// one that appears starts over.
+inline winrt::fire_and_forget ShowDownloaded(winrt::weak_ref<controls::Grid> weak, Ctx ctx, std::wstring key, std::string url, PictureProps picture, TextFn name, std::shared_ptr<Scope> owner) {
+    auto waiter = std::make_shared<bern::pictures::Waiter>();
+    winrt::apartment_context ui;
+    auto holder = weak.get();
+    if (!holder) co_return;
+    auto appeared = holder.Loaded(winrt::auto_revoke, [waiter](auto&&, auto&&) { waiter->Appeared(); });
+    auto left = holder.Unloaded(winrt::auto_revoke, [waiter](auto&&, auto&&) { waiter->Left(); });
+    holder = nullptr;
+    owner->OnDispose([waiter] { waiter->End(); });
+    auto buffer = co_await Pictures::Download(url, waiter);
+    co_await ui;
+    auto frame = weak.get();
+    if (!buffer || !frame || owner->disposed) co_return;
+    auto bytes = std::make_shared<std::vector<uint8_t>>(buffer.data(), buffer.data() + buffer.Length());
+    Recent::Keep(key, bytes);
+    owner->Run([&] { ShowPicture(frame, ctx, bytes, picture, name); });
+}
+
 /// A picture from a declared resource, or from a `MediaSource` the engine
 /// gives. With one side given, the other follows the picture's aspect
 /// ratio. Without a label it is decorative. HDR pictures are drawn in HDR
@@ -2808,7 +2828,9 @@ inline void Image(Parent const& p, Ctx const& ctx, ImageProps props) {
                     std::wstring file = *path;
                     ShowRead(frame, ctx, file, [file] { return FileBytes(file); }, *next, picture, name);
                 } else {
-                    frame.Children().Append(SdrImage(picture, {}, name, *next));
+                    std::wstring key = L"url:" + std::wstring(Wide(*next));
+                    if (auto bytes = Recent::Find(key)) ShowPicture(frame, ctx, bytes, picture, name);
+                    else ShowDownloaded(winrt::make_weak(frame), ctx, std::move(key), *next, picture, name, LaterScope());
                 }
                 return 0;
             });

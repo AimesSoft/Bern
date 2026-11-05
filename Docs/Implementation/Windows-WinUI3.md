@@ -99,7 +99,7 @@ The first batch of the component library uses the same code on both frontends:
 
 | Bern | Both frontends |
 | --- | --- |
-| `Image` | `Image` showing a `BitmapImage`: the resource bytes are read from `resources` next to the executable and written into an in-memory stream, then `SetSourceAsync` is called back on the UI thread (unpackaged apps have no `ms-appx`); images whose given sides are all numbers and that do not do a hero flight are decoded in the background into a `SoftwareBitmap` at twice the display pixels and shown through `SoftwareBitmapSource` (see the performance section below). When both sides are given, it is wrapped in a `Grid` of the declared size, with `contain` as `Uniform` and centered, `cover` as `UniformToFill`, `fill` as `Fill`; when only one side is given, it is `Uniform` and the other side follows the image's aspect ratio. `label` is the automation name; without one, `AccessibilityView` is `Raw` |
+| `Image` | `Image` showing a `BitmapImage`: the resource bytes are read from `resources` next to the executable and written into an in-memory stream, then `SetSourceAsync` is called back on the UI thread (unpackaged apps have no `ms-appx`); images whose given sides are all numbers and that do not do a hero flight are decoded in the background into a `SoftwareBitmap` at twice the display pixels and shown through `SoftwareBitmapSource` (see the performance section below). When both sides are given, it is wrapped in a `Grid` of the declared size, with `contain` as `Uniform` and centered, `cover` as `UniformToFill`, `fill` as `Fill`; when only one side is given, it is `Uniform` and the other side follows the image's aspect ratio. `label` is the automation name; without one, `AccessibilityView` is `Raw`. A picture from the network is downloaded and shown from its bytes, as a file is; see "Pictures from the network" |
 | `Progress` | With `value`, a `ProgressBar` under the label (`Minimum` 0, `Maximum` set to `total`); without it, a 20 px `ProgressRing` plus secondary text |
 | `Grid` | A custom panel `GridPanel`: the column count is the most that fit, columns share the width equally, and each row is as tall as its tallest cell |
 | `Stack` | A single-cell `Grid` with the children stacked on top of each other, aligned by `align` |
@@ -424,6 +424,18 @@ Measured after the fixes:
 
 - Windows 10: the gallery starts on the system XAML and its patterns show. With a temporary list of 120 patterns, scrolling from code to the end showed Swatch 115 to 120, past the 24 items built first. `gallery.exe` loads VMware's 3D driver (`vm3dum64_10.dll`).
 - Windows 11: with the new manifest the gallery starts on WinUI 3, and on the forced system XAML, and shows its patterns.
+
+## Pictures from the network (2026-11-05)
+
+`BitmapImage.UriSource` reports a failure to nobody who looks and tries once, so a picture from the network now comes from `bern_pictures.h`, which knows nothing of the interface: `Windows.Web.Http` reads the bytes, and they are shown as a file's are, with the same background decoding and HDR, and kept with the pictures read lately. Fills from a picture go the same way.
+
+- After a failed network or a 408, 429 or 5xx answer it waits about 1, 2, 4, 8, 16 and 32 seconds, give or take a quarter, then rests until the network changes (`NetworkStatusChanged`) or a window comes to the front (`WM_ACTIVATE`).
+- A try may hear nothing for 15 seconds. `HttpClient` has no such timeout: a timer cancels the request, and the body's progress keeps it waiting.
+- An address the server answered without a picture is not asked again on the same network; bytes that WIC cannot decode count as such an answer.
+- A view that leaves (`Unloaded`) stops trying, and one that appears (`Loaded`) starts over at once.
+- All the clients of a process share their connections, and over HTTP/2 a server has one. Measured on Windows 11 through a relay that stalled TLS and HTTP/2: three requests shared one connection, and 18 tries over 70 seconds all went back to it, with a new `HttpClient` and filter each time. After a stall the new client keeps to HTTP/1.1 (`MaxVersion`), which cannot join that connection: the same three requests then came over two new connections within a second of the timeout.
+
+`tests/picture_retry.rs` compiles `bern_pictures.h` with the Visual Studio tools and runs it against a server that fails on purpose. Both front ends compile with it. Not yet seen in a real window: a XAML application cannot start without a desktop session.
 
 ## Verification log
 
