@@ -2336,7 +2336,7 @@ final class BernPictures {
             let online = path.status == .satisfied
             Task { @MainActor in BernPictures.shared.networkChanged(online: online) }
         }
-        network.start(queue: DispatchQueue(label: "bern.pictures.network", qos: .utility))
+        network.start(queue: DispatchQueue(label: "dev.bern.pictures.network", qos: .utility))
         #if os(macOS)
         let front = NSApplication.didBecomeActiveNotification
         #else

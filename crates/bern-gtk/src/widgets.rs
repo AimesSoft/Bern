@@ -170,7 +170,11 @@ fn fade_after(label: &gtk::Label, lit: f64) {
 /// The size and line height of a label's text, as Pango attributes.
 fn text_attributes(label: &gtk::Label, size: Option<f64>, line_height: Option<f64>) {
     let attributes = gtk::pango::AttrList::new();
-    for faded in label.attributes().map(|old| take_fade(&old)).unwrap_or_default() {
+    for faded in label
+        .attributes()
+        .map(|old| take_fade(&old))
+        .unwrap_or_default()
+    {
         attributes.insert(faded);
     }
     let scale = f64::from(gtk::pango::SCALE);
@@ -281,7 +285,9 @@ pub fn Text(p: &Parent, ctx: &Ctx, props: TextProps) {
     }
     if let Some(lit) = &props.lit {
         let shown = label.clone();
-        bind_number(ctx, lit, None, &label, move |value| fade_after(&shown, value));
+        bind_number(ctx, lit, None, &label, move |value| {
+            fade_after(&shown, value)
+        });
     }
     match props.mark {
         Some(mark) => place(p, &crate::canvas::Marked::new(&label, mark)),
@@ -2449,20 +2455,35 @@ fn progress_ring(p: &Parent, ctx: &Ctx, value: Get, props: &ProgressProps) {
     let drawn = Rc::clone(&fraction);
     area.set_draw_func(move |area, cr, width, height| {
         let color = crate::theme::rgba(&crate::theme::Color::Role("accent"), area.upcast_ref());
-        cr.set_source_rgba(color.red().into(), color.green().into(), color.blue().into(), color.alpha().into());
+        cr.set_source_rgba(
+            color.red().into(),
+            color.green().into(),
+            color.blue().into(),
+            color.alpha().into(),
+        );
         cr.set_line_width(stroke);
         cr.set_line_cap(gtk::cairo::LineCap::Round);
         let (w, h) = (f64::from(width), f64::from(height));
         let start = -std::f64::consts::FRAC_PI_2;
         let sweep = drawn.get().max(0.0001) * std::f64::consts::TAU;
-        cr.arc(w / 2.0, h / 2.0, (w.min(h) - stroke) / 2.0, start, start + sweep);
+        cr.arc(
+            w / 2.0,
+            h / 2.0,
+            (w.min(h) - stroke) / 2.0,
+            start,
+            start + sweep,
+        );
         let _ = cr.stroke();
     });
     let shown = area.clone();
     let at = ctx.clone();
     effect(move || {
         crate::theme::track();
-        let current = if total > 0.0 { (as_f64(&value(&at)) / total).clamp(0.0, 1.0) } else { 0.0 };
+        let current = if total > 0.0 {
+            (as_f64(&value(&at)) / total).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
         fraction.set(current);
         shown.update_property(&[
             gtk::accessible::Property::ValueMin(0.0),
