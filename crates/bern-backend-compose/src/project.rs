@@ -300,13 +300,14 @@ pub fn manifest(
         ""
     };
     let multicast_enabled = android.is_some_and(|options| options.multicast);
-    let internet =
-        if uses_network(app) || android.is_some_and(|options| options.network) || multicast_enabled
-        {
-            "\n    <uses-permission android:name=\"android.permission.INTERNET\" />"
-        } else {
-            ""
-        };
+    let internet = if uses_network(app)
+        || android.is_some_and(|options| options.network)
+        || multicast_enabled
+    {
+        "\n    <uses-permission android:name=\"android.permission.INTERNET\" />\n    <uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\" />"
+    } else {
+        ""
+    };
     let multicast = if multicast_enabled {
         "\n    <uses-permission android:name=\"android.permission.CHANGE_WIFI_MULTICAST_STATE\" />"
     } else {
@@ -657,6 +658,11 @@ mod tests {
         });
         let image = manifest(&image, false, None, &[]);
         assert!(image.contains(INTERNET), "{image}");
+        // Pictures that failed are tried again when the network changes.
+        assert!(
+            image.contains("android.permission.ACCESS_NETWORK_STATE"),
+            "{image}"
+        );
         let shape = in_window("gallery", |element| element.expr("fill_from").is_some());
         let shape = manifest(&shape, false, None, &[]);
         assert!(shape.contains(INTERNET), "{shape}");

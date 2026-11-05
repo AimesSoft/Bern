@@ -13,6 +13,8 @@ mod project;
 mod style;
 pub mod toolchain;
 
+pub use project::KOTLIN;
+
 use bern_ir::spec::COMPONENTS;
 use bern_ir::{Application, IR_VERSION};
 use bern_target_api::{
@@ -29,6 +31,7 @@ const VIEWS: &str = include_str!("../templates/BernViews.kt");
 const STYLE: &str = include_str!("../templates/BernStyle.kt");
 const MEDIA: &str = include_str!("../templates/BernMedia.kt");
 const FEATURES: &str = include_str!("../templates/BernFeatures.kt");
+const PICTURE_TRIES: &str = include_str!("../templates/BernPictureTries.kt");
 const SCENE: &str = include_str!("../templates/BernScene.kt");
 const APP_ICON: &str = include_str!("../templates/BernAppIcon.kt");
 
@@ -441,6 +444,10 @@ impl Target for ComposeAndroid {
                 sources.join("dev/bern/runtime/BernFeatures.kt"),
                 features_source(),
             ),
+            GeneratedFile::text(
+                sources.join("dev/bern/runtime/BernPictureTries.kt"),
+                PICTURE_TRIES,
+            ),
             GeneratedFile::text(sources.join("dev/bern/runtime/BernMedia.kt"), MEDIA),
             GeneratedFile::text(sources.join("dev/bern/runtime/BernScene.kt"), SCENE),
             GeneratedFile::text(sources.join("dev/bern/runtime/BernAppIcon.kt"), APP_ICON),
@@ -620,6 +627,7 @@ impl Target for ComposeAndroid {
                 "BernViews",
                 "BernStyle",
                 "BernFeatures",
+                "BernPictureTries",
                 "BernMedia",
                 "BernScene",
                 "BernAppIcon",
