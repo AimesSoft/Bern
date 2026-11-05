@@ -127,7 +127,7 @@ fn animated_svg_generates_for_every_presenter() {
             .join("\n");
         assert!(text.contains("bern-script ="), "{name}: script dependency");
         assert!(
-            !text.contains("features = [\"boa\"]"),
+            !text.contains("features = [\"__boa\"]"),
             "{name}: must not link Boa"
         );
         assert!(
@@ -157,7 +157,7 @@ fn animated_svg_generates_for_every_presenter() {
                 .map(|f| String::from_utf8_lossy(&f.contents))
                 .collect::<Vec<_>>()
                 .join("\n");
-            assert!(text.contains("features = [\"boa\"]"));
+            assert!(text.contains("features = [\"__boa\"]"));
             assert!(!text.contains("bernScriptDispatch"));
             assert!(!text.contains("class BernSvg"));
             context.target.webview = None;

@@ -29,7 +29,7 @@ javascript = true
 | Web，web_mode = "app" | 浏览器 Worker |
 | tvOS、webview = false | Boa 0.22，纯 Rust 随应用编译 |
 
-`javascript` 默认关闭。生成的 Cargo 工程只在无 WebView 时启用 `bern-script/boa`，系统宿主构建不编译 Boa。Linux 的 `bern-gtk/script` 引入 WebKitGTK；无 WebView 的 Linux 目标同时把 SVG 转为图片，不再引入该依赖。脚本功能目前用于引擎与 UI 同进程的目标；Web 的远程 `web_mode = "ui"` 暂不提供远程脚本路由。
+`javascript` 默认关闭，应用只需要声明这一项：每个目标用什么宿主由 Bern 决定，包在 `bern-script` 上设置特性时 `bern build` 会报错。测试没有目标可运行，可以在 dev-dependencies 里打开 `__boa`。生成的 Cargo 工程只在无 WebView 时启用 `bern-script/__boa`，系统宿主构建不编译 Boa。Linux 的 `bern-gtk/script` 引入 WebKitGTK；无 WebView 的 Linux 目标同时把 SVG 转为图片，不再引入该依赖。脚本功能目前用于引擎与 UI 同进程的目标；Web 的远程 `web_mode = "ui"` 暂不提供远程脚本路由。
 
 ```rust
 async fn example() -> Result<(), bern::script::Error> {
@@ -49,6 +49,6 @@ Boa 每个上下文使用独立工作线程，并限制循环次数与递归深�
 
 UI 可用 `if window.webview { ... } else { ... }`。这是编译期条件，未选分支不进入目标检查和代码生成。`Svg(static_source: ...)` 的自动静态回退见 [动画 SVG](Animated-SVG.md)。
 
-验证：`cargo test -p bern-script`、`cargo test -p bern-script --features boa`、`cargo test -p bern-cli --test svg_targets`、`node --test crates/bern-script/tests/browser.test.mjs`。macOS 的 `bern-script` 测试还会编译 Swift 宿主并实测 WKWebView。
+验证：`cargo test -p bern-script`、`cargo test -p bern-script --features __boa`、`cargo test -p bern-cli --test svg_targets`、`node --test crates/bern-script/tests/browser.test.mjs`。macOS 的 `bern-script` 测试还会编译 Swift 宿主并实测 WKWebView。
 
 2026-10-22 验证：编译器／IR／目标 API 的 114 项单元测试、七平台生成与回退测试、GTK 生成和打包测试通过。Boa 的持久变量、独立上下文、JSON、Promise、异常与循环限制测试通过；WKWebView 真正执行与浏览器 Worker 测试通过。一个实际应用的 tvOS 模拟器整包构建成功，二进制未链接 WebKit；启用脚本的 SVG 示例完成 iOS 模拟器、Android APK、Web 整包构建，iOS 依赖树不含 Boa。Windows、Linux 的原生宿主尚未在对应系统上编译运行。

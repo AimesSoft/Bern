@@ -29,7 +29,7 @@ javascript = true
 | Web, web_mode = "app" | Browser Worker |
 | tvOS, webview = false | Boa 0.22, pure Rust compiled with the app |
 
-`javascript` is off by default. The generated Cargo project enables `bern-script/boa` only when there is no WebView; builds with a system host do not compile Boa. On Linux, `bern-gtk/script` pulls in WebKitGTK; a Linux target without a WebView also turns SVG into images and no longer pulls in that dependency. The script feature is currently used for targets where the engine and the UI run in the same process; the Web's remote `web_mode = "ui"` does not yet provide remote script routing.
+`javascript` is off by default, and it is all an application says: the host of each target is Bern's to pick, and `bern build` refuses a package that sets features on `bern-script`. A test, which has no target to run in, may turn on `__boa` as a dev-dependency. The generated Cargo project enables `bern-script/__boa` only when there is no WebView; builds with a system host do not compile Boa. On Linux, `bern-gtk/script` pulls in WebKitGTK; a Linux target without a WebView also turns SVG into images and no longer pulls in that dependency. The script feature is currently used for targets where the engine and the UI run in the same process; the Web's remote `web_mode = "ui"` does not yet provide remote script routing.
 
 ```rust
 async fn example() -> Result<(), bern::script::Error> {
@@ -49,6 +49,6 @@ Boa uses a separate worker thread for each context and limits loop iterations an
 
 The UI can use `if window.webview { ... } else { ... }`. This is a compile-time condition: the branch not chosen does not enter target checks or code generation. For the automatic static fallback of `Svg(static_source: ...)`, see [Animated SVG](Animated-SVG.md).
 
-Verification: `cargo test -p bern-script`, `cargo test -p bern-script --features boa`, `cargo test -p bern-cli --test svg_targets`, `node --test crates/bern-script/tests/browser.test.mjs`. On macOS the `bern-script` tests also compile the Swift host and test WKWebView for real.
+Verification: `cargo test -p bern-script`, `cargo test -p bern-script --features __boa`, `cargo test -p bern-cli --test svg_targets`, `node --test crates/bern-script/tests/browser.test.mjs`. On macOS the `bern-script` tests also compile the Swift host and test WKWebView for real.
 
 Verified on 2026-10-22: 114 unit tests of the compiler / IR / target API, generation and fallback tests for seven platforms, and GTK generation and packaging tests passed. Boa tests for persistent variables, independent contexts, JSON, Promises, exceptions and loop limits passed; tests of real WKWebView execution and of the browser Worker passed. A full-package tvOS simulator build of a real app succeeded, and the binary did not link WebKit; the script-enabled SVG example completed full-package builds for the iOS simulator, an Android APK and the Web, and the iOS dependency tree contained no Boa. The native hosts for Windows and Linux have not yet been compiled and run on those systems.
