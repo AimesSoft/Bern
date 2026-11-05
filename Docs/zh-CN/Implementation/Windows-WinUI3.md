@@ -30,10 +30,10 @@ frontends = ["winui3"]   # 或 ["xaml-islands"]；不写则两个都编译
 
 | 条件 | 两个都编译 | 只有 WinUI 3 | 只有系统 XAML |
 | --- | --- | --- | --- |
-| 系统有 Windows App Runtime 2（任何 2.x：其他程序装的，或 Windows 11 自带的） | WinUI 3（`Microsoft.UI.Xaml`），Mica 背景与 `TitleBar`，Windows 11 外观 | 同左 | 系统 XAML |
-| 没有（Windows 10，或没有 2.x 的 Windows 11） | 系统自带的 XAML（`Windows.UI.Xaml`），经 XAML Islands 承载在 Win32 窗口中，Windows 10 外观 | 提示框，可在浏览器中打开安装程序 | 同左 |
+| 系统有 Windows App Runtime 2（其他程序装的 2.5 或更新版本，或 Windows 11 自带的 2.x） | WinUI 3（`Microsoft.UI.Xaml`），Mica 背景与 `TitleBar`，Windows 11 外观 | 同左 | 系统 XAML |
+| 没有（Windows 10，或没有 2.x 的 Windows 11，或只装了更旧的 2.x） | 系统自带的 XAML（`Windows.UI.Xaml`），经 XAML Islands 承载在 Win32 窗口中，Windows 10 外观 | 提示框，可在浏览器中打开安装程序 | 同左 |
 
-- **运行时按顺序找。** 先用引导程序 `MddBootstrapInitialize2(0x00020000, L"", 2.0.0.0, None)` 找其他程序装的任何 2.x：2.0 起框架包只按主版本区分（`Microsoft.WindowsAppRuntime.2`），2.x 之间兼容。应用按最新的 2.5.1 编译，只用每个 2.x 都有的接口；展示应用在 2.2 上逐页实测通过。找不到时，再经系统的动态依赖接口（`TryCreatePackageDependency`、`AddPackageDependency`，Windows 11 才有）加载 Windows 自带的 `Microsoft.WindowsAppRuntime.CBS.2`。两者都不弹窗，也不引导安装。
+- **运行时按顺序找。** 先用引导程序 `MddBootstrapInitialize2(0x00020000, L"", 2.5.0.0, None)` 找其他程序装的 2.x，要求不低于编译用的 SDK：更旧的版本可能启动失败又没有任何提示，而系统 XAML 不需要运行时。2.0 起框架包只按主版本区分（`Microsoft.WindowsAppRuntime.2`），2.x 之间兼容。应用按最新的 2.5.1 编译，只用每个 2.x 都有的接口；展示应用在 2.2 上逐页实测通过。找不到时，再经系统的动态依赖接口（`TryCreatePackageDependency`、`AddPackageDependency`，Windows 11 才有）加载 Windows 自带的 `Microsoft.WindowsAppRuntime.CBS.2`。两者都不弹窗，也不引导安装。
 - **Windows 自带的运行时。** Windows 11 25H2 带有 `CBS.2`（2.2）、`CBS.1.8`、`CBS.1.6` 与 `CBS`（1.5），都在 `C:\Windows\SystemApps`，给系统自己的组件用。实测普通程序能挂上 `CBS.2` 与 `CBS.1.6`，挂不上 `CBS.1.8` 与 `CBS`。`CBS.2` 比商店版少了各语言的 `.mui`，而且 WinUI 不会自己找到它的 `resources.pri`：直接使用时报 `Cannot locate resource from 'ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml'` 并退出。所以用它时，应用在 `Application.ResourceManagerRequested` 中用这份运行时自己的 `resources.pri` 创建资源管理器交给 WinUI。
 - **只编译 WinUI 3。** 找不到运行时时，按界面语言弹出提示（标题为应用名），选“是”用默认浏览器打开最新运行时的安装程序 `https://aka.ms/windowsappsdk/2.5/latest/windowsappruntimeinstall-<架构>.exe`（微软的固定地址，跳转到下载服务器），然后退出；装好后再次打开即可。
 - **只编译系统 XAML。** 不找运行时，不链接也不随附引导程序；预编译头只含一个前端，首次构建约 39 秒。

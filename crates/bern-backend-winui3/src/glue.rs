@@ -15,9 +15,10 @@ pub use bern_target_api::glue::{cli_rs, mcp_rs};
 use std::path::Path;
 
 /// Windows App SDK release the runtime is written against: the newest. Its
-/// headers and metadata are build inputs only; applications use any
-/// Windows App Runtime 2 the system has, installed by another program or
-/// the copy Windows 11 ships with, or the system XAML when there is none.
+/// headers and metadata are build inputs only; applications use a Windows
+/// App Runtime 2 at least this new that another program installed, or the
+/// copy Windows 11 ships with, or the system XAML when there is neither.
+/// `InstalledMinimum` in `bern_main.cpp` follows this.
 pub const WINDOWS_APP_SDK: &str = "2.5";
 /// The Windows App SDK component packages the build reads, from the NuGet
 /// cache or nuget.org: `(id, version)`, as Windows App SDK 2.5.1 has them.
