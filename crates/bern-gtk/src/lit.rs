@@ -1,7 +1,5 @@
 //! Text lit part of the way: drawn through a mask that is opaque as far as
-//! it is lit and faded after, its edge soft and inside the character it
-//! stops in, moving from before that character's left side to past its
-//! right.
+//! it is lit and faded after, the edge inside the character it stops in.
 
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
@@ -104,18 +102,10 @@ fn mask(snapshot: &gtk::Snapshot, widget: &Lit, label: &gtk::Label, lit: f64) {
     let x = origin.x() + left as f32 + place.x() as f32 / scale;
     let y = origin.y() + top as f32 + place.y() as f32 / scale;
     let (wide, high) = (place.width() as f32 / scale, place.height() as f32 / scale);
-    let edge = (wide / 2.0).max(0.5);
-    let end = x + (wide + edge) * lit.fract() as f32;
+    let end = x + wide * lit.fract() as f32;
     snapshot.append_color(&opaque, &graphene::Rect::new(0.0, 0.0, width, y));
-    snapshot.append_linear_gradient(
-        &graphene::Rect::new(0.0, y, width, high),
-        &graphene::Point::new(end - edge, y),
-        &graphene::Point::new(end, y),
-        &[
-            gsk::ColorStop::new(0.0, opaque),
-            gsk::ColorStop::new(1.0, faded),
-        ],
-    );
+    snapshot.append_color(&opaque, &graphene::Rect::new(0.0, y, end, high));
+    snapshot.append_color(&faded, &graphene::Rect::new(end, y, width - end, high));
     let below = y + high;
     snapshot.append_color(
         &faded,

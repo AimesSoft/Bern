@@ -229,9 +229,8 @@ fun BernText(text: String, style: TextStyle, color: Color, lines: Int? = null, l
     )
 }
 
-/// `lit`: what stands after `lit` characters of `text` faded, its edge soft
-/// and inside the character `lit` stops in, moving from before its left
-/// side to past its right.
+/// `lit`: what stands after `lit` characters of `text` faded, the edge inside
+/// the character `lit` stops in.
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.bernFade(
     layout: androidx.compose.ui.text.TextLayoutResult, text: String, lit: Double,
 ) {
@@ -240,15 +239,14 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.bernFade(
     val at = text.offsetByCodePoints(0, whole)
     val box = layout.getBoundingBox(at)
     val line = layout.getLineForOffset(at)
-    val edge = (box.width / 2).coerceAtLeast(0.5f)
-    val end = box.left + (box.width + edge) * (lit - whole).toFloat()
+    val end = box.left + box.width * (lit - whole).toFloat()
     val faded = Color.Black.copy(alpha = 0.4f)
     val top = layout.getLineTop(line)
     val blend = androidx.compose.ui.graphics.BlendMode.DstIn
     drawRect(
-        androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(Color.Black, faded), startX = end - edge, endX = end),
-        androidx.compose.ui.geometry.Offset(0f, top),
-        androidx.compose.ui.geometry.Size(size.width, layout.getLineBottom(line) - top),
+        faded,
+        androidx.compose.ui.geometry.Offset(end, top),
+        androidx.compose.ui.geometry.Size(size.width - end, layout.getLineBottom(line) - top),
         blendMode = blend,
     )
     for (later in line + 1 until layout.lineCount) {
