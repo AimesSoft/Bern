@@ -71,6 +71,7 @@ import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -210,25 +211,54 @@ fun bernTextStyle(style: String, size: Float? = null, lineHeight: Float? = null)
 
 /// A `Text`: at most `lines` lines, the last ending with an ellipsis.
 @Composable
-fun BernText(text: String, style: TextStyle, color: Color, lines: Int? = null, lit: Int = -1) {
-    val faded = if (color != Color.Unspecified) color
-        else if (style.color != Color.Unspecified) style.color
-        else LocalContentColor.current
+fun BernText(text: String, style: TextStyle, color: Color, lines: Int? = null, lit: Double = -1.0) {
+    val laid = remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
     Text(
-        if (lit < 0) androidx.compose.ui.text.AnnotatedString(text) else bernLit(text, lit, faded),
+        text,
+        modifier = if (lit < 0) Modifier else Modifier
+            .graphicsLayer(compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen)
+            .drawWithContent {
+                drawContent()
+                laid.value?.let { bernFade(it, text, lit) }
+            },
         style = style,
         color = color,
         maxLines = lines ?: Int.MAX_VALUE,
         overflow = if (lines != null) TextOverflow.Ellipsis else TextOverflow.Clip,
+        onTextLayout = { laid.value = it },
     )
 }
 
-/// `lit`: the first `lit` characters of `text` as they are, the rest faded.
-private fun bernLit(text: String, lit: Int, color: Color): androidx.compose.ui.text.AnnotatedString {
-    val from = text.offsetByCodePoints(0, lit.coerceAtMost(text.codePointCount(0, text.length)))
-    return androidx.compose.ui.text.buildAnnotatedString {
-        append(text)
-        addStyle(androidx.compose.ui.text.SpanStyle(color = color.copy(alpha = color.alpha * 0.4f)), from, text.length)
+/// `lit`: what stands after `lit` characters of `text` faded, its edge soft
+/// and inside the character `lit` stops in, moving from before its left
+/// side to past its right.
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.bernFade(
+    layout: androidx.compose.ui.text.TextLayoutResult, text: String, lit: Double,
+) {
+    val whole = lit.toInt()
+    if (whole >= text.codePointCount(0, text.length)) return
+    val at = text.offsetByCodePoints(0, whole)
+    val box = layout.getBoundingBox(at)
+    val line = layout.getLineForOffset(at)
+    val edge = (box.width / 2).coerceAtLeast(0.5f)
+    val end = box.left + (box.width + edge) * (lit - whole).toFloat()
+    val faded = Color.Black.copy(alpha = 0.4f)
+    val top = layout.getLineTop(line)
+    val blend = androidx.compose.ui.graphics.BlendMode.DstIn
+    drawRect(
+        androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(Color.Black, faded), startX = end - edge, endX = end),
+        androidx.compose.ui.geometry.Offset(0f, top),
+        androidx.compose.ui.geometry.Size(size.width, layout.getLineBottom(line) - top),
+        blendMode = blend,
+    )
+    for (later in line + 1 until layout.lineCount) {
+        val from = layout.getLineTop(later)
+        drawRect(
+            faded,
+            androidx.compose.ui.geometry.Offset(0f, from),
+            androidx.compose.ui.geometry.Size(size.width, layout.getLineBottom(later) - from),
+            blendMode = blend,
+        )
     }
 }
 

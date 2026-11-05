@@ -21,6 +21,7 @@ mod icons;
 mod kernel;
 mod layout;
 mod lazy;
+mod lit;
 mod markdown;
 mod media;
 pub mod motion;

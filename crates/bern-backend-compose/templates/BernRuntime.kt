@@ -2656,15 +2656,9 @@ internal object BernOverlay {
             val line = lines.getJSONObject(i)
             val text = line.optString("text")
             if (text.isEmpty()) continue
-            view.addView(android.widget.TextView(context).apply {
-                val color = android.graphics.Color.parseColor(line.optString("color", "#ffffffff"))
-                val lit = line.optInt("lit", -1)
-                this.text = if (lit < 0) text else android.text.SpannableString(text).apply {
-                    val from = text.offsetByCodePoints(0, lit.coerceAtMost(text.codePointCount(0, text.length)))
-                    val alpha = (android.graphics.Color.alpha(color) * 0.4).toInt()
-                    val faded = (color and 0x00FFFFFF) or (alpha shl 24)
-                    setSpan(android.text.style.ForegroundColorSpan(faded), from, text.length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                }
+            val color = android.graphics.Color.parseColor(line.optString("color", "#ffffffff"))
+            view.addView(BernLitLine(context, line.optDouble("lit", -1.0), color).apply {
+                this.text = text
                 setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, line.optDouble("size", 18.0).toFloat())
                 setTextColor(color)
                 if (line.optBoolean("bold")) setTypeface(typeface, android.graphics.Typeface.BOLD)
@@ -2750,4 +2744,29 @@ internal class BernOverlaySymbol(private val symbol: String) : android.graphics.
 
     @Deprecated("Deprecated in Java")
     override fun getOpacity() = android.graphics.PixelFormat.TRANSLUCENT
+}
+
+/// A line of an overlay: as far as `lit` in `color`, the rest faded, the edge
+/// inside the character `lit` stops in, moving from before its left side to
+/// past its right. All of it below zero.
+private class BernLitLine(
+    context: android.content.Context, private val lit: Double, private val color: Int,
+) : android.widget.TextView(context) {
+    override fun onDraw(canvas: android.graphics.Canvas) {
+        val shown = text.toString()
+        val lines = layout
+        if (lit >= 0 && lines != null) {
+            val whole = lit.toInt().coerceAtMost(shown.codePointCount(0, shown.length))
+            val at = shown.offsetByCodePoints(0, whole)
+            val left = lines.getPrimaryHorizontal(at)
+            val right = if (at < shown.length) lines.getPrimaryHorizontal(shown.offsetByCodePoints(at, 1)) else left
+            val edge = ((right - left) / 2).coerceAtLeast(0.5f)
+            val end = left + (right - left + edge) * (lit - lit.toInt()).toFloat()
+            val faded = (color and 0x00FFFFFF) or ((android.graphics.Color.alpha(color) * 0.4).toInt() shl 24)
+            paint.shader = android.graphics.LinearGradient(
+                end - edge, 0f, end, 0f, color, faded, android.graphics.Shader.TileMode.CLAMP,
+            )
+        }
+        super.onDraw(canvas)
+    }
 }

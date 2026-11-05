@@ -196,12 +196,6 @@ fn label(line: &Line) -> gtk::Label {
         wide(b),
     ));
     attributes.insert(gtk::pango::AttrInt::new_foreground_alpha(wide(a)));
-    if let Some(at) = line.faded_from() {
-        let faded = f64::from(wide(a)) * bern_ffi::overlay::FADED;
-        let mut rest = gtk::pango::AttrInt::new_foreground_alpha(faded as u16);
-        rest.set_start_index(at as u32);
-        attributes.insert(rest);
-    }
     label.set_attributes(Some(&attributes));
     label
 }
@@ -212,7 +206,11 @@ fn show(id: &str, overlay: &Overlay) {
         lines.remove(&child);
     }
     for line in overlay.lines.iter().filter(|line| !line.text.is_empty()) {
-        lines.append(&label(line));
+        let text = label(line);
+        match line.lit.filter(|lit| *lit >= 0.0) {
+            Some(lit) => lines.append(&crate::lit::Lit::new(&text, &text, lit)),
+            None => lines.append(&text),
+        }
     }
     // Every button keeps its slot; locked, only those that unlock it show
     // and take the pointer.

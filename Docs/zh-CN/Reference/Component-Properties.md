@@ -151,7 +151,7 @@
 
 `Svg` 的 `static_source` 是动画结束时的画面，没有 WebView 的构建直接显示它；`data` 是交给文档的一段文字，文档的脚本在 `window.bernSvg.update(state)` 的 `state.data` 中读到，变化时再交一次；`external_links: true` 时，文档里点开的 https 链接交给系统浏览器打开，文档本身始终不离开打包的资源。见[动画 SVG](../Implementation/Animated-SVG.md)。
 
-`Text` 加 `lit` 时，前面这么多个字符保持原色，其余淡显，用于逐字演唱；小于零时全部正常显示。按 Unicode 标量计数。SwiftUI、Compose、WinUI 和 GTK 会绘制这一效果，其他目标显示完整文字。
+`Text` 加 `lit` 时，前面这么多保持原色，其余淡显，用于逐字演唱：2.5 是两个字加第三个字的左半部分，能在字内绘制的目标会画出来；小于零时全部正常显示。按 Unicode 标量计数。SwiftUI、Compose、WinUI 和 GTK 会绘制这一效果，其他目标显示完整文字。
 
 `Text` 加 `markdown` 时，内容是行内 Markdown：`**粗体**`、`*斜体*` 或 `_斜体_`、`` `代码` ``、`~~删除线~~` 和 `[链接](地址)`，反斜杠让下一个标记照字面显示。SwiftUI 交给系统的 `AttributedString(markdown:)`，Compose 写成带样式与 `LinkAnnotation` 的 `AnnotatedString`，Web 生成元素（不当作 HTML，链接只接受网页和邮件地址），GTK 转成 Pango 标记；Windows 暂时去掉标记只显示文字。整篇文档（标题、列表、表格等）由应用自己分块，每块用这样的文字显示。
 

@@ -137,46 +137,16 @@ pub struct TextProps {
     pub markdown: bool,
     /// Bold while this holds, else in the style's weight.
     pub bold: Option<Get>,
-    /// That many of its first characters as they are, the rest faded; below
+    /// As far through its characters as this as it is, the rest faded; below
     /// zero, all of it.
     pub lit: Option<Num>,
     /// The spring a size that follows state changes with.
     pub animate: Option<Curve>,
 }
 
-/// What `lit` faded in `attributes`, taken out of them.
-fn take_fade(attributes: &gtk::pango::AttrList) -> Vec<gtk::pango::Attribute> {
-    attributes
-        .filter(|attribute| attribute.attr_class().type_() == gtk::pango::AttrType::ForegroundAlpha)
-        .map(|taken| taken.attributes())
-        .unwrap_or_default()
-}
-
-/// What stands after the first `lit` characters of a label faded.
-fn fade_after(label: &gtk::Label, lit: f64) {
-    let attributes = label.attributes().unwrap_or_default();
-    take_fade(&attributes);
-    let text = label.text();
-    if lit >= 0.0
-        && let Some((at, _)) = text.char_indices().nth(lit as usize)
-    {
-        let mut faded = gtk::pango::AttrInt::new_foreground_alpha(0x6666);
-        faded.set_start_index(at as u32);
-        attributes.insert(faded);
-    }
-    label.set_attributes(Some(&attributes));
-}
-
 /// The size and line height of a label's text, as Pango attributes.
 fn text_attributes(label: &gtk::Label, size: Option<f64>, line_height: Option<f64>) {
     let attributes = gtk::pango::AttrList::new();
-    for faded in label
-        .attributes()
-        .map(|old| take_fade(&old))
-        .unwrap_or_default()
-    {
-        attributes.insert(faded);
-    }
     let scale = f64::from(gtk::pango::SCALE);
     if let Some(size) = size {
         attributes.insert(gtk::pango::AttrSize::new_size_absolute(
@@ -283,15 +253,16 @@ pub fn Text(p: &Parent, ctx: &Ctx, props: TextProps) {
             bind_label(&label, bound_text(ctx, content));
         }
     }
-    if let Some(lit) = &props.lit {
-        let shown = label.clone();
-        bind_number(ctx, lit, None, &label, move |value| {
-            fade_after(&shown, value)
-        });
-    }
-    match props.mark {
-        Some(mark) => place(p, &crate::canvas::Marked::new(&label, mark)),
-        None => place(p, &crate::layout::Words::wrap(&label)),
+    match (props.mark, &props.lit) {
+        (Some(mark), _) => place(p, &crate::canvas::Marked::new(&label, mark)),
+        (None, Some(lit)) => {
+            let words = crate::layout::Words::wrap(&label);
+            let shown = crate::lit::Lit::new(&words, &label, -1.0);
+            let bound = shown.clone();
+            bind_number(ctx, lit, None, &label, move |value| bound.set(value));
+            place(p, &shown);
+        }
+        (None, None) => place(p, &crate::layout::Words::wrap(&label)),
     }
 }
 

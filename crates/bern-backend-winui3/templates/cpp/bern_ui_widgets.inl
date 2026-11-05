@@ -187,14 +187,14 @@ struct TextProps {
     /// `bold`: the text is bold while this holds, else in its style's
     /// weight.
     Get bold;
-    /// `lit`: that many of its first characters as they are, the rest faded;
-    /// below zero, all of it.
+    /// `lit`: as far through its characters as this as they are, the rest
+    /// faded; below zero, all of it.
     Len lit;
     /// `animate`: a size that follows state springs to each new value.
     Motion const* animate = nullptr;
 };
 
-/// `lit`: what stands after the first `lit` characters of `text` faded.
+/// `lit`: what stands after its whole characters in `text` faded.
 inline void FadeAfter(controls::TextBlock const& block, std::wstring_view text, double lit) {
     block.TextHighlighters().Clear();
     if (lit < 0) return;
@@ -211,6 +211,46 @@ inline void FadeAfter(controls::TextBlock const& block, std::wstring_view text, 
     faded.Foreground(xaml::Media::SolidColorBrush(color));
     faded.Background(xaml::Media::SolidColorBrush(winrt::Windows::UI::Colors::Transparent()));
     block.TextHighlighters().Append(faded);
+}
+
+/// `lit`: the part of the character it stops in, from that character's left:
+/// `over`, the same text unfaded above `block`, shows only there.
+inline void LightPart(controls::TextBlock const& block, controls::TextBlock const& over, double lit) {
+    over.Visibility(xaml::Visibility::Collapsed);
+    double part = lit - std::floor(lit);
+    if (lit < 0 || part <= 0) return;
+    over.FontSize(block.FontSize());
+    over.FontWeight(block.FontWeight());
+    over.Foreground(block.Foreground());
+    over.Opacity(block.Opacity());
+    over.MaxLines(block.MaxLines());
+    over.TextTrimming(block.TextTrimming());
+    over.TextWrapping(block.TextWrapping());
+    over.TextAlignment(block.TextAlignment());
+    over.LineStackingStrategy(block.LineStackingStrategy());
+    over.LineHeight(block.LineHeight());
+    auto start = block.ContentStart(), end = block.ContentEnd();
+    if (!start || !end) return;
+    using Direction = xaml::Documents::LogicalDirection;
+    auto left = static_cast<std::int64_t>(lit);
+    for (int offset = 0; offset < 100000; ++offset) {
+        auto here = start.GetPositionAtOffset(offset, Direction::Forward);
+        if (!here || here.Offset() >= end.Offset()) return;
+        auto next = start.GetPositionAtOffset(offset + 1, Direction::Forward);
+        if (!next) return;
+        auto from = here.GetCharacterRect(Direction::Forward);
+        auto to = next.GetCharacterRect(Direction::Forward);
+        // A rectangle has no width here: the next one's place gives it.
+        bool sameLine = std::abs(from.Y - to.Y) < 1;
+        float width = sameLine ? to.X - from.X : static_cast<float>(block.FontSize());
+        if (width <= 0) continue;
+        if (left-- > 0) continue;
+        media::RectangleGeometry clip;
+        clip.Rect(winrt::Windows::Foundation::Rect{from.X, from.Y, width * static_cast<float>(part), from.Height});
+        over.Clip(clip);
+        over.Visibility(xaml::Visibility::Visible);
+        return;
+    }
 }
 
 /// `Text(markdown)` here: the words of inline Markdown without its marks,
@@ -267,11 +307,19 @@ inline void Text(Parent const& p, Ctx const& ctx, TextProps props) {
             if (auto text = weak.get()) text.FontWeight(on ? WeightNamed("bold") : weight);
         });
     }
+    controls::TextBlock over{nullptr};
     if (props.lit.Given()) {
-        Reactive::Run([lit = props.lit, ctx, content, weak = winrt::make_weak(block)] {
+        over = TextOf(content);
+        ApplyTextStyle(over, props.style);
+        over.IsHitTestVisible(false);
+        over.Visibility(xaml::Visibility::Collapsed);
+        Reactive::Run([lit = props.lit, ctx, content, weak = winrt::make_weak(block), above = winrt::make_weak(over)] {
             double count = lit.Now(ctx);
             auto text = content ? winrt::to_hstring(content()) : winrt::hstring();
-            if (auto shown = weak.get()) FadeAfter(shown, text, count);
+            auto shown = weak.get();
+            if (!shown) return;
+            FadeAfter(shown, text, count);
+            if (auto copy = above.get()) LightPart(shown, copy, count);
         });
     }
     if (props.lineHeight.Given()) {
@@ -279,6 +327,13 @@ inline void Text(Parent const& p, Ctx const& ctx, TextProps props) {
         BindLen(ctx, props.lineHeight, nullptr, [block](double height) { block.LineHeight((std::max)(0.0, height)); });
     }
     if (props.emphasis && (std::string_view(props.emphasis) == "secondary" || std::string_view(props.emphasis) == "tertiary")) Secondary(block);
+    if (!props.mark && over) {
+        controls::Grid holder;
+        holder.Children().Append(block);
+        holder.Children().Append(over);
+        Place(p, Colored(holder, props.color));
+        return;
+    }
     if (!props.mark) {
         Place(p, Colored(block, props.color));
         return;
