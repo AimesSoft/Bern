@@ -10,8 +10,9 @@ repository.workspace = true
 [features]
 default = []
 # Turned on by the project Bern generates, for a target with no system host.
-# An application asks for `javascript = true` and leaves the host to Bern.
-__boa = ["dep:boa_engine"]
+# An application asks for `javascript = true` and leaves the host to Bern; only
+# its tests, with no target to run in, turn this on, as a dev-dependency.
+boa = ["dep:boa_engine"]
 
 [dependencies]
 serde.workspace = true
