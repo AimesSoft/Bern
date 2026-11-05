@@ -3,7 +3,7 @@
 
 use super::{Checker, FieldExpect, Root, Scope, is_labeled_enum};
 use bern_ir as ir;
-use bern_protocol::Type;
+use bern_protocol::{Type, Value};
 use bern_syntax as ast;
 
 impl Checker<'_> {
@@ -196,15 +196,32 @@ impl Checker<'_> {
                 || field.as_deref() == Some("webview")
                 || field.as_deref() == Some("menu_bar")
                 || field.as_deref() == Some("keyboard")
+                || field.as_deref() == Some("app_version")
                 || field.as_deref().is_some_and(|name| sizes.contains(&name));
             if !known || path.segments.len() != 2 {
                 self.error(
                     path.span(),
-                    "the hosting window offers `window.fullscreen` (the actual full-screen state), `window.idle` (no input for `idle_after` seconds), its size: `window.compact`, `window.medium`, `window.expanded`, `window.large`, `window.short` (shorter than the compact breakpoint, as a phone on its side), `window.tv` (the window is on a television), `window.webview` (the target supports WebView), `window.menu_bar` (the application's `MenuBar` shows in the system menu bar), and `window.keyboard` (a hardware keyboard is attached)",
+                    "the hosting window offers `window.fullscreen` (the actual full-screen state), `window.idle` (no input for `idle_after` seconds), its size: `window.compact`, `window.medium`, `window.expanded`, `window.large`, `window.short` (shorter than the compact breakpoint, as a phone on its side), `window.tv` (the window is on a television), `window.webview` (the target supports WebView), `window.menu_bar` (the application's `MenuBar` shows in the system menu bar), `window.keyboard` (a hardware keyboard is attached), and `window.app_version` (`version` of `[app]` in Bern.toml)",
                 );
                 return None;
             }
             let field = field.unwrap_or_default();
+            // Known when the app is built: no target has anything to read.
+            if field == "app_version" {
+                let Some(version) = self.app_version else {
+                    self.error(
+                        path.span(),
+                        "`window.app_version` is the version of an application, and a library belongs to none; take it as a parameter",
+                    );
+                    return None;
+                };
+                return Some(ir::Expr {
+                    kind: ir::ExprKind::Literal {
+                        value: Value::Text(version.to_string()),
+                    },
+                    ty: Type::Text,
+                });
+            }
             if field == "short" && self.layouts.is_none() {
                 self.error(
                     path.span(),

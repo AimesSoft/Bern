@@ -2,7 +2,7 @@
 //! Values cross the boundary as JSON. Each context has independent globals.
 use serde::{Deserialize, Serialize};
 pub use serde_json::Value;
-#[cfg(not(feature = "__boa"))]
+#[cfg(not(feature = "boa"))]
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -60,33 +60,33 @@ impl Evaluation {
         self.state.lock().unwrap().result.take()
     }
 }
-#[cfg(not(feature = "__boa"))]
+#[cfg(not(feature = "boa"))]
 static NEXT: AtomicU64 = AtomicU64::new(1);
-#[cfg(not(feature = "__boa"))]
+#[cfg(not(feature = "boa"))]
 fn next() -> String {
     NEXT.fetch_add(1, Ordering::Relaxed).to_string()
 }
 
 pub struct Context {
-    #[cfg(not(feature = "__boa"))]
+    #[cfg(not(feature = "boa"))]
     id: String,
-    #[cfg(feature = "__boa")]
+    #[cfg(feature = "boa")]
     worker: std::sync::mpsc::Sender<(String, Shared)>,
 }
 impl Context {
     pub fn new() -> std::result::Result<Self, Error> {
-        #[cfg(feature = "__boa")]
+        #[cfg(feature = "boa")]
         let worker = boa::worker()?;
-        #[cfg(not(feature = "__boa"))]
+        #[cfg(not(feature = "boa"))]
         if !hub().lock().unwrap().available {
             return Err(Error(
                 "JavaScript host is not running; enable javascript in the target".into(),
             ));
         }
         Ok(Self {
-            #[cfg(not(feature = "__boa"))]
+            #[cfg(not(feature = "boa"))]
             id: next(),
-            #[cfg(feature = "__boa")]
+            #[cfg(feature = "boa")]
             worker,
         })
     }
@@ -96,11 +96,11 @@ impl Context {
             waker: None,
         }));
         let source = source.into();
-        #[cfg(feature = "__boa")]
+        #[cfg(feature = "boa")]
         if self.worker.send((source, state.clone())).is_err() {
             finish(&state, Err(Error("JavaScript context stopped".into())));
         }
-        #[cfg(not(feature = "__boa"))]
+        #[cfg(not(feature = "boa"))]
         {
             let mut hub = hub().lock().unwrap();
             if hub.available {
@@ -121,7 +121,7 @@ impl Context {
 }
 impl Drop for Context {
     fn drop(&mut self) {
-        #[cfg(not(feature = "__boa"))]
+        #[cfg(not(feature = "boa"))]
         {
             let states = {
                 let mut hub = hub().lock().unwrap();
@@ -230,7 +230,7 @@ pub mod host {
         }
     }
 }
-#[cfg(feature = "__boa")]
+#[cfg(feature = "boa")]
 mod boa {
     use super::*;
     use boa_engine::{

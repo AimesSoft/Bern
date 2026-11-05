@@ -88,9 +88,23 @@ std::wstring KnownFolder(KNOWNFOLDERID const& id) {
     return out;
 }
 
-std::wstring InstallFolder() { return KnownFolder(FOLDERID_UserProgramFiles) + L"\\" + kFolder; }
 std::wstring Shortcut() { return KnownFolder(FOLDERID_Programs) + L"\\" + kShortcut + L".lnk"; }
 std::wstring UninstallKey() { return std::wstring(L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\") + kKey; }
+
+/// The folder picked for a first installation, if one was.
+std::wstring picked;
+
+/// Where the application goes: what was picked, else where it already is,
+/// else the user's programs folder.
+std::wstring InstallFolder() {
+    if (!picked.empty()) return picked;
+    wchar_t folder[MAX_PATH] = {};
+    DWORD size = sizeof folder;
+    if (RegGetValueW(HKEY_CURRENT_USER, UninstallKey().c_str(), L"InstallLocation", RRF_RT_REG_SZ, nullptr, folder,
+                     &size) == ERROR_SUCCESS)
+        return folder;
+    return KnownFolder(FOLDERID_UserProgramFiles) + L"\\" + kFolder;
+}
 
 std::wstring ThisProgram() {
     wchar_t path[MAX_PATH] = {};
@@ -241,7 +255,8 @@ Outcome Install() {
     if (!Unpack(files)) return Outcome::Failed;
     reached = 0.6f;
     // A version already there goes only now that the new one is at hand.
-    if (present && !RemoveTree(folder)) return Outcome::CloseFirst;
+    // A folder that was already there and is not ours stays as it is.
+    if (present && !InstalledVersion().empty() && !RemoveTree(folder)) return Outcome::CloseFirst;
     BYTE const* next = files.bytes.data();
     for (size_t i = 0; i < std::size(kFiles); ++i) {
         if (!WriteBytes(next, files.sizes[i], folder + L"\\" + kFiles[i])) return Outcome::Failed;
@@ -306,6 +321,9 @@ constexpr float kPicture = 96;
 constexpr float kPictureTop = 50;
 constexpr float kNameTop = 162;
 constexpr float kLineTop = 194;
+constexpr float kPlaceTop = 218;
+constexpr float kPlaceHeight = 22;
+constexpr float kPlaceInset = 28;
 constexpr float kActionTop = 250;
 constexpr float kActionWidth = 168;
 constexpr float kActionHeight = 38;
@@ -316,6 +334,7 @@ constexpr float kCloseSize = 32;
 constexpr float kCloseInset = 10;
 
 constexpr UINT kFinished = WM_APP;
+constexpr int kPlace = 100;
 constexpr UINT_PTR kTick = 1;
 
 enum class Phase { Ready, Working, Done, Failed };
@@ -326,6 +345,8 @@ struct Colors {
 
 HWND window = nullptr;
 HWND button = nullptr;
+/// The folder of a first installation: pressing it picks another.
+HWND place = nullptr;
 UINT dpi = 96;
 bool dark = false;
 Phase phase = Phase::Ready;
@@ -344,6 +365,8 @@ ComPtr<ID2D1Bitmap> picture;
 ComPtr<IDWriteTextFormat> name_format;
 ComPtr<IDWriteTextFormat> line_format;
 ComPtr<IDWriteTextFormat> action_format;
+ComPtr<IDWriteTextFormat> place_format;
+ComPtr<IDWriteTextFormat> pencil_format;
 
 int Px(float dip) { return static_cast<int>(dip * static_cast<float>(dpi) / 96.0f + 0.5f); }
 float Dip(LONG px) { return static_cast<float>(px) * 96.0f / static_cast<float>(dpi); }
@@ -409,6 +432,16 @@ bool StartGraphics() {
     line_format = Format(text, DWRITE_FONT_WEIGHT_NORMAL, 13);
     action_format = Format(text, DWRITE_FONT_WEIGHT_MEDIUM, 14);
     action_format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    place_format = Format(text, DWRITE_FONT_WEIGHT_NORMAL, 12);
+    place_format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    // Windows 10 and 11 both have this font and its pencil.
+    pencil_format = Format(L"Segoe MDL2 Assets", DWRITE_FONT_WEIGHT_NORMAL, 13);
+    pencil_format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    place_format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+    ComPtr<IDWriteInlineObject> dots;
+    dwrite->CreateEllipsisTrimmingSign(place_format.Get(), dots.GetAddressOf());
+    DWRITE_TRIMMING place_trimming{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
+    place_format->SetTrimming(&place_trimming, dots.Get());
     // A long name ends in an ellipsis rather than pushing the rest down.
     name_format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
     ComPtr<IDWriteInlineObject> ellipsis;
@@ -435,6 +468,10 @@ void LoadPicture() {
 }
 
 void PlaceButton() {
+    if (place) {
+        SetWindowPos(place, nullptr, Px(kPlaceInset), Px(kPlaceTop), Px(kWidth - 2 * kPlaceInset), Px(kPlaceHeight),
+                     SWP_NOZORDER | SWP_NOACTIVATE);
+    }
     float left = (kWidth - kActionWidth) / 2 - kRing;
     SetWindowPos(button, nullptr, Px(left), Px(kActionTop - kRing), Px(kActionWidth + 2 * kRing), Px(kActionHeight + 2 * kRing), SWP_NOZORDER | SWP_NOACTIVATE);
 }
@@ -452,6 +489,7 @@ void ApplyTheme() {
     DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE, &value, sizeof value);
     InvalidateRect(window, nullptr, FALSE);
     InvalidateRect(button, nullptr, FALSE);
+    if (place) InvalidateRect(place, nullptr, FALSE);
 }
 
 void Paint(HDC dc) {
@@ -490,6 +528,60 @@ void Paint(HDC dc) {
     target->EndDraw();
 }
 
+void DrawPlace(DRAWITEMSTRUCT const& item) {
+    Colors const colors = Palette();
+    target->BindDC(item.hDC, &item.rcItem);
+    target->BeginDraw();
+    target->Clear(colors.surface);
+    float width = Dip(item.rcItem.right - item.rcItem.left);
+    float height = Dip(item.rcItem.bottom - item.rcItem.top);
+    bool focused = (item.itemState & ODS_FOCUS) && !(item.itemState & ODS_NOFOCUSRECT);
+    wchar_t label[MAX_PATH] = {};
+    UINT32 length = static_cast<UINT32>(GetWindowTextW(item.hwndItem, label, MAX_PATH));
+    // The folder, as much of it as fits, and the pencil that says it can change.
+    float mark = 16, gap = 8;
+    float room = width - mark - gap;
+    ComPtr<IDWriteTextLayout> folder;
+    dwrite->CreateTextLayout(label, length, place_format.Get(), room, height, folder.GetAddressOf());
+    folder->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+    DWRITE_TEXT_METRICS size{};
+    folder->GetMetrics(&size);
+    float shown = size.width < room ? size.width : room;
+    float left = (width - shown - gap - mark) / 2;
+    target->DrawTextLayout({left, 0}, folder.Get(), Brush(focused ? colors.text : colors.soft).Get());
+    float start = left + shown + gap;
+    target->DrawText(L"\uE70F", 1, pencil_format.Get(), {start, 0, start + mark, height}, Brush(colors.text).Get());
+    target->EndDraw();
+}
+
+LRESULT CALLBACK PlaceProc(HWND self, UINT message, WPARAM wide, LPARAM wide_too, UINT_PTR, DWORD_PTR) {
+    if (message == WM_SETCURSOR) {
+        SetCursor(LoadCursorW(nullptr, IDC_HAND));
+        return TRUE;
+    }
+    return DefSubclassProc(self, message, wide, wide_too);
+}
+
+/// Ask for the folder of a first installation; the application gets a
+/// folder of its own inside it.
+void PickFolder() {
+    ComPtr<IFileOpenDialog> dialog;
+    if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog)))) return;
+    DWORD options = 0;
+    dialog->GetOptions(&options);
+    dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
+    if (FAILED(dialog->Show(window))) return;
+    ComPtr<IShellItem> item;
+    PWSTR path = nullptr;
+    if (FAILED(dialog->GetResult(item.GetAddressOf())) || FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &path))) return;
+    std::wstring folder(path);
+    CoTaskMemFree(path);
+    if (!folder.empty() && folder.back() == L'\\') folder.pop_back();
+    picked = folder + L"\\" + kFolder;
+    SetWindowTextW(place, picked.c_str());
+    InvalidateRect(place, nullptr, FALSE);
+}
+
 void DrawAction(DRAWITEMSTRUCT const& item) {
     Colors const colors = Palette();
     target->BindDC(item.hDC, &item.rcItem);
@@ -518,6 +610,7 @@ void Start() {
     reached = 0;
     line = removing ? Text().uninstalling : Text().installing;
     ShowWindow(button, SW_HIDE);
+    if (place) ShowWindow(place, SW_HIDE);
     SetFocus(window);
     SetTimer(window, kTick, 15, nullptr);
     InvalidateRect(window, nullptr, FALSE);
@@ -542,6 +635,8 @@ void Settle() {
         line = Fill(outcome == Outcome::CloseFirst ? Text().close_first : Text().failed);
         SetWindowTextW(button, Text().retry);
     }
+    // A folder that could not be written to can be changed for another.
+    if (place && !fine) ShowWindow(place, SW_SHOW);
     ShowWindow(button, SW_SHOW);
     SetFocus(button);
     InvalidateRect(window, nullptr, FALSE);
@@ -610,11 +705,15 @@ LRESULT CALLBACK WindowProc(HWND self, UINT message, WPARAM wide, LPARAM wide_to
         EndPaint(self, &paint);
         return 0;
     }
-    case WM_DRAWITEM:
-        DrawAction(*reinterpret_cast<DRAWITEMSTRUCT const*>(wide_too));
+    case WM_DRAWITEM: {
+        auto const& item = *reinterpret_cast<DRAWITEMSTRUCT const*>(wide_too);
+        if (item.CtlID == kPlace) DrawPlace(item);
+        else DrawAction(item);
         return TRUE;
+    }
     case WM_COMMAND:
         if (LOWORD(wide) == IDOK) Act();
+        if (LOWORD(wide) == kPlace) PickFolder();
         if (LOWORD(wide) == IDCANCEL) PostMessageW(self, WM_CLOSE, 0, 0);
         return 0;
     case WM_TIMER:
@@ -671,6 +770,11 @@ int ShowWindowAndWait() {
     button = CreateWindowExW(0, L"BUTTON", action, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW, 0, 0, 0, 0, window,
                              reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDOK)), instance, nullptr);
     SetWindowSubclass(button, ButtonProc, 0, 0);
+    if (!removing && installed.empty()) {
+        place = CreateWindowExW(0, L"BUTTON", InstallFolder().c_str(), WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+                                0, 0, 0, 0, window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kPlace)), instance, nullptr);
+        SetWindowSubclass(place, PlaceProc, 0, 0);
+    }
     Scale();
     ApplyTheme();
     DWM_WINDOW_CORNER_PREFERENCE round = DWMWCP_ROUND;

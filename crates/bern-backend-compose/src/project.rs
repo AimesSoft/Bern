@@ -153,7 +153,11 @@ android {{
 
     buildTypes {{
         release {{
-            isMinifyEnabled = false
+            // What nothing reaches goes. The engine calls into the runtime
+            // by name: those classes and methods are marked `@Keep`.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
             // Without a release key, the debug key: installable for
             // testing, not for a store.
             signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
@@ -167,6 +171,15 @@ android {{
 
     buildFeatures {{
         compose = true
+    }}
+}}
+
+// A release travels with its engine compressed, about half the download,
+// and the system unpacks it on install. A debug engine is hundreds of
+// megabytes, too much to compress on every run.
+androidComponents {{
+    onVariants(selector().withBuildType("release")) {{ variant ->
+        variant.packaging.jniLibs.useLegacyPackaging.set(true)
     }}
 }}
 
@@ -646,6 +659,18 @@ mod tests {
             drop.contains("<data android:mimeType=\"video/*\" />"),
             "{drop}"
         );
+    }
+
+    #[test]
+    fn a_release_is_shrunk_and_its_engine_compressed() {
+        let build = app_build(&app("hello"), &["arm64-v8a"], false);
+        for expected in ["isMinifyEnabled = true", "isShrinkResources = true"] {
+            assert!(build.contains(expected), "{build}");
+        }
+        // Not a debug build, whose engine is too large to compress each run.
+        let compressed = build.find("useLegacyPackaging.set(true)").unwrap();
+        let release = build.find("withBuildType(\"release\")").unwrap();
+        assert!(release < compressed, "{build}");
     }
 
     #[test]

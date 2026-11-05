@@ -2357,6 +2357,72 @@ private struct BernMarkRenderer: TextRenderer {
     }
 }
 
+extension View {
+    /// `Text(lit:)`: lit as far as `lit`, into a character from its left.
+    func bernLitting(_ lit: Double) -> some View {
+        modifier(BernLitting(lit: lit))
+    }
+}
+
+private struct BernLitting: ViewModifier {
+    let lit: Double
+
+    func body(content: Content) -> some View {
+        if #available(macOS 15, iOS 18, tvOS 18, *) {
+            content.textRenderer(BernLitRenderer(lit: lit))
+        } else {
+            content
+        }
+    }
+}
+
+@available(macOS 15, iOS 18, tvOS 18, *)
+private struct BernLitRenderer: TextRenderer {
+    let lit: Double
+
+    func draw(layout: Text.Layout, in context: inout GraphicsContext) {
+        guard lit >= 0 else {
+            for line in layout { context.draw(line) }
+            return
+        }
+        var left = lit
+        for line in layout {
+            for run in line {
+                for glyph in run {
+                    draw(glyph, part: min(max(left, 0), 1), in: context)
+                    left -= 1
+                }
+            }
+        }
+    }
+
+    /// One glyph faded, and over it the same glyph as far as `part`, with a
+    /// soft edge that travels from before its left side to past its right.
+    private func draw(_ glyph: Text.Layout.RunSlice, part: Double, in context: GraphicsContext) {
+        guard part < 1 else {
+            context.draw(glyph)
+            return
+        }
+        var faded = context
+        faded.opacity *= 0.4
+        faded.draw(glyph)
+        guard part > 0 else { return }
+        let rect = glyph.typographicBounds.rect.insetBy(dx: -2, dy: -2)
+        let edge = rect.width / 2
+        let end = rect.minX + (rect.width + edge) * part
+        var lit = context
+        lit.clipToLayer { layer in
+            layer.fill(
+                Path(rect),
+                with: .linearGradient(
+                    Gradient(colors: [.white, .clear]),
+                    startPoint: CGPoint(x: end - edge, y: rect.midY),
+                    endPoint: CGPoint(x: end, y: rect.midY)))
+        }
+        lit.draw(glyph)
+    }
+}
+
 // MARK: - Linked to scrolling and gestures
 
 extension View {

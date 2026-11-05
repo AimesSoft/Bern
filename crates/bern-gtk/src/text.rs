@@ -112,9 +112,19 @@ fn matching<'a>(supported: &'a [String], tag: &str) -> Option<&'a String> {
         })
 }
 
+/// Where the language chosen in the app is kept: it stays through a restart.
+fn kept_language() -> Option<std::path::PathBuf> {
+    let program = std::env::current_exe().ok()?;
+    let name = program.file_stem()?;
+    Some(gtk::glib::user_config_dir().join(name).join("language"))
+}
+
 pub(crate) fn install(table: StringTable, supported: &[&str], fallback: &str) {
     let supported: Vec<String> = supported.iter().map(|tag| tag.to_string()).collect();
-    let language = choose(&supported, fallback);
+    let kept = kept_language()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .filter(|tag| supported.contains(tag));
+    let language = kept.unwrap_or_else(|| choose(&supported, fallback));
     LANGUAGE.with(|cell| {
         let _ = cell.set(Language {
             strings: Cell::new(strings_of(table, &language)),
@@ -144,6 +154,12 @@ pub(crate) fn set_language(tag: &str) -> bool {
             language.current.set(tag.to_string());
             language.strings.set(strings_of(language.table, tag));
         });
+        if !cfg!(test)
+            && let Some(path) = kept_language()
+        {
+            let _ = path.parent().map(std::fs::create_dir_all);
+            let _ = std::fs::write(path, tag);
+        }
         true
     })
 }

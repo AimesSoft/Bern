@@ -13,6 +13,7 @@ impl Generator<'_> {
             out.line(format!("SwiftUI.Text(bernMarkdown({content}))"));
         } else if let Some(lit) = self.length(element, "lit") {
             out.line(format!("bernLit({content}, {lit})"));
+            out.line(format!(".bernLitting({lit})"));
         } else {
             out.line(format!("SwiftUI.Text(verbatim: {content})"));
         }

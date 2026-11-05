@@ -7,7 +7,7 @@ pub fn dependency(context: &BuildContext) -> String {
     format!(
         "bern-script = {{ {}, features = [{}] }}\n",
         context.framework.dependency("bern-script"),
-        if backend == "boa" { "\"__boa\"" } else { "" }
+        if backend == "boa" { "\"boa\"" } else { "" }
     )
 }
 pub fn webview(context: &BuildContext) -> bool {

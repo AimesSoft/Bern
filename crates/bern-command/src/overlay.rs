@@ -32,28 +32,29 @@ pub struct Line {
     pub bold: bool,
     /// Red, green, blue and alpha.
     pub color: [u8; 4],
-    /// That many of its first characters in `color`, the rest faded; all of
-    /// it when there is no such count.
-    pub lit: Option<usize>,
+    /// As far through its characters as this in `color`, the rest faded:
+    /// 2.5 is two and the left half of the third. All of it when there is no
+    /// such place, or it is below zero.
+    pub lit: Option<f64>,
 }
 
 /// How much of `Line::color`'s alpha what `Line::lit` leaves out keeps.
 pub const FADED: f64 = 0.4;
 
 impl Line {
-    /// Where what is faded starts in `text`, in bytes.
-    pub fn faded_from(&self) -> Option<usize> {
-        self.text.char_indices().nth(self.lit?).map(|(at, _)| at)
+    /// The character `lit` stops in, as where it starts in `text` in bytes,
+    /// and how much of it is lit. None when all of `text` shows as it is.
+    pub fn lit_to(&self) -> Option<(usize, f64)> {
+        let lit = self.lit.filter(|lit| *lit >= 0.0)?;
+        let (at, _) = self.text.char_indices().nth(lit as usize)?;
+        Some((at, lit.fract()))
     }
 
-    /// Where it starts and how long it is, in UTF-16 units.
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
-    fn faded_range(&self) -> Option<(usize, usize)> {
-        let at = self.faded_from()?;
-        Some((
-            self.text[..at].encode_utf16().count(),
-            self.text[at..].encode_utf16().count(),
-        ))
+    /// The same, where it starts in UTF-16 units.
+    #[cfg(target_os = "windows")]
+    fn lit_to_utf16(&self) -> Option<(usize, f64)> {
+        let (at, part) = self.lit_to()?;
+        Some((self.text[..at].encode_utf16().count(), part))
     }
 }
 
@@ -238,7 +239,7 @@ fn as_json(overlay: &Overlay) -> String {
                 text(&line.text),
                 line.size,
                 line.bold,
-                line.lit.map_or(-1, |lit| lit as i64)
+                line.lit.unwrap_or(-1.0)
             )
         })
         .collect();
@@ -286,7 +287,7 @@ mod mac {
         NSWindowCollectionBehavior, NSWindowStyleMask,
     };
     use objc2_foundation::{
-        NSMutableAttributedString, NSMutableDictionary, NSPoint, NSRange, NSRect, NSSize, NSString,
+        NSMutableAttributedString, NSMutableDictionary, NSPoint, NSRect, NSSize, NSString,
     };
     use std::cell::{Cell, RefCell};
     use std::collections::HashMap;
@@ -379,7 +380,31 @@ mod mac {
         super::save_place(id, frame.origin.x + frame.size.width / 2.0, frame.origin.y);
     }
 
+    /// A line: faded, and over it what is lit, cut off inside the character
+    /// `Line::lit` stops in.
     fn label(line: &Line, mtm: MainThreadMarker) -> Retained<NSTextField> {
+        let Some((at, part)) = line.lit_to() else {
+            return styled(line, &line.text, 1.0, mtm);
+        };
+        let label = styled(line, &line.text, super::FADED, mtm);
+        let width = |text: &str| styled(line, text, 1.0, mtm).frame().size.width;
+        let sung = width(&line.text[..at]);
+        let next = line.text[at..].chars().next().map_or(0, char::len_utf8);
+        // A label keeps two points on either side of its text.
+        let lit = sung - 2.0 + (width(&line.text[..at + next]) - sung) * part;
+        let size = NSSize::new(lit, label.frame().size.height);
+        let clip = NSView::initWithFrame(
+            NSView::alloc(mtm),
+            NSRect::new(NSPoint::new(0.0, 0.0), size),
+        );
+        clip.setClipsToBounds(true);
+        clip.addSubview(&styled(line, &line.text, 1.0, mtm));
+        label.addSubview(&clip);
+        label
+    }
+
+    /// `text` in the style of `line`, its alpha scaled by `alpha`.
+    fn styled(line: &Line, text: &str, alpha: f64, mtm: MainThreadMarker) -> Retained<NSTextField> {
         let attributes = NSMutableDictionary::<NSString, AnyObject>::new();
         let font = if line.bold {
             NSFont::boldSystemFontOfSize(line.size)
@@ -387,7 +412,7 @@ mod mac {
             NSFont::systemFontOfSize(line.size)
         };
         let [r, g, b, a] = line.color.map(|c| c as f64 / 255.0);
-        let color = NSColor::colorWithSRGBRed_green_blue_alpha(r, g, b, a);
+        let color = NSColor::colorWithSRGBRed_green_blue_alpha(r, g, b, a * alpha);
         let shadow = NSShadow::new();
         shadow.setShadowOffset(NSSize::new(0.0, -1.0));
         shadow.setShadowBlurRadius(3.0);
@@ -406,22 +431,10 @@ mod mac {
         let text = unsafe {
             NSMutableAttributedString::initWithString_attributes(
                 NSMutableAttributedString::alloc(),
-                &NSString::from_str(&line.text),
+                &NSString::from_str(text),
                 Some(&attributes),
             )
         };
-        if let Some((start, length)) = line.faded_range() {
-            let faded = NSColor::colorWithSRGBRed_green_blue_alpha(r, g, b, a * super::FADED);
-            // SAFETY: the key is AppKit's name for this value, and the range
-            // lies in the text.
-            unsafe {
-                text.addAttribute_value_range(
-                    NSForegroundColorAttributeName,
-                    &faded,
-                    NSRange::new(start, length),
-                );
-            }
-        }
         let label = NSTextField::labelWithAttributedString(&text, mtm);
         label.sizeToFit();
         label
@@ -695,18 +708,21 @@ mod win {
     use std::sync::{Mutex, mpsc};
     use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
     use windows::Win32::Graphics::Direct2D::Common::{
-        D2D_RECT_F, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
+        D2D_RECT_F, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_GRADIENT_STOP,
+        D2D1_PIXEL_FORMAT,
     };
     use windows::Win32::Graphics::Direct2D::{
-        D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE, D2D1_FACTORY_TYPE_SINGLE_THREADED,
-        D2D1_FEATURE_LEVEL_DEFAULT, D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE_DEFAULT,
-        D2D1_RENDER_TARGET_USAGE_NONE, D2D1_ROUNDED_RECT, D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE,
-        D2D1CreateFactory, ID2D1Factory,
+        D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE, D2D1_EXTEND_MODE_CLAMP,
+        D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_FEATURE_LEVEL_DEFAULT, D2D1_GAMMA_2_2,
+        D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES, D2D1_RENDER_TARGET_PROPERTIES,
+        D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1_RENDER_TARGET_USAGE_NONE, D2D1_ROUNDED_RECT,
+        D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, D2D1CreateFactory, ID2D1Factory,
     };
     use windows::Win32::Graphics::DirectWrite::{
         DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-        DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_METRICS, DWRITE_TEXT_RANGE,
-        DWriteCreateFactory, IDWriteFactory, IDWriteFontCollection, IDWriteTextLayout,
+        DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_HIT_TEST_METRICS,
+        DWRITE_TEXT_METRICS, DWRITE_TEXT_RANGE, DWriteCreateFactory, IDWriteFactory,
+        IDWriteFontCollection, IDWriteTextLayout,
     };
     use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
     use windows::Win32::Graphics::Gdi::{
@@ -1176,14 +1192,14 @@ mod win {
         unsafe {
             let dpi = GetDpiForWindow(hwnd).max(96);
             let scale = dpi as f32 / 96.0;
-            let lines: Vec<(IDWriteTextLayout, f32, f32, [u8; 4], Option<(usize, usize)>)> = window
+            let lines: Vec<(IDWriteTextLayout, f32, f32, [u8; 4], Option<(usize, f64)>)> = window
                 .overlay
                 .lines
                 .iter()
                 .filter(|line| !line.text.is_empty())
                 .filter_map(|line| {
                     layout(dwrite, line, scale)
-                        .map(|(layout, w, h)| (layout, w, h, line.color, line.faded_range()))
+                        .map(|(layout, w, h)| (layout, w, h, line.color, line.lit_to_utf16()))
                 })
                 .collect();
             if lines.is_empty() {
@@ -1347,7 +1363,7 @@ mod win {
             }
             let shadow = dark(0.75)?;
             let mut top = margin + bar_height;
-            for (layout, line_width, line_height, [r, g, b, a], faded) in &lines {
+            for (layout, line_width, line_height, [r, g, b, a], lit) in &lines {
                 let left = (width as f32 - line_width) / 2.0;
                 let brush = target.CreateSolidColorBrush(
                     &D2D1_COLOR_F {
@@ -1371,30 +1387,57 @@ mod win {
                         D2D1_DRAW_TEXT_OPTIONS_NONE,
                     );
                 }
-                if let Some((start, length)) = faded {
-                    let rest = target.CreateSolidColorBrush(
-                        &D2D1_COLOR_F {
-                            r: *r as f32 / 255.0,
-                            g: *g as f32 / 255.0,
-                            b: *b as f32 / 255.0,
-                            a: *a as f32 / 255.0 * super::FADED as f32,
+                let at = Vector2 { X: left, Y: top };
+                if let Some((start, part)) = lit {
+                    // What is lit and what is not, the edge inside the
+                    // character, moving from before its left side to past
+                    // its right.
+                    let (mut x, mut y) = (0.0, 0.0);
+                    let mut metrics = DWRITE_HIT_TEST_METRICS::default();
+                    layout.HitTestTextPosition(
+                        *start as u32,
+                        false,
+                        &mut x,
+                        &mut y,
+                        &mut metrics,
+                    )?;
+                    let edge = (metrics.width / 2.0).max(0.5);
+                    let end = left + x + (metrics.width + edge) * *part as f32;
+                    let color = |alpha: f32| D2D1_COLOR_F {
+                        r: *r as f32 / 255.0,
+                        g: *g as f32 / 255.0,
+                        b: *b as f32 / 255.0,
+                        a: *a as f32 / 255.0 * alpha,
+                    };
+                    let stops = target.CreateGradientStopCollection(
+                        &[
+                            D2D1_GRADIENT_STOP {
+                                position: 0.0,
+                                color: color(1.0),
+                            },
+                            D2D1_GRADIENT_STOP {
+                                position: 1.0,
+                                color: color(super::FADED as f32),
+                            },
+                        ],
+                        D2D1_GAMMA_2_2,
+                        D2D1_EXTEND_MODE_CLAMP,
+                    )?;
+                    let lit = target.CreateLinearGradientBrush(
+                        &D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
+                            startPoint: Vector2 {
+                                X: end - edge,
+                                Y: 0.0,
+                            },
+                            endPoint: Vector2 { X: end, Y: 0.0 },
                         },
                         None,
+                        &stops,
                     )?;
-                    layout.SetDrawingEffect(
-                        &rest,
-                        DWRITE_TEXT_RANGE {
-                            startPosition: *start as u32,
-                            length: *length as u32,
-                        },
-                    )?;
+                    target.DrawTextLayout(at, layout, &lit, D2D1_DRAW_TEXT_OPTIONS_NONE);
+                } else {
+                    target.DrawTextLayout(at, layout, &brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
                 }
-                target.DrawTextLayout(
-                    Vector2 { X: left, Y: top },
-                    layout,
-                    &brush,
-                    D2D1_DRAW_TEXT_OPTIONS_NONE,
-                );
                 top += line_height + gap;
             }
             target.EndDraw(None, None)?;
@@ -1483,7 +1526,7 @@ mod tests {
                 size: 28.0,
                 bold: true,
                 color: [255, 128, 0, 255],
-                lit: Some(2),
+                lit: Some(2.0),
             }],
             place: Place::Taskbar,
             locked: true,
@@ -1508,8 +1551,10 @@ mod tests {
             color: [255; 4],
             lit,
         };
-        assert_eq!(line(None).faded_from(), None);
-        assert_eq!(line(Some(2)).faded_from(), Some(6));
-        assert_eq!(line(Some(99)).faded_from(), None);
+        assert_eq!(line(None).lit_to(), None);
+        assert_eq!(line(Some(-1.0)).lit_to(), None);
+        assert_eq!(line(Some(2.0)).lit_to(), Some((6, 0.0)));
+        assert_eq!(line(Some(1.5)).lit_to(), Some((3, 0.5)));
+        assert_eq!(line(Some(99.0)).lit_to(), None);
     }
 }

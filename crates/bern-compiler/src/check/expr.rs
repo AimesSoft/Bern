@@ -525,6 +525,10 @@ impl Checker<'_> {
             ir::ExprKind::If {
                 then, otherwise, ..
             } => self.is_content(then, scope) && self.is_content(otherwise, scope),
+            // `window.app_version`: written in no language.
+            ir::ExprKind::Literal {
+                value: Value::Text(text),
+            } => self.app_version == Some(text.as_str()),
             _ => false,
         }
     }

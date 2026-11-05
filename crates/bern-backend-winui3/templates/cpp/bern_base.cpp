@@ -426,10 +426,37 @@ static std::string Choose(std::string const& fallback) {
     return fallback;
 }
 
+/// Where the language chosen in the app is kept, a value per program: it
+/// stays through a restart.
+static constexpr wchar_t kKeptLanguages[] = L"Software\\Bern\\Language";
+
+static std::wstring ProgramName() {
+    wchar_t path[MAX_PATH] = {};
+    GetModuleFileNameW(nullptr, path, MAX_PATH);
+    std::wstring name(path);
+    return name.substr(name.find_last_of(L'\\') + 1);
+}
+
+static std::string KeptLanguage() {
+    wchar_t value[64] = {};
+    DWORD size = sizeof value;
+    if (RegGetValueW(HKEY_CURRENT_USER, kKeptLanguages, ProgramName().c_str(), RRF_RT_REG_SZ, nullptr, value, &size) != ERROR_SUCCESS)
+        return {};
+    return winrt::to_string(value);
+}
+
+static void KeepLanguage(std::string const& tag) {
+    auto value = winrt::to_hstring(tag);
+    RegSetKeyValueW(HKEY_CURRENT_USER, kKeptLanguages, ProgramName().c_str(), REG_SZ, value.c_str(),
+                    static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t)));
+}
+
 void Install(Catalog const& catalog) {
     all = &catalog.strings;
     supported = catalog.languages;
-    auto chosen = Choose(catalog.defaultLanguage);
+    auto kept = KeptLanguage();
+    bool known = std::find(supported.begin(), supported.end(), kept) != supported.end();
+    auto chosen = known ? kept : Choose(catalog.defaultLanguage);
     language.Set(chosen);
     strings.Set(TableFor(chosen));
 }
@@ -444,6 +471,7 @@ bool SetLanguage(std::string const& tag) {
         language.Set(tag);
         strings.Set(TableFor(tag));
     });
+    KeepLanguage(tag);
     return true;
 }
 

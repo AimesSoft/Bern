@@ -226,9 +226,9 @@ mod tests {
             error.contains("`my-core`") && error.contains("javascript = true"),
             "{error}"
         );
-        assert!(check_script_host(&metadata(json!(["__boa"]), Value::Null)).is_err());
+        assert!(check_script_host(&metadata(json!(["boa"]), Value::Null)).is_err());
         // A test has no target to run in.
-        assert!(check_script_host(&metadata(json!(["__boa"]), json!("dev"))).is_ok());
+        assert!(check_script_host(&metadata(json!(["boa"]), json!("dev"))).is_ok());
     }
 
     #[test]

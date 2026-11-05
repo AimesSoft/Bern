@@ -277,10 +277,14 @@ final class BernLanguage: @unchecked Sendable {
             declared.append(language)
         }
         supported = declared
-        let initial = Bundle.main.preferredLocalizations.first ?? declared.first ?? "en"
+        let kept = UserDefaults.standard.string(forKey: Self.keptLanguage).flatMap { declared.contains($0) ? $0 : nil }
+        let initial = kept ?? Bundle.main.preferredLocalizations.first ?? declared.first ?? "en"
         current = initial
         bundle = Self.bundle(for: initial)
     }
+
+    /// Where the language chosen in the app is kept: it stays through a restart.
+    private static let keptLanguage = "bern.language"
 
     private static func bundle(for language: String) -> Bundle {
         Bundle.main.path(forResource: language, ofType: "lproj").flatMap(Bundle.init(path:)) ?? .main
@@ -292,6 +296,7 @@ final class BernLanguage: @unchecked Sendable {
         guard supported.contains(language) else { return false }
         bundle = Self.bundle(for: language)
         current = language
+        UserDefaults.standard.set(language, forKey: Self.keptLanguage)
         return true
     }
 
@@ -2905,15 +2910,21 @@ struct BernMasonry: Layout {
     }
 }
 
-/// A `Text` with `lit`: its first `lit` characters as they are, the rest
-/// faded; all of it below zero.
+/// A `Text` with `lit`: as far as `lit` as it is, the rest faded; all of it
+/// below zero. Where text renderers exist, `bernLitting` does this and goes
+/// into a character from its left; before them a character comes up whole.
 func bernLit(_ text: String, _ lit: Double) -> SwiftUI.Text {
+    if #available(macOS 15, iOS 18, tvOS 18, *) { return SwiftUI.Text(verbatim: text) }
     let scalars = text.unicodeScalars
     guard lit >= 0 else { return SwiftUI.Text(verbatim: text) }
     let at = scalars.index(scalars.startIndex, offsetBy: Int(lit), limitedBy: scalars.endIndex) ?? scalars.endIndex
     let sung = SwiftUI.Text(verbatim: String(scalars[..<at]))
-    let rest = SwiftUI.Text(verbatim: String(scalars[at...])).foregroundColor(SwiftUI.Color.primary.opacity(0.4))
-    return SwiftUI.Text("\(sung)\(rest)")
+    guard at < scalars.endIndex else { return sung }
+    let next = scalars.index(after: at)
+    let now = SwiftUI.Text(verbatim: String(scalars[at..<next]))
+        .foregroundColor(SwiftUI.Color.primary.opacity(0.4 + 0.6 * (lit - lit.rounded(.down))))
+    let rest = SwiftUI.Text(verbatim: String(scalars[next...])).foregroundColor(SwiftUI.Color.primary.opacity(0.4))
+    return SwiftUI.Text("\(sung)\(now)\(rest)")
 }
 
 /// A `Text` with `markdown`: its inline Markdown as the system styles it,
