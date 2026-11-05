@@ -366,6 +366,7 @@ ComPtr<IDWriteTextFormat> name_format;
 ComPtr<IDWriteTextFormat> line_format;
 ComPtr<IDWriteTextFormat> action_format;
 ComPtr<IDWriteTextFormat> place_format;
+ComPtr<IDWriteTextFormat> pencil_format;
 
 int Px(float dip) { return static_cast<int>(dip * static_cast<float>(dpi) / 96.0f + 0.5f); }
 float Dip(LONG px) { return static_cast<float>(px) * 96.0f / static_cast<float>(dpi); }
@@ -433,6 +434,9 @@ bool StartGraphics() {
     action_format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     place_format = Format(text, DWRITE_FONT_WEIGHT_NORMAL, 12);
     place_format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    // Windows 10 and 11 both have this font and its pencil.
+    pencil_format = Format(L"Segoe MDL2 Assets", DWRITE_FONT_WEIGHT_NORMAL, 13);
+    pencil_format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     place_format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
     ComPtr<IDWriteInlineObject> dots;
     dwrite->CreateEllipsisTrimmingSign(place_format.Get(), dots.GetAddressOf());
@@ -533,10 +537,29 @@ void DrawPlace(DRAWITEMSTRUCT const& item) {
     float height = Dip(item.rcItem.bottom - item.rcItem.top);
     bool focused = (item.itemState & ODS_FOCUS) && !(item.itemState & ODS_NOFOCUSRECT);
     wchar_t label[MAX_PATH] = {};
-    int length = GetWindowTextW(item.hwndItem, label, MAX_PATH);
-    target->DrawText(label, static_cast<UINT32>(length), place_format.Get(), {0, 0, width, height},
-                     Brush(focused ? colors.text : colors.soft).Get());
+    UINT32 length = static_cast<UINT32>(GetWindowTextW(item.hwndItem, label, MAX_PATH));
+    // The folder, as much of it as fits, and the pencil that says it can change.
+    float mark = 16, gap = 8;
+    float room = width - mark - gap;
+    ComPtr<IDWriteTextLayout> folder;
+    dwrite->CreateTextLayout(label, length, place_format.Get(), room, height, folder.GetAddressOf());
+    folder->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+    DWRITE_TEXT_METRICS size{};
+    folder->GetMetrics(&size);
+    float shown = size.width < room ? size.width : room;
+    float left = (width - shown - gap - mark) / 2;
+    target->DrawTextLayout({left, 0}, folder.Get(), Brush(focused ? colors.text : colors.soft).Get());
+    float start = left + shown + gap;
+    target->DrawText(L"\uE70F", 1, pencil_format.Get(), {start, 0, start + mark, height}, Brush(colors.text).Get());
     target->EndDraw();
+}
+
+LRESULT CALLBACK PlaceProc(HWND self, UINT message, WPARAM wide, LPARAM wide_too, UINT_PTR, DWORD_PTR) {
+    if (message == WM_SETCURSOR) {
+        SetCursor(LoadCursorW(nullptr, IDC_HAND));
+        return TRUE;
+    }
+    return DefSubclassProc(self, message, wide, wide_too);
 }
 
 /// Ask for the folder of a first installation; the application gets a
@@ -750,6 +773,7 @@ int ShowWindowAndWait() {
     if (!removing && installed.empty()) {
         place = CreateWindowExW(0, L"BUTTON", InstallFolder().c_str(), WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
                                 0, 0, 0, 0, window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kPlace)), instance, nullptr);
+        SetWindowSubclass(place, PlaceProc, 0, 0);
     }
     Scale();
     ApplyTheme();
