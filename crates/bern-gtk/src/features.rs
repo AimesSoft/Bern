@@ -928,7 +928,11 @@ pub fn Toast(_p: &Parent, ctx: &Ctx, props: ToastProps) {
     effect(move || {
         let key = (props.key)(&at);
         let text = (props.content)(&at);
-        if last.borrow().as_ref().is_some_and(|(k, t)| *k == key && *t == text) {
+        if last
+            .borrow()
+            .as_ref()
+            .is_some_and(|(k, t)| *k == key && *t == text)
+        {
             return;
         }
         *last.borrow_mut() = Some((key, text.clone()));
