@@ -408,6 +408,18 @@ Verification: the gallery generator tests cover all three; on a physical Windows
 - New Segoe Fluent glyphs: `arrow.clockwise` E72C, `backward.fill` EB9E, `forward.fill` EB9D, `chart.bar` EAFC, `checkmark.circle.fill` EC61, `heart.fill` EB52, `info.circle.fill` F167, `iphone` E8EA, `list.bullet` E8FD, `music.note.list` E90B, `qrcode` ED14, `qrcode.viewfinder` EE6F, `quote.bubble` E720 / `.fill` EC71 (a microphone, for the same reason as on Android), `rectangle.portrait.and.arrow.right` F3B1, `repeat` E8EE, `repeat.1` E8ED, `shuffle` E8B1, `text.bubble.fill` E7E7. The code points were rendered and checked one by one on Windows 11.
 - Measured (Windows 11 PC, a music app, built over SSH, launched by a scheduled task, window screenshots): during playback the blurred cover background extends under the title bar while the sidebar stays below the title bar; on the lyrics page the line being sung is bold and larger, and the lines around it blur progressively; playback progress advances (app volume set to 0).
 
+## First run on real Windows 10 (2026-11-05)
+
+Until now the Islands front end had only been forced on Windows 11. The first run on Windows 10 (22H2, build 19045, Pro, in a VMware virtual machine, no Windows App Runtime) found two faults that Windows 11 does not show:
+
+- **Applications did not start.** `WindowsXamlManager::InitializeForCurrentThread` failed with `0x8000FFFF`, saying XAML Islands needs an app targeting 10.0.18226 or later, although the manifest declared `maxversiontested` 10.0.26100.0. The value itself was the cause. Measured on 19045: 18362, 19041 and 19045 pass; 22000, 22621 and 26100 fail. The manifest now declares `MINIMUM_WINDOWS`, 10.0.19041.0.
+- **Grids in a scroll view were empty.** There `EffectiveViewportChanged` only reports the empty rectangle (`inf, inf, -inf, -inf`), so `LazyGridPanel` found no row near the view and dropped them all. While the effective viewport is empty, the grid now reads what the scroll view shows, and reads it again on `ViewChanged` and `SizeChanged`, because the event is not raised while the view scrolls.
+
+Measured after the fixes:
+
+- Windows 10: the gallery starts on the system XAML and its patterns show. With a temporary list of 120 patterns, scrolling from code to the end showed Swatch 115 to 120, past the 24 items built first. `gallery.exe` loads VMware's 3D driver (`vm3dum64_10.dll`).
+- Windows 11: with the new manifest the gallery starts on WinUI 3, and on the forced system XAML, and shows its patterns.
+
 ## Verification log
 
 2026-10-11, a physical Windows 11 25H2 machine, built over SSH, the app launched into the user's desktop session by a scheduled task and driven by the generated CLI; screenshots are window captures from the development snapshot. Each of the two frontends went through:
@@ -455,7 +467,7 @@ Not verified (this round):
 
 Verification not done:
 
-- Clean Windows 10 and Windows 11 without the Windows App Runtime. The Islands results on this machine come from a forced fallback.
+- Clean Windows 11 without the Windows App Runtime. The Islands results on this machine come from a forced fallback; Windows 10 was run on 2026-11-05 (see [First run on real Windows 10](#first-run-on-real-windows-10-2026-11-05)).
 - Whether an unpackaged app can use it through the bootstrapper when only the system-component runtime (`Microsoft.WindowsAppRuntime.CBS`) is installed.
 - Keyboard and manual operation (Ctrl+W, Esc, Alt+←, input methods), Narrator and full keyboard traversal, high-contrast themes, multiple displays, ARM64, remote network sources (HLS was only tested over local HTTP).
 

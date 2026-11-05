@@ -408,6 +408,18 @@ Windows App SDK 没有表格控件（DataGrid 在社区工具包里），`B::Tab
 - 新增 Segoe Fluent 字形：`arrow.clockwise` E72C、`backward.fill` EB9E、`forward.fill` EB9D、`chart.bar` EAFC、`checkmark.circle.fill` EC61、`heart.fill` EB52、`info.circle.fill` F167、`iphone` E8EA、`list.bullet` E8FD、`music.note.list` E90B、`qrcode` ED14、`qrcode.viewfinder` EE6F、`quote.bubble` E720 / `.fill` EC71（麦克风，原因同 Android）、`rectangle.portrait.and.arrow.right` F3B1、`repeat` E8EE、`repeat.1` E8ED、`shuffle` E8B1、`text.bubble.fill` E7E7。码位在 Windows 11 上逐个渲染核对。
 - 实测（Windows 11 PC，一个音乐应用，经 SSH 构建、计划任务启动、窗口截图）：播放时封面模糊背景铺到标题栏下，侧栏保持在标题栏之下；歌词页正在唱的一行加粗放大、两侧逐渐模糊；播放进度推进（应用音量设为 0）。
 
+## 首次在真实 Windows 10 上运行（2026-11-05）
+
+此前 Islands 前端只在 Windows 11 上强制回退运行过。首次在 Windows 10（22H2，build 19045，专业版，VMware 虚拟机，没有 Windows App Runtime）上运行，发现了两处 Windows 11 上看不到的问题：
+
+- **应用无法启动。** `WindowsXamlManager::InitializeForCurrentThread` 以 `0x8000FFFF` 失败，提示 XAML Islands 要求应用面向 10.0.18226 或更新版本，而 manifest 声明的 `maxversiontested` 是 10.0.26100.0。原因就在这个值本身。在 19045 上实测：18362、19041、19045 通过；22000、22621、26100 失败。manifest 现在声明 `MINIMUM_WINDOWS`，即 10.0.19041.0。
+- **滚动视图里的网格是空的。** 这里 `EffectiveViewportChanged` 只报告空矩形（`inf, inf, -inf, -inf`），`LazyGridPanel` 于是认为没有一行靠近视野，把所有行都丢掉了。现在有效视口为空时，网格改读滚动视图实际显示的范围，并在 `ViewChanged` 和 `SizeChanged` 时重新读取，因为视图滚动时这个事件不会触发。
+
+修复后实测：
+
+- Windows 10：gallery 在系统 XAML 上启动，图案正常显示。临时换成 120 个图案后，用代码滚到底能看到 Swatch 115 到 120，超过了最先生成的 24 项。`gallery.exe` 加载了 VMware 的 3D 驱动（`vm3dum64_10.dll`）。
+- Windows 11：用新的 manifest，gallery 在 WinUI 3 和强制回退的系统 XAML 上都能启动，并显示图案。
+
 ## 验证记录
 
 2026-10-11，Windows 11 25H2 实体机，经 SSH 构建，以计划任务把应用启动到用户的桌面会话，由生成的 CLI 驱动；截图来自开发快照中的窗口截取。两种前端分别执行：
@@ -455,7 +467,7 @@ Windows App SDK 没有表格控件（DataGrid 在社区工具包里），`B::Tab
 
 未完成的验证：
 
-- 没有 Windows App Runtime 的干净 Windows 10 与 Windows 11。本机的 Islands 结果来自强制回退。
+- 没有 Windows App Runtime 的干净 Windows 11。本机的 Islands 结果来自强制回退；Windows 10 已于 2026-11-05 运行（见[首次在真实 Windows 10 上运行](#首次在真实-windows-10-上运行2026-11-05)）。
 - 只装有系统组件版运行时（`Microsoft.WindowsAppRuntime.CBS`）时，非打包应用能否经引导程序使用它。
 - 键盘与手动操作（Ctrl+W、Esc、Alt+←、输入法）、讲述人与完整的键盘遍历、高对比主题、多显示器、ARM64、远程网络源（HLS 只经本机 HTTP 测过）。
 

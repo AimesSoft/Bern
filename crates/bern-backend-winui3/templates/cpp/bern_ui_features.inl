@@ -180,11 +180,11 @@ using RowParent = Parent;
 
 /// A grid of one `ForEach` in a vertical scroll view that builds only the
 /// rows near what is in sight: one view's height before and after the
-/// effective viewport the scroll view gives it. A row out of sight takes
-/// the height it had when last built, or that of the first item built;
-/// outside a scroll view every row is built. Rows are built and dropped
-/// outside layout, after the sight or the items change. Laid out as
-/// `GridPanel`.
+/// effective viewport the scroll view gives it, or what the scroll view
+/// shows while that is empty. A row out of sight takes the height it had
+/// when last built, or that of the first item built; outside a scroll view
+/// every row is built. Rows are built and dropped outside layout, after the
+/// sight or the items change. Laid out as `GridPanel`.
 struct LazyGridPanel : controls::PanelT<LazyGridPanel> {
     double minWidth = 120;
     double spacing = 8;
@@ -222,6 +222,9 @@ struct LazyGridPanel : controls::PanelT<LazyGridPanel> {
     /// In a vertical scroll view, and what of the grid is in sight there.
     bool scrolls = false;
     std::optional<Rect> sight;
+    /// No effective viewport to go by. XAML Islands on Windows 10 only ever
+    /// gives an empty one, and stops reporting it while the view scrolls.
+    bool blind = true;
     /// The last layout: columns, their width, where each row starts.
     size_t columns = 1;
     float cell = 0;
@@ -475,12 +478,38 @@ inline void LazyGrid(Parent const& p, Ctx const& ctx, GridProps props, EachProps
         uint32_t at = 0;
         if (grid->Children().IndexOf(item->host, at)) grid->Children().RemoveAt(at);
     };
-    auto sighted = panel.EffectiveViewportChanged([grid](xaml::FrameworkElement const&, xaml::EffectiveViewportChangedEventArgs const& args) {
-        grid->sight = args.EffectiveViewport();
+    // What the scroll view shows, in the grid's coordinates, for when the
+    // effective viewport says nothing.
+    auto look = [keep, grid, scroll] {
+        auto panel = keep.get();
+        if (!panel || !grid->scrolls || !scroll->viewer) return;
+        auto viewer = scroll->viewer;
+        auto port = static_cast<float>(viewer.ViewportHeight());
+        if (port <= 0) return;
+        try {
+            auto content = viewer.Content().as<xaml::UIElement>();
+            auto origin = panel.TransformToVisual(content).TransformPoint({0, 0});
+            grid->sight = Rect{0, static_cast<float>(viewer.VerticalOffset()) - origin.Y, static_cast<float>(panel.ActualWidth()), port};
+        } catch (winrt::hresult_error const&) {
+        }
+    };
+    auto sighted = panel.EffectiveViewportChanged([grid, look](xaml::FrameworkElement const&, xaml::EffectiveViewportChangedEventArgs const& args) {
+        auto viewport = args.EffectiveViewport();
+        grid->blind = viewport.Height < 0;
+        if (grid->blind) look();
+        else grid->sight = viewport;
         if (grid->scrolls && !grid->Current()) grid->Later();
     });
+    winrt::event_token viewed{}, sized{};
     // A scroll view's `position` reaches rows not built yet.
     if (grid->scrolls) {
+        auto follow = [grid, look](auto&&, auto&&) {
+            if (!grid->blind) return;
+            look();
+            if (!grid->Current()) grid->Later();
+        };
+        viewed = scroll->viewer.ViewChanged(follow);
+        sized = scroll->viewer.SizeChanged(follow);
         scroll->reveal.push_back([keep, grid, scroll](std::string const& key) -> xaml::UIElement {
             auto panel = keep.get();
             if (!panel || !grid->make || !scroll->viewer) return nullptr;
@@ -542,8 +571,12 @@ inline void LazyGrid(Parent const& p, Ctx const& ctx, GridProps props, EachProps
             return 0;
         });
     });
-    Reactive::OnCleanup([impl, sighted] {
+    Reactive::OnCleanup([impl, sighted, scroll, viewed, sized] {
         impl->EffectiveViewportChanged(sighted);
+        if (impl->scrolls) {
+            scroll->viewer.ViewChanged(viewed);
+            scroll->viewer.SizeChanged(sized);
+        }
         for (auto& [key, item] : impl->built) item->owner->Dispose();
         impl->built.clear();
         impl->make = nullptr;

@@ -525,8 +525,11 @@ END
     )
 }
 
-/// Per-monitor DPI awareness, and the Windows versions the application was
-/// tested on: XAML Islands needs the newest one declared.
+/// Per-monitor DPI awareness, and the Windows version the application was
+/// tested on. XAML Islands wants 10.0.18226 or later here, and Windows 10
+/// refuses a version well past its own (measured on 19045: 19045 starts,
+/// 22000 and later fail at `InitializeForCurrentThread`), so the manifest
+/// names the oldest supported Windows, which every system accepts.
 pub fn manifest(app: &Application) -> String {
     format!(
         r#"<?xml version="1.0" encoding="utf-8"?>
@@ -536,7 +539,7 @@ pub fn manifest(app: &Application) -> String {
   <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
     <application>
       <supportedOS Id="{{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}}" />
-      <maxversiontested Id="10.0.26100.0" />
+      <maxversiontested Id="{minimum}" />
     </application>
   </compatibility>
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
@@ -548,6 +551,7 @@ pub fn manifest(app: &Application) -> String {
 </assembly>
 "#,
         bundle = xml(&app.app.bundle_id),
+        minimum = MINIMUM_WINDOWS,
     )
 }
 

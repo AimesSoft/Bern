@@ -175,7 +175,14 @@ fn showcase_generates_a_winui3_application() {
         "{identity}"
     );
     let manifest = std::fs::read_to_string(output.join("app/app.manifest")).unwrap();
-    assert!(manifest.contains("maxversiontested"), "{manifest}");
+    // Windows 10 cannot start XAML Islands with a newer version here.
+    assert!(
+        manifest.contains(&format!(
+            r#"maxversiontested Id="{}""#,
+            bern_backend_winui3::MINIMUM_WINDOWS
+        )),
+        "{manifest}"
+    );
     for runtime in [
         "runtime/bern_base.h",
         "runtime/bern_main.cpp",
