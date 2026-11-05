@@ -14,7 +14,7 @@ fn result(eval: Evaluation) -> std::result::Result<Value, bern_script::Error> {
     }
 }
 #[test]
-#[cfg(feature = "boa")]
+#[cfg(feature = "__boa")]
 fn persistent_contexts_values_promises_errors_and_limits() {
     let first = Context::new().unwrap();
     let second = Context::new().unwrap();
@@ -41,7 +41,7 @@ fn persistent_contexts_values_promises_errors_and_limits() {
     assert_eq!(result(first.eval("6 * 7")).unwrap(), 42);
 }
 #[test]
-#[cfg(not(feature = "boa"))]
+#[cfg(not(feature = "__boa"))]
 fn host_routing_disposal_and_shutdown() {
     use bern_script::host;
     host::stop();

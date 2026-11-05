@@ -32,6 +32,7 @@ pub fn detect(workspace: &Path, package: &str) -> Result<Framework, String> {
     }
     let metadata: Value = serde_json::from_slice(&output.stdout)
         .map_err(|error| format!("cannot read `cargo metadata`: {error}"))?;
+    check_script_host(&metadata)?;
     let dependency = metadata["packages"]
         .as_array()
         .into_iter()
@@ -50,6 +51,24 @@ pub fn detect(workspace: &Path, package: &str) -> Result<Framework, String> {
     Ok(patched_checkout(workspace)
         .map(Framework::Path)
         .unwrap_or(declared))
+}
+
+/// Which JavaScript host a target runs is Bern's choice: a package that
+/// picks one itself would bring it to every target, whatever the system
+/// has. Tests may, having no target to run in.
+fn check_script_host(metadata: &Value) -> Result<(), String> {
+    for package in metadata["packages"].as_array().into_iter().flatten() {
+        for dependency in package["dependencies"].as_array().into_iter().flatten() {
+            let features = dependency["features"].as_array().map_or(0, Vec::len);
+            if dependency["name"] == "bern-script" && dependency["kind"] != "dev" && features > 0 {
+                return Err(format!(
+                    "the package `{}` sets features on `bern-script`: Bern picks the JavaScript host of each target. Remove them, and set `javascript = true` on the targets that run scripts",
+                    package["name"].as_str().unwrap_or_default()
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The checkout a `[patch]` puts in place of the declared source of `bern`,
@@ -191,6 +210,25 @@ mod tests {
         );
         let elsewhere = json!({ "name": "bern", "path": "/nowhere/bern" });
         assert!(from_dependency(&elsewhere).is_err());
+    }
+
+    #[test]
+    fn the_javascript_host_is_not_the_applications_to_pick() {
+        let metadata = |features: Value, kind: Value| {
+            json!({ "packages": [{
+                "name": "my-core",
+                "dependencies": [{ "name": "bern-script", "features": features, "kind": kind }],
+            }] })
+        };
+        assert!(check_script_host(&metadata(json!([]), Value::Null)).is_ok());
+        let error = check_script_host(&metadata(json!(["boa"]), Value::Null)).unwrap_err();
+        assert!(
+            error.contains("`my-core`") && error.contains("javascript = true"),
+            "{error}"
+        );
+        assert!(check_script_host(&metadata(json!(["__boa"]), Value::Null)).is_err());
+        // A test has no target to run in.
+        assert!(check_script_host(&metadata(json!(["__boa"]), json!("dev"))).is_ok());
     }
 
     #[test]
