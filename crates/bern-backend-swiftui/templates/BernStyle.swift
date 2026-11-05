@@ -4469,7 +4469,8 @@ extension View {
             self.frame(height: height ?? 36)
                 .glassEffect(.regular.interactive(), in: Capsule())
         } else {
-            self.frame(height: height)
+            // A UIKit field takes all the height it is offered.
+            self.frame(height: height ?? 36)
         }
         #else
         self.frame(height: height)
