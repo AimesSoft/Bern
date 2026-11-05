@@ -421,7 +421,7 @@ bern 0.1.0 on macOS (aarch64)
 - **macOS**：Xcode 26 或更新版本。從 App Store 安裝後執行 `sudo xcode-select --switch /Applications/Xcode.app`。
 - **iOS**：Xcode 的 iOS 平台與一個 iOS 模擬器，以及 `rustup target add aarch64-apple-ios-sim`。目前建置模擬器應用程式，實機的簽署與打包還沒有做。
 - **Windows**：Visual Studio 2022 或更新版本的「使用 C++ 的桌面開發」（只裝建置工具也可以），含 Windows 11 SDK；Rust 使用 MSVC 工具鏈。首次建置時以 Windows SDK 的 `cppwinrt` 產生 C++/WinRT 標頭檔，並把它們與執行階段預先編譯（每個設定約 2.4 GB，放在 `target` 中）；之後的建置只編譯應用程式自己的程式碼，新專案約 5 秒，展示應用程式約 9 秒。應用程式目錄只有執行檔、400 KB 的啟動程式 DLL 與資源，不需要 .NET，也不隨附 Windows App SDK。
-- **Linux**：GTK 4.14 與 libadwaita 1.5 的開發套件，例如 `sudo apt install libgtk-4-dev libadwaita-1-dev gstreamer1.0-libav`。
+- **Linux**：GTK 4.14 與 libadwaita 1.5 的開發套件，例如 `sudo apt install libgtk-4-dev libadwaita-1-dev libsoup-3.0-dev gstreamer1.0-libav`。
 - **Android**：Android Studio（帶 SDK 與 NDK，在 SDK Manager 的 SDK Tools 中勾選 NDK）、Gradle 9.4 或更新版本，以及 `rustup target add aarch64-linux-android`。第一次建置時 Gradle 會下載 Android 外掛與 Compose 程式庫。
 - **Web**：`rustup target add wasm32-unknown-unknown`。`web_app` 建置把引擎編譯為 WebAssembly 在頁面內執行；`web_ui` 建置讓頁面作為獨立引擎宿主的介面，`bern run` 啟動宿主並開啟它的位址。
 

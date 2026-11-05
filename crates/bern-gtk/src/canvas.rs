@@ -175,21 +175,16 @@ fn average_of(pixbuf: &gtk::gdk_pixbuf::Pixbuf) -> Option<Rgb> {
 }
 
 fn read_picture(url: String) {
-    let file = if url.contains("://") {
-        gio::File::for_uri(&url)
-    } else {
-        gio::File::for_path(&url)
-    };
-    let finished = url.clone();
-    file.load_bytes_async(None::<&gio::Cancellable>, move |result| {
-        let average = result.ok().and_then(|(bytes, _)| {
+    glib::spawn_future_local(async move {
+        let average = crate::pictures::picture(&url, async |bytes| {
             let stream = gio::MemoryInputStream::from_bytes(&bytes);
             let pixbuf =
                 gtk::gdk_pixbuf::Pixbuf::from_stream(&stream, None::<&gio::Cancellable>).ok()?;
             let upright = pixbuf.apply_embedded_orientation().unwrap_or(pixbuf);
             average_of(&upright)
-        });
-        AVERAGES.with(|averages| averages.borrow_mut().insert(finished, average));
+        })
+        .await;
+        AVERAGES.with(|averages| averages.borrow_mut().insert(url, average));
         READ.with(Version::bump);
     });
 }

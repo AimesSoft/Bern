@@ -976,6 +976,11 @@ pub(crate) fn open(kind_id: &str) -> Result<String, Failure> {
     let def = &host.def.windows[kind];
 
     let window = adw::ApplicationWindow::new(&application);
+    window.connect_is_active_notify(|window| {
+        if window.is_active() {
+            crate::pictures::try_again();
+        }
+    });
     let width = def.width.map(|width| width as i32).unwrap_or(-1);
     let height = def.height.map(|height| height as i32).unwrap_or(-1);
     window.set_default_size(width, height);

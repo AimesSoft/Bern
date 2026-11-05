@@ -28,6 +28,7 @@ mod overlay;
 mod palette;
 mod parent;
 mod picture;
+mod pictures;
 mod query;
 pub mod reactive;
 mod scene;

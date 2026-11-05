@@ -155,7 +155,11 @@ pub fn debian_control(
         .as_deref()
         .map(control_line)
         .unwrap_or_else(|| format!("{name} maintainers"));
-    let mut depends = vec!["libgtk-4-1 (>= 4.14)", "libadwaita-1-0 (>= 1.5)"];
+    let mut depends = vec![
+        "libgtk-4-1 (>= 4.14)",
+        "libadwaita-1-0 (>= 1.5)",
+        "libsoup-3.0-0",
+    ];
     let mut extra = String::new();
     if scripts || bern_target_api::svg::used(app) {
         depends.push("libwebkitgtk-6.0-4");
@@ -432,7 +436,7 @@ mod tests {
             "Package: hello\n",
             "Architecture: arm64\n",
             "Installed-Size: 4321\n",
-            "Depends: libgtk-4-1 (>= 4.14), libadwaita-1-0 (>= 1.5)\n",
+            "Depends: libgtk-4-1 (>= 4.14), libadwaita-1-0 (>= 1.5), libsoup-3.0-0\n",
             "Maintainer: Hello maintainers\n",
         ] {
             assert!(hello.contains(expected), "{hello}");

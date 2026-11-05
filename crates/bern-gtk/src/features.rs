@@ -2200,37 +2200,17 @@ pub(crate) fn premultiplied_texture(pixbuf: &gtk::gdk_pixbuf::Pixbuf) -> Option<
 }
 
 /// A texture read from a `file://` or http(s) URL and decoded in the
-/// background at the size `wanted` asks for; from the cache when a view
-/// showed the same picture at that size before.
-fn load_texture(
-    url: &str,
-    wanted: DecodeBox,
-    done: impl FnOnce(Option<gtk::gdk::Texture>) + 'static,
-) {
-    let key: TextureKey = (url.to_string(), wanted.key());
-    if let Some(texture) = cached_texture(&key) {
-        done(Some(texture));
-        return;
-    }
-    let file = if url.contains("://") {
-        gio::File::for_uri(url)
-    } else {
-        gio::File::for_path(url)
-    };
-    file.load_bytes_async(None::<&gio::Cancellable>, move |result| {
-        let Ok((bytes, _)) = result else {
-            done(None);
-            return;
-        };
-        let decoding = gio::spawn_blocking(move || decode_texture(&bytes, wanted));
-        glib::spawn_future_local(async move {
-            let texture = decoding.await.ok().flatten();
-            if let Some(texture) = &texture {
-                cache_texture(key, texture);
-            }
-            done(texture);
-        });
-    });
+/// background at the size `wanted` asks for, once it comes.
+async fn load_texture(url: &str, wanted: DecodeBox) -> Option<gtk::gdk::Texture> {
+    let texture = crate::pictures::picture(url, async |bytes| {
+        gio::spawn_blocking(move || decode_texture(&bytes, wanted))
+            .await
+            .ok()
+            .flatten()
+    })
+    .await?;
+    cache_texture((url.to_string(), wanted.key()), &texture);
+    Some(texture)
 }
 
 /// Shows a texture read in the background, or none.
@@ -2300,44 +2280,95 @@ pub fn RuntimeImage(p: &Parent, ctx: &Ctx, props: RuntimeImageProps) {
         }
         None => picture.update_state(&[gtk::accessible::State::Hidden(true)]),
     }
+    let fixed_ratio = props.aspect.is_some();
+    // Shows what came, and tells whether anything is still to come.
+    let shown = Rc::new(Cell::new(false));
+    let present = {
+        let shown = Rc::clone(&shown);
+        Rc::new(move |texture: Option<gtk::gdk::Texture>| {
+            if !fixed_ratio
+                && let Some(texture) = &texture
+                && texture.width() > 0
+                && texture.height() > 0
+            {
+                ratio.set(f64::from(texture.width()) / f64::from(texture.height()));
+            }
+            shown.set(texture.is_some());
+            show(texture.as_ref());
+            resize();
+        })
+    };
+    let current: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+    let loading: Rc<RefCell<Option<glib::JoinHandle<()>>>> = Rc::default();
+    let stop = {
+        let loading = Rc::clone(&loading);
+        move || {
+            if let Some(load) = loading.take() {
+                load.abort();
+            }
+        }
+    };
+    let start = {
+        let loading = Rc::clone(&loading);
+        let stop = stop.clone();
+        let present = Rc::clone(&present);
+        move |url: String| {
+            stop();
+            let present = Rc::clone(&present);
+            let finished = Rc::clone(&loading);
+            let load = glib::spawn_future_local(async move {
+                let texture = load_texture(&url, decoded_at).await;
+                finished.take();
+                present(texture);
+            });
+            *loading.borrow_mut() = Some(load);
+        }
+    };
     let at = ctx.clone();
     let hidden = outer.clone();
-    let current: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
-    let fixed_ratio = props.aspect.is_some();
+    let wanted = Rc::clone(&current);
+    let begin = start.clone();
+    let end = stop.clone();
     effect(move || {
         let url = crate::media::url_of(&(props.url)(&at));
         untrack(|| {
-            if *current.borrow() == url {
+            if *wanted.borrow() == url {
                 return;
             }
-            *current.borrow_mut() = url.clone();
+            *wanted.borrow_mut() = url.clone();
             hidden.set_visible(url.is_some());
+            end();
             // Nothing until the new picture is read, not the one before.
-            show(None);
+            present(None);
             let Some(url) = url else {
                 return;
             };
-            let show = Rc::clone(&show);
-            let ratio = Rc::clone(&ratio);
-            let resize = Rc::clone(&resize);
-            let wanted = Rc::clone(&current);
-            let requested = url.clone();
-            load_texture(&url, decoded_at, move |texture| {
-                // A later URL replaced this one while it was read.
-                if wanted.borrow().as_deref() != Some(requested.as_str()) {
-                    return;
-                }
-                if !fixed_ratio
-                    && let Some(texture) = &texture
-                    && texture.width() > 0
-                    && texture.height() > 0
-                {
-                    ratio.set(f64::from(texture.width()) / f64::from(texture.height()));
-                }
-                show(texture.as_ref());
-                resize();
-            });
+            // A view showing a picture read before shows it at once.
+            match cached_texture(&(url.clone(), decoded_at.key())) {
+                Some(texture) => present(Some(texture)),
+                None => begin(url),
+            }
         });
+    });
+    // A view that leaves stops trying, and one that appears starts over.
+    let left = stop.clone();
+    let handlers = [
+        outer.connect_unmap(move |_| left()),
+        outer.connect_map(move |_| {
+            if !shown.get()
+                && loading.borrow().is_none()
+                && let Some(url) = current.borrow().clone()
+            {
+                start(url);
+            }
+        }),
+    ];
+    let watched = outer.clone();
+    on_cleanup(move || {
+        stop();
+        for handler in handlers {
+            watched.disconnect(handler);
+        }
     });
     place(p, &outer);
 }

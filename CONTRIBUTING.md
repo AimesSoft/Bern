@@ -13,7 +13,7 @@ cargo test --workspace
 node --test crates/bern-svg/tests/*.test.mjs crates/bern-backend-web/tests/*.test.mjs
 ```
 
-The GTK runtime `crates/bern-gtk` is not a workspace member and is checked separately. It needs the development packages for GTK 4.14, libadwaita 1.5 and WebKitGTK 6 (on Debian and Ubuntu, `libgtk-4-dev libadwaita-1-dev libwebkitgtk-6.0-dev`):
+The GTK runtime `crates/bern-gtk` is not a workspace member and is checked separately. It needs the development packages for GTK 4.14, libadwaita 1.5, libsoup 3 and WebKitGTK 6 (on Debian and Ubuntu, `libgtk-4-dev libadwaita-1-dev libsoup-3.0-dev libwebkitgtk-6.0-dev`):
 
 ```sh
 cd crates/bern-gtk
