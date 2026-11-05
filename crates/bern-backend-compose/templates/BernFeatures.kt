@@ -858,7 +858,7 @@ fun BernSplitButton(
 /// thread at about the size they are drawn: their own pixels divided by
 /// the largest power of two that still covers it. The last 64 MB of
 /// pictures read are kept, so a picture shown again appears at once, and a
-/// read under way is shared.
+/// read under way is shared. `BernPictureTries` says when to try again.
 object BernPictures {
     /// A picture of `width` × `height` pixels, read at 1/`sample` of that.
     class Picture(val bitmap: ImageBitmap, val width: Int, val height: Int, val sample: Int) {
@@ -868,12 +868,36 @@ object BernPictures {
     private val kept = object : LruCache<String, Picture>(64 shl 20) {
         override fun sizeOf(key: String, value: Picture) = value.bitmap.asAndroidBitmap().allocationByteCount
     }
-    private val reading = ConcurrentHashMap<String, Deferred<Picture?>>()
+    private val reading = ConcurrentHashMap<String, Deferred<BernTry<Picture>>>()
     /// Each picture's proportion once known; 0 for a file that cannot be read.
     private val ratios = ConcurrentHashMap<String, Float>()
     private val averages = mutableStateMapOf<String, Long>()
     private val averaging = HashSet<String>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val listening = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /// Starts hearing of what is worth another try, for the first picture
+    /// from the network: the network and the app coming to the front. An
+    /// app without such pictures may not read the network's state.
+    private fun listen(context: Context, url: String) {
+        if (!url.startsWith("http", ignoreCase = true) || !listening.compareAndSet(false, true)) return
+        val app = context.applicationContext as android.app.Application
+        app.getSystemService(android.net.ConnectivityManager::class.java).registerDefaultNetworkCallback(
+            object : android.net.ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: android.net.Network) = BernPictureTries.networkChanged(online = true)
+                override fun onLost(network: android.net.Network) = BernPictureTries.networkChanged(online = false)
+            },
+        )
+        app.registerActivityLifecycleCallbacks(object : android.app.Application.ActivityLifecycleCallbacks {
+            override fun onActivityResumed(activity: android.app.Activity) = BernPictureTries.tryAgain()
+            override fun onActivityCreated(activity: android.app.Activity, state: android.os.Bundle?) {}
+            override fun onActivityStarted(activity: android.app.Activity) {}
+            override fun onActivityPaused(activity: android.app.Activity) {}
+            override fun onActivityStopped(activity: android.app.Activity) {}
+            override fun onActivitySaveInstanceState(activity: android.app.Activity, state: android.os.Bundle) {}
+            override fun onActivityDestroyed(activity: android.app.Activity) {}
+        })
+    }
 
     /// The URL of a declared resource.
     fun resource(name: String): String = Uri.fromFile(File(BernResources.root, name)).toString()
@@ -906,14 +930,17 @@ object BernPictures {
     suspend fun twice(context: Context, url: String, wide: Int, tall: Int, fit: ContentScale): Picture? {
         val key = twiceKey(url, wide, tall)
         kept.get(key)?.let { return it }
+        listen(context, url)
         val app = context.applicationContext
-        val read = reading[key] ?: scope.async {
-            runCatching { decode(app, url, wide, tall, keep = false, twice = fit) }.getOrNull()
-        }.also { read ->
-            reading[key] = read
-            read.invokeOnCompletion { reading.remove(key, read) }
-        }
-        val picture = read.await() ?: return null
+        val picture = BernPictureTries.until(url) {
+            val read = reading[key] ?: scope.async {
+                attempt { decode(app, url, wide, tall, keep = false, twice = fit) }
+            }.also { read ->
+                reading[key] = read
+                read.invokeOnCompletion { reading.remove(key, read) }
+            }
+            read.await()
+        } ?: return null
         kept.put(key, picture)
         return picture
     }
@@ -926,24 +953,37 @@ object BernPictures {
     /// The picture at `url` to be drawn `wide` × `tall` pixels: the one kept
     /// when it is enough, else the read under way when that is, else a new
     /// read. A read goes on when its caller leaves, and keeps what it read.
+    /// It comes when it comes: a failed try is tried again for as long as
+    /// the caller waits.
     suspend fun read(context: Context, url: String, wide: Int, tall: Int): Picture? {
         kept.get(url)?.takeIf { enough(it, wide, tall) }?.let { return it }
-        reading[url]?.await()?.takeIf { enough(it, wide, tall) }?.let { return it }
+        listen(context, url)
         val app = context.applicationContext
-        val read = scope.async { runCatching { decode(app, url, wide, tall, keep = true) }.getOrNull() }
-        reading[url] = read
-        read.invokeOnCompletion { reading.remove(url, read) }
-        return read.await()
+        return BernPictureTries.until(url) {
+            val running = reading[url]?.await()
+            if (running is BernTry.Failed || (running is BernTry.Came && enough(running.value, wide, tall))) {
+                return@until running
+            }
+            val read = scope.async { attempt { decode(app, url, wide, tall, keep = true) } }
+            reading[url] = read
+            read.invokeOnCompletion { reading.remove(url, read) }
+            read.await()
+        }
     }
+
+    /// One try: whatever else went wrong, no picture.
+    private fun attempt(decoded: () -> BernTry<Picture>): BernTry<Picture> =
+        runCatching(decoded).getOrDefault(BernTry.Absent)
 
     fun average(context: Context, url: String?): BernColor? {
         if (url.isNullOrEmpty()) return null
         averages[url]?.let { return BernColor.Fixed(it, it) }
         if (averaging.add(url)) {
+            listen(context, url)
             val app = context.applicationContext
             scope.launch {
                 val picture = kept.get(url)
-                    ?: runCatching { decode(app, url, 32, 32, keep = false) }.getOrNull()
+                    ?: BernPictureTries.until(url) { attempt { decode(app, url, 32, 32, keep = false) } }
                     ?: return@launch
                 val average = mean(picture.bitmap.asAndroidBitmap())
                 withContext(Dispatchers.Main) { averages[url] = average }
@@ -1006,14 +1046,18 @@ object BernPictures {
     /// `wide` × `tall`; a download is fetched once for both. With `twice`,
     /// the fit of a double-sampled picture, at exactly twice the pixels it
     /// covers: the sample that covers that, drawn down to it.
-    private fun decode(context: Context, url: String, wide: Int, tall: Int, keep: Boolean, twice: ContentScale? = null): Picture? {
+    private fun decode(context: Context, url: String, wide: Int, tall: Int, keep: Boolean, twice: ContentScale? = null): BernTry<Picture> {
         val uri = Uri.parse(url)
         val scheme = uri.scheme?.lowercase()
         val bytes = when (scheme) {
-            "http", "https" -> java.net.URL(url).openStream().use { it.readBytes() }
+            "http", "https" -> when (val read = BernPictureTries.download(url)) {
+                is BernTry.Came -> read.value
+                is BernTry.Failed -> return read
+            }
             "file", "content" -> null
-            else -> return null
+            else -> return BernTry.Absent
         }
+        val unreadable = if (bytes != null) BernTry.Refused else BernTry.Absent
         fun pixels(options: BitmapFactory.Options): Bitmap? = when {
             bytes != null -> BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
             scheme == "file" -> BitmapFactory.decodeFile(uri.path, options)
@@ -1023,11 +1067,11 @@ object BernPictures {
         pixels(bounds)
         val width = bounds.outWidth
         val height = bounds.outHeight
-        if (width <= 0 || height <= 0) return null
+        if (width <= 0 || height <= 0) return unreadable
         ratios[url] = width.toFloat() / height
         val target = twice?.let { twiceCovered(width, height, wide, tall, it) }
         val sample = if (target != null) sample(width, height, target.first, target.second) else sample(width, height, wide, tall)
-        var bitmap = pixels(BitmapFactory.Options().apply { inSampleSize = sample }) ?: return null
+        var bitmap = pixels(BitmapFactory.Options().apply { inSampleSize = sample }) ?: return unreadable
         if (target != null && (bitmap.width > target.first || bitmap.height > target.second)) {
             bitmap = Bitmap.createScaledBitmap(bitmap, target.first, target.second, true)
         }
@@ -1039,7 +1083,7 @@ object BernPictures {
                 if (kept.get(url)?.let { it.sample < sample } != true) kept.put(url, picture)
             }
         }
-        return picture
+        return BernTry.Came(picture)
     }
 }
 
