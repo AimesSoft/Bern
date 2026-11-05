@@ -17,7 +17,7 @@
 - `Modal`（不写高度时 `<dialog>` 不设高度，与内容一样高，`max-height` 为视口减 32，超出时由其中的滚动区收缩）、`Flow`、`Timer`、搜索面板及分组结果、显式 `PickerOption`、引擎受控 Switch/Picker。`Picker(style: chips)` 是 Radio Group 模式的药丸按钮（`chip` 配方），直接放在 `Flow` 里时组容器为 `display: contents`，每枚都是 Flow 的子项。定时器随声明生命周期清理；搜索支持方向键、回车、Escape 和焦点恢复。
 - Stack 样式、文本字号/字重/行数、纯图标 Label/Menu、胶囊控件、分轴 padding、baseline、模板图及固有比例、图片圆角与响应式比例、独立 Grid 行距。
 - 固定侧栏宽度、顶栏、动态 badge、无标题 Detail、工具栏 leading 项、手风琴列宽动画、边缘 grow、延迟入场、事件触发 nudge、应用减少动态效果。
-- 布局的伸展意图在显式宽高处停止，Spacer 按主轴参与布局。`reflow` 在条件分支的 DocumentFragment 挂载后观察实际父元素，共享观察器并在最后一个声明卸载后清理。
+- 布局的伸展意图在显式宽高处停止，Spacer 按主轴参与布局。行里填充的元素从零开始（`flex: 1 1 0`），但只因内部的 `Spacer` 才填充的容器，在这一行的 `Spacer` 旁带 `bern-keeps-width`（`flex: 1 1 auto`），只参与平分余下的空间；此前 380 宽弹窗里这样的列只有 105 宽，标题折行，标签重叠（2026-11-05）。`reflow` 在条件分支的 DocumentFragment 挂载后观察实际父元素，共享观察器并在最后一个声明卸载后清理。
 - 新增该应用用到的 SF 名称到 Lucide 的映射；SVG 随构建离线分发，授权保留。
 
 `bern-command::storage::Store` 在 WASM 中使用宿主导入 `storage_read/storage_write`，保存到同源 localStorage 的 `bern:<bundle_id>:<key>`。二进制值以字节数组编码；缺失与空值不同，权限、格式和容量错误返回 `CommandError`。原生文件存储路径保持原行为。

@@ -213,6 +213,7 @@ HDR 图片（PQ 或 HLG 的 PNG、带增益图的 JPEG）不经过 XAML 的 `Ima
 ### 布局与页面结构
 
 - `padding_x`、`padding_y` 在 `padding` 之上分别覆盖左右与上下。`Row(align: baseline)`：各子元素先顶对齐排布，再按各自第一个文字块的 `BaselineOffset`（经 `TransformToVisual` 换算到子元素内）下移到同一条基线，多占的高度在下一轮测量中计入。
+- `Row` 与 `Column`（`FlexPanel`）：填充的元素平分剩余空间，但只因内部的 `Spacer` 才填充的容器，在同一面板的 `Spacer` 旁先占自身长度，只参与平分余下的空间，与通用规则一致；空间不够时 `Spacer` 为零，这些容器按比例收缩。此前这样的容器被算作又一个填充项：380 宽弹窗里的 `Row { Spacer  Column { …  Row { Spacer  …  Spacer } }  Spacer }`，列只分到一行的三分之一，即 100 宽，固定宽度的卡片和一排标签都被截断（2026-11-05 修改）。输入框、滚动视图这类自身填充的元素仍然平分。
 - `Grid(row_gap:)` 单独设置行距；`Grid(cell_ratio:, cell_extra:)` 每行高为列宽 ÷ `cell_ratio` + `cell_extra`，各格从格子顶部排，内容更高时伸进下面的行距。`Flow` 是换行面板（`FlowPanel`）：子项在行内竖直居中，`Spacer`（角色 `bern-spacer`）换行时不占宽度，排好后分得所在行余下的宽度。
 - `ScaleBox`：子元素在声明的逻辑尺寸中层叠，整体以一个 `CompositeTransform`（缩放加居中平移）适配所得空间，超出部分裁掉；图片、文字与点击区域保持对齐。`Positioned` 在所在层叠中占满，内容按（可弹簧的）`x`、`y`、`width`、`height` 放置并居中。`Positioned(bleed:)`：`ScaleBox` 的上下文带着它的场景空白（`Ctx::scene`，图层里面的内容不再带），排布时按所得尺寸算出画布四周的空白（场景点）；有 `bleed` 的图层测量与排布内容时把到达的每条画布边延伸到空白的边缘，四条边各是一个随图层 `animate` 的弹簧，碰到哪条边按图层要去的位置判断。盒子换了形状时场景本身的尺寸不变，XAML 不会重新排布同样大小的子元素，所以空白一变，盒子让登记过的延伸图层 `InvalidateMeasure`，延伸量随即跳到新值。`Marquee`：内容按自然宽度每帧（`CompositionTarget.Rendering`）从右缘外跑到左缘外，`paused` 时停住，减少动态效果时静止在宽度 28% 处；其中的文字由 Composition 的 `DropShadow`（以文字自己的 `GetAlphaMask` 为蒙版）带 1 点黑色阴影。
 - `Accordion`：每列一个 0 到 1 的权重弹簧，列宽由权重分配，总宽不变，每列按 `corner` 圆角裁剪（裁剪在每次排布时按列的大小设置）。

@@ -499,6 +499,7 @@ pub fn glow(
         flex: false,
         width: grow.width || grow.flex,
         height: grow.height || grow.flex,
+        keep: false,
     }));
     let corners = match corner {
         Some(corner) => [corner; 4],

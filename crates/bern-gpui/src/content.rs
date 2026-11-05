@@ -506,6 +506,7 @@ fn framed(c: &Ctx, element: gpui::Img, covers: bool, blurred: Blurred<'_>) -> El
                 flex: false,
                 width: filled.width || filled.flex,
                 height: filled.height || filled.flex,
+                keep: false,
             }
             .apply(element.flex_none());
             filled

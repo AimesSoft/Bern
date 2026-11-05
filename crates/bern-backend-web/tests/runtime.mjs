@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
-import { Timer, Scope, within, cell, accordionWidths, layoutIntent, fixedSize } from "../templates/bern.js";
+import { Timer, Scope, within, cell, accordionWidths, layoutIntent, fixedSize, keepsWidth } from "../templates/bern.js";
 
 function layoutNode(classes, children = [], axis = null, tagName = "DIV", attributes = []) {
   const names = new Set(classes.split(" "));
@@ -65,6 +65,25 @@ test("spacers expand only their stack axis while fixed drawing frames stop propa
   const panel = layoutNode("bern-popover-panel", [row], null, "DIV", ["popover"]);
   const split = layoutNode("bern-split-button", [layoutNode("bern-split-main"), panel]);
   assert.equal(layoutIntent(split, "width"), false, "nor do popover panels size their trigger");
+});
+
+test("a stack that fills only through spacers keeps its width beside a spacer", () => {
+  const inRow = (parent) => { for (const child of parent.children) child.parentElement = parent; return parent; };
+  const spacer = () => layoutNode("bern-spacer");
+  const steps = inRow(layoutNode("bern-stack bern-hstack", [spacer(), layoutNode("bern-label"), spacer()], "row"));
+  const spaced = inRow(layoutNode("bern-stack bern-vstack", [layoutNode("bern-text"), steps], "column"));
+  inRow(layoutNode("bern-stack bern-hstack", [spacer(), spaced, spacer()], "row"));
+  assert.equal(keepsWidth(spaced), true);
+
+  const field = layoutNode("bern-field bern-fill-width");
+  const filled = inRow(layoutNode("bern-stack bern-vstack", [steps, field], "column"));
+  inRow(layoutNode("bern-stack bern-hstack", [spacer(), filled, spacer()], "row"));
+  assert.equal(keepsWidth(filled), false, "what fills for itself shares the row equally");
+
+  const left = inRow(layoutNode("bern-stack bern-vstack", [steps], "column"));
+  const right = inRow(layoutNode("bern-stack bern-vstack", [steps], "column"));
+  inRow(layoutNode("bern-stack bern-hstack", [left, right], "row"));
+  assert.equal(keepsWidth(left), false, "with no spacer beside them, columns stay equal");
 });
 
 test("image and text layers determine their size while rails only cover them", () => {

@@ -583,13 +583,22 @@ impl Greed {
         }
     }
 
-    /// How an element taking this space grows in a container of `axis`.
-    fn grow(self, axis: Axis) -> String {
+    /// Whether it takes the space along `axis`.
+    fn along(self, axis: Axis) -> bool {
+        match axis {
+            Axis::Column => self.height,
+            Axis::Row => self.width,
+        }
+    }
+
+    /// How an element taking this space grows in a container of `axis`;
+    /// with `keep`, from its own length.
+    fn grow(self, axis: Axis, keep: bool) -> String {
         let (flex, width, height) = match axis {
             Axis::Column => (self.height, self.width, false),
             Axis::Row => (self.width, false, self.height),
         };
-        format!("b::Grow {{ flex: {flex}, width: {width}, height: {height} }}")
+        format!("b::Grow {{ flex: {flex}, width: {width}, height: {height}, keep: {keep} }}")
     }
 }
 
@@ -613,6 +622,8 @@ pub struct Generator<'a> {
     reflow_now: RefCell<Option<String>>,
     /// The children being pushed are the layers of a `Stack` or `Modal`.
     layers: std::cell::Cell<bool>,
+    /// The children being pushed stand beside a `Spacer` of their container.
+    spacer: std::cell::Cell<bool>,
 }
 
 /// How a container places its children, for the corners they lie on.
@@ -639,6 +650,7 @@ impl<'a> Generator<'a> {
             reflow_next: RefCell::new(None),
             reflow_now: RefCell::new(None),
             layers: std::cell::Cell::new(false),
+            spacer: std::cell::Cell::new(false),
         }
     }
 
@@ -1398,6 +1410,61 @@ pub fn app() -> b::AppDef {{
         })
     }
 
+    /// Whether `node` takes the space along `axis` only through `Spacer`s
+    /// inside it: what it holds still has a length of its own.
+    fn spaced(&self, node: &Node, axis: Axis) -> bool {
+        match node {
+            Node::Element(element) => match element.kind.as_str() {
+                "Column" => self.spaced_in(&element.children, Some(Axis::Column), axis),
+                "Row" => self.spaced_in(&element.children, Some(Axis::Row), axis),
+                "Stack" => self.spaced_in(&element.children, None, axis),
+                _ => false,
+            },
+            Node::Component(reference) => self
+                .app
+                .component(&reference.component)
+                .is_some_and(|component| self.spaced(&component.body, axis)),
+            Node::If(node) => {
+                let arms: Vec<&Node> = node
+                    .branches
+                    .iter()
+                    .flat_map(|(_, body)| body.iter())
+                    .chain(node.otherwise.iter())
+                    .collect();
+                self.spaced_among(&arms, None, axis)
+            }
+            Node::IfLet(node) => {
+                let arms: Vec<&Node> = node.then.iter().chain(node.otherwise.iter()).collect();
+                self.spaced_among(&arms, None, axis)
+            }
+            Node::Match(node) => {
+                let arms: Vec<&Node> = node.arms.iter().flat_map(|arm| arm.body.iter()).collect();
+                self.spaced_among(&arms, None, axis)
+            }
+        }
+    }
+
+    fn spaced_in(&self, nodes: &[Node], container: Option<Axis>, axis: Axis) -> bool {
+        self.spaced_among(&nodes.iter().collect::<Vec<_>>(), container, axis)
+    }
+
+    /// Whether `nodes`, in a container laying them out along `container`,
+    /// take the space along `axis` only through `Spacer`s.
+    fn spaced_among(&self, nodes: &[&Node], container: Option<Axis>, axis: Axis) -> bool {
+        let mut spaced = false;
+        for node in nodes {
+            if matches!(node, Node::Element(element) if element.kind == "Spacer") {
+                spaced = spaced || container == Some(axis);
+            } else if self.greed(node, axis).along(axis) {
+                if !self.spaced(node, axis) {
+                    return false;
+                }
+                spaced = true;
+            }
+        }
+        spaced
+    }
+
     fn element_greed(&self, element: &Element, parent: Axis) -> Greed {
         // A length that fills (`width: fill`) is no fixed length, nor are a
         // `ScaleBox`'s, the size of its scene, which it fits into whatever
@@ -1532,10 +1599,16 @@ pub fn app() -> b::AppDef {{
         let reflow = self.reflow_next.borrow_mut().take();
         let around = self.reflow_now.replace(reflow);
         let layers = self.layers.replace(along == Along::Layers);
+        let spacer = self.spacer.replace(
+            nodes
+                .iter()
+                .any(|node| matches!(node, Node::Element(element) if element.kind == "Spacer")),
+        );
         let mut body = String::new();
         for node in nodes {
             self.push(&mut body, node, axis);
         }
+        self.spacer.replace(spacer);
         self.layers.replace(layers);
         self.reflow_now.replace(around);
         format!("{{ let mut v: Vec<b::El> = Vec::new(); {body} v }}")
@@ -1637,6 +1710,12 @@ pub fn app() -> b::AppDef {{
     }
 
     /// Statements that push the elements of `node` onto `v`.
+    /// Whether `node`, being pushed, starts from its own length: `Spacer`s
+    /// beside it give way to what it holds.
+    fn keeps(&self, node: &Node, axis: Axis) -> bool {
+        self.spacer.get() && self.spaced(node, axis)
+    }
+
     fn push(&self, out: &mut String, node: &Node, axis: Axis) {
         match node {
             Node::Element(element) if element.kind == "ForEach" => {
@@ -1652,7 +1731,8 @@ pub fn app() -> b::AppDef {{
             Node::Element(element) => {
                 let ctx = format!(
                     "&c.grown({}){}",
-                    self.element_greed(element, axis).grow(axis),
+                    self.element_greed(element, axis)
+                        .grow(axis, self.keeps(node, axis)),
                     self.corners_of(node)
                 );
                 let reflow = self.reflow_now.borrow().clone();
@@ -1711,7 +1791,7 @@ pub fn app() -> b::AppDef {{
                     string(&component.name),
                     string(&site),
                     params.join(", "),
-                    self.greed(node, axis).grow(axis),
+                    self.greed(node, axis).grow(axis, self.keeps(node, axis)),
                     self.corners_of(node)
                 );
                 let code = match self.reflow_now.borrow().clone() {
@@ -1867,7 +1947,9 @@ pub fn app() -> b::AppDef {{
         let leaving = self.leaving.replace(false);
         let around = self.reflow_now.replace(None);
         let layers = self.layers.replace(false);
+        let spacer = self.spacer.replace(false);
         let code = self.element_built(element, ctx, leaving);
+        self.spacer.replace(spacer);
         self.layers.replace(layers);
         self.reflow_now.replace(around);
         code
@@ -2810,8 +2892,10 @@ pub fn app() -> b::AppDef {{
                             (None, None, Some(to)) => format!("b::Placement::Span(0.0, {to})"),
                             _ => "b::Placement::At(0.0)".into(),
                         };
-                        let ctx =
-                            format!("&c.grown({})", self.element_greed(child, axis).grow(axis));
+                        let ctx = format!(
+                            "&c.grown({})",
+                            self.element_greed(child, axis).grow(axis, false)
+                        );
                         if let Some(code) = self.element(child, &ctx) {
                             out.push_str(&format!("v.push(({code}, {placement})); "));
                         }

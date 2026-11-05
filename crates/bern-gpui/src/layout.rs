@@ -24,6 +24,10 @@ pub struct Grow {
     pub flex: bool,
     pub width: bool,
     pub height: bool,
+    /// With `flex`, it starts from its own length rather than from nothing:
+    /// a stack that fills only through spacers inside it, beside a spacer
+    /// of its container.
+    pub keep: bool,
 }
 
 impl Grow {
@@ -31,18 +35,20 @@ impl Grow {
         flex: false,
         width: false,
         height: false,
+        keep: false,
     };
     pub const ALL: Grow = Grow {
         flex: true,
         width: true,
         height: true,
+        keep: false,
     };
 
     pub(crate) fn apply<E: Styled>(self, element: E) -> E {
-        let element = if self.flex {
-            element.flex_1().min_w(px(0.0)).min_h(px(0.0))
-        } else {
-            element
+        let element = match (self.flex, self.keep) {
+            (true, true) => element.flex_auto().min_w(px(0.0)).min_h(px(0.0)),
+            (true, false) => element.flex_1().min_w(px(0.0)).min_h(px(0.0)),
+            (false, _) => element,
         };
         let element = if self.width {
             element.w_full()
