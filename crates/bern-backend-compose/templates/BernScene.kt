@@ -209,11 +209,85 @@ fun bernTextStyle(style: String, size: Float? = null, lineHeight: Float? = null)
     return text
 }
 
-/// A `Text`: at most `lines` lines, the last ending with an ellipsis. `lit`
-/// is read as it draws: it moves many times a second, and reading it here
-/// neither composes nor lays out anything.
+/// What `route` has lit of a text, as an outline: the text itself stays drawn
+/// and a frame only moves the outline of its layer.
+private class BernLitCut(
+    private val layout: androidx.compose.ui.text.TextLayoutResult?, private val text: String, private val place: Double,
+) : androidx.compose.ui.graphics.Shape {
+    override fun createOutline(
+        size: androidx.compose.ui.geometry.Size, layoutDirection: androidx.compose.ui.unit.LayoutDirection,
+        density: androidx.compose.ui.unit.Density,
+    ): androidx.compose.ui.graphics.Outline {
+        val all = androidx.compose.ui.geometry.Rect(0f, 0f, size.width, size.height)
+        val shown = layout ?: return androidx.compose.ui.graphics.Outline.Rectangle(all.copy(right = 0f))
+        val whole = place.toInt()
+        if (whole >= text.codePointCount(0, text.length)) return androidx.compose.ui.graphics.Outline.Rectangle(all)
+        val at = text.offsetByCodePoints(0, whole)
+        val box = shown.getBoundingBox(at)
+        val line = shown.getLineForOffset(at)
+        val end = box.left + box.width * (place - whole).toFloat()
+        val top = shown.getLineTop(line)
+        val cut = androidx.compose.ui.geometry.Rect(0f, top, end, shown.getLineBottom(line))
+        if (line == 0) return androidx.compose.ui.graphics.Outline.Rectangle(cut)
+        val path = androidx.compose.ui.graphics.Path()
+        path.addRect(all.copy(bottom = top))
+        path.addRect(cut)
+        return androidx.compose.ui.graphics.Outline.Generic(path)
+    }
+}
+
+/// A `Text` lit along `route`: faded, and over it the same text in a layer
+/// whose outline moves every frame by itself. Nothing composes, lays out or
+/// draws text again until the route or its clock changes.
 @Composable
-fun BernText(text: String, style: TextStyle, color: Color, lines: Int? = null, lit: (() -> Double)? = null) {
+private fun BernRouteText(text: String, style: TextStyle, color: Color, lines: Int?, route: BernLitRoute) {
+    val laid = remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
+    val frame = remember { androidx.compose.runtime.mutableLongStateOf(0L) }
+    if (route.moving) androidx.compose.runtime.LaunchedEffect(route) {
+        var drawn = route.place()
+        while (true) androidx.compose.runtime.withFrameNanos {
+            val place = route.place()
+            // Sixty times a second is enough, whatever the screen can do.
+            if (kotlin.math.abs(place - drawn) >= BERN_LIT_STEP && it - frame.longValue >= 15_000_000L) {
+                drawn = place
+                frame.longValue = it
+            }
+        }
+    }
+    val most = lines ?: Int.MAX_VALUE
+    val overflow = if (lines != null) TextOverflow.Ellipsis else TextOverflow.Clip
+    androidx.compose.foundation.layout.Box {
+        Text(
+            text, Modifier.graphicsLayer { alpha = 0.4f }, style = style, color = color, maxLines = most,
+            overflow = overflow, onTextLayout = { laid.value = it },
+        )
+        Text(
+            text,
+            Modifier.graphicsLayer {
+                frame.longValue
+                clip = true
+                shape = BernLitCut(laid.value, text, route.place())
+            },
+            style = style, color = color, maxLines = most, overflow = overflow,
+        )
+    }
+}
+
+/// A `Text`: at most `lines` lines, the last ending with an ellipsis. `lit`
+/// is read as it draws: reading it here neither composes nor lays out
+/// anything. With `litPath` at zero or above it moves along that route.
+@Composable
+fun BernText(
+    text: String, style: TextStyle, color: Color, lines: Int? = null, lit: (() -> Double)? = null,
+    litPath: (() -> String)? = null, litClock: (() -> Double)? = null, litSince: (() -> Double)? = null,
+) {
+    if (lit != null && litPath != null && lit() >= 0) {
+        val path = litPath()
+        val clock = litClock?.invoke() ?: 0.0
+        val since = litSince?.invoke() ?: 0.0
+        val route = remember(path, clock, since) { BernLitRoute(path, clock, since) }
+        if (!route.empty) return BernRouteText(text, style, color, lines, route)
+    }
     val laid = remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
     Text(
         text,

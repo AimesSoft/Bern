@@ -190,6 +190,11 @@ struct TextProps {
     /// `lit`: as far through its characters as this as they are, the rest
     /// faded; below zero, all of it.
     Len lit;
+    /// `lit_path`: seconds and characters, which `lit` at zero or above
+    /// follows by itself; `lit_clock` is the second it showed at `lit_since`.
+    Str litPath;
+    Len litClock;
+    Len litSince;
     /// `animate`: a size that follows state springs to each new value.
     Motion const* animate = nullptr;
 };
@@ -223,9 +228,8 @@ struct LitPlace {
     media::RectangleGeometry clip{nullptr};
 };
 
-/// Find the character `lit` stops in, and give `over` what `block` looks like.
-inline void FindPart(controls::TextBlock const& block, controls::TextBlock const& over, double lit, LitPlace& place) {
-    place.found = false;
+/// Give `over` what `block` looks like.
+inline void CopyLook(controls::TextBlock const& block, controls::TextBlock const& over) {
     over.FontSize(block.FontSize());
     over.FontWeight(block.FontWeight());
     over.Foreground(block.Foreground());
@@ -235,6 +239,12 @@ inline void FindPart(controls::TextBlock const& block, controls::TextBlock const
     over.TextAlignment(block.TextAlignment());
     over.LineStackingStrategy(block.LineStackingStrategy());
     over.LineHeight(block.LineHeight());
+}
+
+/// Find the character `lit` stops in, and give `over` what `block` looks like.
+inline void FindPart(controls::TextBlock const& block, controls::TextBlock const& over, double lit, LitPlace& place) {
+    place.found = false;
+    CopyLook(block, over);
     auto start = block.ContentStart(), end = block.ContentEnd();
     if (!start || !end) return;
     using Direction = xaml::Documents::LogicalDirection;
@@ -278,6 +288,178 @@ inline void LightPart(controls::TextBlock const& block, controls::TextBlock cons
     auto box = place.character;
     place.clip.Rect(winrt::Windows::Foundation::Rect{box.X, box.Y, box.Width * static_cast<float>(part), box.Height});
     over.Visibility(xaml::Visibility::Visible);
+}
+
+/// `lit_path`: seconds and characters, in order, apart by spaces. The place
+/// moves evenly from each to the next, and stays at the first before it and
+/// the last after it.
+struct LitRoute {
+    std::vector<std::pair<double, double>> points;
+
+    LitRoute() = default;
+    explicit LitRoute(winrt::hstring const& path) {
+        wchar_t const* at = path.c_str();
+        wchar_t* end = nullptr;
+        std::vector<double> numbers;
+        for (double value = wcstod(at, &end); end != at; value = wcstod(at, &end)) {
+            numbers.push_back(value);
+            at = end;
+        }
+        for (size_t index = 0; index + 1 < numbers.size(); index += 2) points.emplace_back(numbers[index], numbers[index + 1]);
+    }
+
+    double At(double second) const {
+        if (points.empty()) return 0;
+        if (second <= points.front().first) return points.front().second;
+        for (size_t index = 1; index < points.size(); ++index) {
+            if (second >= points[index].first) continue;
+            auto [from, start] = points[index - 1];
+            auto [to, end] = points[index];
+            return start + (end - start) * (second - from) / (to - from);
+        }
+        return points.back().second;
+    }
+};
+
+/// A `Text` on a route. The system's compositor moves the cut along a line of
+/// text, off the UI thread: this thread only starts it, for each line of text
+/// and whenever the route or its clock changes.
+struct LitPlay {
+    winrt::weak_ref<controls::TextBlock> shown, above;
+    bool on = false;
+    winrt::hstring text, path;
+    LitRoute route;
+    double clock = 0, since = 0;
+    /// Where each character stands; empty until it is measured again.
+    std::vector<winrt::Windows::Foundation::Rect> characters;
+    /// How many characters stand lit before the cut's line of text.
+    std::int64_t lit = -1;
+    composition::CompositionRectangleGeometry clip{nullptr};
+    /// What is started later belongs to this turn, and a new one ends it.
+    std::uint64_t turn = 0;
+};
+
+inline double UnixSeconds() {
+    return std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+/// Where each character of `block` stands: a rectangle has no width here, so
+/// the next one's place gives it.
+inline void MeasureCharacters(controls::TextBlock const& block, std::vector<winrt::Windows::Foundation::Rect>& characters) {
+    characters.clear();
+    auto start = block.ContentStart(), end = block.ContentEnd();
+    if (!start || !end) return;
+    using Direction = xaml::Documents::LogicalDirection;
+    for (int offset = 0; offset < 100000; ++offset) {
+        auto here = start.GetPositionAtOffset(offset, Direction::Forward);
+        if (!here || here.Offset() >= end.Offset()) return;
+        auto next = start.GetPositionAtOffset(offset + 1, Direction::Forward);
+        if (!next) return;
+        auto from = here.GetCharacterRect(Direction::Forward);
+        auto to = next.GetCharacterRect(Direction::Forward);
+        bool sameLine = std::abs(from.Y - to.Y) < 1;
+        float width = sameLine ? to.X - from.X : static_cast<float>(block.FontSize());
+        if (width > 0) characters.push_back({from.X, from.Y, width, from.Height});
+    }
+}
+
+/// Start the cut from where the clock has it now, along the line of text it
+/// is in, and come back for the next.
+inline void PlayLit(std::shared_ptr<LitPlay> const& play) {
+    auto block = play->shown.get();
+    auto over = play->above.get();
+    if (!block || !over) return;
+    auto turn = ++play->turn;
+    auto clear = [&] {
+        if (play->lit != -1) block.TextHighlighters().Clear();
+        play->lit = -1;
+        over.Visibility(xaml::Visibility::Collapsed);
+    };
+    if (!play->on || play->route.points.empty()) return clear();
+    if (play->characters.empty()) {
+        CopyLook(block, over);
+        MeasureCharacters(block, play->characters);
+    }
+    auto const& characters = play->characters;
+    double second = play->clock + (play->since > 0 ? UnixSeconds() - play->since : 0);
+    double place = (std::max)(0.0, play->route.At(second));
+    auto whole = static_cast<size_t>(place);
+    if (whole >= characters.size()) return clear();
+    // The line of text the cut is in.
+    auto sameLine = [&](size_t index) { return std::abs(characters[index].Y - characters[whole].Y) < 1; };
+    size_t first = whole, last = whole + 1;
+    while (first > 0 && sameLine(first - 1)) --first;
+    while (last < characters.size() && sameLine(last)) ++last;
+    auto edge = [&](double at) {
+        auto index = static_cast<size_t>(at);
+        if (index >= last) return characters[last - 1].X + characters[last - 1].Width;
+        return characters[index].X + characters[index].Width * static_cast<float>(at - std::floor(at));
+    };
+    if (play->lit != static_cast<std::int64_t>(first)) {
+        FadeAfter(block, play->text, static_cast<double>(first));
+        play->lit = static_cast<std::int64_t>(first);
+    }
+    if (!play->clip) {
+        auto visual = xaml::Hosting::ElementCompositionPreview::GetElementVisual(over);
+        auto compositor = visual.Compositor();
+        play->clip = compositor.CreateRectangleGeometry();
+        visual.Clip(compositor.CreateGeometricClip(play->clip));
+    }
+    auto top = characters[whole].Y, height = characters[whole].Height;
+    play->clip.StopAnimation(L"Size");
+    play->clip.Offset(float2{0, top});
+    play->clip.Size(float2{edge(place), height});
+    over.Opacity(block.Opacity());
+    over.Visibility(xaml::Visibility::Visible);
+    if (play->since <= 0) return;
+    // Where the cut is to be, one stop at each whole character too:
+    // characters are not all as wide.
+    std::vector<std::pair<double, float>> stops{{second, edge(place)}};
+    auto const& points = play->route.points;
+    double ends = second;
+    for (size_t index = 1; index < points.size(); ++index) {
+        double from = points[index - 1].first, start = points[index - 1].second;
+        double to = points[index].first, end = points[index].second;
+        if (to <= second) continue;
+        if (from > second) stops.emplace_back(from, edge(start));
+        if (end > start) {
+            double limit = static_cast<double>(last);
+            for (double character = std::floor(play->route.At((std::max)(second, from))) + 1; character < end && character <= limit; character += 1) {
+                ends = from + (to - from) * (character - start) / (end - start);
+                stops.emplace_back(ends, edge(character));
+            }
+            if (end > limit) break;
+        }
+        stops.emplace_back(to, edge(end));
+        ends = to;
+    }
+    if (ends - second > 0.002) {
+        auto compositor = play->clip.Compositor();
+        auto even = compositor.CreateLinearEasingFunction();
+        auto motion = compositor.CreateVector2KeyFrameAnimation();
+        double length = ends - second;
+        for (auto const& [at, x] : stops) {
+            float progress = static_cast<float>((std::min)(1.0, (at - second) / length));
+            motion.InsertKeyFrame(progress, float2{x, height}, even);
+        }
+        motion.Duration(std::chrono::duration_cast<winrt::Windows::Foundation::TimeSpan>(std::chrono::duration<double>(length)));
+        play->clip.StartAnimation(L"Size", motion);
+    }
+    auto wait = std::chrono::milliseconds(static_cast<long long>((ends - second) * 1000) + 20);
+    Host::After(wait, [play, turn] {
+        if (play->turn == turn) PlayLit(play);
+    });
+}
+
+/// After a change that moves the characters: a size may be springing, and
+/// only where they come to rest counts.
+inline void SettleLit(std::shared_ptr<LitPlay> const& play) {
+    play->characters.clear();
+    auto turn = ++play->turn;
+    if (auto over = play->above.get()) over.Visibility(xaml::Visibility::Collapsed);
+    Host::After(std::chrono::milliseconds(40), [play, turn] {
+        if (play->turn == turn) PlayLit(play);
+    });
 }
 
 /// `Text(markdown)` here: the words of inline Markdown without its marks,
@@ -341,22 +523,47 @@ inline void Text(Parent const& p, Ctx const& ctx, TextProps props) {
         over.IsHitTestVisible(false);
         over.Visibility(xaml::Visibility::Collapsed);
         auto place = std::make_shared<LitPlace>();
-        // The characters stand elsewhere once the lines wrap differently.
-        block.SizeChanged([place](auto&&, auto&&) { place->whole = -2; });
-        Reactive::Run([lit = props.lit, ctx, content, weak = winrt::make_weak(block), above = winrt::make_weak(over), place] {
-            double count = lit.Now(ctx);
-            auto text = content ? winrt::to_hstring(content()) : winrt::hstring();
-            auto shown = weak.get();
-            if (!shown) return;
-            auto whole = count < 0 ? std::int64_t{-1} : static_cast<std::int64_t>(count);
-            if (whole != place->whole || text != place->text) {
-                FadeAfter(shown, text, count);
-                place->whole = whole;
-                place->text = text;
-                place->found = false;
-            }
-            if (auto copy = above.get()) LightPart(shown, copy, count, *place);
-        });
+        auto play = std::make_shared<LitPlay>();
+        play->shown = winrt::make_weak(block);
+        play->above = winrt::make_weak(over);
+        auto route = Bound(ctx, props.litPath);
+        if (route) {
+            block.SizeChanged([play](auto&&, auto&&) {
+                if (play->on) SettleLit(play);
+            });
+            Reactive::Run([lit = props.lit, route, clock = props.litClock, since = props.litSince, ctx, content, play] {
+                bool on = lit.Now(ctx) >= 0;
+                auto path = on ? winrt::hstring(route()) : winrt::hstring();
+                auto text = on && content ? winrt::to_hstring(content()) : winrt::hstring();
+                play->clock = on && clock.Given() ? clock.Now(ctx) : 0;
+                play->since = on && since.Given() ? since.Now(ctx) : 0;
+                bool same = on == play->on && path == play->path && text == play->text;
+                play->on = on;
+                if (same) return PlayLit(play);
+                play->path = path;
+                play->text = text;
+                play->route = LitRoute(path);
+                SettleLit(play);
+            });
+        }
+        else {
+            // The characters stand elsewhere once the lines wrap differently.
+            block.SizeChanged([place](auto&&, auto&&) { place->whole = -2; });
+            Reactive::Run([lit = props.lit, ctx, content, weak = winrt::make_weak(block), above = winrt::make_weak(over), place] {
+                double count = lit.Now(ctx);
+                auto text = content ? winrt::to_hstring(content()) : winrt::hstring();
+                auto shown = weak.get();
+                if (!shown) return;
+                auto whole = count < 0 ? std::int64_t{-1} : static_cast<std::int64_t>(count);
+                if (whole != place->whole || text != place->text) {
+                    FadeAfter(shown, text, count);
+                    place->whole = whole;
+                    place->text = text;
+                    place->found = false;
+                }
+                if (auto copy = above.get()) LightPart(shown, copy, count, *place);
+            });
+        }
     }
     if (props.lineHeight.Given()) {
         block.LineStackingStrategy(xaml::LineStackingStrategy::BlockLineHeight);

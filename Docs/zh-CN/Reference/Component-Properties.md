@@ -153,6 +153,8 @@
 
 `Text` 加 `lit` 时，前面这么多保持原色，其余淡显，用于逐字演唱：2.5 是两个字加第三个字的左半部分，能在字内绘制的目标会画出来；小于零时全部正常显示。按 Unicode 标量计数。SwiftUI、Compose、WinUI 和 GTK 会绘制这一效果，其他目标显示完整文字。
 
+有 `lit_path` 时，只要 `lit` 不小于零，前端就自己每帧移动这个位置：`lit_path` 依次列出秒数和字符数，用空格隔开（`"10 0 11 2 12 2"`），位置在相邻两点之间匀速移动。`lit_clock` 是 `lit_since` 那一刻的秒数，`lit_since` 是 Unix 时间（秒），为零表示时钟停着。只有路线或时钟变了状态才变，不用逐步发送。Windows 由合成器移动它。
+
 `Text` 加 `markdown` 时，内容是行内 Markdown：`**粗体**`、`*斜体*` 或 `_斜体_`、`` `代码` ``、`~~删除线~~` 和 `[链接](地址)`，反斜杠让下一个标记照字面显示。SwiftUI 交给系统的 `AttributedString(markdown:)`，Compose 写成带样式与 `LinkAnnotation` 的 `AnnotatedString`，Web 生成元素（不当作 HTML，链接只接受网页和邮件地址），GTK 转成 Pango 标记；Windows 暂时去掉标记只显示文字。整篇文档（标题、列表、表格等）由应用自己分块，每块用这样的文字显示。
 
 `Search` 放在 `Toolbar` 或 `Sidebar` 里由它们接管；放在页面里是平台自己的搜索框（iOS 的 `UISearchTextField`、macOS 的 `NSSearchField`、网页的 `input[type=search]`），子内容是在框获得焦点或有文字时列在框下的结果，`width` / `height` / `font_size` 是框本身的尺寸与字号（工具栏里的搜索面板则是面板尺寸）。

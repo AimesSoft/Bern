@@ -2378,6 +2378,285 @@ private struct BernLitting: ViewModifier {
     }
 }
 
+#if os(macOS)
+private typealias BernLitPlatformView = NSView
+#else
+private typealias BernLitPlatformView = UIView
+#endif
+
+/// `Text(lit_path:)`: seconds and characters, in order, apart by spaces. The
+/// place moves evenly from each to the next, and stays at the first before
+/// it and the last after it.
+struct BernLitRoute: Equatable {
+    private var points: [BernLitPoint] = []
+
+    private struct BernLitPoint: Equatable {
+        var second: Double
+        var place: Double
+    }
+
+    init(_ path: String) {
+        let numbers = path.split(separator: " ").compactMap { Double($0) }
+        for at in stride(from: 0, to: numbers.count - 1, by: 2) {
+            points.append(BernLitPoint(second: numbers[at], place: numbers[at + 1]))
+        }
+    }
+
+    var isEmpty: Bool { points.isEmpty }
+
+    /// The seconds and places it passes from `second` on, one at each whole
+    /// character too: characters are not all as wide.
+    func steps(from second: Double) -> [(second: Double, place: Double)] {
+        var steps = [(second: second, place: place(at: second))]
+        for index in points.indices.dropFirst() {
+            let (from, to) = (points[index - 1], points[index])
+            guard to.second > second else { continue }
+            if from.second > second { steps.append((from.second, from.place)) }
+            if to.place > from.place {
+                var character = place(at: max(second, from.second)).rounded(.down) + 1
+                while character < to.place {
+                    let part = (character - from.place) / (to.place - from.place)
+                    steps.append((from.second + (to.second - from.second) * part, character))
+                    character += 1
+                }
+            }
+            steps.append((to.second, to.place))
+        }
+        return steps
+    }
+
+    func place(at second: Double) -> Double {
+        guard let first = points.first else { return 0 }
+        guard second > first.second else { return first.place }
+        for index in points.indices.dropFirst() where second < points[index].second {
+            let (from, to) = (points[index - 1], points[index])
+            return from.place + (to.place - from.place) * (second - from.second) / (to.second - from.second)
+        }
+        return points[points.count - 1].place
+    }
+}
+
+/// A `Text` lit along `lit_path`: it moves every frame by itself, and state
+/// only changes when the route or the clock does. `clock` is the second it
+/// showed at `since`, in seconds since the Unix epoch; a `since` of zero
+/// stands still. Where text renderers exist the lit text is a picture on a
+/// layer, and Core Animation moves its edge off the main thread: a frame
+/// costs this process nothing.
+struct BernLitText: View {
+    let text: String
+    let lit: @MainActor () -> Double
+    let path: @MainActor () -> String
+    let clock: @MainActor () -> Double
+    let since: @MainActor () -> Double
+    @StateObject private var measured = BernLitMeasured()
+
+    var body: some View {
+        let number = lit()
+        let route = BernLitRoute(number >= 0 ? path() : "")
+        if route.isEmpty {
+            bernLit(text, number).bernLitting { number }
+        } else if #available(macOS 15, iOS 18, tvOS 18, *) {
+            SwiftUI.Text(verbatim: text)
+                .textRenderer(BernLitMeasure(measured: measured))
+                .opacity(0.4)
+                .overlay {
+                    BernLitLayer(text: text, measured: measured, route: route, clock: clock(), since: since())
+                        .allowsHitTesting(false)
+                }
+        } else {
+            let (clock, since) = (clock(), since())
+            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: since <= 0)) { timeline in
+                bernLit(text, route.place(at: clock + (since > 0 ? timeline.date.timeIntervalSince1970 - since : 0)))
+            }
+        }
+    }
+}
+
+/// A line of text as `BernLitMeasure` found it: its bounds, and where each
+/// glyph starts, then where the last ends.
+struct BernLitGlyphs: Equatable {
+    var bounds: CGRect
+    var edges: [CGFloat]
+}
+
+/// Where the glyphs of a `Text` stand.
+final class BernLitMeasured: ObservableObject, @unchecked Sendable {
+    @Published var lines: [BernLitGlyphs] = []
+}
+
+/// Draws the text as it is, and tells where it stands.
+@available(macOS 15, iOS 18, tvOS 18, *)
+private struct BernLitMeasure: TextRenderer {
+    let measured: BernLitMeasured
+
+    func draw(layout: Text.Layout, in context: inout GraphicsContext) {
+        var lines: [BernLitGlyphs] = []
+        for line in layout {
+            var edges: [CGFloat] = []
+            for run in line {
+                for glyph in run {
+                    let rect = glyph.typographicBounds.rect
+                    if edges.isEmpty { edges.append(rect.minX) }
+                    edges.append(rect.maxX)
+                }
+            }
+            lines.append(BernLitGlyphs(bounds: line.typographicBounds.rect, edges: edges))
+            context.draw(line)
+        }
+        let found = lines
+        DispatchQueue.main.async { [measured] in
+            if measured.lines != found { measured.lines = found }
+        }
+    }
+}
+
+/// The text as it is, on a layer shown only as far as it is lit.
+@available(macOS 15, iOS 18, tvOS 18, *)
+@MainActor
+private final class BernLitSurface: BernLitPlatformView {
+    /// What it shows, and what changes the picture.
+    struct Shown {
+        var text: String
+        var lines: [BernLitGlyphs]
+        var route: BernLitRoute
+        var clock: Double
+        var since: Double
+        var environment: EnvironmentValues
+    }
+
+    var shown: Shown? {
+        didSet { refresh() }
+    }
+    private let picture = CALayer()
+    private let cuts = CALayer()
+    /// What the picture is of, and what the cuts follow.
+    private var drawn: (text: String, lines: [BernLitGlyphs], size: CGSize, dark: Bool)?
+    private var playing: (route: BernLitRoute, clock: Double, since: Double, width: CGFloat)?
+
+    init() {
+        super.init(frame: .zero)
+        #if os(macOS)
+        wantsLayer = true
+        layer?.isGeometryFlipped = true
+        layer?.addSublayer(picture)
+        #else
+        isUserInteractionEnabled = false
+        backgroundColor = .clear
+        layer.addSublayer(picture)
+        #endif
+        picture.mask = cuts
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    #if os(macOS)
+    override func layout() {
+        super.layout()
+        refresh()
+    }
+    #else
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        refresh()
+    }
+    #endif
+
+    private func refresh() {
+        guard let shown, bounds.width > 0, bounds.height > 0, !shown.lines.isEmpty else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        let dark = shown.environment.colorScheme == .dark
+        let old = drawn
+        if old?.text != shown.text || old?.lines != shown.lines || old?.size != bounds.size || old?.dark != dark {
+            let content = SwiftUI.Text(verbatim: shown.text)
+                .environment(\.self, shown.environment)
+                .frame(width: bounds.width, height: bounds.height)
+            let renderer = ImageRenderer(content: content)
+            renderer.scale = shown.environment.displayScale
+            renderer.isOpaque = false
+            picture.contents = renderer.cgImage
+            picture.contentsScale = shown.environment.displayScale
+            picture.frame = bounds
+            cuts.frame = bounds
+            drawn = (shown.text, shown.lines, bounds.size, dark)
+            playing = nil
+        }
+        let same = playing.map {
+            $0.route == shown.route && $0.clock == shown.clock && $0.since == shown.since && $0.width == bounds.width
+        }
+        if same != true { play(shown) }
+    }
+
+    /// One rectangle per line of text, each as wide as it is lit, and if the
+    /// clock runs, on their way along the route.
+    private func play(_ shown: Shown) {
+        playing = (shown.route, shown.clock, shown.since, bounds.width)
+        cuts.sublayers?.forEach { $0.removeFromSuperlayer() }
+        let now = shown.clock + (shown.since > 0 ? Date().timeIntervalSince1970 - shown.since : 0)
+        let steps = shown.since > 0 ? shown.route.steps(from: now) : [(second: now, place: shown.route.place(at: now))]
+        let length = (steps.last?.second ?? now) - now
+        var before = 0.0
+        for line in shown.lines {
+            let glyphs = Double(line.edges.count - 1)
+            let start = before
+            before += glyphs
+            let width: (Double) -> CGFloat = { [bounds] place in
+                let left = place - start
+                if left <= 0 { return 0 }
+                if left >= glyphs { return bounds.width }
+                let whole = Int(left)
+                return line.edges[whole] + (line.edges[whole + 1] - line.edges[whole]) * (left - Double(whole))
+            }
+            let cut = CALayer()
+            cut.backgroundColor = CGColor(gray: 0, alpha: 1)
+            cut.anchorPoint = .zero
+            cut.bounds = CGRect(x: 0, y: 0, width: width(steps.last?.place ?? 0), height: line.bounds.height)
+            cut.position = CGPoint(x: 0, y: line.bounds.minY)
+            cuts.addSublayer(cut)
+            guard length > 0.002 else { continue }
+            let motion = CAKeyframeAnimation(keyPath: "bounds.size.width")
+            motion.values = steps.map { width($0.place) }
+            motion.keyTimes = steps.map { NSNumber(value: ($0.second - now) / length) }
+            motion.duration = length
+            cut.add(motion, forKey: "lit")
+        }
+    }
+}
+
+#if os(macOS)
+@available(macOS 15, iOS 18, tvOS 18, *)
+private struct BernLitLayer: NSViewRepresentable {
+    let text: String
+    @ObservedObject var measured: BernLitMeasured
+    let route: BernLitRoute
+    let clock: Double
+    let since: Double
+
+    func makeNSView(context: Context) -> BernLitSurface { BernLitSurface() }
+
+    func updateNSView(_ view: BernLitSurface, context: Context) {
+        view.shown = .init(text: text, lines: measured.lines, route: route, clock: clock, since: since, environment: context.environment)
+    }
+}
+#else
+@available(macOS 15, iOS 18, tvOS 18, *)
+private struct BernLitLayer: UIViewRepresentable {
+    let text: String
+    @ObservedObject var measured: BernLitMeasured
+    let route: BernLitRoute
+    let clock: Double
+    let since: Double
+
+    func makeUIView(context: Context) -> BernLitSurface { BernLitSurface() }
+
+    func updateUIView(_ view: BernLitSurface, context: Context) {
+        view.shown = .init(text: text, lines: measured.lines, route: route, clock: clock, since: since, environment: context.environment)
+    }
+}
+#endif
+
 @available(macOS 15, iOS 18, tvOS 18, *)
 private struct BernLitRenderer: TextRenderer {
     let lit: Double
@@ -2389,29 +2668,43 @@ private struct BernLitRenderer: TextRenderer {
         }
         var left = lit
         for line in layout {
-            for run in line {
-                for glyph in run {
-                    draw(glyph, part: min(max(left, 0), 1), in: context)
-                    left -= 1
-                }
+            let glyphs = line.reduce(0) { $0 + $1.count }
+            defer { left -= Double(glyphs) }
+            if left >= Double(glyphs) {
+                context.draw(line)
+            } else if left <= 0 {
+                draw(line, cut: nil, in: context)
+            } else {
+                draw(line, cut: cut(in: line, after: left), in: context)
             }
         }
     }
 
-    /// One glyph faded, and over it the same glyph cut off at `part`.
-    private func draw(_ glyph: Text.Layout.RunSlice, part: Double, in context: GraphicsContext) {
-        guard part < 1 else {
-            context.draw(glyph)
-            return
+    /// Where `place` glyphs of `line` end, inside the one it stops in.
+    private func cut(in line: Text.Layout.Line, after place: Double) -> CGFloat {
+        var left = place
+        for run in line {
+            guard left < Double(run.count) else {
+                left -= Double(run.count)
+                continue
+            }
+            let rect = run[Int(left)].typographicBounds.rect
+            return rect.minX + rect.width * (left - left.rounded(.down))
         }
+        return line.typographicBounds.rect.maxX
+    }
+
+    /// A line faded, and over it the same line up to `cut`. A frame draws a
+    /// line or two of text like this, whatever its length.
+    private func draw(_ line: Text.Layout.Line, cut: CGFloat?, in context: GraphicsContext) {
         var faded = context
         faded.opacity *= 0.4
-        faded.draw(glyph)
-        guard part > 0 else { return }
-        let rect = glyph.typographicBounds.rect.insetBy(dx: 0, dy: -2)
+        faded.draw(line)
+        guard let cut else { return }
+        let rect = line.typographicBounds.rect.insetBy(dx: -2, dy: -2)
         var lit = context
-        lit.clip(to: Path(CGRect(x: rect.minX, y: rect.minY, width: rect.width * part, height: rect.height)))
-        lit.draw(glyph)
+        lit.clip(to: Path(CGRect(x: rect.minX, y: rect.minY, width: cut - rect.minX, height: rect.height)))
+        lit.draw(line)
     }
 }
 

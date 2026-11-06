@@ -46,13 +46,23 @@ impl Generator<'_> {
             .number("lines")
             .map(|lines| format!(", lines = {}", lines.max(1.0) as i64))
             .unwrap_or_default();
-        let lit = match element.prop("lit") {
-            Some(Prop::Number { value }) => format!(", lit = {{ {value:?} }}"),
-            Some(Prop::Expr { expr }) => {
-                format!(", lit = {{ ({}).toDouble() }}", self.expr(expr))
-            }
-            _ => String::new(),
+        let number = |name: &str| match element.prop(name) {
+            Some(Prop::Number { value }) => Some(format!("{value:?}")),
+            Some(Prop::Expr { expr }) => Some(format!("({}).toDouble()", self.expr(expr))),
+            _ => None,
         };
+        let lit = number("lit").map_or_else(String::new, |lit| {
+            let route = self
+                .text_prop(element, "lit_path")
+                .map_or_else(String::new, |path| {
+                    format!(
+                        ", litPath = {{ {path} }}, litClock = {{ {} }}, litSince = {{ {} }}",
+                        number("lit_clock").unwrap_or_else(|| "0.0".into()),
+                        number("lit_since").unwrap_or_else(|| "0.0".into()),
+                    )
+                });
+            format!(", lit = {{ {lit} }}{route}")
+        });
         match element.keyword("mark") {
             _ if element.keyword("markdown") == Some("true") => out.line(format!(
                 "BernMarkdownText({content}, {style}, {color}{lines})"

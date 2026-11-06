@@ -1,6 +1,7 @@
 //! Text lit part of the way: drawn through a mask that is opaque as far as
 //! it is lit and faded after, the edge inside the character it stops in.
 
+use bern_ffi::overlay::Route;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{gdk, glib, graphene, gsk};
@@ -8,6 +9,9 @@ use std::cell::{Cell, RefCell};
 
 /// How much of its alpha what is not lit keeps.
 const FADED: f32 = 0.4;
+/// How far along a character it moves between frames drawn: about a pixel,
+/// and nothing is drawn while it waits between words.
+const STEP: f64 = 1.0 / 48.0;
 
 mod imp {
     use super::*;
@@ -17,6 +21,10 @@ mod imp {
         pub child: RefCell<Option<gtk::Widget>>,
         pub label: RefCell<Option<gtk::Label>>,
         pub lit: Cell<f64>,
+        pub route: RefCell<Route>,
+        pub tick: RefCell<Option<gtk::TickCallbackId>>,
+        /// Where it stood when last drawn.
+        pub drawn: Cell<f64>,
     }
 
     #[glib::object_subclass]
@@ -45,7 +53,8 @@ mod imp {
             let (Some(child), Some(label)) = (child.as_ref(), label.as_ref()) else {
                 return;
             };
-            let lit = self.lit.get();
+            let lit = widget.place();
+            self.drawn.set(lit);
             if lit < 0.0 {
                 widget.snapshot_child(child, snapshot);
                 return;
@@ -80,7 +89,47 @@ impl Lit {
     /// As far through its characters as `lit`; below zero, all of it.
     pub fn set(&self, lit: f64) {
         self.imp().lit.set(lit);
+        self.keep_moving();
         self.queue_draw();
+    }
+
+    /// Move along `route` by itself, every frame, while `lit` is not below
+    /// zero; an empty route leaves it at `lit`.
+    pub fn follow(&self, route: Route) {
+        self.imp().route.replace(route);
+        self.keep_moving();
+        self.queue_draw();
+    }
+
+    fn place(&self) -> f64 {
+        let (lit, route) = (self.imp().lit.get(), self.imp().route.borrow());
+        if lit < 0.0 || route.points.is_empty() {
+            lit
+        } else {
+            route.place()
+        }
+    }
+
+    /// A frame clock only while something moves.
+    fn keep_moving(&self) {
+        let moving = self.imp().lit.get() >= 0.0 && self.imp().route.borrow().moving();
+        let mut tick = self.imp().tick.borrow_mut();
+        match (moving, tick.is_some()) {
+            (true, false) => {
+                *tick = Some(self.add_tick_callback(|widget, _| {
+                    if (widget.place() - widget.imp().drawn.get()).abs() >= STEP {
+                        widget.queue_draw();
+                    }
+                    glib::ControlFlow::Continue
+                }));
+            }
+            (false, true) => {
+                if let Some(id) = tick.take() {
+                    id.remove();
+                }
+            }
+            _ => {}
+        }
     }
 }
 
