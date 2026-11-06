@@ -981,6 +981,8 @@ impl Target for SwiftUiMacos {
             .output()
             .is_ok_and(|output| output.status.success());
         let strings = |args: &[&str]| args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>();
+        // LZMA: about a quarter smaller than zlib, and macOS 10.15 opens it.
+        const DISK_IMAGE_FORMAT: &str = "ULMO";
         steps.extend(if diskutil {
             vec![
                 run(
@@ -1071,7 +1073,7 @@ impl Target for SwiftUiMacos {
                         "create",
                         "from",
                         "--format",
-                        "UDZO",
+                        DISK_IMAGE_FORMAT,
                         &path(&writable),
                         &path(&image),
                     ]),
@@ -1091,7 +1093,7 @@ impl Target for SwiftUiMacos {
                         "convert",
                         &path(&writable),
                         "-format",
-                        "UDZO",
+                        DISK_IMAGE_FORMAT,
                         "-o",
                         &path(&image),
                     ]),
