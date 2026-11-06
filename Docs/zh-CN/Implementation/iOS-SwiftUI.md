@@ -36,7 +36,7 @@
 
 生成的应用包是 iOS 的扁平结构：可执行文件、`Info.plist`、各语言的 `.lproj` 与随包资源都在包的顶层。图标由 `actool` 把 1024 像素的 PNG 编译进 `Assets.car`（未声明图标时是 Bern 标志的方形版本，声明的较小图标先用 `sips` 放大；`[app.icon].ios` 为 `.appiconset` 文件夹时原样编译，其中的深色、着色版随之生效；为 Icon Composer 的 `.icon` 文件夹时以 `AppIcon.icon` 与资源目录一起交给 `actool`，iOS 26 起显示液态玻璃图标，更早的系统用从它画出的浅色、深色、着色平面图）。`Info.plist` 声明启动屏（否则应用以兼容模式显示，不铺满屏幕）、多场景（iPad 的多窗口；iPhone 始终只有一个场景）、iPhone 与 iPad、iPad 上的全部四个方向、最低 iOS 17.0。
 
-最低 iOS 17，用第二个前端时为 iOS 16（见“iOS 16 前端”）：与 macOS 14 同一代，运行时用到的 Observation、`ContentUnavailableView` 等从这一版起提供。
+默认最低 iOS 16，靠第二个前端做到；只用 iOS 17 前端时最低 iOS 17（见“iOS 16 前端”）：与 macOS 14 同一代，运行时用到的 Observation、`ContentUnavailableView` 等从这一版起提供。
 
 ## 与 macOS 的差异
 
@@ -202,21 +202,21 @@ iPhone 17 模拟器（iOS 26.1），一个真实应用首次启动即显示全�
 
 ## iOS 16 前端（2026-11-04）
 
-目标用第二个前端支持 iOS 16，和 Windows 用一份源码出两个前端的做法相同。不写 `frontends` 时什么都不变：应用是所有 Apple 目标共用的前端，最低 iOS 17。
+目标用第二个前端支持 iOS 16，和 Windows 用一份源码出两个前端的做法相同。不写 `frontends` 时两个前端都编译，应用用一个 `.ipa` 从 iOS 16 起运行；只写 `swiftui` 时是所有 Apple 目标共用的前端，最低 iOS 17。
 
 ```toml
 [targets.ios]
 platform = "ios"
-frontends = ["swiftui", "swiftui-16"]
+frontends = ["swiftui", "swiftui-16"]   # 默认如此
 # packages = "separate"
 ```
 
 | `frontends` | `packages` | `bern package` 的产物 | 最低系统 |
 | --- | --- | --- | --- |
-| 不写，或 `["swiftui"]` | | 一个 `.ipa`，与之前相同 | iOS 17 |
+| `["swiftui"]` | | 所有 Apple 目标共用的前端，一个 `.ipa` | iOS 17 |
 | `["swiftui-16"]` | | iOS 16 前端的一个 `.ipa`，也能在之后的系统上运行 | iOS 16 |
-| 两个都写 | `one` 或不写 | 一个 `.ipa`，启动时选择前端 | iOS 16 |
-| 两个都写 | `separate` | `<产品>-<版本>-ios.ipa` 与 `<产品>-<版本>-ios16.ipa` | iOS 17 与 iOS 16 |
+| 两个都写，或不写 | `one` 或不写 | 一个 `.ipa`，启动时选择前端 | iOS 16 |
+| 两个都写，或不写 | `separate` | `<产品>-<版本>-ios.ipa` 与 `<产品>-<版本>-ios16.ipa` | iOS 17 与 iOS 16 |
 
 **一份源码。** `ios16.rs` 在 Swift 生成之后改写它，`BernCompat16.swift` 放改写后的源码调用的替代实现；生成器和运行时模板不知道这件事。改写找不到原来的调用时测试失败，生成测试把两个前端都编译到编译器自身的检查通过为止。
 

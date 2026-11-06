@@ -1232,7 +1232,7 @@ fn target_frontends(
     };
     match (platform, frontends) {
         ("windows", None) => WINDOWS_FRONTENDS.map(str::to_string).to_vec(),
-        ("ios", None) => vec![IOS_FRONTENDS[0].to_string()],
+        ("ios", None) => IOS_FRONTENDS.map(str::to_string).to_vec(),
         ("windows" | "ios", Some(frontends)) => {
             let [first, second] = [known[0], known[1]];
             if frontends.is_empty() {
