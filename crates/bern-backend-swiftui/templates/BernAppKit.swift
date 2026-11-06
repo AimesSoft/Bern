@@ -1575,7 +1575,9 @@ extension BernFiles {
     /// Makes the app what opens the kinds of `[[app.opens]]`.
     static func makeDefault() {
         for type in types(engineKinds) where type != .folder && type != .item {
-            NSWorkspace.shared.setDefaultApplication(at: Bundle.main.bundleURL, toOpen: type)
+            NSWorkspace.shared.setDefaultApplication(at: Bundle.main.bundleURL, toOpen: type) { error in
+                if let error { NSLog("bern: cannot open %@ by default: %@", type.identifier, error.localizedDescription) }
+            }
         }
     }
 
