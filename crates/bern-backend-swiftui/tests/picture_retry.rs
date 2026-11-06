@@ -39,6 +39,11 @@ import Network
 import SwiftUI
 enum BernImageFit { case contain, cover, fill }
 enum BernColor { case fixed(light: UInt32, dark: UInt32) }
+// No engine here, so it serves nothing.
+struct BernBuffer { var ptr: UnsafeMutablePointer<UInt8>! = nil; var len = 0 }
+func bern_files_served(_ url: UnsafePointer<UInt8>?, _ len: Int) -> UInt8 { 0 }
+func bern_files_read(_ url: UnsafePointer<UInt8>?, _ len: Int) -> BernBuffer { BernBuffer() }
+func bern_buffer_free(_ buffer: BernBuffer) {}
 enum BernImage {
     struct Picture: @unchecked Sendable { let image: CGImage }
     nonisolated static func sampledPixels(_ source: CGImageSource, width: CGFloat?, height: CGFloat?, fit: BernImageFit, scale: CGFloat) -> Int? { nil }
