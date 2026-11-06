@@ -1110,8 +1110,15 @@ extension View {
     func bernToolbarTitleHidden() -> some View {
         #if os(tvOS)
         self
+        #elseif os(iOS)
+        // A large title is drawn with the content, out of the toolbar's reach.
+        if #available(iOS 18.0, *) {
+            navigationBarTitleDisplayMode(.inline).toolbar(removing: .title)
+        } else {
+            navigationBarTitleDisplayMode(.inline)
+        }
         #else
-        if #available(macOS 15.0, iOS 18.0, *) {
+        if #available(macOS 15.0, *) {
             toolbar(removing: .title)
         } else {
             self

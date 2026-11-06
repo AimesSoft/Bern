@@ -595,9 +595,10 @@ class BernWindowContext(
     /// its side.
     val short: Boolean get() = (measuredHeight ?: estimatedHeight) < BernHost.layouts.compact
     /// The size of the window's width by the breakpoints of `[layouts]`:
-    /// `compact`, `medium`, `expanded` or `large`.
+    /// `compact`, `medium`, `expanded` or `large`. A television is `large`
+    /// however it counts its pixels: most report 960 dp for a 1080p screen.
     val size: String
-        get() = BernHost.layouts.sizeOf(measuredWidth ?: estimatedWidth)
+        get() = if (BernHost.television) "large" else BernHost.layouts.sizeOf(measuredWidth ?: estimatedWidth)
     val compact: Boolean get() = size == "compact"
     val medium: Boolean get() = size == "medium"
     val expanded: Boolean get() = size == "expanded"
