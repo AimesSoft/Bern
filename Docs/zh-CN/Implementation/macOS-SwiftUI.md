@@ -416,6 +416,7 @@ open target/bern/macos/Showcase.app
 - 有 `BERN_MACOS_SIGNING_IDENTITY` 时以强化运行时与安全时间戳签名，并签磁盘映像；再有 `BERN_MACOS_NOTARY_PROFILE` 时经 `notarytool` 公证并装订。没有时做临时签名，只能在本机打开，并提示 Gatekeeper 会拒绝。
 - 磁盘映像打开后是一个专门的窗口：左边是应用，右边是“应用程序”，中间一支细箭头，背景安静，卷图标用应用的图标。访达把这种布局存在 `.DS_Store` 里，`src/dmg.rs` 自己写这个文件，所以打包不需要访达，也不需要图形会话，构建服务器上得到同样的映像。背景的别名不含目录编号（此时还不存在），访达按路径找到文件。背景是 `templates/dmg/background.tiff`，含两种密度，所有应用共用。
 - 卷先做成可写的：系统有 `diskutil image` 时用它（`hdiutil` 在 macOS 27 上已显示弃用提示），否则用 `hdiutil`。挂载后再放入 `.DS_Store` 和图标标记，因为 `diskutil image create` 会漏掉 `.DS_Store`，`hdiutil create` 会漏掉标记；最后压缩成 `UDZO`。
+- 磁盘映像最后用 LZMA 压缩（`ULMO`），比 zlib 小约四分之一，macOS 10.15 起能打开。
 - 实测（2026-11-05，macOS 27.2）：访达打开两个应用的映像，布局、背景和卷图标都如上所述，中文卷名也一样；上面两条路线都跑过。深色模式下的窗口没有看过：背景是浅色的，据说访达会让这样的窗口保持浅色。
 - 实测（2026-10-12，新项目）：磁盘映像 1.8 MB；挂载后签名校验通过，从映像中直接启动应用，`Contents/Helpers/my-app state` 能读到引擎状态。公证需要 Developer ID，这台机器只有开发证书，未实测。
 
