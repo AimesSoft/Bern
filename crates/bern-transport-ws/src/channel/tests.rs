@@ -360,7 +360,7 @@ fn players_run_on_the_page_that_holds_them() {
 }
 
 #[test]
-fn a_page_leaves_the_engines_own_executor_in_place() {
+fn a_page_and_the_engine_each_run_what_they_open() {
     #[derive(Default)]
     struct Native(Mutex<Vec<ExecRequest>>);
     impl MediaExecutor for Native {
@@ -379,25 +379,40 @@ fn a_page_leaves_the_engines_own_executor_in_place() {
             multi_view: true,
         },
     );
+    let open_on_device = |url: &str| {
+        env.media.dispatch(
+            MediaCommand::Open,
+            vec![
+                Value::Text("preview".into()),
+                Value::Record(vec![Value::Text(url.into())]),
+            ],
+            |_| {},
+        );
+    };
     send(&connection, hello("secret"));
     send(
         &connection,
         json!({"type":"media_attach","backend":"browser","backend_version":"1","background_playback":true,"multi_view":false}),
     );
-    send(
-        &connection,
-        json!({"type":"command","request_id":"open","engine_id":env.host.engine_id().to_string(),
-        "command":"media.open","params":{"player_id":"preview","source":{"url":"file:///a.mkv"}}}),
-    );
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    while native.0.lock().unwrap().is_empty() && std::time::Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(10));
-    }
+    open_on_device("file:///device.mkv");
     assert_eq!(native.0.lock().unwrap().len(), 1);
     assert!(
         page.position(|m| m["type"] == "media_request").is_none(),
         "a page connecting must not take playback from the engine"
     );
+
+    send(
+        &connection,
+        json!({"type":"command","request_id":"open","engine_id":env.host.engine_id().to_string(),
+        "command":"media.open","params":{"player_id":"preview","source":{"url":"blob:page"}}}),
+    );
+    let load = page.wait(|m| m["type"] == "media_request" && m["op"] == "load");
+    assert_eq!(load["url"], "blob:page");
+    assert_eq!(native.0.lock().unwrap().len(), 1);
+
+    open_on_device("file:///again.mkv");
+    assert_eq!(native.0.lock().unwrap().len(), 2);
+
     connection.closed();
     assert!(env.media.has_executor());
 }

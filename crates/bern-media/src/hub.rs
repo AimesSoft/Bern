@@ -60,6 +60,9 @@ struct Player {
     version: u64,
     observed: Observation,
     request: Option<RequestInfo>,
+    /// Runs this player in place of the engine's executor: a page runs what it
+    /// opened itself, while the device plays what was opened there.
+    runner: Option<Arc<dyn MediaExecutor>>,
 }
 
 /// A video view showing a player inside one window instance.
@@ -206,6 +209,14 @@ fn player_value(id: &str, player: &Player, available: bool, views: usize) -> Val
 }
 
 impl State {
+    /// What runs `player`.
+    fn runner_of(&self, player: &str) -> Option<Arc<dyn MediaExecutor>> {
+        self.players
+            .get(player)
+            .and_then(|player| player.runner.clone())
+            .or_else(|| self.executor.clone())
+    }
+
     fn views_of(&self, player: &str) -> usize {
         self.views
             .values()
@@ -291,6 +302,7 @@ impl MediaHub {
                     version: 0,
                     observed: Observation::idle(),
                     request: None,
+                    runner: None,
                 },
             );
         }
@@ -376,6 +388,9 @@ impl MediaHub {
         let mut requests = Vec::new();
         for id in ids {
             let player = state.players.get_mut(&id).unwrap();
+            if player.runner.is_some() {
+                continue;
+            }
             let Some(url) = player.source.clone() else {
                 player.observed = idle(&player.observed);
                 continue;
@@ -412,6 +427,53 @@ impl MediaHub {
         });
         if attached {
             self.detach_executor();
+        }
+    }
+
+    /// `id` runs on `runner`, until something else opens a source in it.
+    pub fn run_on(&self, id: &str, runner: &Arc<dyn MediaExecutor>) {
+        if let Some(player) = self.state().players.get_mut(id) {
+            player.runner = Some(Arc::clone(runner));
+        }
+    }
+
+    /// `runner` is gone: what it ran stops, and the players go back to the
+    /// engine's executor.
+    pub fn forget_runner(&self, runner: &Arc<dyn MediaExecutor>) {
+        let _send = self.shared.send.lock().expect("media send lock");
+        let mut state = self.state();
+        let mut orphaned = Vec::new();
+        for (id, player) in &mut state.players {
+            let ran = player
+                .runner
+                .as_ref()
+                .is_some_and(|held| std::ptr::addr_eq(Arc::as_ptr(held), Arc::as_ptr(runner)));
+            if ran {
+                player.runner = None;
+                player.source = None;
+                player.version += 1;
+                player.observed = idle(&player.observed);
+                orphaned.push(id.clone());
+            }
+        }
+        let waiting: Vec<u64> = state
+            .pending
+            .iter()
+            .filter(|(_, pending)| orphaned.contains(&pending.player))
+            .map(|(request, _)| *request)
+            .collect();
+        let replies: Vec<Reply> = waiting
+            .into_iter()
+            .filter_map(|request| state.pending.remove(&request)?.reply)
+            .collect();
+        let update = state.bump();
+        drop(state);
+        self.notify(update);
+        for reply in replies {
+            reply(Err(error(
+                "executor_unavailable",
+                "the media executor disconnected; the outcome is unknown",
+            )));
         }
     }
 
@@ -462,6 +524,7 @@ impl MediaHub {
                 version: 0,
                 observed: Observation::idle(),
                 request: None,
+                runner: None,
             },
         );
         let update = state.bump();
@@ -492,7 +555,7 @@ impl MediaHub {
             None => idle(&player.observed),
         };
         let version = player.version;
-        let executor = state.executor.clone();
+        let executor = state.runner_of(id);
         let request = executor.as_ref().map(|_| state.track(id, BINDING, None));
         let update = state.bump();
         drop(state);
@@ -516,13 +579,13 @@ impl MediaHub {
     pub fn release(&self, id: &str) {
         let _send = self.shared.send.lock().expect("media send lock");
         let mut state = self.state();
+        let executor = state.runner_of(id);
         let Some((replies, request)) = Self::remove(&mut state, id) else {
             return;
         };
-        let executor = state.executor.clone();
         let update = state.bump();
         drop(state);
-        self.finish_release(update, executor, vec![request], replies);
+        self.finish_release(update, vec![(executor, request)], replies);
     }
 
     /// A window instance closed: its views detach and the players its
@@ -544,15 +607,15 @@ impl MediaHub {
         let mut released = Vec::new();
         let mut replies = Vec::new();
         for id in owned {
+            let executor = state.runner_of(&id);
             if let Some((mut orphaned, request)) = Self::remove(&mut state, &id) {
                 replies.append(&mut orphaned);
-                released.push(request);
+                released.push((executor, request));
             }
         }
-        let executor = state.executor.clone();
         let update = state.bump();
         drop(state);
-        self.finish_release(update, executor, released, replies);
+        self.finish_release(update, released, replies);
     }
 
     /// Remove a player; returns the replies of its waiting requests and the
@@ -583,8 +646,7 @@ impl MediaHub {
     fn finish_release(
         &self,
         update: MediaUpdate,
-        executor: Option<Arc<dyn MediaExecutor>>,
-        released: Vec<ExecRequest>,
+        released: Vec<(Option<Arc<dyn MediaExecutor>>, ExecRequest)>,
         replies: Vec<Orphan>,
     ) {
         self.notify(update);
@@ -594,8 +656,8 @@ impl MediaHub {
                 format!("player `{id}` was released by its owner"),
             )));
         }
-        if let Some(executor) = executor {
-            for request in released {
+        for (executor, request) in released {
+            if let Some(executor) = executor {
                 executor.execute(request);
             }
         }
@@ -640,6 +702,28 @@ impl MediaHub {
         params: Vec<Value>,
         reply: impl FnOnce(Result<Value, CommandError>) + Send + 'static,
     ) -> Option<u64> {
+        self.dispatch_on(None, command, params, reply)
+    }
+
+    /// [`MediaHub::dispatch`], for a command sent by `runner`, which then runs
+    /// the source it opens.
+    pub fn dispatch_from(
+        &self,
+        runner: Arc<dyn MediaExecutor>,
+        command: MediaCommand,
+        params: Vec<Value>,
+        reply: impl FnOnce(Result<Value, CommandError>) + Send + 'static,
+    ) -> Option<u64> {
+        self.dispatch_on(Some(runner), command, params, reply)
+    }
+
+    fn dispatch_on(
+        &self,
+        runner: Option<Arc<dyn MediaExecutor>>,
+        command: MediaCommand,
+        params: Vec<Value>,
+        reply: impl FnOnce(Result<Value, CommandError>) + Send + 'static,
+    ) -> Option<u64> {
         let (types, specs) = catalog();
         let spec = &specs[command.index() as usize];
         if let Err(problem) = check_params(spec, &params, types) {
@@ -656,18 +740,31 @@ impl MediaHub {
                 reply(self.player(&id).ok_or_else(|| not_found(&id)));
                 None
             }
-            _ => self.route(command, params, Box::new(reply)),
+            _ => self.route(runner, command, params, Box::new(reply)),
         }
     }
 
-    fn route(&self, command: MediaCommand, params: Vec<Value>, reply: Reply) -> Option<u64> {
+    fn route(
+        &self,
+        runner: Option<Arc<dyn MediaExecutor>>,
+        command: MediaCommand,
+        params: Vec<Value>,
+        reply: Reply,
+    ) -> Option<u64> {
         let _send = self.shared.send.lock().expect("media send lock");
         let mut state = self.state();
         let id = text_param(&params, 0);
         let prepared = (|| {
-            let executor = state.executor.clone();
+            let engine = state.executor.clone();
             let player = state.players.get_mut(&id).ok_or_else(|| not_found(&id))?;
-            let executor = executor.ok_or_else(unavailable)?;
+            // A new source runs where it was opened; the rest follows it.
+            let opening = matches!(command, MediaCommand::Open);
+            let held = if opening {
+                runner.clone()
+            } else {
+                player.runner.clone()
+            };
+            let executor = held.or(engine).ok_or_else(unavailable)?;
             let playable = |player: &Player| {
                 if player.source.is_none() {
                     return Err(error("no_source", format!("player `{id}` has no source")));
@@ -709,6 +806,7 @@ impl MediaHub {
                     player.version += 1;
                     player.source = Some(url.clone());
                     player.observed = loading(&player.observed);
+                    player.runner = runner.clone();
                     ExecOp::Load { url }
                 }
                 MediaCommand::Play => {
