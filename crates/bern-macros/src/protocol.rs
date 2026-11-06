@@ -382,6 +382,13 @@ pub fn expand(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
                 /// `bern::wake::Waker` was woken, and once as the
                 /// application starts. The state is published afterwards.
                 fn wake(&mut self) {}
+
+                /// The last `wake` left the state as it was, so publishing
+                /// can skip reading it. Worth saying for a large state in
+                /// an application woken many times a second.
+                fn quiet(&self) -> bool {
+                    false
+                }
             }
 
             /// The protocol descriptor: types, state and command catalog.
@@ -438,6 +445,10 @@ pub fn expand(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
 
                 fn wake(&mut self) {
                     Engine::wake(&mut self.0)
+                }
+
+                fn quiet(&self) -> bool {
+                    Engine::quiet(&self.0)
                 }
             }
 

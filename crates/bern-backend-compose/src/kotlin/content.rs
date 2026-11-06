@@ -47,8 +47,10 @@ impl Generator<'_> {
             .map(|lines| format!(", lines = {}", lines.max(1.0) as i64))
             .unwrap_or_default();
         let lit = match element.prop("lit") {
-            Some(Prop::Number { value }) => format!(", lit = {value:?}"),
-            Some(Prop::Expr { expr }) => format!(", lit = ({}).toDouble()", self.expr(expr)),
+            Some(Prop::Number { value }) => format!(", lit = {{ {value:?} }}"),
+            Some(Prop::Expr { expr }) => {
+                format!(", lit = {{ ({}).toDouble() }}", self.expr(expr))
+            }
             _ => String::new(),
         };
         match element.keyword("mark") {

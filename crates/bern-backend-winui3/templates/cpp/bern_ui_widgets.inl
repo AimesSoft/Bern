@@ -213,16 +213,22 @@ inline void FadeAfter(controls::TextBlock const& block, std::wstring_view text, 
     block.TextHighlighters().Append(faded);
 }
 
-/// `lit`: the part of the character it stops in, from that character's left:
-/// `over`, the same text unfaded above `block`, shows only there.
-inline void LightPart(controls::TextBlock const& block, controls::TextBlock const& over, double lit) {
-    over.Visibility(xaml::Visibility::Collapsed);
-    double part = lit - std::floor(lit);
-    if (lit < 0 || part <= 0) return;
+/// Where a `lit` stands. It moves many times a second, nearly always inside
+/// one character, and only the clip has to follow it there.
+struct LitPlace {
+    std::int64_t whole = -2;
+    winrt::hstring text;
+    bool found = false;
+    winrt::Windows::Foundation::Rect character{};
+    media::RectangleGeometry clip{nullptr};
+};
+
+/// Find the character `lit` stops in, and give `over` what `block` looks like.
+inline void FindPart(controls::TextBlock const& block, controls::TextBlock const& over, double lit, LitPlace& place) {
+    place.found = false;
     over.FontSize(block.FontSize());
     over.FontWeight(block.FontWeight());
     over.Foreground(block.Foreground());
-    over.Opacity(block.Opacity());
     over.MaxLines(block.MaxLines());
     over.TextTrimming(block.TextTrimming());
     over.TextWrapping(block.TextWrapping());
@@ -245,12 +251,33 @@ inline void LightPart(controls::TextBlock const& block, controls::TextBlock cons
         float width = sameLine ? to.X - from.X : static_cast<float>(block.FontSize());
         if (width <= 0) continue;
         if (left-- > 0) continue;
-        media::RectangleGeometry clip;
-        clip.Rect(winrt::Windows::Foundation::Rect{from.X, from.Y, width * static_cast<float>(part), from.Height});
-        over.Clip(clip);
-        over.Visibility(xaml::Visibility::Visible);
+        place.character = winrt::Windows::Foundation::Rect{from.X, from.Y, width, from.Height};
+        place.found = true;
+        if (!place.clip) {
+            place.clip = media::RectangleGeometry();
+            over.Clip(place.clip);
+        }
         return;
     }
+}
+
+/// `lit`: the part of the character it stops in, from that character's left:
+/// `over`, the same text unfaded above `block`, shows only there.
+inline void LightPart(controls::TextBlock const& block, controls::TextBlock const& over, double lit, LitPlace& place) {
+    double part = lit - std::floor(lit);
+    if (lit < 0 || part <= 0) {
+        over.Visibility(xaml::Visibility::Collapsed);
+        return;
+    }
+    over.Opacity(block.Opacity());
+    if (!place.found) FindPart(block, over, lit, place);
+    if (!place.found) {
+        over.Visibility(xaml::Visibility::Collapsed);
+        return;
+    }
+    auto box = place.character;
+    place.clip.Rect(winrt::Windows::Foundation::Rect{box.X, box.Y, box.Width * static_cast<float>(part), box.Height});
+    over.Visibility(xaml::Visibility::Visible);
 }
 
 /// `Text(markdown)` here: the words of inline Markdown without its marks,
@@ -313,13 +340,22 @@ inline void Text(Parent const& p, Ctx const& ctx, TextProps props) {
         ApplyTextStyle(over, props.style);
         over.IsHitTestVisible(false);
         over.Visibility(xaml::Visibility::Collapsed);
-        Reactive::Run([lit = props.lit, ctx, content, weak = winrt::make_weak(block), above = winrt::make_weak(over)] {
+        auto place = std::make_shared<LitPlace>();
+        // The characters stand elsewhere once the lines wrap differently.
+        block.SizeChanged([place](auto&&, auto&&) { place->whole = -2; });
+        Reactive::Run([lit = props.lit, ctx, content, weak = winrt::make_weak(block), above = winrt::make_weak(over), place] {
             double count = lit.Now(ctx);
             auto text = content ? winrt::to_hstring(content()) : winrt::hstring();
             auto shown = weak.get();
             if (!shown) return;
-            FadeAfter(shown, text, count);
-            if (auto copy = above.get()) LightPart(shown, copy, count);
+            auto whole = count < 0 ? std::int64_t{-1} : static_cast<std::int64_t>(count);
+            if (whole != place->whole || text != place->text) {
+                FadeAfter(shown, text, count);
+                place->whole = whole;
+                place->text = text;
+                place->found = false;
+            }
+            if (auto copy = above.get()) LightPart(shown, copy, count, *place);
         });
     }
     if (props.lineHeight.Given()) {

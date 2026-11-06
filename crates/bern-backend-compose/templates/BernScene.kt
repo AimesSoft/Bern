@@ -209,17 +209,23 @@ fun bernTextStyle(style: String, size: Float? = null, lineHeight: Float? = null)
     return text
 }
 
-/// A `Text`: at most `lines` lines, the last ending with an ellipsis.
+/// A `Text`: at most `lines` lines, the last ending with an ellipsis. `lit`
+/// is read as it draws: it moves many times a second, and reading it here
+/// neither composes nor lays out anything.
 @Composable
-fun BernText(text: String, style: TextStyle, color: Color, lines: Int? = null, lit: Double = -1.0) {
+fun BernText(text: String, style: TextStyle, color: Color, lines: Int? = null, lit: (() -> Double)? = null) {
     val laid = remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
     Text(
         text,
-        modifier = if (lit < 0) Modifier else Modifier
-            .graphicsLayer(compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen)
+        modifier = if (lit == null) Modifier else Modifier
+            .graphicsLayer {
+                compositingStrategy = if (lit() < 0) androidx.compose.ui.graphics.CompositingStrategy.Auto
+                else androidx.compose.ui.graphics.CompositingStrategy.Offscreen
+            }
             .drawWithContent {
                 drawContent()
-                laid.value?.let { bernFade(it, text, lit) }
+                val at = lit()
+                if (at >= 0) laid.value?.let { bernFade(it, text, at) }
             },
         style = style,
         color = color,

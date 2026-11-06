@@ -312,7 +312,7 @@ impl<'a> Generator<'a> {
                 }
                 if let Some(key) = element.expr("nudge_key") {
                     effects.push_str(&format!(
-                        ".bernNudgeKey({}, {}, {nudge_scale})",
+                        ".bernNudgeKey({{ {} }}, {}, {nudge_scale})",
                         self.expr(key),
                         crate::style::motion(
                             self.app,

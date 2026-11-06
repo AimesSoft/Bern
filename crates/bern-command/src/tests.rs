@@ -553,6 +553,62 @@ mod composite {
         }
     }
 
+    /// A module engine counting how often its state was taken, and saying
+    /// whether its wakes change it.
+    struct Waking {
+        taken: Arc<AtomicUsize>,
+        quiet: bool,
+    }
+
+    impl EngineProtocol for Waking {
+        fn descriptor(&self) -> &'static ProtocolDescriptor {
+            tally_descriptor()
+        }
+        fn invoke(&mut self, _: &Invocation) -> Result<Value, CommandError> {
+            Ok(Value::Unit)
+        }
+        fn snapshot(&self) -> Vec<Value> {
+            self.taken.fetch_add(1, Ordering::SeqCst);
+            vec![Value::Int(0)]
+        }
+        fn quiet(&self) -> bool {
+            self.quiet
+        }
+    }
+
+    /// What a wake reads: the fields, and how often the module was read.
+    fn woken(quiet: bool) -> (Vec<(usize, Value)>, usize) {
+        let taken = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&taken);
+        let module = ModuleEngine {
+            descriptor: tally_descriptor(),
+            start: Box::new(move || {
+                Box::new(Waking {
+                    taken: Arc::clone(&counted),
+                    quiet,
+                })
+            }),
+            optional: false,
+            enabled: true,
+            depends: Vec::new(),
+        };
+        let mut engine = Composite::new(Box::new(Counter(0)), vec![module]).unwrap();
+        engine.wake();
+        let fields = engine.woken_fields().unwrap();
+        (fields, taken.load(Ordering::SeqCst))
+    }
+
+    #[test]
+    fn a_quiet_module_is_not_read_after_a_wake() {
+        assert_eq!(woken(true), (vec![(0, Value::Int(0))], 0));
+    }
+
+    #[test]
+    fn a_module_that_is_not_quiet_is_read_after_a_wake() {
+        let module = (1, Value::Record(vec![Value::Int(0)]));
+        assert_eq!(woken(false), (vec![(0, Value::Int(0)), module], 1));
+    }
+
     #[test]
     fn a_module_state_is_taken_only_when_read() {
         let taken = Arc::new(AtomicUsize::new(0));
