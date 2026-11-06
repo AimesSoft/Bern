@@ -400,7 +400,7 @@ fn install_icon(bundle_id: &str) {
 /// Accent colors from the brand color, for libadwaita's named colors.
 fn brand_css(red: u8, green: u8, blue: u8) -> String {
     let color = format!("rgb({red},{green},{blue})");
-    theme::named_colors(&[("accent_bg_color", color.clone()), ("accent_color", color)])
+    crate::theme::named_colors(&[("accent_bg_color", color.clone()), ("accent_color", color)])
 }
 
 /// Install the host of `def` on this thread: the interface language, and
