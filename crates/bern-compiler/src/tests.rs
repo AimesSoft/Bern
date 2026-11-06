@@ -2662,7 +2662,7 @@ fn the_files_an_application_opens_are_checked() {
     assert_eq!(config.opens[0].files, "audio .cue");
     assert_eq!(config.opens[0].menu_text("xx", &language), Some("Play"));
     let wrong = |opens: &str, message: &str| {
-        let errors = load(opens).err().expect("refused");
+        let errors = load(opens).unwrap_err();
         assert!(
             errors.iter().any(|error| error.message.contains(message)),
             "{errors:?}"

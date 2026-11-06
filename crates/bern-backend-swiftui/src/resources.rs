@@ -426,7 +426,10 @@ pub fn services_menu_files(app: &Application) -> Vec<(PathBuf, String)> {
                     )
                 })
                 .collect();
-            (format!("{language}.lproj/ServicesMenu.strings").into(), table)
+            (
+                format!("{language}.lproj/ServicesMenu.strings").into(),
+                table,
+            )
         })
         .collect()
 }
@@ -814,7 +817,10 @@ mod tests {
         assert!(!plain.contains("NSServices"), "{plain}");
         assert!(services_menu_files(&hello).is_empty());
         hello.app.opens = vec![
-            opens("audio .cue", &[("en", "Play with Hello"), ("zh-Hans", "播放")]),
+            opens(
+                "audio .cue",
+                &[("en", "Play with Hello"), ("zh-Hans", "播放")],
+            ),
             opens(".lrc", &[]),
         ];
         let mac = info_plist(&hello, "Hello", "14.0", false);
@@ -825,20 +831,31 @@ mod tests {
         assert!(mac.contains("<string>bernOpenFiles</string>"), "{mac}");
         assert!(mac.contains("<string>public.audio</string>"), "{mac}");
         let id = &hello.app.bundle_id;
-        assert!(mac.contains(&format!("<string>{id}.file.cue</string>")), "{mac}");
+        assert!(
+            mac.contains(&format!("<string>{id}.file.cue</string>")),
+            "{mac}"
+        );
         // Only what has an item needs a type for it.
-        assert!(!mac.contains(&format!("<string>{id}.file.lrc</string>")), "{mac}");
+        assert!(
+            !mac.contains(&format!("<string>{id}.file.lrc</string>")),
+            "{mac}"
+        );
         let ios = info_plist_ios(&hello, "Hello", "17.0");
         assert!(ios.contains("<key>CFBundleDocumentTypes</key>"), "{ios}");
         assert!(!ios.contains("NSServices"), "{ios}");
         let menus = services_menu_files(&hello);
         assert_eq!(menus.len(), hello.languages.supported.len());
-        assert!(menus[0].1.contains("\"Play with Hello\" = "), "{}", menus[0].1);
+        assert!(
+            menus[0].1.contains("\"Play with Hello\" = "),
+            "{}",
+            menus[0].1
+        );
     }
 
     #[test]
     fn the_runtime_takes_the_shared_extensions() {
-        let runtime = crate::runtime_source(include_str!("../templates/BernRuntime.swift"), "audio .cue");
+        let runtime =
+            crate::runtime_source(include_str!("../templates/BernRuntime.swift"), "audio .cue");
         assert!(!runtime.contains("bern:file-extensions"));
         assert!(!runtime.contains("bern:engine-opens"));
         assert!(runtime.contains(r#"engineKinds = "audio .cue""#));

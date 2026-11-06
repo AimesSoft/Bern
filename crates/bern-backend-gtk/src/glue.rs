@@ -503,7 +503,7 @@ pub fn opened_types(app: &Application) -> Vec<&'static str> {
             add("inode/directory");
         } else if let Some((_, mimes)) = KINDS.iter().find(|(kind, _)| *kind == word) {
             for mime in *mimes {
-                add(*mime);
+                add(mime);
             }
         }
     }

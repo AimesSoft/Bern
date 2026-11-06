@@ -504,7 +504,10 @@ mod tests {
         app.languages.default = "en".to_string();
         let plain = setup_info(&app, "hello", &[]);
         assert!(plain.contains("kMenus = 1;"), "{plain}");
-        assert!(plain.contains("kFileTypes[] = {\n    {nullptr, -1},"), "{plain}");
+        assert!(
+            plain.contains("kFileTypes[] = {\n    {nullptr, -1},"),
+            "{plain}"
+        );
         app.app.opens = vec![
             opens("audio folder", "Play"),
             opens(".lrc", ""),
