@@ -36,7 +36,7 @@ This document records what was actually completed for the `swiftui + ios` target
 
 The generated app bundle has the flat iOS structure: the executable, `Info.plist`, each language's `.lproj` and the bundled resources are all at the top level of the bundle. `actool` compiles the 1024-pixel PNG icon into `Assets.car` (with no icon declared it is a square version of the Bern logo, and a smaller declared icon is first enlarged with `sips`; when `[app.icon].ios` is an `.appiconset` folder it is compiled as is, and its dark and tinted variants take effect with it; when it is an Icon Composer `.icon` folder it is handed to `actool` as `AppIcon.icon` together with the asset catalog, iOS 26 and later show the Liquid Glass icon, and earlier systems use the light, dark and tinted flat images drawn from it). `Info.plist` declares a launch screen (otherwise the app is shown in compatibility mode and does not fill the screen), multiple scenes (multiple windows on iPad; iPhone always has only one scene), iPhone and iPad, all four orientations on iPad, and a minimum of iOS 17.0.
 
-Minimum iOS 17, or iOS 16 with a second front end (see "The iOS 16 front end"): the same generation as macOS 14; Observation, `ContentUnavailableView` and other APIs the runtime uses are available from this version on.
+Minimum iOS 16 by default, through a second front end, or iOS 17 with that one alone (see "The iOS 16 front end"): the same generation as macOS 14; Observation, `ContentUnavailableView` and other APIs the runtime uses are available from this version on.
 
 ## Differences from macOS
 
@@ -202,21 +202,21 @@ Verification: an app produced an `.ipa` on this Mac and on macOS 26 in GitHub Ac
 
 ## The iOS 16 front end (2026-11-04)
 
-The target reaches iOS 16 with a second front end, as Windows has two over one source. Without `frontends` nothing changes: the app is the front end every Apple target shares, from iOS 17.
+The target reaches iOS 16 with a second front end, as Windows has two over one source. Both are built unless `frontends` says otherwise, so an app runs from iOS 16 in one `.ipa`; name `swiftui` alone for the front end every Apple target shares, from iOS 17.
 
 ```toml
 [targets.ios]
 platform = "ios"
-frontends = ["swiftui", "swiftui-16"]
+frontends = ["swiftui", "swiftui-16"]   # the default
 # packages = "separate"
 ```
 
 | `frontends` | `packages` | What `bern package` makes | Earliest system |
 | --- | --- | --- | --- |
-| Not written, or `["swiftui"]` | | One `.ipa`, as before | iOS 17 |
+| `["swiftui"]` | | One `.ipa` of the front end every Apple target shares | iOS 17 |
 | `["swiftui-16"]` | | One `.ipa` of the iOS 16 front end, which also runs on later systems | iOS 16 |
-| Both | `one`, or not written | One `.ipa` that chooses as the app starts | iOS 16 |
-| Both | `separate` | `<product>-<version>-ios.ipa` and `<product>-<version>-ios16.ipa` | iOS 17 and iOS 16 |
+| Both, or not written | `one`, or not written | One `.ipa` that chooses as the app starts | iOS 16 |
+| Both, or not written | `separate` | `<product>-<version>-ios.ipa` and `<product>-<version>-ios16.ipa` | iOS 17 and iOS 16 |
 
 **One source.** `ios16.rs` rewrites the Swift once it is generated, and `BernCompat16.swift` holds the stand-ins the rewritten source calls; the generator and the runtime templates know nothing of it. A test fails when a rewrite no longer finds its call, and the generation test compiles both front ends as far as the compiler's own checks go.
 
