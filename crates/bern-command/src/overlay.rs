@@ -37,25 +37,131 @@ pub struct Line {
     /// 2.5 is two and the left half of the third. All of it when there is no
     /// such place, or it is below zero.
     pub lit: Option<f64>,
+    /// Lit along this by itself instead, every frame, with nothing more to
+    /// show until the route or its clock changes.
+    pub route: Option<Route>,
+}
+
+/// How far a line is lit as a clock runs.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Route {
+    /// Seconds and characters, in order: the place moves evenly from each
+    /// to the next, and stays at the first before it and the last after it.
+    pub points: Vec<(f64, f64)>,
+    /// The second the clock showed.
+    pub clock: f64,
+    /// When it showed that, in seconds since the Unix epoch; zero while the
+    /// clock stands still.
+    pub since: f64,
+}
+
+impl Route {
+    /// From `path` as `Text(lit_path:)` takes it: seconds and characters
+    /// apart by spaces.
+    pub fn new(path: &str, clock: f64, since: f64) -> Self {
+        let numbers: Vec<f64> = path
+            .split_ascii_whitespace()
+            .filter_map(|number| number.parse().ok())
+            .collect();
+        let (pairs, _) = numbers.as_chunks::<2>();
+        let points = pairs.iter().map(|pair| (pair[0], pair[1])).collect();
+        Self {
+            points,
+            clock,
+            since,
+        }
+    }
+
+    /// As `Route::new` reads it.
+    pub fn path(&self) -> String {
+        let points: Vec<String> = self
+            .points
+            .iter()
+            .map(|(second, place)| format!("{second} {place}"))
+            .collect();
+        points.join(" ")
+    }
+
+    /// The clock runs, along a route with somewhere to go.
+    pub fn moving(&self) -> bool {
+        self.since > 0.0 && !self.points.is_empty()
+    }
+
+    /// The second the clock shows now.
+    pub fn second(&self) -> f64 {
+        if self.since <= 0.0 {
+            return self.clock;
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0.0, |since| since.as_secs_f64());
+        self.clock + now - self.since
+    }
+
+    /// Where it stands at `second`.
+    pub fn at(&self, second: f64) -> f64 {
+        let Some((first, last)) = self.points.first().zip(self.points.last()) else {
+            return 0.0;
+        };
+        if second <= first.0 {
+            return first.1;
+        }
+        self.points
+            .windows(2)
+            .find(|pair| second < pair[1].0)
+            .map_or(last.1, |pair| {
+                let ((from, start), (to, end)) = (pair[0], pair[1]);
+                start + (end - start) * (second - from) / (to - from)
+            })
+    }
+
+    /// Where it stands now.
+    pub fn place(&self) -> f64 {
+        self.at(self.second())
+    }
+
+    /// The seconds and places it passes from `second` on, one at each whole
+    /// character too: characters are not all as wide.
+    #[cfg(any(target_os = "macos", test))]
+    fn steps(&self, second: f64) -> Vec<(f64, f64)> {
+        let mut steps = vec![(second, self.at(second))];
+        for pair in self.points.windows(2) {
+            let ((from, start), (to, end)) = (pair[0], pair[1]);
+            if to <= second {
+                continue;
+            }
+            if from > second && steps.last() != Some(&(from, start)) {
+                steps.push((from, start));
+            }
+            if end > start {
+                let mut place = self.at(second.max(from)).floor() + 1.0;
+                while place < end {
+                    steps.push((from + (to - from) * (place - start) / (end - start), place));
+                    place += 1.0;
+                }
+            }
+            steps.push((to, end));
+        }
+        steps
+    }
 }
 
 /// How much of `Line::color`'s alpha what `Line::lit` leaves out keeps.
 pub const FADED: f64 = 0.4;
 
 impl Line {
-    /// The character `lit` stops in, as where it starts in `text` in bytes,
-    /// and how much of it is lit. None when all of `text` shows as it is.
-    pub fn lit_to(&self) -> Option<(usize, f64)> {
-        let lit = self.lit.filter(|lit| *lit >= 0.0)?;
-        let (at, _) = self.text.char_indices().nth(lit as usize)?;
-        Some((at, lit.fract()))
+    /// It is lit part of the way, or may come to be.
+    pub fn lights(&self) -> bool {
+        self.route.is_some() || self.lit.is_some_and(|lit| lit >= 0.0)
     }
 
-    /// The same, where it starts in UTF-16 units.
-    #[cfg(target_os = "windows")]
-    fn lit_to_utf16(&self) -> Option<(usize, f64)> {
-        let (at, part) = self.lit_to()?;
-        Some((self.text[..at].encode_utf16().count(), part))
+    /// How far it is lit now, if it lights up at all.
+    #[cfg(any(target_os = "macos", target_os = "windows", test))]
+    fn lit_now(&self) -> Option<f64> {
+        match &self.route {
+            Some(route) => Some(route.place()),
+            None => self.lit.filter(|lit| *lit >= 0.0),
+        }
     }
 }
 
@@ -168,7 +274,7 @@ static SHOWN: Mutex<BTreeMap<String, Overlay>> = Mutex::new(BTreeMap::new());
 #[derive(Debug, PartialEq, Eq)]
 enum Change {
     Nothing,
-    /// Words sung advance many times a second: this has to stay cheap.
+    /// Only how far a line is lit, or the route it follows.
     Lit,
     All,
 }
@@ -181,11 +287,14 @@ impl Overlay {
         let same = |line: &Line, other: &Line| {
             Line {
                 lit: None,
+                route: None,
                 ..line.clone()
             } == Line {
                 lit: None,
+                route: None,
                 ..other.clone()
             } && line.lit.is_some() == other.lit.is_some()
+                && line.route.is_some() == other.route.is_some()
         };
         let lines = self.lines.len() == next.lines.len()
             && self.lines.iter().zip(&next.lines).all(|(a, b)| same(a, b));
@@ -233,9 +342,8 @@ pub fn hide(id: &str) {
 fn lit_here(id: &str, overlay: &Overlay) {
     #[cfg(target_os = "macos")]
     mac::lit(id.to_string(), overlay.clone());
-    // One bitmap: it is drawn whole.
     #[cfg(target_os = "windows")]
-    win::show(id.to_string(), overlay.clone());
+    win::lit(id.to_string(), overlay.clone());
     #[cfg(target_os = "android")]
     let _ = crate::platform::request("overlay_lit", id, &as_json(overlay));
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "android")))]
@@ -312,12 +420,20 @@ fn as_json(overlay: &Overlay) -> String {
         .iter()
         .map(|line| {
             let [r, g, b, a] = line.color;
+            let route = line.route.as_ref().map_or_else(String::new, |route| {
+                format!(
+                    ",\"path\":{},\"clock\":{},\"since\":{}",
+                    text(&route.path()),
+                    route.clock,
+                    route.since
+                )
+            });
             format!(
-                "{{\"text\":{},\"size\":{},\"bold\":{},\"color\":\"#{a:02x}{r:02x}{g:02x}{b:02x}\",\"lit\":{}}}",
+                "{{\"text\":{},\"size\":{},\"bold\":{},\"color\":\"#{a:02x}{r:02x}{g:02x}{b:02x}\",\"lit\":{}{route}}}",
                 text(&line.text),
                 line.size,
                 line.bold,
-                line.lit.unwrap_or(-1.0)
+                line.lit.unwrap_or(if line.route.is_some() { 0.0 } else { -1.0 })
             )
         })
         .collect();
@@ -352,10 +468,10 @@ fn as_json(overlay: &Overlay) -> String {
 /// the bar's buttons.
 #[cfg(target_os = "macos")]
 mod mac {
-    use super::{Line, Overlay};
+    use super::{Line, Overlay, Route};
     use dispatch2::{DispatchQueue, DispatchTime};
     use objc2::rc::Retained;
-    use objc2::runtime::{AnyObject, NSObject, ProtocolObject};
+    use objc2::runtime::{AnyClass, AnyObject, NSObject, ProtocolObject};
     use objc2::{AnyThread, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
     use objc2_app_kit::{
         NSBackingStoreType, NSBox, NSBoxType, NSButton, NSColor, NSEvent, NSFont,
@@ -365,7 +481,8 @@ mod mac {
         NSWindowCollectionBehavior, NSWindowStyleMask,
     };
     use objc2_foundation::{
-        NSMutableAttributedString, NSMutableDictionary, NSPoint, NSRect, NSSize, NSString,
+        NSArray, NSMutableAttributedString, NSMutableDictionary, NSNumber, NSPoint, NSRect, NSSize,
+        NSString,
     };
     use std::cell::{Cell, RefCell};
     use std::collections::HashMap;
@@ -412,21 +529,70 @@ mod mac {
                 .or_insert_with(|| styled(line, &line.text[..at], 1.0, mtm).frame().size.width)
         }
 
-        /// Cut the line off where `Line::lit` says.
+        /// How wide the line is as far as `place`.
+        fn width_at(&mut self, place: f64, mtm: MainThreadMarker) -> f64 {
+            let text = &self.line.text;
+            let Some((at, now)) = text.char_indices().nth(place as usize) else {
+                return self.size.width;
+            };
+            let next = at + now.len_utf8();
+            let sung = self.width_to(at, mtm);
+            // A label keeps two points on either side of its text.
+            sung - 2.0 + (self.width_to(next, mtm) - sung) * place.fract()
+        }
+
+        /// Cut the line off where it is lit now. On a route the cut goes on
+        /// by itself: Core Animation moves it, off this thread.
         fn show(&mut self, mtm: MainThreadMarker) {
-            let width = match self.line.lit_to() {
-                Some((at, part)) => {
-                    let sung = self.width_to(at, mtm);
-                    let next = self.line.text[at..]
-                        .chars()
-                        .next()
-                        .map_or(0, char::len_utf8);
-                    // A label keeps two points on either side of its text.
-                    sung - 2.0 + (self.width_to(at + next, mtm) - sung) * part
-                }
+            // SAFETY: a view answers `layer`, here with its backing layer.
+            let layer: Option<Retained<AnyObject>> = unsafe { msg_send![&*self.clip, layer] };
+            let key = NSString::from_str("lit");
+            if let Some(layer) = &layer {
+                // SAFETY: a layer, and a key of its animations.
+                let _: () = unsafe { msg_send![&**layer, removeAnimationForKey: &*key] };
+            }
+            let width = match self.line.lit_now() {
+                Some(place) => self.width_at(place, mtm),
                 None => self.size.width,
             };
             self.clip.setFrameSize(NSSize::new(width, self.size.height));
+            let Some(route) = self.line.route.clone().filter(Route::moving) else {
+                return;
+            };
+            let begin = route.second();
+            let steps = route.steps(begin);
+            let Some(length) = steps
+                .last()
+                .map(|(second, _)| second - begin)
+                .filter(|length| *length > 0.0)
+            else {
+                return;
+            };
+            let class = AnyClass::get(c"CAKeyframeAnimation");
+            let (Some(class), Some(layer)) = (class, layer) else {
+                return;
+            };
+            let mut widths = Vec::with_capacity(steps.len());
+            let mut times = Vec::with_capacity(steps.len());
+            for (second, place) in steps {
+                widths.push(NSNumber::new_f64(self.width_at(place, mtm)));
+                times.push(NSNumber::new_f64((second - begin) / length));
+            }
+            if let Some(last) = widths.last() {
+                self.clip
+                    .setFrameSize(NSSize::new(last.as_f64(), self.size.height));
+            }
+            let path = NSString::from_str("bounds.size.width");
+            // SAFETY: Core Animation's class, its documented properties with
+            // values of their kinds, and a layer that copies the animation.
+            unsafe {
+                let motion: Retained<AnyObject> = msg_send![class, animationWithKeyPath: &*path];
+                let _: () = msg_send![&*motion, setValues: &*NSArray::from_retained_slice(&widths)];
+                let _: () =
+                    msg_send![&*motion, setKeyTimes: &*NSArray::from_retained_slice(&times)];
+                let _: () = msg_send![&*motion, setDuration: length];
+                let _: () = msg_send![&*layer, addAnimation: &*motion, forKey: &*key];
+            }
         }
     }
 
@@ -495,6 +661,7 @@ mod mac {
                 for (lit, line) in shown.lit.iter_mut().zip(lines) {
                     if let Some(lit) = lit {
                         lit.line.lit = line.lit;
+                        lit.line.route = line.route.clone();
                         lit.show(mtm);
                     }
                 }
@@ -526,7 +693,7 @@ mod mac {
     /// A line: faded, and over it what is lit, cut off inside the character
     /// `Line::lit` stops in.
     fn label(line: &Line, mtm: MainThreadMarker) -> (Retained<NSTextField>, Option<Lit>) {
-        if !line.lit.is_some_and(|lit| lit >= 0.0) {
+        if !line.lights() {
             return (styled(line, &line.text, 1.0, mtm), None);
         }
         let label = styled(line, &line.text, super::FADED, mtm);
@@ -859,33 +1026,31 @@ mod mac {
 /// through but over a button that shows.
 #[cfg(target_os = "windows")]
 mod win {
-    use super::{Overlay, Place};
+    use super::{Line, Overlay, Place, Route};
     use std::cell::RefCell;
     use std::collections::HashMap;
     use std::sync::{Mutex, mpsc};
     use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
     use windows::Win32::Graphics::Direct2D::Common::{
-        D2D_RECT_F, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_GRADIENT_STOP,
-        D2D1_PIXEL_FORMAT,
+        D2D_RECT_F, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
     };
     use windows::Win32::Graphics::Direct2D::{
-        D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE, D2D1_EXTEND_MODE_CLAMP,
-        D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_FEATURE_LEVEL_DEFAULT, D2D1_GAMMA_2_2,
-        D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES, D2D1_RENDER_TARGET_PROPERTIES,
-        D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1_RENDER_TARGET_USAGE_NONE, D2D1_ROUNDED_RECT,
-        D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, D2D1CreateFactory, ID2D1Factory,
+        D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE, D2D1_FACTORY_TYPE_SINGLE_THREADED,
+        D2D1_FEATURE_LEVEL_DEFAULT, D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE_DEFAULT,
+        D2D1_RENDER_TARGET_USAGE_NONE, D2D1_ROUNDED_RECT, D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE,
+        D2D1CreateFactory, ID2D1Factory,
     };
     use windows::Win32::Graphics::DirectWrite::{
         DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
         DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_HIT_TEST_METRICS,
-        DWRITE_TEXT_METRICS, DWRITE_TEXT_RANGE, DWriteCreateFactory, IDWriteFactory,
-        IDWriteFontCollection, IDWriteTextLayout,
+        DWRITE_TEXT_METRICS, DWriteCreateFactory, IDWriteFactory, IDWriteFontCollection,
+        IDWriteTextLayout,
     };
     use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
     use windows::Win32::Graphics::Gdi::{
         AC_SRC_ALPHA, AC_SRC_OVER, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION,
-        CreateCompatibleDC, CreateDIBSection, DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC,
-        HGDIOBJ, ReleaseDC, ScreenToClient, SelectObject,
+        CreateCompatibleDC, CreateDIBSection, DIB_RGB_COLORS, DeleteDC, DeleteObject, GdiFlush,
+        GetDC, HBITMAP, HDC, HGDIOBJ, ReleaseDC, ScreenToClient, SelectObject,
     };
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::System::Threading::GetCurrentThreadId;
@@ -898,16 +1063,18 @@ mod win {
         HTTRANSPARENT, HWND_TOPMOST, IDC_ARROW, KillTimer, LoadCursorW, MA_NOACTIVATE, MSG,
         PostThreadMessageW, RegisterClassExW, SPI_GETWORKAREA, SW_HIDE, SW_SHOWNOACTIVATE,
         SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetTimer, SetWindowLongPtrW, SetWindowPos,
-        ShowWindow, SystemParametersInfoW, TranslateMessage, ULW_ALPHA, UpdateLayeredWindow,
-        WM_APP, WM_EXITSIZEMOVE, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_NCHITTEST,
-        WM_TIMER, WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
-        WS_EX_TRANSPARENT, WS_POPUP,
+        ShowWindow, SystemParametersInfoW, TranslateMessage, ULW_ALPHA, UPDATELAYEREDWINDOWINFO,
+        UpdateLayeredWindow, UpdateLayeredWindowIndirect, WM_APP, WM_EXITSIZEMOVE, WM_LBUTTONDOWN,
+        WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_NCHITTEST, WM_TIMER, WNDCLASSEXW, WS_EX_LAYERED,
+        WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
     };
     use windows::core::{BOOL, PCWSTR, w};
     use windows_numerics::Vector2;
 
     enum Message {
         Show(String, Overlay),
+        /// Only how far the lines are lit, or their routes, changed.
+        Lit(String, Overlay),
         Hide(String),
     }
 
@@ -927,6 +1094,9 @@ mod win {
     /// milliseconds.
     const HOVER_TIMER: usize = 2;
     const HOVER_EVERY: u32 = 80;
+    /// How often a line on a route moves on, in milliseconds.
+    const LIT_TIMER: usize = 3;
+    const LIT_EVERY: u32 = 16;
 
     /// The icon font's glyphs for the symbols the bar draws.
     const GLYPHS: &[(&str, u16)] = &[
@@ -941,6 +1111,10 @@ mod win {
 
     pub fn show(id: String, overlay: Overlay) {
         send(Message::Show(id, overlay));
+    }
+
+    pub fn lit(id: String, overlay: Overlay) {
+        send(Message::Lit(id, overlay));
     }
 
     pub fn hide(id: String) {
@@ -981,6 +1155,138 @@ mod win {
         pressed: Option<usize>,
         /// The buttons that show, each where it is in the window in pixels.
         buttons: Vec<(RECT, usize)>,
+        /// What it shows now.
+        frame: Option<Frame>,
+    }
+
+    /// What a window shows, kept for lines to light up in: a frame moves
+    /// the cut by the pixels it passed, and draws nothing.
+    struct Frame {
+        memory: HDC,
+        bitmap: HBITMAP,
+        /// What `memory` held before `bitmap`.
+        previous: HGDIOBJ,
+        bits: *mut u32,
+        width: i32,
+        height: i32,
+        /// The whole frame with every line that lights up lit, and faded.
+        bright: Vec<u32>,
+        faded: Vec<u32>,
+        lit: Vec<LitLine>,
+    }
+
+    /// A line that lights up, in a frame.
+    struct LitLine {
+        /// Of the overlay's lines.
+        index: usize,
+        top: i32,
+        bottom: i32,
+        /// Where each character starts, and then where the last ends.
+        edges: Vec<f32>,
+        /// Where the cut stands.
+        at: i32,
+    }
+
+    impl LitLine {
+        /// Where the cut stands at `place`.
+        fn cut(&self, place: f64) -> i32 {
+            let last = self.edges.len().saturating_sub(1);
+            let whole = (place.max(0.0) as usize).min(last);
+            let start = self.edges.get(whole).copied().unwrap_or(0.0);
+            let end = self.edges.get(whole + 1).copied().unwrap_or(start);
+            (start + (end - start) * place.max(0.0).fract() as f32).round() as i32
+        }
+    }
+
+    impl Drop for Frame {
+        fn drop(&mut self) {
+            // SAFETY: this frame's own device context and bitmap.
+            unsafe {
+                SelectObject(self.memory, self.previous);
+                let _ = DeleteObject(HGDIOBJ(self.bitmap.0));
+                let _ = DeleteDC(self.memory);
+            }
+        }
+    }
+
+    /// Move each lit line's cut to where it is now, and show only what it
+    /// passed.
+    unsafe fn advance(window: &mut Window) {
+        let (hwnd, overlay) = (window.hwnd, &window.overlay);
+        let Some(frame) = &mut window.frame else {
+            return;
+        };
+        let (width, height) = (frame.width, frame.height);
+        // SAFETY: the bitmap's pixels, top row first, as `draw` made them.
+        let pixels =
+            unsafe { std::slice::from_raw_parts_mut(frame.bits, (width * height) as usize) };
+        for line in &mut frame.lit {
+            let Some(place) = overlay.lines.get(line.index).and_then(Line::lit_now) else {
+                continue;
+            };
+            let to = line.cut(place).clamp(0, width);
+            if to == line.at {
+                continue;
+            }
+            let (left, right) = (to.min(line.at), to.max(line.at));
+            let source = if to > line.at {
+                &frame.bright
+            } else {
+                &frame.faded
+            };
+            for row in line.top..line.bottom {
+                let span = (row * width + left) as usize..(row * width + right) as usize;
+                pixels[span.clone()].copy_from_slice(&source[span]);
+            }
+            line.at = to;
+            let dirty = RECT {
+                left,
+                top: line.top,
+                right,
+                bottom: line.bottom,
+            };
+            let blend = BLENDFUNCTION {
+                BlendOp: AC_SRC_OVER as u8,
+                BlendFlags: 0,
+                SourceConstantAlpha: 255,
+                AlphaFormat: AC_SRC_ALPHA as u8,
+            };
+            let size = SIZE {
+                cx: width,
+                cy: height,
+            };
+            let origin = POINT { x: 0, y: 0 };
+            let info = UPDATELAYEREDWINDOWINFO {
+                cbSize: std::mem::size_of::<UPDATELAYEREDWINDOWINFO>() as u32,
+                psize: &size,
+                hdcSrc: frame.memory,
+                pptSrc: &origin,
+                pblend: &blend,
+                dwFlags: ULW_ALPHA,
+                prcDirty: &dirty,
+                ..Default::default()
+            };
+            // SAFETY: a window of this thread, its frame, and locals that
+            // outlive the call.
+            let _ = unsafe { UpdateLayeredWindowIndirect(hwnd, &info) };
+        }
+    }
+
+    /// A timer while a line on a route has somewhere to go.
+    unsafe fn keep_moving(window: &Window) {
+        let moving = window
+            .overlay
+            .lines
+            .iter()
+            .any(|line| line.route.as_ref().is_some_and(Route::moving));
+        // SAFETY: a window of this thread.
+        unsafe {
+            if moving {
+                SetTimer(Some(window.hwnd), LIT_TIMER, LIT_EVERY, None);
+            } else {
+                let _ = KillTimer(Some(window.hwnd), LIT_TIMER);
+            }
+        }
     }
 
     impl Window {
@@ -1079,6 +1385,13 @@ mod win {
                         super::save_place(&window.id, place.0, place.1);
                     });
                 }
+                LRESULT(0)
+            }
+            WM_TIMER if wparam.0 == LIT_TIMER => {
+                with_window(hwnd, |window, _, _| {
+                    // SAFETY: a window of this thread.
+                    unsafe { advance(window) };
+                });
                 LRESULT(0)
             }
             WM_TIMER if wparam.0 == HOVER_TIMER => {
@@ -1187,10 +1500,31 @@ mod win {
                     // SAFETY: a window of this thread.
                     unsafe {
                         let _ = KillTimer(Some(window.hwnd), HOVER_TIMER);
+                        let _ = KillTimer(Some(window.hwnd), LIT_TIMER);
                         let _ = ShowWindow(window.hwnd, SW_HIDE);
                     }
                 }
             }),
+            Message::Lit(id, overlay) => {
+                let moved = WINDOWS.with(|windows| {
+                    let mut windows = windows.borrow_mut();
+                    let Some(window) = windows.get_mut(&id).filter(|window| window.frame.is_some())
+                    else {
+                        return false;
+                    };
+                    window.overlay = overlay.clone();
+                    // SAFETY: a window of this thread.
+                    unsafe {
+                        advance(window);
+                        keep_moving(window);
+                    }
+                    true
+                });
+                if !moved {
+                    // SAFETY: as this call's own.
+                    unsafe { apply(Message::Show(id, overlay), d2d, dwrite, instance) };
+                }
+            }
             Message::Show(id, overlay) => WINDOWS.with(|windows| {
                 let mut windows = windows.borrow_mut();
                 let window = windows.entry(id.clone()).or_insert_with(|| {
@@ -1221,6 +1555,7 @@ mod win {
                         hot: None,
                         pressed: None,
                         buttons: Vec::new(),
+                        frame: None,
                     }
                 });
                 window.overlay = overlay;
@@ -1349,19 +1684,23 @@ mod win {
         unsafe {
             let dpi = GetDpiForWindow(hwnd).max(96);
             let scale = dpi as f32 / 96.0;
-            let lines: Vec<(IDWriteTextLayout, f32, f32, [u8; 4], Option<(usize, f64)>)> = window
+            let lines: Vec<(IDWriteTextLayout, f32, f32, [u8; 4], Option<usize>)> = window
                 .overlay
                 .lines
                 .iter()
-                .filter(|line| !line.text.is_empty())
-                .filter_map(|line| {
-                    layout(dwrite, line, scale)
-                        .map(|(layout, w, h)| (layout, w, h, line.color, line.lit_to_utf16()))
+                .enumerate()
+                .filter(|(_, line)| !line.text.is_empty())
+                .filter_map(|(index, line)| {
+                    layout(dwrite, line, scale).map(|(layout, w, h)| {
+                        (layout, w, h, line.color, line.lights().then_some(index))
+                    })
                 })
                 .collect();
             if lines.is_empty() {
                 let _ = KillTimer(Some(hwnd), HOVER_TIMER);
+                let _ = KillTimer(Some(hwnd), LIT_TIMER);
                 let _ = ShowWindow(hwnd, SW_HIDE);
+                window.frame = None;
                 return Ok(());
             }
             let free = window.overlay.place == Place::Free;
@@ -1446,159 +1785,181 @@ mod win {
                 },
             )?;
             target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
-            target.BeginDraw();
-            target.Clear(Some(&D2D1_COLOR_F {
-                r: 0.0,
-                g: 0.0,
-                b: 0.0,
-                a: 0.0,
-            }));
-            let dark = |a: f32| {
-                target.CreateSolidColorBrush(
-                    &D2D1_COLOR_F {
-                        r: 0.0,
-                        g: 0.0,
-                        b: 0.0,
-                        a,
-                    },
-                    None,
-                )
-            };
-            // The plate, while the pointer is over an unlocked overlay or
-            // always on the taskbar.
-            if !window.overlay.locked && (window.over || !free) {
-                let plate = D2D1_ROUNDED_RECT {
-                    rect: D2D_RECT_F {
-                        left: 0.0,
-                        top: 0.0,
-                        right: width as f32,
-                        bottom: height as f32,
-                    },
-                    radiusX: 12.0 * scale,
-                    radiusY: 12.0 * scale,
+            let lights = lines.iter().any(|line| line.4.is_some());
+            let pixels = (width * height) as usize;
+            let (mut bright, mut faded) = (Vec::new(), Vec::new());
+            let mut lit = Vec::new();
+            // What lights up is drawn lit, then faded: moving the cut then
+            // draws nothing.
+            for dim in [false, true].into_iter().take(if lights { 2 } else { 1 }) {
+                lit.clear();
+                target.BeginDraw();
+                target.Clear(Some(&D2D1_COLOR_F {
+                    r: 0.0,
+                    g: 0.0,
+                    b: 0.0,
+                    a: 0.0,
+                }));
+                let dark = |a: f32| {
+                    target.CreateSolidColorBrush(
+                        &D2D1_COLOR_F {
+                            r: 0.0,
+                            g: 0.0,
+                            b: 0.0,
+                            a,
+                        },
+                        None,
+                    )
                 };
-                target.FillRoundedRectangle(&plate, &dark(0.3)?);
-            }
-            if window.over {
-                let white = target.CreateSolidColorBrush(
-                    &D2D1_COLOR_F {
-                        r: 1.0,
-                        g: 1.0,
-                        b: 1.0,
-                        a: 1.0,
-                    },
-                    None,
-                )?;
-                for (rect, index) in &window.buttons {
-                    let middle = Vector2 {
-                        X: (rect.left + rect.right) as f32 / 2.0,
-                        Y: (rect.top + rect.bottom) as f32 / 2.0,
+                // The plate, while the pointer is over an unlocked overlay or
+                // always on the taskbar.
+                if !window.overlay.locked && (window.over || !free) {
+                    let plate = D2D1_ROUNDED_RECT {
+                        rect: D2D_RECT_F {
+                            left: 0.0,
+                            top: 0.0,
+                            right: width as f32,
+                            bottom: height as f32,
+                        },
+                        radiusX: 12.0 * scale,
+                        radiusY: 12.0 * scale,
                     };
-                    let round = D2D1_ELLIPSE {
-                        point: middle,
-                        radiusX: button / 2.0,
-                        radiusY: button / 2.0,
-                    };
-                    target.FillEllipse(
-                        &round,
-                        &dark(if window.hot == Some(*index) {
-                            0.55
-                        } else {
-                            0.3
-                        })?,
-                    );
-                    if let Some((layout, glyph_width, glyph_height)) =
-                        glyph(dwrite, &window.overlay.buttons[*index].symbol, scale)
-                    {
-                        let at = Vector2 {
-                            X: middle.X - glyph_width / 2.0,
-                            Y: middle.Y - glyph_height / 2.0,
+                    target.FillRoundedRectangle(&plate, &dark(0.3)?);
+                }
+                if window.over {
+                    let white = target.CreateSolidColorBrush(
+                        &D2D1_COLOR_F {
+                            r: 1.0,
+                            g: 1.0,
+                            b: 1.0,
+                            a: 1.0,
+                        },
+                        None,
+                    )?;
+                    for (rect, index) in &window.buttons {
+                        let middle = Vector2 {
+                            X: (rect.left + rect.right) as f32 / 2.0,
+                            Y: (rect.top + rect.bottom) as f32 / 2.0,
                         };
-                        target.DrawTextLayout(at, &layout, &white, D2D1_DRAW_TEXT_OPTIONS_NONE);
+                        let round = D2D1_ELLIPSE {
+                            point: middle,
+                            radiusX: button / 2.0,
+                            radiusY: button / 2.0,
+                        };
+                        target.FillEllipse(
+                            &round,
+                            &dark(if window.hot == Some(*index) {
+                                0.55
+                            } else {
+                                0.3
+                            })?,
+                        );
+                        if let Some((layout, glyph_width, glyph_height)) =
+                            glyph(dwrite, &window.overlay.buttons[*index].symbol, scale)
+                        {
+                            let at = Vector2 {
+                                X: middle.X - glyph_width / 2.0,
+                                Y: middle.Y - glyph_height / 2.0,
+                            };
+                            target.DrawTextLayout(at, &layout, &white, D2D1_DRAW_TEXT_OPTIONS_NONE);
+                        }
+                    }
+                }
+                let shadow = dark(0.75)?;
+                let mut top = margin + bar_height;
+                for (layout, line_width, line_height, [r, g, b, a], index) in &lines {
+                    let left = (width as f32 - line_width) / 2.0;
+                    let alpha = if dim && index.is_some() {
+                        super::FADED as f32
+                    } else {
+                        1.0
+                    };
+                    let brush = target.CreateSolidColorBrush(
+                        &D2D1_COLOR_F {
+                            r: *r as f32 / 255.0,
+                            g: *g as f32 / 255.0,
+                            b: *b as f32 / 255.0,
+                            a: *a as f32 / 255.0 * alpha,
+                        },
+                        None,
+                    )?;
+                    // A soft shadow: the text a little down and around, dark,
+                    // under the text itself.
+                    for (dx, dy) in [(1.0, 1.5), (0.0, 1.0), (1.0, 0.0), (-0.5, 1.0)] {
+                        target.DrawTextLayout(
+                            Vector2 {
+                                X: left + dx * scale,
+                                Y: top + dy * scale,
+                            },
+                            layout,
+                            &shadow,
+                            D2D1_DRAW_TEXT_OPTIONS_NONE,
+                        );
+                    }
+                    let at = Vector2 { X: left, Y: top };
+                    target.DrawTextLayout(at, layout, &brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
+                    if let Some(index) = index {
+                        let mut edges = Vec::new();
+                        let (mut x, mut y) = (0.0, 0.0);
+                        let mut metrics = DWRITE_HIT_TEST_METRICS::default();
+                        let mut unit = 0;
+                        for character in window.overlay.lines[*index].text.chars() {
+                            layout.HitTestTextPosition(
+                                unit,
+                                false,
+                                &mut x,
+                                &mut y,
+                                &mut metrics,
+                            )?;
+                            edges.push(left + x);
+                            unit += character.len_utf16() as u32;
+                        }
+                        edges.push(left + x + metrics.width);
+                        lit.push(LitLine {
+                            index: *index,
+                            top: top.floor() as i32,
+                            bottom: ((top + line_height).ceil() as i32 + 2).min(height),
+                            edges,
+                            at: 0,
+                        });
+                    }
+                    top += line_height + gap;
+                }
+                target.EndDraw(None, None)?;
+                let _ = GdiFlush();
+                if lights {
+                    let drawn = std::slice::from_raw_parts(bits as *const u32, pixels);
+                    if dim {
+                        faded = drawn.to_vec();
+                    } else {
+                        bright = drawn.to_vec();
                     }
                 }
             }
-            let shadow = dark(0.75)?;
-            let mut top = margin + bar_height;
-            for (layout, line_width, line_height, [r, g, b, a], lit) in &lines {
-                let left = (width as f32 - line_width) / 2.0;
-                let brush = target.CreateSolidColorBrush(
-                    &D2D1_COLOR_F {
-                        r: *r as f32 / 255.0,
-                        g: *g as f32 / 255.0,
-                        b: *b as f32 / 255.0,
-                        a: *a as f32 / 255.0,
-                    },
-                    None,
-                )?;
-                // A soft shadow: the text a little down and around, dark,
-                // under the text itself.
-                for (dx, dy) in [(1.0, 1.5), (0.0, 1.0), (1.0, 0.0), (-0.5, 1.0)] {
-                    target.DrawTextLayout(
-                        Vector2 {
-                            X: left + dx * scale,
-                            Y: top + dy * scale,
-                        },
-                        layout,
-                        &shadow,
-                        D2D1_DRAW_TEXT_OPTIONS_NONE,
-                    );
+            // Everything that lights up starts out faded, as drawn last; the
+            // cut then moves to where it is.
+            let mut frame = Frame {
+                memory,
+                bitmap,
+                previous,
+                bits: bits as *mut u32,
+                width,
+                height,
+                bright,
+                faded,
+                lit,
+            };
+            let shown = std::slice::from_raw_parts_mut(frame.bits, pixels);
+            for line in &mut frame.lit {
+                let place = window.overlay.lines[line.index]
+                    .lit_now()
+                    .unwrap_or(f64::MAX);
+                line.at = line.cut(place).clamp(0, width);
+                for row in line.top..line.bottom {
+                    let span = (row * width) as usize..(row * width + line.at) as usize;
+                    shown[span.clone()].copy_from_slice(&frame.bright[span]);
                 }
-                let at = Vector2 { X: left, Y: top };
-                if let Some((start, part)) = lit {
-                    // What is lit and what is not, the edge inside the
-                    // character.
-                    let (mut x, mut y) = (0.0, 0.0);
-                    let mut metrics = DWRITE_HIT_TEST_METRICS::default();
-                    layout.HitTestTextPosition(
-                        *start as u32,
-                        false,
-                        &mut x,
-                        &mut y,
-                        &mut metrics,
-                    )?;
-                    let end = left + x + metrics.width * *part as f32;
-                    let color = |alpha: f32| D2D1_COLOR_F {
-                        r: *r as f32 / 255.0,
-                        g: *g as f32 / 255.0,
-                        b: *b as f32 / 255.0,
-                        a: *a as f32 / 255.0 * alpha,
-                    };
-                    let stops = target.CreateGradientStopCollection(
-                        &[
-                            D2D1_GRADIENT_STOP {
-                                position: 0.0,
-                                color: color(1.0),
-                            },
-                            D2D1_GRADIENT_STOP {
-                                position: 1.0,
-                                color: color(super::FADED as f32),
-                            },
-                        ],
-                        D2D1_GAMMA_2_2,
-                        D2D1_EXTEND_MODE_CLAMP,
-                    )?;
-                    let lit = target.CreateLinearGradientBrush(
-                        &D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
-                            startPoint: Vector2 {
-                                X: end - 0.5,
-                                Y: 0.0,
-                            },
-                            endPoint: Vector2 {
-                                X: end + 0.5,
-                                Y: 0.0,
-                            },
-                        },
-                        None,
-                        &stops,
-                    )?;
-                    target.DrawTextLayout(at, layout, &lit, D2D1_DRAW_TEXT_OPTIONS_NONE);
-                } else {
-                    target.DrawTextLayout(at, layout, &brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
-                }
-                top += line_height + gap;
             }
-            target.EndDraw(None, None)?;
 
             let (left, top) = match window.overlay.place {
                 Place::Taskbar => taskbar_spot(width, height).unwrap_or((0, 0)),
@@ -1648,11 +2009,10 @@ mod win {
                 Some(&blend),
                 ULW_ALPHA,
             );
-            SelectObject(memory, previous);
-            let _ = DeleteObject(HGDIOBJ(bitmap.0));
-            let _ = DeleteDC(memory);
+            window.frame = Some(frame);
             ReleaseDC(None, screen);
             result?;
+            keep_moving(window);
             let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
             let _ = SetWindowPos(
                 hwnd,
@@ -1685,6 +2045,7 @@ mod tests {
                 bold: true,
                 color: [255, 128, 0, 255],
                 lit: Some(2.0),
+                route: None,
             }],
             place: Place::Taskbar,
             locked: true,
@@ -1702,13 +2063,6 @@ mod tests {
 
     #[test]
     fn what_is_faded_starts_after_the_lit_characters() {
-        let line = |lit| Line {
-            text: "你好 world".into(),
-            size: 20.0,
-            bold: false,
-            color: [255; 4],
-            lit,
-        };
         let overlay = |text: &str, lit| Overlay {
             lines: vec![Line {
                 text: text.into(),
@@ -1716,6 +2070,7 @@ mod tests {
                 bold: false,
                 color: [0; 4],
                 lit,
+                route: None,
             }],
             ..Overlay::default()
         };
@@ -1724,10 +2079,58 @@ mod tests {
         assert_eq!(shown.change_to(&overlay("a", Some(1.5))), Change::Lit);
         assert_eq!(shown.change_to(&overlay("a", None)), Change::All);
         assert_eq!(shown.change_to(&overlay("b", Some(1.5))), Change::All);
-        assert_eq!(line(None).lit_to(), None);
-        assert_eq!(line(Some(-1.0)).lit_to(), None);
-        assert_eq!(line(Some(2.0)).lit_to(), Some((6, 0.0)));
-        assert_eq!(line(Some(1.5)).lit_to(), Some((3, 0.5)));
-        assert_eq!(line(Some(99.0)).lit_to(), None);
+    }
+
+    #[test]
+    fn a_route_moves_evenly_and_waits_between_its_points() {
+        let route = Route::new("10 0 11 2 12 2 12.5 3", 0.0, 0.0);
+        assert_eq!(route.at(9.0), 0.0);
+        assert_eq!(route.at(10.5), 1.0);
+        assert_eq!(route.at(11.5), 2.0);
+        assert_eq!(route.at(12.25), 2.5);
+        assert_eq!(route.at(20.0), 3.0);
+        assert_eq!(route.path(), "10 0 11 2 12 2 12.5 3");
+        assert_eq!(Route::new("", 0.0, 0.0).at(1.0), 0.0);
+    }
+
+    #[test]
+    fn a_route_runs_only_on_a_running_clock() {
+        let standing = Route::new("0 0 100 5", 50.0, 0.0);
+        assert!(!standing.moving());
+        assert_eq!(standing.place(), 2.5);
+        let long_ago = Route::new("0 0 100 5", 0.0, 1.0);
+        assert!(long_ago.moving());
+        assert_eq!(long_ago.place(), 5.0);
+        assert!(!Route::new("", 0.0, 1.0).moving());
+    }
+
+    #[test]
+    fn a_routes_steps_stop_at_every_whole_character() {
+        let route = Route::new("0 0 3 3 4 3", 0.0, 0.0);
+        assert_eq!(
+            route.steps(0.5),
+            vec![(0.5, 0.5), (1.0, 1.0), (2.0, 2.0), (3.0, 3.0), (4.0, 3.0)]
+        );
+    }
+
+    #[test]
+    fn a_line_on_a_route_lights_up_and_changes_cheaply() {
+        let overlay = |clock| Overlay {
+            lines: vec![Line {
+                text: "ab".into(),
+                size: 10.0,
+                bold: false,
+                color: [0; 4],
+                lit: None,
+                route: Some(Route::new("0 0 1 2", clock, 0.0)),
+            }],
+            ..Overlay::default()
+        };
+        assert!(overlay(0.0).lines[0].lights());
+        assert_eq!(overlay(0.5).lines[0].lit_now(), Some(1.0));
+        assert_eq!(overlay(0.0).change_to(&overlay(0.5)), Change::Lit);
+        assert!(
+            as_json(&overlay(0.5)).contains(r#""lit":0,"path":"0 0 1 2","clock":0.5,"since":0"#)
+        );
     }
 }

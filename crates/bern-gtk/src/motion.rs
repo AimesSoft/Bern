@@ -1627,6 +1627,14 @@ pub enum Num {
 }
 
 impl Num {
+    /// The value now.
+    pub(crate) fn now(&self, ctx: &Ctx) -> f64 {
+        match self {
+            Num::Fixed(value) => *value,
+            Num::Bound(get) => crate::value::as_f64(&get(ctx)),
+        }
+    }
+
     /// The value now, without recording a dependency.
     pub(crate) fn peek(&self, ctx: &Ctx) -> f64 {
         match self {

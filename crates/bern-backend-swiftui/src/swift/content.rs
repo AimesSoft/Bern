@@ -12,8 +12,20 @@ impl Generator<'_> {
         if element.keyword("markdown") == Some("true") {
             out.line(format!("SwiftUI.Text(bernMarkdown({content}))"));
         } else if let Some(lit) = self.length(element, "lit") {
-            out.line(format!("bernLit({content}, {lit})"));
-            out.line(format!(".bernLitting {{ {lit} }}"));
+            if let Some(path) = self.text_prop(element, "lit_path") {
+                let clock = self
+                    .length(element, "lit_clock")
+                    .unwrap_or_else(|| "0".into());
+                let since = self
+                    .length(element, "lit_since")
+                    .unwrap_or_else(|| "0".into());
+                out.line(format!(
+                    "BernLitText(text: {content}, lit: {{ {lit} }}, path: {{ {path} }}, clock: {{ {clock} }}, since: {{ {since} }})"
+                ));
+            } else {
+                out.line(format!("bernLit({content}, {lit})"));
+                out.line(format!(".bernLitting {{ {lit} }}"));
+            }
         } else {
             out.line(format!("SwiftUI.Text(verbatim: {content})"));
         }

@@ -30,6 +30,9 @@ impl Generator<'_> {
                 ),
                 ("bold", element.expr("bold").map(|bold| self.getter(bold))),
                 ("lit", self.len(element, "lit")),
+                ("litPath", self.text_prop(element, "lit_path")),
+                ("litClock", self.len(element, "lit_clock")),
+                ("litSince", self.len(element, "lit_since")),
                 ("animate", Self::animate(element)),
             ])
         ));

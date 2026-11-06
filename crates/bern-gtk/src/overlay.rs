@@ -211,8 +211,12 @@ fn lit(id: &str, overlay: &Overlay) {
     let mut child = lines.first_child();
     for line in overlay.lines.iter().filter(|line| !line.text.is_empty()) {
         let Some(widget) = child else { break };
-        if let (Some(value), Some(shown)) = (line.lit, widget.downcast_ref::<crate::lit::Lit>()) {
-            shown.set(value);
+        if let Some(shown) = widget.downcast_ref::<crate::lit::Lit>() {
+            if let Some(route) = &line.route {
+                shown.follow(route.clone());
+            } else if let Some(value) = line.lit {
+                shown.set(value);
+            }
         }
         child = widget.next_sibling();
     }
@@ -225,9 +229,14 @@ fn show(id: &str, overlay: &Overlay) {
     }
     for line in overlay.lines.iter().filter(|line| !line.text.is_empty()) {
         let text = label(line);
-        match line.lit.filter(|lit| *lit >= 0.0) {
-            Some(lit) => lines.append(&crate::lit::Lit::new(&text, &text, lit)),
-            None => lines.append(&text),
+        if line.lights() {
+            let shown = crate::lit::Lit::new(&text, &text, line.lit.unwrap_or(0.0));
+            if let Some(route) = &line.route {
+                shown.follow(route.clone());
+            }
+            lines.append(&shown);
+        } else {
+            lines.append(&text);
         }
     }
     // Every button keeps its slot; locked, only those that unlock it show

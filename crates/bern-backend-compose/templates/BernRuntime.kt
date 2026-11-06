@@ -2675,7 +2675,7 @@ internal object BernOverlay {
             val text = line.optString("text")
             if (text.isEmpty()) continue
             val color = android.graphics.Color.parseColor(line.optString("color", "#ffffffff"))
-            view.addView(BernLitLine(context, line.optDouble("lit", -1.0), color).apply {
+            view.addView(BernLitLine(context, line.optDouble("lit", -1.0), color, bernLineRoute(line)).apply {
                 this.text = text
                 setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, line.optDouble("size", 18.0).toFloat())
                 setTextColor(color)
@@ -2704,7 +2704,7 @@ internal object BernOverlay {
             if (line.optString("text").isEmpty()) continue
             while (child < view.childCount && view.getChildAt(child) !is BernLitLine) child += 1
             if (child == view.childCount) return
-            (view.getChildAt(child) as BernLitLine).light(line.optDouble("lit", -1.0))
+            (view.getChildAt(child) as BernLitLine).light(line.optDouble("lit", -1.0), bernLineRoute(line))
             child += 1
         }
     }
@@ -2780,19 +2780,80 @@ internal class BernOverlaySymbol(private val symbol: String) : android.graphics.
     override fun getOpacity() = android.graphics.PixelFormat.TRANSLUCENT
 }
 
-/// A line of an overlay: as far as `lit` in `color`, the rest faded, the edge
-/// inside the character `lit` stops in. All of it below zero.
+/// `Text(lit_path:)`: seconds and characters, in order, apart by spaces. The
+/// place moves evenly from each to the next, and stays at the first before
+/// it and the last after it. `clock` is the second it showed at `since`, in
+/// seconds since the Unix epoch; a `since` of zero stands still.
+internal class BernLitRoute(path: String, private val clock: Double, private val since: Double) {
+    private val numbers = path.split(' ').mapNotNull { it.toDoubleOrNull() }
+    val empty get() = numbers.size < 2
+    val moving get() = since > 0 && !empty
+
+    fun place(): Double = at(clock + if (since > 0) System.currentTimeMillis() / 1000.0 - since else 0.0)
+
+    private fun at(second: Double): Double {
+        if (second <= numbers[0]) return numbers[1]
+        var index = 2
+        while (index + 1 < numbers.size) {
+            if (second < numbers[index]) {
+                val part = (second - numbers[index - 2]) / (numbers[index] - numbers[index - 2])
+                return numbers[index - 1] + (numbers[index + 1] - numbers[index - 1]) * part
+            }
+            index += 2
+        }
+        return numbers[numbers.size - 1]
+    }
+}
+
+/// How far along a character a lit edge moves between frames drawn: about a
+/// pixel, and nothing is drawn while it waits between words.
+internal const val BERN_LIT_STEP = 1.0 / 48
+
+/// The route of a line of an overlay as JSON has it, if it has one.
+private fun bernLineRoute(line: org.json.JSONObject): BernLitRoute? {
+    val route = BernLitRoute(line.optString("path"), line.optDouble("clock", 0.0), line.optDouble("since", 0.0))
+    return if (route.empty) null else route
+}
+
+/// A line of an overlay: as far as `lit` in `color`, or along `route` by
+/// itself, the rest faded, the edge inside the character it stops in. All of
+/// it below zero.
 private class BernLitLine(
-    context: android.content.Context, private var lit: Double, private val color: Int,
+    context: android.content.Context, private var number: Double, private val color: Int,
+    private var route: BernLitRoute?,
 ) : android.widget.TextView(context) {
-    fun light(value: Double) {
-        lit = value
+    private var drawn = -1.0
+    private val frame = object : Runnable {
+        override fun run() {
+            val moving = route?.takeIf { it.moving } ?: return
+            if (kotlin.math.abs(moving.place() - drawn) >= BERN_LIT_STEP) invalidate()
+            postOnAnimation(this)
+        }
+    }
+
+    fun light(value: Double, moving: BernLitRoute?) {
+        number = value
+        route = moving
         invalidate()
+        removeCallbacks(frame)
+        if (isAttachedToWindow) postOnAnimation(frame)
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        postOnAnimation(frame)
+    }
+
+    override fun onDetachedFromWindow() {
+        removeCallbacks(frame)
+        super.onDetachedFromWindow()
     }
 
     override fun onDraw(canvas: android.graphics.Canvas) {
         val shown = text.toString()
         val lines = layout
+        val lit = route?.place() ?: number
+        drawn = lit
         if (lit >= 0 && lines != null) {
             val whole = lit.toInt().coerceAtMost(shown.codePointCount(0, shown.length))
             val at = shown.offsetByCodePoints(0, whole)

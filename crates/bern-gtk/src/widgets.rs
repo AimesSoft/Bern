@@ -15,6 +15,7 @@ use crate::text::{self, tr};
 use crate::value::{as_f64, as_text, number};
 use crate::{Act, Build, Ctx, Get, Parent, Str, icons};
 use adw::prelude::*;
+use bern_ffi::overlay::Route;
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -140,6 +141,11 @@ pub struct TextProps {
     /// As far through its characters as this as it is, the rest faded; below
     /// zero, all of it.
     pub lit: Option<Num>,
+    /// Seconds and characters: `lit` at zero or above moves along them by
+    /// itself, as `lit_clock` runs from `lit_since`.
+    pub lit_path: Option<Str>,
+    pub lit_clock: Option<Num>,
+    pub lit_since: Option<Num>,
     /// The spring a size that follows state changes with.
     pub animate: Option<Curve>,
 }
@@ -260,6 +266,24 @@ pub fn Text(p: &Parent, ctx: &Ctx, props: TextProps) {
             let shown = crate::lit::Lit::new(&words, &label, -1.0);
             let bound = shown.clone();
             bind_number(ctx, lit, None, &label, move |value| bound.set(value));
+            if let Some(path) = &props.lit_path {
+                let (at, path, bound) = (ctx.clone(), bound_text(ctx, path), shown.clone());
+                let (lit, clock, since) = (
+                    lit.clone(),
+                    props.lit_clock.clone(),
+                    props.lit_since.clone(),
+                );
+                effect(move || {
+                    let read =
+                        |value: &Option<Num>| value.as_ref().map_or(0.0, |value| value.now(&at));
+                    let route = if lit.now(&at) < 0.0 {
+                        Route::default()
+                    } else {
+                        Route::new(&path(), read(&clock), read(&since))
+                    };
+                    bound.follow(route);
+                });
+            }
             place(p, &shown);
         }
         (None, None) => place(p, &crate::layout::Words::wrap(&label)),
