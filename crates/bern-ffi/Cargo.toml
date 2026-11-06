@@ -18,6 +18,10 @@ bern-transport-ipc = { workspace = true, optional = true }
 bern-adapter-json = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 
+# Serves the WebUI a native build carries, when the engine asks for it.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+bern-transport-ws.workspace = true
+
 # The JNI bridge of the Kotlin frontend.
 [target.'cfg(target_os = "android")'.dependencies]
 jni-sys = "0.4"

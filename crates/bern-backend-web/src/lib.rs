@@ -790,7 +790,9 @@ impl Target for WebBrowser {
                 }
             }
         }
-        if remote {
+        // A native target carries the page; its engine is the app's own.
+        let page_only = context.target.page_only;
+        if remote && !page_only {
             let host_target = context.workspace_dir.join("target/bern-web-glue/host");
             let built = host_target.join(profile);
             steps.push(BuildStep::Run {
@@ -820,7 +822,7 @@ impl Target for WebBrowser {
         }
         // The agent skill beside `bin/`, where the engine host listens; an
         // `app` build has no programs to describe.
-        let listens = skill::listens(&context.target.channels);
+        let listens = skill::listens(&context.target.channels) && !page_only;
         let place = listens.then(|| {
             skill::Place::beside_bin(app, cfg!(windows)).connect(if remote { format!(
                 "The programs reach the engine host `{program}-host` beside them, which serves the page: start it (`bern run --target {target}` does) before calling them. The `ui` and `window` commands act on the page while a browser has it open.",

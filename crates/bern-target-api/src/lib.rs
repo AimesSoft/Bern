@@ -432,6 +432,12 @@ pub struct TargetConfig {
     /// unless the target names fewer; on iOS from [`IOS_FRONTENDS`], the
     /// first unless the target names more. Empty for other platforms.
     pub frontends: Vec<String>,
+    /// The `web_mode = "ui"` target whose page this native build carries
+    /// among its resources, to serve when the engine asks.
+    pub web_ui: Option<String>,
+    /// Build the page of this `web_mode = "ui"` target and no engine host: a
+    /// native target carries it.
+    pub page_only: bool,
     /// iOS with both front ends: one `.ipa` for each instead of one for all.
     pub separate_packages: bool,
     /// Override the target's web document capability. False removes all
@@ -462,6 +468,9 @@ pub struct AndroidOptions {
     /// storage, by path, once the user allows it
     /// (`bern::platform::ask_all_files`).
     pub all_files_access: bool,
+    /// The engine links C++ code against the NDK's shared runtime, which the
+    /// app then carries as `libc++_shared.so`.
+    pub cxx_runtime: bool,
 }
 
 impl TargetConfig {
@@ -496,6 +505,24 @@ pub struct WebExtension {
     pub path: String,
     #[serde(default)]
     pub build: Vec<String>,
+}
+
+/// The folder below a native build's resources that holds the page of the
+/// target its `web_ui` names.
+pub const WEB_UI_FOLDER: &str = "__bern_web_ui";
+
+/// Where the page a native build carries is built: the output of the target
+/// its `web_ui` names, for the same modules.
+pub fn web_ui_output(context: &BuildContext) -> PathBuf {
+    let targets = context.workspace_dir.join("target").join("bern");
+    let page = targets.join(context.target.web_ui.as_deref().unwrap_or_default());
+    match context
+        .output_dir
+        .strip_prefix(targets.join(&context.target.name))
+    {
+        Ok(modules) => page.join(modules),
+        Err(_) => page,
+    }
 }
 
 /// The Windows front ends: WinUI 3 on the Windows App Runtime, and the
@@ -826,6 +853,8 @@ mod tests {
             abis: Vec::new(),
             channels: vec![],
             frontends: vec![],
+            web_ui: None,
+            page_only: false,
             separate_packages: false,
         }
     }

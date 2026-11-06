@@ -127,7 +127,7 @@ channels = ["ipc"]
 android = { network = true, multicast = true, audio_settings = true, all_files_access = true }
 ```
 
-`audio_settings` 生成 `MODIFY_AUDIO_SETTINGS`，供需要改变系统音频播放方式的引擎使用。`network` 生成 `INTERNET` 权限；`multicast` 同时生成 `INTERNET` 与 `CHANGE_WIFI_MULTICAST_STATE`，并在 Activity 的 `onStart` 持有非引用计数的 `WifiManager.MulticastLock`，在 `onStop` 释放，以接收前台局域网发现的 Wi-Fi 组播。两项默认关闭；声明媒体或网络图片的应用仍按原规则获得网络权限。`android` 选项只能用于 Android 目标，未知字段会报错。后台持续接收需另外的 Android 后台服务支持，不由这个锁保持应用运行。
+`cxx_runtime` 把 NDK 的 `libc++_shared.so` 按 ABI 放进应用，供引擎里链接了它的 C++ 代码使用。`audio_settings` 生成 `MODIFY_AUDIO_SETTINGS`，供需要改变系统音频播放方式的引擎使用。`network` 生成 `INTERNET` 权限；`multicast` 同时生成 `INTERNET` 与 `CHANGE_WIFI_MULTICAST_STATE`，并在 Activity 的 `onStart` 持有非引用计数的 `WifiManager.MulticastLock`，在 `onStop` 释放，以接收前台局域网发现的 Wi-Fi 组播。两项默认关闭；声明媒体或网络图片的应用仍按原规则获得网络权限。`android` 选项只能用于 Android 目标，未知字段会报错。后台持续接收需另外的 Android 后台服务支持，不由这个锁保持应用运行。
 
 `all_files_access` 供要按路径（`std::fs`）读写共享存储上任意文件的引擎使用。它生成 `MANAGE_EXTERNAL_STORAGE`，Android 10 及以下再生成 `READ_EXTERNAL_STORAGE` 与 `WRITE_EXTERNAL_STORAGE`，并设置 `requestLegacyExternalStorage`。只写进清单不会得到权限：`bern::platform::all_files_allowed()` 说明用户是否已允许；`bern::platform::ask_all_files()` 要在命令里调用，Android 11 及以上打开系统设置里本应用的授权页，更早的版本显示存储权限弹窗。用户返回后，无论是否允许，引擎的 `wake` 都会运行，在那里重新读 `all_files_allowed()`。默认关闭。Google Play 只接受核心功能确实需要此权限的应用，并要在 Play Console 里申报；多数应用应该用文档选择器。部分 Android TV 系统没有这个页面，这时 `ask_all_files` 返回 `platform_failed`。
 
@@ -463,3 +463,11 @@ Android 与 Material 3 都没有表格控件，`Table` 按 Material 数据表的
 ## 滚动条（2026-10-27）
 
 `ScrollView` 的 `indicators`（`automatic`、`hidden`、`mouse`）在 Compose 上都不生成代码：`horizontalScroll`、`verticalScroll` 本身不画滚动条。
+
+## 应用自带的媒体内核
+
+`bern::media::kernel` 在 Android 上也能用：视频视图给内核一个 `ANativeWindow`（`SurfaceKind::NativeWindow`），帧时钟是单独线程上的 `Choreographer`，播放、暂停、跳转照常走媒体命令。应用启动时 `BernMedia.attachExecutor` 先问内核，内核不接时才用 Media3。
+
+`SurfaceView` 不能被圆角裁剪；窗口在表面销毁前归还内核。遥控器的返回键按键到达 `BernShortcuts` 后，系统还会再走一次 Back 回调，这时引擎的回答还没关掉快捷键，所以 500 毫秒内的回调不再执行。
+
+验证：一个实际应用在 Android 手机、平板和 Android TV 模拟器上用自带内核播放 1080p HEVC（MediaCodec 解码、Vulkan 渲染），字幕和横屏全屏正常，遥控器的确定和返回只生效一次。

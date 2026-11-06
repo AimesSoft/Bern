@@ -491,6 +491,11 @@ pub unsafe fn start_app<E: EngineProtocol>(
         let host = Host::start(engine);
         let media = MediaHub::new(&spec.players);
         let sessions = Sessions::new();
+        // A build that carries a WebUI: the engine serves it when it wants to.
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(page) = bern_command::web_ui::page() {
+            bern_transport_ws::install(host.clone(), sessions.clone(), media.clone(), page);
+        }
         let channel = if spec.ipc {
             Some(start_channel(&host, &sessions, &media, spec.bundle_id)?)
         } else {

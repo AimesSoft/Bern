@@ -701,6 +701,57 @@ native!(Java_dev_bern_runtime_BernNative_queryClose(_env, handle: jlong, subscri
     query::bern_query_close(app(handle), subscription as u64)
 });
 
+#[link(name = "android")]
+unsafe extern "C" {
+    fn ANativeWindow_fromSurface(env: *mut JNIEnv, surface: jobject) -> *mut c_void;
+    fn ANativeWindow_release(window: *mut c_void);
+}
+
+native!(Java_dev_bern_runtime_BernNative_mediaKernelAttach(
+    env, handle: jlong, bytes: jbyteArray
+) -> jbyteArray {
+    let bytes = bytes_in(env, bytes);
+    buffer_out(env, media::bern_media_kernel_attach(app(handle), bytes.as_ptr(), bytes.len()))
+});
+
+// The native window of a `Surface`, which the view holds until it released
+// it; 0 when the surface has gone.
+native!(Java_dev_bern_runtime_BernNative_surfaceWindow(env, surface: jobject) -> jlong {
+    ANativeWindow_fromSurface(env, surface) as jlong
+});
+
+native!(Java_dev_bern_runtime_BernNative_surfaceWindowRelease(_env, window: jlong) -> () {
+    ANativeWindow_release(window as *mut c_void)
+});
+
+native!(Java_dev_bern_runtime_BernNative_mediaSurfaceAttach(
+    env, handle: jlong, bytes: jbyteArray
+) -> () {
+    let bytes = bytes_in(env, bytes);
+    media::bern_media_surface_attach(app(handle), bytes.as_ptr(), bytes.len())
+});
+
+native!(Java_dev_bern_runtime_BernNative_mediaSurfaceResize(
+    env, handle: jlong, bytes: jbyteArray
+) -> () {
+    let bytes = bytes_in(env, bytes);
+    media::bern_media_surface_resize(app(handle), bytes.as_ptr(), bytes.len())
+});
+
+native!(Java_dev_bern_runtime_BernNative_mediaSurfaceDetach(
+    env, handle: jlong, bytes: jbyteArray
+) -> () {
+    let bytes = bytes_in(env, bytes);
+    media::bern_media_surface_detach(app(handle), bytes.as_ptr(), bytes.len())
+});
+
+native!(Java_dev_bern_runtime_BernNative_mediaSurfaceFrame(
+    env, handle: jlong, view: jbyteArray, now: jdouble, target: jdouble
+) -> () {
+    let view = bytes_in(env, view);
+    media::bern_media_surface_frame(app(handle), view.as_ptr(), view.len(), now, target)
+});
+
 native!(Java_dev_bern_runtime_BernNative_mediaExecutorAttached(
     env, handle: jlong, bytes: jbyteArray
 ) -> jbyteArray {

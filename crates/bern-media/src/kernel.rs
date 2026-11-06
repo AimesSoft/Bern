@@ -67,6 +67,8 @@ pub enum SurfaceKind {
     /// and hands them to the view, which composites them with the rest of
     /// the window. GTK on Linux.
     FrameSink,
+    /// An `ANativeWindow`: Android.
+    NativeWindow,
 }
 
 impl SurfaceKind {
@@ -74,6 +76,7 @@ impl SurfaceKind {
         SurfaceKind::MetalLayer,
         SurfaceKind::SwapChainPanel,
         SurfaceKind::FrameSink,
+        SurfaceKind::NativeWindow,
     ];
 
     /// Code of the kind in the C ABI.
@@ -82,6 +85,7 @@ impl SurfaceKind {
             SurfaceKind::MetalLayer => 0,
             SurfaceKind::SwapChainPanel => 1,
             SurfaceKind::FrameSink => 2,
+            SurfaceKind::NativeWindow => 3,
         }
     }
 
@@ -109,6 +113,10 @@ pub enum SurfaceHandle {
     /// gives it to the kernel. The view keeps it registered until
     /// [`MediaKernel::detach_surface`] returns.
     FrameSink(u64),
+    /// The address of an `ANativeWindow`, which the view holds a reference
+    /// to; the kernel takes one of its own if it keeps it past
+    /// [`MediaKernel::detach_surface`].
+    NativeWindow(u64),
 }
 
 impl SurfaceHandle {
@@ -117,6 +125,7 @@ impl SurfaceHandle {
             SurfaceHandle::MetalLayer(_) => SurfaceKind::MetalLayer,
             SurfaceHandle::SwapChainPanel(_) => SurfaceKind::SwapChainPanel,
             SurfaceHandle::FrameSink(_) => SurfaceKind::FrameSink,
+            SurfaceHandle::NativeWindow(_) => SurfaceKind::NativeWindow,
         }
     }
 }

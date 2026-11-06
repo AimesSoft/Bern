@@ -132,7 +132,7 @@ fn connect() -> (Arc<Env>, Arc<Connection>, Arc<Page>) {
         host,
         Sessions::new(),
         MediaHub::new(&["preview".into()]),
-        "secret".into(),
+        Some("secret".into()),
     );
     let page = Arc::new(Page::default());
     let sink = Arc::clone(&page);

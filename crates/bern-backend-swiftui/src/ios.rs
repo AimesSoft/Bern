@@ -205,6 +205,9 @@ impl Target for SwiftUiIos {
             GeneratedFile::text("Sources/bern.h", HEADER),
             GeneratedFile::text("glue/Cargo.toml", glue::cargo_toml(context, app)),
             GeneratedFile::text("glue/src/lib.rs", glue::lib_rs(context, app, Platform::Ios)),
+            GeneratedFile::text("tools/Cargo.toml", glue::tools_cargo_toml(context, app)),
+            GeneratedFile::text("tools/src/cli.rs", glue::cli_rs(context, app)),
+            GeneratedFile::text("tools/src/mcp.rs", glue::mcp_rs(context, app)),
             GeneratedFile::text("glue/src/cli.rs", glue::cli_rs(context, app)),
             GeneratedFile::text("glue/src/mcp.rs", glue::mcp_rs(context, app)),
             GeneratedFile::text(
@@ -383,7 +386,10 @@ impl Target for SwiftUiIos {
         let profile = if context.release { "release" } else { "debug" };
         let glue_target = context.workspace_dir.join("target/bern-glue");
         let rust_output = glue_target.join(rust_target).join(profile);
-        let host_output = glue_target.join(host_target).join(profile);
+        // The command line tools are for the computer that builds and need
+        // no engine, so they build without what the engine links for a device.
+        let tools_target = context.workspace_dir.join("target/bern-tools");
+        let host_output = tools_target.join(host_target).join(profile);
         let cli = app.app.id.replace('_', "-");
         let path = |path: &std::path::Path| path.display().to_string();
         let cargo = |what: &str, target: &str| {
@@ -447,8 +453,22 @@ impl Target for SwiftUiIos {
             BuildStep::Run {
                 description: "Build the command line tools for this Mac".into(),
                 program: "cargo".into(),
-                args: cargo("--bins", host_target),
-                cwd: output.join("glue"),
+                args: {
+                    let mut args = vec![
+                        "build".to_string(),
+                        "--manifest-path".into(),
+                        output.join("tools/Cargo.toml").display().to_string(),
+                        "--target-dir".into(),
+                        tools_target.display().to_string(),
+                        "--target".into(),
+                        host_target.into(),
+                    ];
+                    if context.release {
+                        args.push("--release".into());
+                    }
+                    args
+                },
+                cwd: output.join("tools"),
                 env: vec![(
                     "MACOSX_DEPLOYMENT_TARGET".to_string(),
                     crate::MINIMUM_MACOS.to_string(),

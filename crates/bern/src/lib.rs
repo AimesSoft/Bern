@@ -20,8 +20,10 @@ pub mod trace {
     pub use bern_command::trace_span as span;
 }
 
-pub use bern_command::{CallContext, EngineProtocol, Entry, Host, Subscription};
-pub use bern_command::{files, now_playing, overlay, platform, resources, secrets, storage, wake};
+pub use bern_command::{CallContext, EngineProtocol, Entry, Host, Subscription, current_entry};
+pub use bern_command::{
+    files, now_playing, overlay, platform, resources, secrets, storage, wake, web_ui,
+};
 pub use bern_macros::{component, features, players, protocol, session, style, tr, ui, value};
 /// Keyboard shortcuts as declarations write them, for engines that keep
 /// shortcuts the interface follows: [`shortcut::parse_shortcut`]

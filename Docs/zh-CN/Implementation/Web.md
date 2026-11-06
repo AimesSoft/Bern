@@ -413,3 +413,36 @@ flowchart LR
 - 下拉菜单依赖 Popover API（Chromium 114、Safari 17、Firefox 125 起）；更旧的浏览器没有回退。
 - 媒体进度条没有显示缓冲范围。
 - 分段控件每段收到两侧各 4 仍放不下时超出所在容器（在竖向滚动视图里被裁切），标签不加省略号。浮层打开后改变窗口大小不重新定位。
+
+## WebUI 随原生应用
+
+原生目标写 `web_ui = "<目标名>"`，指向一个 `web_mode = "ui"` 的目标，`bern build` 就先编译这个目标的页面（不编译引擎宿主），把页面的文件作为资源放进应用的 `__bern_web_ui/`：
+
+```toml
+[targets.macos]
+platform = "macos"
+web_ui = "web_ui"
+
+[targets.web_ui]
+ui = "web"
+platform = "browser"
+web_mode = "ui"
+application_transport = "websocket"
+application_codec = "json"
+```
+
+应用运行时默认什么都不监听。引擎用 `bern::web_ui` 说要不要开：
+
+```rust
+bern::web_ui::set(Some(bern::web_ui::Options { port: 8080, routes: None }));
+match bern::web_ui::status() { /* Stopped、Running { port }、Failed(message) */ }
+```
+
+- `set` 是声明式的：引擎启动时还没有服务器也可以调用，运行时准备好就照办；选项变了就重启。`available()` 在引擎起来后说这个构建有没有页面。
+- 页面是引擎的又一个 UI 会话，和窗口共用引擎状态，草稿和窗口各自独立。页面发来的命令入口是 `Entry::Web`，引擎运行命令时用 `bern::current_entry()` 读到，例如让页面发起的视频在页面里播放。
+- 这个服务器监听所有网卡，接受任何 `Host`，不要令牌：别的设备打开地址就要能用，所以应用要把它做成用户主动打开的功能。WebSocket 升级仍然要求 `Origin` 与服务器相同，别的网站的页面驱动不了引擎。
+- `Options.routes` 是应用自己的 HTTP 接口，和页面同一个端口。它先于页面回答，返回 `None` 时由页面的文件回答；在连接自己的线程上运行，可以用 `host` 运行引擎的命令。`Body::File` 按偏移和长度发送文件，范围请求由应用决定。
+- 引擎名下的 `file:` 图片，页面经 `/__bern/file` 读取，只限应用的缓存和数据文件夹。
+- 引擎宿主（`web_mode = "ui"` 的 `<程序>-host`）同样可以这样对局域网开放，它自己的 127.0.0.1 服务器仍然带令牌。
+
+验证：`bern-transport-ws` 的测试走真实 TCP 连接，覆盖任意 `Host`、应用接口先于页面、`HEAD`、应用文件的范围；配置测试覆盖 `web_ui` 必须指向 `web_mode = "ui"` 的目标。一个实际应用在 macOS 上实测：页面从应用内的服务器打开，引擎是运行中的原生应用，1080p HEVC 在浏览器里解码播放，局域网客户端经应用接口按范围读文件。

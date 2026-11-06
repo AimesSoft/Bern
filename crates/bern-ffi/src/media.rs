@@ -425,6 +425,7 @@ pub unsafe extern "C" fn bern_media_surface_attach(
             Some(SurfaceKind::MetalLayer) => SurfaceHandle::MetalLayer(handle),
             Some(SurfaceKind::SwapChainPanel) => SurfaceHandle::SwapChainPanel(handle),
             Some(SurfaceKind::FrameSink) => SurfaceHandle::FrameSink(handle),
+            Some(SurfaceKind::NativeWindow) => SurfaceHandle::NativeWindow(handle),
             None => return,
         };
         let Some(size) = surface_size(&mut reader) else {

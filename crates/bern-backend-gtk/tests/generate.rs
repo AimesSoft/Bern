@@ -251,6 +251,8 @@ fn linux() -> TargetConfig {
         abis: Vec::new(),
         channels: Vec::new(),
         frontends: Vec::new(),
+        web_ui: None,
+        page_only: false,
         separate_packages: false,
     }
 }

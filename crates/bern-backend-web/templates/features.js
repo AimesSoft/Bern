@@ -366,6 +366,7 @@ async function pictureFailure(url) {
 /// the same network. `failed` hears of each failed try, `loaded` of the
 /// picture.
 function loadPicture(image, url, show, { failed, loaded } = {}) {
+  url = servedFile(url);
   listenForNetwork();
   let tries = 0;
   let trying = false;
@@ -478,7 +479,16 @@ function picture(url) {
 }
 
 /// The average color of the picture at `url`, once read; `null` before.
+/// A file of the device the engine runs on, as a WebUI page reaches it: by
+/// its server, which keeps to the app's own folders.
+function servedFile(url) {
+  return typeof url === "string" && url.startsWith("file:")
+    ? `__bern/file?url=${encodeURIComponent(url)}`
+    : url;
+}
+
 export function averageColor(url) {
+  url = servedFile(url);
   if (!url) return null;
   return picture(url).average.get();
 }

@@ -155,3 +155,72 @@ fn only_the_served_page_may_open_the_channel() {
     assert_eq!(reply["error"]["code"], "unauthorized");
     let _ = std::fs::remove_dir_all(root);
 }
+
+struct Hello;
+
+impl bern_command::web_ui::Routes for Hello {
+    fn handle(
+        &self,
+        request: &bern_command::web_ui::Request,
+        _host: &bern_command::Host,
+    ) -> Option<bern_command::web_ui::Response> {
+        (request.path == "/api/hello").then(|| bern_command::web_ui::Response {
+            status: 200,
+            headers: vec![("Content-Type".into(), "text/plain".into())],
+            body: bern_command::web_ui::Body::Bytes(
+                format!(
+                    "{} {}",
+                    request.param("name").unwrap_or_default(),
+                    request.body.len()
+                )
+                .into_bytes(),
+            ),
+        })
+    }
+}
+
+#[test]
+fn an_open_server_takes_any_host_and_routes_answer_before_the_page() {
+    let (first, root) = start();
+    drop(first);
+    let options = bern_command::web_ui::Options {
+        port: 0,
+        routes: Some(std::sync::Arc::new(Hello)),
+    };
+    let server = Server::start_open(
+        host(),
+        Sessions::new(),
+        MediaHub::new(&[]),
+        root.clone(),
+        &options,
+    )
+    .unwrap();
+    assert_eq!(
+        server.url(),
+        format!("http://127.0.0.1:{}/", server.address().port())
+    );
+
+    let (head, body) = request(
+        &server,
+        "POST /api/hello?name=a%20b HTTP/1.1\r\nHost: 192.168.1.5:1180\r\nContent-Length: 3\r\n\r\nabc",
+    );
+    assert!(head.starts_with("HTTP/1.1 200"), "{head}");
+    assert_eq!(body, b"a b 3");
+
+    let (head, _) = request(
+        &server,
+        "HEAD /api/hello?name=a HTTP/1.1\r\nHost: nas.local\r\n\r\n",
+    );
+    assert!(head.contains("Content-Length: 3"), "{head}");
+
+    // What the routes leave is the page's, by whatever name it was reached.
+    let (head, _) = request(&server, "GET / HTTP/1.1\r\nHost: nas.local:1180\r\n\r\n");
+    assert!(head.starts_with("HTTP/1.1 200"), "{head}");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn a_page_reads_the_apps_own_files_and_no_others() {
+    assert_eq!(app_file("url=file%3A%2F%2F%2Fetc%2Fhosts"), None);
+    assert_eq!(app_file("other=1"), None);
+}

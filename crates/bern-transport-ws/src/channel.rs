@@ -37,13 +37,19 @@ pub struct Env {
     pub host: Host,
     pub sessions: Sessions,
     pub media: MediaHub,
-    pub token: String,
+    /// What a page must present; `None` for a server open to any page.
+    pub token: Option<String>,
     router: Arc<Router>,
     next: AtomicU64,
 }
 
 impl Env {
-    pub fn new(host: Host, sessions: Sessions, media: MediaHub, token: String) -> Arc<Self> {
+    pub fn new(
+        host: Host,
+        sessions: Sessions,
+        media: MediaHub,
+        token: Option<String>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             host,
             sessions,
@@ -387,7 +393,10 @@ impl Connection {
             ));
             return false;
         };
-        if !token.is_some_and(|token| crate::digest::same(&token, &self.env.token)) {
+        let admitted = self.env.token.as_ref().is_none_or(|expected| {
+            token.is_some_and(|token| crate::digest::same(&token, expected))
+        });
+        if !admitted {
             self.send(&error(
                 None,
                 "unauthorized",
@@ -462,7 +471,7 @@ impl Connection {
                                     params,
                                 },
                                 CallContext {
-                                    entry: Entry::Json,
+                                    entry: Entry::Web,
                                     request_id: request_id.clone(),
                                 },
                                 cancellation,

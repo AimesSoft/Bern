@@ -58,13 +58,14 @@ fn every_generated_crate_optimizes_its_releases_across_crates() {
             manifests.push(shown);
         }
     }
-    // Android's command line and MCP server, and the WebUI's engine host,
-    // are crates of their own beside the engine's.
+    // The command line and MCP server of Android and iOS, and the WebUI's
+    // engine host, are crates of their own beside the engine's.
     assert_eq!(
         manifests,
         [
             "macos: glue/Cargo.toml",
             "ios: glue/Cargo.toml",
+            "ios: tools/Cargo.toml",
             "android: glue/Cargo.toml",
             "android: tools/Cargo.toml",
             "linux: app/Cargo.toml",

@@ -853,6 +853,13 @@ object BernNative {
     external fun queryOpen(app: Long, kind: Int, generation: Long, index: Int): ByteArray
     external fun queryRequest(app: Long, subscription: Long, params: ByteArray): ByteArray
     external fun queryClose(app: Long, subscription: Long)
+    external fun mediaKernelAttach(app: Long, bytes: ByteArray): ByteArray
+    external fun surfaceWindow(surface: android.view.Surface): Long
+    external fun surfaceWindowRelease(window: Long)
+    external fun mediaSurfaceAttach(app: Long, bytes: ByteArray)
+    external fun mediaSurfaceResize(app: Long, bytes: ByteArray)
+    external fun mediaSurfaceDetach(app: Long, bytes: ByteArray)
+    external fun mediaSurfaceFrame(app: Long, view: ByteArray, now: Double, target: Double)
     external fun mediaExecutorAttached(app: Long, bytes: ByteArray): ByteArray
     external fun mediaSnapshot(app: Long): ByteArray
     external fun mediaDispatch(app: Long, command: Int, params: ByteArray, token: Long)
