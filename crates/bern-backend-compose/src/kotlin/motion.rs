@@ -131,7 +131,16 @@ impl Generator<'_> {
                 continue;
             }
             out.open(format!("{index} -> {{"));
-            if body.len() > 1 {
+            // What a scene places stays where it is put: a column would
+            // push each element below the room the one before it takes.
+            let placed = body
+                .iter()
+                .any(|node| matches!(node, Node::Element(element) if element.kind == "Positioned"));
+            if body.len() > 1 && placed {
+                out.open("Box {");
+                self.nodes(out, body, &inner.within(Scope::Other));
+                out.close("}");
+            } else if body.len() > 1 {
                 out.open("Column {");
                 self.nodes(out, body, &inner.within(Scope::Column));
                 out.close("}");

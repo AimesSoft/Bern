@@ -939,6 +939,9 @@ struct BernWindowBehavior: ViewModifier {
             // a drag gesture here would keep the navigation bar's buttons
             // from being tapped.
             .background(BernTouchWatcher { touched() })
+            #if os(iOS)
+            .background(BernHingeWatcher(window: context))
+            #endif
             #if os(tvOS)
             .onReceive(NotificationCenter.default.publisher(for: bernRemoteActivity)) { note in
                 if note.object as? String == context.kindID { touched() }
@@ -1366,6 +1369,61 @@ struct BernSearchInput: UIViewRepresentable {
     }
 }
 
+#endif
+
+// MARK: - Hinge
+
+#if os(iOS)
+/// Tells the window how a foldable's hinge stands; a device without one
+/// never answers. The interface came with the iOS 27.1 SDK.
+struct BernHingeWatcher: UIViewRepresentable {
+    let window: BernWindowContext
+
+    func makeUIView(context: Context) -> BernHingeView {
+        BernHingeView(context: window)
+    }
+
+    func updateUIView(_ view: BernHingeView, context: Context) {}
+}
+
+/// Follows the hinge, and where the system divides this view at the fold.
+final class BernHingeView: UIView {
+    private let context: BernWindowContext
+
+    init(context: BernWindowContext) {
+        self.context = context
+        super.init(frame: .zero)
+        isUserInteractionEnabled = false
+        #if compiler(>=6.4.2)
+        if #available(iOS 27.1, *) {
+            addInteraction(UIHingeInteraction { [weak self] _, update in
+                context.hinge = update.hinge.flatMap { hinge in
+                    switch hinge.status {
+                    case .closed: .closed
+                    case .partiallyOpen: .partiallyOpen
+                    case .fullyOpen: .open
+                    default: nil
+                    }
+                }
+                self?.setNeedsLayout()
+            })
+        }
+        #endif
+    }
+
+    required init?(coder: NSCoder) { fatalError("made in code") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        #if compiler(>=6.4.2)
+        if #available(iOS 27.1, *) {
+            // Inactive while the device lies flat: the fold is still there.
+            let division = reservedRegions(kind: .division, options: .includeInactive).first?.frame.midX
+            if context.division != division { context.division = division }
+        }
+        #endif
+    }
+}
 #endif
 
 // MARK: - Orientation

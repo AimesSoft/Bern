@@ -419,6 +419,10 @@ fun BernStyledSidebarItem(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
+    if (LocalBernRail.current) {
+        BernSidebarItem(label, icon, selected, badge, onClick)
+        return
+    }
     val interaction = remember { BernInteractions() }
     val pressed = interaction.pressed
     val hovered = interaction.hovered

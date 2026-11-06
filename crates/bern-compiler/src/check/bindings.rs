@@ -192,6 +192,10 @@ impl Checker<'_> {
             let known = field.as_deref() == Some("fullscreen")
                 || field.as_deref() == Some("idle")
                 || field.as_deref() == Some("short")
+                || field.as_deref() == Some("rail")
+                || field.as_deref() == Some("unfolded")
+                || field.as_deref() == Some("tabletop")
+                || field.as_deref() == Some("fold")
                 || field.as_deref() == Some("tv")
                 || field.as_deref() == Some("webview")
                 || field.as_deref() == Some("menu_bar")
@@ -201,7 +205,7 @@ impl Checker<'_> {
             if !known || path.segments.len() != 2 {
                 self.error(
                     path.span(),
-                    "the hosting window offers `window.fullscreen` (the actual full-screen state), `window.idle` (no input for `idle_after` seconds), its size: `window.compact`, `window.medium`, `window.expanded`, `window.large`, `window.short` (shorter than the compact breakpoint, as a phone on its side), `window.tv` (the window is on a television), `window.webview` (the target supports WebView), `window.menu_bar` (the application's `MenuBar` shows in the system menu bar), `window.keyboard` (a hardware keyboard is attached), and `window.app_version` (`version` of `[app]` in Bern.toml)",
+                    "the hosting window offers `window.fullscreen` (the actual full-screen state), `window.idle` (no input for `idle_after` seconds), its size: `window.compact`, `window.medium`, `window.expanded`, `window.large`, `window.short` (shorter than the compact breakpoint, as a phone on its side), `window.fold` (where a foldable's fold lies), `window.tv` (the window is on a television), `window.webview` (the target supports WebView), `window.menu_bar` (the application's `MenuBar` shows in the system menu bar), `window.keyboard` (a hardware keyboard is attached), and `window.app_version` (`version` of `[app]` in Bern.toml)",
                 );
                 return None;
             }
@@ -232,6 +236,10 @@ impl Checker<'_> {
             if field != "fullscreen"
                 && field != "idle"
                 && field != "short"
+                && field != "rail"
+                && field != "unfolded"
+                && field != "tabletop"
+                && field != "fold"
                 && field != "tv"
                 && field != "webview"
                 && field != "menu_bar"
@@ -260,11 +268,16 @@ impl Checker<'_> {
                     }
                 }
             }
+            let ty = if field == "fold" {
+                Type::Float
+            } else {
+                Type::Bool
+            };
             return Some(ir::Expr {
                 kind: ir::ExprKind::Binding {
                     binding: ir::Binding::Window { field },
                 },
-                ty: Type::Bool,
+                ty,
             });
         }
         let Some(root) = scope.get(&root_name).cloned() else {

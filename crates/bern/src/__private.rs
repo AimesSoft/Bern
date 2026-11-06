@@ -116,6 +116,14 @@ pub struct WindowState {
     /// Whether the window is shorter than the compact breakpoint, as a
     /// phone on its side.
     pub short: <bool as BernValue>::Ref,
+    /// A split view shows its sidebar as a navigation rail.
+    pub rail: <bool as BernValue>::Ref,
+    /// A foldable open with its fold down the middle.
+    pub unfolded: <bool as BernValue>::Ref,
+    /// A foldable resting half open with its fold across.
+    pub tabletop: <bool as BernValue>::Ref,
+    /// How far from the window's left edge a foldable's fold lies.
+    pub fold: <f64 as BernValue>::Ref,
     /// Whether the window is a television's.
     pub tv: <bool as BernValue>::Ref,
     /// Build-time availability of a web document engine.
@@ -138,6 +146,10 @@ pub fn window() -> WindowState {
         expanded: bool::reference(),
         large: bool::reference(),
         short: bool::reference(),
+        rail: bool::reference(),
+        unfolded: bool::reference(),
+        tabletop: bool::reference(),
+        fold: f64::reference(),
         tv: bool::reference(),
         webview: bool::reference(),
         menu_bar: bool::reference(),

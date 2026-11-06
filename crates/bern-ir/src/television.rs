@@ -122,6 +122,7 @@ impl Known {
                 "idle" => None,
                 // A television takes a keyboard too.
                 "keyboard" => None,
+                "rail" | "unfolded" | "tabletop" => Some(false),
                 "short" => self
                     .layouts
                     .map(|layouts| TELEVISION_SCREEN.1 < layouts.compact_below),

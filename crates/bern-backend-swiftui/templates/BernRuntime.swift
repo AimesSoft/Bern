@@ -550,7 +550,26 @@ final class BernWindowContext {
     /// after it move in, those of the first frame do not.
     var settled = false
 
-    private var size: String { bernAppBreakpoints.size(of: layoutWidth) }
+    /// How far a foldable's hinge is open; nil on a device without one.
+    var hinge: BernHinge?
+    /// Where the system divides the window at the fold, from its left edge.
+    var division: CGFloat?
+
+    /// A foldable open with its fold down the middle: each half counts as a
+    /// window of its own for the breakpoints, as two columns fit it.
+    var unfolded: Bool {
+        (hinge == .open || hinge == .partiallyOpen) && layoutWidth > layoutHeight
+    }
+    /// A foldable resting half open with its fold across: the top half is
+    /// out of reach, the bottom half under the hand.
+    var tabletop: Bool { hinge == .partiallyOpen && layoutHeight > layoutWidth }
+    /// How far from the window's left edge the fold lies, the status bar of
+    /// an open foldable keeping the window from centring on it.
+    var fold: Double { Double(division ?? layoutWidth / 2) }
+    /// A sidebar drawn as a navigation rail: Material's, not on this target.
+    var rail: Bool { false }
+
+    private var size: String { bernAppBreakpoints.size(of: unfolded ? layoutWidth / 2 : layoutWidth) }
     var compact: Bool { size == "compact" }
     var medium: Bool { size == "medium" }
     var expanded: Bool { size == "expanded" }
@@ -792,6 +811,11 @@ extension BernWindowContext {
 
 /// One layout per size of the available width. The content builds the
 /// layout named; external entries read the size.
+/// The positions of a foldable's hinge that a layout tells apart.
+enum BernHinge {
+    case closed, partiallyOpen, open
+}
+
 struct BernAdaptive<Content: View>: View {
     /// The size external entries read; a reference, so the registered
     /// control always reports the current one.

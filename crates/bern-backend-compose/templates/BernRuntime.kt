@@ -605,6 +605,13 @@ class BernWindowContext(
     val large: Boolean get() = size == "large"
     /// `window.tv`: the window is on a television.
     val tv: Boolean get() = BernHost.television
+    /// `window.rail`: a split view shows its sidebar as a navigation rail.
+    val rail: Boolean get() = !tv && !compact
+    /// `window.unfolded`, `window.tabletop` and `window.fold`: a foldable's
+    /// postures, which this target does not read yet.
+    val unfolded: Boolean get() = false
+    val tabletop: Boolean get() = false
+    val fold: Double get() = 0.0
     /// A hardware keyboard is attached: `window.keyboard`.
     val keyboard: Boolean get() = BernHost.keyboard
     val chrome = mutableStateListOf<BernChromeEntry>()
