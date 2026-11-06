@@ -332,14 +332,18 @@ fn write_file_scripts(def: &AppDef) {
     let folder = glib::user_data_dir().join("nautilus/scripts");
     let language = text::language();
     let quoted = format!("'{}'", program.display().to_string().replace('\'', r"'\''"));
-    let script =
-        format!("#!/bin/sh\n[ -x {quoted} ] || {{ rm -f -- \"$0\"; exit 0; }}\nexec {quoted} \"$@\"\n");
+    let script = format!(
+        "#!/bin/sh\n[ -x {quoted} ] || {{ rm -f -- \"$0\"; exit 0; }}\nexec {quoted} \"$@\"\n"
+    );
     for texts in def.file_menus {
         let there = |name: &str| folder.join(name.replace('/', "-"));
         if texts.iter().any(|(_, name)| there(*name).exists()) {
             continue;
         }
-        let chosen = texts.iter().find(|(tag, _)| *tag == language).or(texts.first());
+        let chosen = texts
+            .iter()
+            .find(|(tag, _)| *tag == language)
+            .or(texts.first());
         let Some((_, name)) = chosen else {
             continue;
         };
