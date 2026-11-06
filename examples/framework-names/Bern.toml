@@ -34,6 +34,8 @@ platform = "macos"
 
 [targets.ios]
 platform = "ios"
+# The tests of the generated Swift read this front end.
+frontends = ["swiftui"]
 
 [targets.tvos]
 platform = "tvos"

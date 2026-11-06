@@ -46,9 +46,10 @@ channels = ["ipc"]
 [targets.ios]
 platform = "ios"
 channels = ["ipc"]
-# iOS 17 and later. Name "swiftui-16" as well to reach iOS 16, in one .ipa
-# that chooses as the app starts, or in one for each with packages.
-# frontends = ["swiftui", "swiftui-16"]
+# iOS 16 and later, in one .ipa that chooses its front end as the app starts.
+# Name only "swiftui" for iOS 17 and later, or keep both and ask for an .ipa
+# of each with packages.
+# frontends = ["swiftui"]
 # packages = "separate"
 
 [targets.windows]

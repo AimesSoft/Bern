@@ -304,6 +304,29 @@ Implementation notes: [macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Doc
 
 Omitting the UI technology picks the platform default; an unavailable default fails loudly instead of silently switching to another stack.
 
+### Windows and iOS each have two front ends
+
+These two platforms span more system versions than one UI framework reaches, so the same declaration generates two front ends for each. By default both go into one package and the app chooses as it starts, by the system it finds. Neither the user nor the app's code has to do anything.
+
+| Platform | Front end | Name in `frontends` | Runs on |
+| --- | --- | --- | --- |
+| Windows | WinUI 3 | `winui3` | Systems with Windows App Runtime 2, with Mica and the Windows 11 look |
+| Windows | The system XAML, through XAML Islands | `xaml-islands` | Every other Windows 10 and 11, with no runtime to install |
+| iOS | SwiftUI | `swiftui` | iOS 17 and later; every Apple target shares this front end |
+| iOS | SwiftUI for iOS 16 | `swiftui-16` | iOS 16, rewritten from the same generated code |
+
+To keep only one, name it:
+
+```toml
+[targets.windows]
+frontends = ["winui3"]   # asks to install the runtime on a system without it
+
+[targets.ios]
+frontends = ["swiftui"]  # iOS 17 and later
+```
+
+With both iOS front ends, `packages = "separate"` makes one `.ipa` of each. The [Windows](Docs/Implementation/Windows-WinUI3.md) and [iOS](Docs/Implementation/iOS-SwiftUI.md) implementation notes give the rules of the choice, and what is reduced on iOS 16.
+
 ## Compared with other cross-platform frameworks
 
 <p align="center">

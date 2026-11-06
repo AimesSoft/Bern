@@ -207,14 +207,13 @@ fn ios_builds_the_current_front_end_unless_told_otherwise() {
             .unwrap();
         (target.frontends.clone(), target.separate_packages)
     };
-    assert_eq!(
-        ios(&load("").unwrap()),
-        (vec!["swiftui".to_string()], false)
-    );
     let both = "frontends = [\"swiftui\", \"swiftui-16\"]\n";
+    let both_listed = vec!["swiftui".to_string(), "swiftui-16".to_string()];
+    assert_eq!(ios(&load("").unwrap()), (both_listed.clone(), false));
+    assert_eq!(ios(&load(both).unwrap()), (both_listed, false));
     assert_eq!(
-        ios(&load(both).unwrap()),
-        (vec!["swiftui".to_string(), "swiftui-16".to_string()], false)
+        ios(&load("frontends = [\"swiftui\"]\n").unwrap()),
+        (vec!["swiftui".to_string()], false)
     );
     assert!(ios(&load(&format!("{both}packages = \"separate\"\n")).unwrap()).1);
     assert!(!ios(&load(&format!("{both}packages = \"one\"\n")).unwrap()).1);
@@ -222,7 +221,9 @@ fn ios_builds_the_current_front_end_unless_told_otherwise() {
     let message = |table: &str| load(table).unwrap_err()[0].message.clone();
     assert!(message("frontends = [\"uikit\"]").contains("unknown front end `uikit`"));
     assert!(message(&format!("{both}packages = \"many\"\n")).contains("`many`"));
-    assert!(message("packages = \"separate\"\n").contains("both front ends"));
+    assert!(
+        message("frontends = [\"swiftui\"]\npackages = \"separate\"\n").contains("both front ends")
+    );
 }
 
 #[test]

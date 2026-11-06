@@ -57,6 +57,8 @@ channels = ["ipc"]
 [targets.ios]
 platform = "ios"
 channels = ["ipc"]
+# The tests of the generated Swift read this front end.
+frontends = ["swiftui"]
 
 # Apple TV, built for the simulator; `bern run --target tvos` starts it in
 # the Apple TV simulator that is running.
