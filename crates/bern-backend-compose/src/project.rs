@@ -125,6 +125,11 @@ plugins {{
 }}
 
 android {{
+    // The default also leaves out folders that start with an underscore,
+    // which drops Bern's pictures and the WebUI from the package.
+    androidResources {{
+        ignoreAssetsPattern = "!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~"
+    }}
     namespace = "{namespace}"
     compileSdk = {COMPILE_SDK}
 
