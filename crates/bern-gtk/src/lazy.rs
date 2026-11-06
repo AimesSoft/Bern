@@ -243,11 +243,14 @@ impl LazyGrid {
         let cell = ((width - gap * (columns as i32 - 1)) / columns as i32).max(0);
         imp.columns.set(columns);
         imp.cell.set(cell);
-        for (key, row) in imp.built.borrow().iter() {
-            let (_, natural, _, _) = row.holder.measure(gtk::Orientation::Vertical, cell);
-            imp.heights.borrow_mut().insert(key.clone(), natural);
-            if imp.guess.get() <= 0 && natural > 0 {
-                imp.guess.set(natural);
+        // No width yet, as for a list not laid out: nothing to measure at.
+        if cell > 0 {
+            for (key, row) in imp.built.borrow().iter() {
+                let (_, natural, _, _) = row.holder.measure(gtk::Orientation::Vertical, cell);
+                imp.heights.borrow_mut().insert(key.clone(), natural);
+                if imp.guess.get() <= 0 && natural > 0 {
+                    imp.guess.set(natural);
+                }
             }
         }
         let fixed = self.cell_height(cell);

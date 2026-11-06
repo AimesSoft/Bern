@@ -1250,6 +1250,7 @@ fn reveal(outer: &gtk::Widget, motion: &MotionBox) {
             if let Some((previous, controller)) = watched.borrow_mut().take() {
                 previous.remove_controller(&controller);
             }
+            crate::layout::hold_input(&container);
             let pointer = gtk::EventControllerMotion::new();
             let entered = Rc::clone(&hovering);
             let update_enter = Rc::clone(&update);
