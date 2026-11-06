@@ -399,9 +399,8 @@ fn install_icon(bundle_id: &str) {
 
 /// Accent colors from the brand color, for libadwaita's named colors.
 fn brand_css(red: u8, green: u8, blue: u8) -> String {
-    format!(
-        "@define-color accent_bg_color rgb({red},{green},{blue});\n@define-color accent_color rgb({red},{green},{blue});\n"
-    )
+    let color = format!("rgb({red},{green},{blue})");
+    crate::theme::named_colors(&[("accent_bg_color", color.clone()), ("accent_color", color)])
 }
 
 /// Install the host of `def` on this thread: the interface language, and
@@ -788,9 +787,8 @@ pub(crate) mod tests {
 
     #[test]
     fn brand_color_becomes_the_accent() {
-        assert_eq!(
-            brand_css(53, 132, 228),
-            "@define-color accent_bg_color rgb(53,132,228);\n@define-color accent_color rgb(53,132,228);\n"
-        );
+        let css = brand_css(53, 132, 228);
+        assert!(css.contains("@define-color accent_bg_color rgb(53,132,228);\n"));
+        assert!(css.contains("@define-color accent_color rgb(53,132,228);\n"));
     }
 }
