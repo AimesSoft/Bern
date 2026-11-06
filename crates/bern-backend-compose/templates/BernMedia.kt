@@ -131,10 +131,25 @@ object BernMedia {
         }
     }
 
-    /// Attach Media3 as the executor of every player. One player shows in
-    /// one view at a time, and stops being reliable in the background, where
-    /// Android needs a media service.
+    /// The application's media kernel executes every player: video views
+    /// give it a native window. Set once, as the app starts.
+    var kernel = false
+        private set
+
+    /// Let the application's media kernel execute every player when it can
+    /// draw into a native window. Otherwise attach Media3: one player shows
+    /// in one view at a time, and stops being reliable in the background,
+    /// where Android needs a media service.
     fun attachExecutor(context: Context) {
+        val offer = BernWriter()
+        offer.u32(1)
+        offer.u32(BERN_SURFACE_NATIVE_WINDOW)
+        val answer = BernReader(BernNative.mediaKernelAttach(BernHost.handle, offer.bytes()))
+        if (answer.u8() == 1) {
+            kernel = true
+            receive(BernNative.mediaSnapshot(BernHost.handle))
+            return
+        }
         backend = BernMediaBackend(context.applicationContext)
         val writer = BernWriter()
         writer.text("media3")
@@ -479,10 +494,95 @@ fun bernTime(milliseconds: Long): String {
     return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, rest) else "%d:%02d".format(minutes, rest)
 }
 
+/// `SurfaceKind::NativeWindow` of the C ABI.
+private const val BERN_SURFACE_NATIVE_WINDOW = 3
+
+/// Runs the frames of kernel surfaces on a thread of their own, so they keep
+/// the display's pace while the main thread lays out or animates.
+private object BernKernelClock {
+    private val thread = android.os.HandlerThread("bern-kernel-clock").apply { start() }
+    val handler = android.os.Handler(thread.looper)
+}
+
+/// A surface the application's media kernel draws `player` into. The window
+/// goes to the kernel when it exists and comes back before it is destroyed.
+class BernKernelView(context: Context, private val player: String) :
+    android.view.SurfaceView(context),
+    android.view.SurfaceHolder.Callback {
+    private val token = java.util.UUID.randomUUID().toString()
+    private val tokenBytes = token.toByteArray()
+    private var window = 0L
+    @Volatile private var ticking = false
+    var fit = BernVideoFit.Contain
+
+    private val frame = object : android.view.Choreographer.FrameCallback {
+        override fun doFrame(frameTimeNanos: Long) {
+            if (!ticking) return
+            val now = frameTimeNanos / 1e9
+            val refresh = display?.refreshRate?.takeIf { it > 0f } ?: 60f
+            BernNative.mediaSurfaceFrame(BernHost.handle, tokenBytes, now, now + 1.0 / refresh)
+            android.view.Choreographer.getInstance().postFrameCallback(this)
+        }
+    }
+
+    init {
+        holder.addCallback(this)
+    }
+
+    override fun surfaceCreated(holder: android.view.SurfaceHolder) {}
+
+    override fun surfaceChanged(holder: android.view.SurfaceHolder, format: Int, width: Int, height: Int) {
+        val scale = resources.displayMetrics.density.toDouble()
+        val writer = BernWriter()
+        writer.text(token)
+        if (window != 0L) {
+            writer.u32(width)
+            writer.u32(height)
+            writer.f64(scale)
+            BernNative.mediaSurfaceResize(BernHost.handle, writer.bytes())
+            return
+        }
+        window = BernNative.surfaceWindow(holder.surface)
+        if (window == 0L) return
+        writer.text(player)
+        writer.u32(BERN_SURFACE_NATIVE_WINDOW)
+        writer.u64(window)
+        writer.u32(width)
+        writer.u32(height)
+        writer.f64(scale)
+        writer.u32(fit.ordinal)
+        BernNative.mediaSurfaceAttach(BernHost.handle, writer.bytes())
+        ticking = true
+        BernKernelClock.handler.post { android.view.Choreographer.getInstance().postFrameCallback(frame) }
+    }
+
+    override fun surfaceDestroyed(holder: android.view.SurfaceHolder) {
+        ticking = false
+        if (window == 0L) return
+        val writer = BernWriter()
+        writer.text(token)
+        BernNative.mediaSurfaceDetach(BernHost.handle, writer.bytes())
+        BernNative.surfaceWindowRelease(window)
+        window = 0L
+    }
+}
+
+/// The picture of a player the application's media kernel executes.
+@Composable
+private fun BernKernelSurface(playerID: String, fit: BernVideoFit) {
+    val context = LocalContext.current
+    val view = remember(playerID) { BernKernelView(context, playerID) }
+    AndroidView(factory = { view }, update = { it.fit = fit }, modifier = Modifier.fillMaxSize())
+}
+
 /// The player's picture in a Media3 view without its own controls.
 @OptIn(UnstableApi::class)
 @Composable
 private fun BernVideoSurface(playerID: String, window: String, fit: BernVideoFit, visible: Boolean, clipped: Boolean = false) {
+    if (BernMedia.kernel) {
+        BernKernelSurface(playerID, fit)
+        return
+    }
     val token = remember { java.util.UUID.randomUUID().toString() }
     val context = LocalContext.current
     val view = remember(clipped) {

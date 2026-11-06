@@ -468,6 +468,9 @@ pub struct AndroidOptions {
     /// storage, by path, once the user allows it
     /// (`bern::platform::ask_all_files`).
     pub all_files_access: bool,
+    /// The engine links C++ code against the NDK's shared runtime, which the
+    /// app then carries as `libc++_shared.so`.
+    pub cxx_runtime: bool,
 }
 
 impl TargetConfig {

@@ -659,6 +659,24 @@ impl Target for ComposeAndroid {
                     to: jni.join("libbern_app.so"),
                 },
             ]);
+            if context
+                .target
+                .android
+                .as_ref()
+                .is_some_and(|options| options.cxx_runtime)
+            {
+                // The sysroot names 32-bit ARM by its older triple.
+                let folder = abi.rust.replace("armv7", "arm");
+                steps.push(BuildStep::Copy {
+                    from: bin
+                        .parent()
+                        .expect("the NDK's bin folder has a parent")
+                        .join("sysroot/usr/lib")
+                        .join(folder)
+                        .join("libc++_shared.so"),
+                    to: jni.join("libc++_shared.so"),
+                });
+            }
         }
         steps.extend([
             // Declared resources ship as assets, which the runtime unpacks.

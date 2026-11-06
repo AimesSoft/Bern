@@ -378,6 +378,13 @@ object BernShortcuts {
     /// modifiers, `""` to clear the shortcut, or null to leave it.
     var recorder: ((String?) -> Unit)? = null
 
+    private var backTakenAt = 0L
+
+    /// Back ran a shortcut as a key a moment ago: the system tells of the
+    /// same press again through its Back callback, which the engine's answer
+    /// has not closed yet.
+    fun justTookBack() = android.os.SystemClock.uptimeMillis() - backTakenAt < 500
+
     fun handle(event: KeyEvent): Boolean {
         val code = event.nativeKeyEvent.keyCode
         val back = code == android.view.KeyEvent.KEYCODE_BACK
@@ -410,7 +417,10 @@ object BernShortcuts {
         val entry = entries.values.lastOrNull {
             it.shortcut.replace("ctrl+", "cmd+").replace("cmd+cmd+", "cmd+") == pressed && it.active()
         } ?: return false
-        if (back) tookBack = true
+        if (back) {
+            tookBack = true
+            backTakenAt = android.os.SystemClock.uptimeMillis()
+        }
         entry.action()
         return true
     }
@@ -556,7 +566,9 @@ fun BernShortcut(shortcut: String, active: () -> Boolean = { true }, action: () 
     DisposableEffect(token) { onDispose { BernShortcuts.remove(token) } }
     if (shortcut == "escape") {
         val current by rememberUpdatedState(action)
-        androidx.activity.compose.BackHandler(enabled = active()) { current() }
+        androidx.activity.compose.BackHandler(enabled = active()) {
+            if (!BernShortcuts.justTookBack()) current()
+        }
     }
 }
 
