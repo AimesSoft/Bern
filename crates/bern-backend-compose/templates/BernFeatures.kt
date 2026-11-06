@@ -1189,6 +1189,8 @@ object BernFiles {
     private val extensions: Map<String, List<String>> = mapOf(/*bern:file-extensions*/)
     private var pick: ActivityResultLauncher<Array<String>>? = null
     private var pickFolder: ActivityResultLauncher<Uri?>? = null
+    private var allFilesPage: ActivityResultLauncher<Intent>? = null
+    private var storagePermissions: ActivityResultLauncher<Array<String>>? = null
     private var picked: ((String) -> Unit)? = null
     private var context: Context? = null
     private val openers = LinkedHashMap<Any, Pair<String, (String) -> Unit>>()
@@ -1199,7 +1201,45 @@ object BernFiles {
         context = activity.applicationContext
         pick = activity.registerForActivityResult(ActivityResultContracts.OpenDocument()) { give(it) }
         pickFolder = activity.registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { give(it) }
+        allFilesPage = activity.registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { BernNative.allFilesAnswered() }
+        storagePermissions = activity.registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { BernNative.allFilesAnswered() }
         opened(activity.intent)
+    }
+
+    /// Whether the engine may reach every file on shared storage by path.
+    fun allFilesAllowed(context: Context): Boolean =
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            android.os.Environment.isExternalStorageManager()
+        } else {
+            context.checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+
+    /// Let the user allow that: the app's page in the system's settings from
+    /// Android 11, the storage permissions before. The engine hears when the
+    /// user is back.
+    fun askAllFiles(context: Context) {
+        val declared = context.packageManager
+            .getPackageInfo(context.packageName, android.content.pm.PackageManager.GET_PERMISSIONS)
+            .requestedPermissions
+        check(declared?.contains(android.Manifest.permission.MANAGE_EXTERNAL_STORAGE) == true) {
+            "The Android target does not declare all_files_access"
+        }
+        if (android.os.Build.VERSION.SDK_INT < 30) {
+            checkNotNull(storagePermissions) { "The app has no activity" }.launch(
+                arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE, android.Manifest.permission.WRITE_EXTERNAL_STORAGE),
+            )
+            return
+        }
+        val page = checkNotNull(allFilesPage) { "The app has no activity" }
+        try {
+            page.launch(
+                Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:${context.packageName}")),
+            )
+        } catch (missing: android.content.ActivityNotFoundException) {
+            // Some systems only have the list of all apps.
+            page.launch(Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+        }
     }
 
     private fun give(uri: Uri?) {

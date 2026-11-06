@@ -780,6 +780,15 @@ pub unsafe extern "system" fn Java_dev_bern_runtime_BernNative_overlayPressed(
     }
 }
 
+/// The user came back from what `bern::platform::ask_all_files` showed.
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn Java_dev_bern_runtime_BernNative_allFilesAnswered(
+    _: *mut JNIEnv,
+    _: jobject,
+) {
+    bern_command::platform::all_files_answered();
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "system" fn Java_dev_bern_runtime_BernNative_scriptStart(
     _: *mut JNIEnv,

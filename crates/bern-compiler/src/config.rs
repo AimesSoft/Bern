@@ -1852,6 +1852,15 @@ mod tests {
         assert!(errors.is_empty(), "{errors:?}");
         let options = target.android.unwrap();
         assert!(options.network && options.multicast);
+        assert!(!options.all_files_access);
+
+        let files = target_config(
+            "phone".into(),
+            parse("platform = 'android'\nandroid = { all_files_access = true }"),
+            &mut errors,
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        assert!(files.android.unwrap().all_files_access);
 
         let default = target_config("phone".into(), parse("platform = 'android'"), &mut errors);
         assert!(default.android.is_none());
