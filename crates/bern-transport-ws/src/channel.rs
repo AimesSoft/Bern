@@ -728,7 +728,9 @@ impl Connection {
             } => {
                 self.lock().executor = true;
                 let first = env.router.attach(self.id, Arc::clone(&self.out));
-                if first {
+                // An engine that plays on its own device keeps doing so: a
+                // page that opens is one more way to look at it.
+                if first && !env.media.has_executor() {
                     env.media.attach_executor(
                         Arc::clone(&env.router) as Arc<dyn MediaExecutor>,
                         MediaCapabilities {
@@ -827,7 +829,8 @@ impl Connection {
             self.env.media.release_window(&window);
         }
         if executor && self.env.router.detach(self.id) {
-            self.env.media.detach_executor();
+            let router = Arc::clone(&self.env.router) as Arc<dyn MediaExecutor>;
+            self.env.media.detach_executor_if(&router);
         }
     }
 }

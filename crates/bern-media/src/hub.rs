@@ -399,6 +399,22 @@ impl MediaHub {
         }
     }
 
+    /// Whether something runs the players now.
+    pub fn has_executor(&self) -> bool {
+        self.state().executor.is_some()
+    }
+
+    /// [`MediaHub::detach_executor`], when `executor` is the one attached: one
+    /// that was refused or replaced has nothing to give up.
+    pub fn detach_executor_if(&self, executor: &Arc<dyn MediaExecutor>) {
+        let attached = self.state().executor.as_ref().is_some_and(|attached| {
+            std::ptr::addr_eq(Arc::as_ptr(attached), Arc::as_ptr(executor))
+        });
+        if attached {
+            self.detach_executor();
+        }
+    }
+
     /// The executor is gone. Players report `Unavailable`, waiting requests
     /// fail and later commands are refused until an executor attaches.
     pub fn detach_executor(&self) {

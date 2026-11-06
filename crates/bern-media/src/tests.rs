@@ -454,6 +454,17 @@ fn executor_failures_and_timeouts_are_explicit() {
 }
 
 #[test]
+fn only_the_attached_executor_can_detach_itself() {
+    let (hub, executor) = hub();
+    let other: Arc<dyn MediaExecutor> = Arc::new(Executor::default());
+    hub.detach_executor_if(&other);
+    assert!(hub.has_executor());
+    let attached: Arc<dyn MediaExecutor> = executor;
+    hub.detach_executor_if(&attached);
+    assert!(!hub.has_executor());
+}
+
+#[test]
 fn a_detached_executor_makes_players_unavailable() {
     let (hub, executor) = hub();
     dispatch(

@@ -360,6 +360,49 @@ fn players_run_on_the_page_that_holds_them() {
 }
 
 #[test]
+fn a_page_leaves_the_engines_own_executor_in_place() {
+    #[derive(Default)]
+    struct Native(Mutex<Vec<ExecRequest>>);
+    impl MediaExecutor for Native {
+        fn execute(&self, request: ExecRequest) {
+            self.0.lock().unwrap().push(request);
+        }
+    }
+    let (env, connection, page) = connect();
+    let native = Arc::new(Native::default());
+    env.media.attach_executor(
+        Arc::clone(&native) as Arc<dyn MediaExecutor>,
+        MediaCapabilities {
+            backend: "native".into(),
+            backend_version: "1".into(),
+            background_playback: true,
+            multi_view: true,
+        },
+    );
+    send(&connection, hello("secret"));
+    send(
+        &connection,
+        json!({"type":"media_attach","backend":"browser","backend_version":"1","background_playback":true,"multi_view":false}),
+    );
+    send(
+        &connection,
+        json!({"type":"command","request_id":"open","engine_id":env.host.engine_id().to_string(),
+        "command":"media.open","params":{"player_id":"preview","source":{"url":"file:///a.mkv"}}}),
+    );
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while native.0.lock().unwrap().is_empty() && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(native.0.lock().unwrap().len(), 1);
+    assert!(
+        page.position(|m| m["type"] == "media_request").is_none(),
+        "a page connecting must not take playback from the engine"
+    );
+    connection.closed();
+    assert!(env.media.has_executor());
+}
+
+#[test]
 fn local_media_commands_return_to_the_initiating_executor() {
     let (env, first, page) = connect();
     send(&first, hello("secret"));
