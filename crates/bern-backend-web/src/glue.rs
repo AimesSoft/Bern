@@ -356,6 +356,7 @@ fn main() {{
     let media = bern_media::MediaHub::new(&[{players}]);
     let sessions = bern_runtime::Sessions::new();
     {ipc_start}
+    bern_transport_ws::install(host.clone(), sessions.clone(), media.clone(), root.clone());
     let server = match bern_transport_ws::Server::start(host.clone(), sessions, media, root, port) {{
         Ok(server) => server,
         Err(error) => {{

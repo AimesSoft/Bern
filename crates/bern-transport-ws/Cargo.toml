@@ -19,5 +19,7 @@ serde_json.workspace = true
 # The system random number generator; Unix reads /dev/urandom.
 getrandom = "0.3"
 
+# By path alone: bern-ffi depends on this crate, and a published crate keeps
+# no such dev-dependency.
 [dev-dependencies]
-bern-ffi = { workspace = true, features = ["remote"] }
+bern-ffi = { path = "../bern-ffi", features = ["remote"] }

@@ -28,6 +28,7 @@ pub mod secrets;
 pub mod storage;
 pub mod trace;
 pub mod wake;
+pub mod web_ui;
 
 pub use composite::{Composite, ModuleEngine};
 
@@ -93,6 +94,8 @@ pub enum Entry {
     Cli,
     Json,
     Mcp,
+    /// A WebUI page, in a browser.
+    Web,
     Test,
 }
 
@@ -103,9 +106,21 @@ impl Entry {
             Entry::Cli => "cli",
             Entry::Json => "json",
             Entry::Mcp => "mcp",
+            Entry::Web => "web",
             Entry::Test => "test",
         }
     }
+}
+
+thread_local! {
+    static CURRENT_ENTRY: std::cell::Cell<Option<Entry>> = const { std::cell::Cell::new(None) };
+}
+
+/// The entry of the command the engine is running, on the engine's thread.
+/// An engine that treats a page differently from a window reads it here; the
+/// last command's entry stays until the next one.
+pub fn current_entry() -> Option<Entry> {
+    CURRENT_ENTRY.get()
 }
 
 /// Caller information established by the host or transport, never taken
@@ -666,7 +681,7 @@ impl<E: EngineProtocol> Worker<E> {
         };
         let Job::Invoke {
             invocation,
-            context: _context,
+            context,
             cancellation,
             reply,
             trace: traced,
@@ -674,6 +689,7 @@ impl<E: EngineProtocol> Worker<E> {
         else {
             return false;
         };
+        CURRENT_ENTRY.set(Some(context.entry));
         let _scope = traced.as_ref().map(trace::JobScope::enter);
         let job_trace = traced.map(|job| (job.seq, job.catalog));
         let (engine, shared) = (&mut self.engine, &self.shared);

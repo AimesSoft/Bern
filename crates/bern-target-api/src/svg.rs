@@ -190,7 +190,12 @@ pub fn one_size(element: &bern_ir::Element) -> bool {
 }
 
 pub fn resource_path(context: &BuildContext, name: &str) -> std::path::PathBuf {
-    if name.starts_with(STATIC_PREFIX) {
+    if let Some(file) = name
+        .strip_prefix(crate::WEB_UI_FOLDER)
+        .and_then(|rest| rest.strip_prefix('/'))
+    {
+        crate::web_ui_output(context).join(file)
+    } else if name.starts_with(STATIC_PREFIX) {
         context.output_dir.join(name)
     } else {
         context.project_dir.join(name)

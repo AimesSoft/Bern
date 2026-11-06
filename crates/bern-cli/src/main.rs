@@ -673,6 +673,95 @@ fn describe(framework: &Framework) -> String {
 }
 
 /// `bern check`, `bern build`, `bern package`, `bern run` and `bern ir`.
+/// Build the page of the `web_mode = "ui"` target `name`, without its engine
+/// host, and give its files as resources for a native target to carry.
+fn web_ui_page(
+    config: &Config,
+    compiled: &Compiled,
+    workspace: &Path,
+    registry: &Registry,
+    framework: &Framework,
+    name: &str,
+    release: bool,
+) -> Result<Vec<bern_ir::ResourceDef>, ExitCode> {
+    let failed = |errors: &[Diagnostic]| {
+        report(errors);
+        ExitCode::FAILURE
+    };
+    let mut page = config
+        .targets
+        .iter()
+        .find(|target| target.name == name)
+        .expect("the configuration checks the target")
+        .clone();
+    page.page_only = true;
+    let target = registry
+        .resolve(&page)
+        .map_err(|error| failed(std::slice::from_ref(&error)))?;
+    let context = context(config, compiled, workspace, &page, framework, release);
+    let app = compiled.app.on_platform(&page.platform);
+    let app = bern_target_api::style::for_platforms(&app, target.descriptor().platforms);
+    let mut files = target
+        .generate(&app, &context)
+        .map_err(|errors| failed(&errors))?;
+    if let Err(error) = modules::configure(&mut files, config) {
+        eprintln!("error: {error}");
+        return Err(ExitCode::FAILURE);
+    }
+    for file in &files {
+        if let Err(error) = write_if_changed(&context.output_dir.join(&file.path), &file.contents) {
+            eprintln!("error: cannot write {}: {error}", file.path.display());
+            return Err(ExitCode::FAILURE);
+        }
+    }
+    let mut plan = target
+        .plan(&app, &context)
+        .map_err(|errors| failed(&errors))?;
+    modules::environment(&mut plan.steps, config);
+    if !run_steps(&plan.steps) {
+        return Err(ExitCode::FAILURE);
+    }
+    // What the page loads; the rest of the folder is how it was made, and
+    // what other builds of the target left.
+    let keep = |path: &Path| {
+        let first = path.components().next().map(|part| part.as_os_str());
+        let first = first.and_then(|part| part.to_str()).unwrap_or_default();
+        !first.starts_with("without-")
+            && ![
+                "glue",
+                "bin",
+                "package",
+                "skills",
+                "build.json",
+                "features.json",
+                "control.json",
+                "serve-bridge.py",
+            ]
+            .contains(&first)
+    };
+    let found = bern_target_api::files_below(&context.output_dir).map_err(|error| {
+        eprintln!(
+            "error: cannot read {}: {error}",
+            context.output_dir.display()
+        );
+        ExitCode::FAILURE
+    })?;
+    Ok(found
+        .into_iter()
+        .map(|(_, path)| path)
+        .filter(|path| keep(path))
+        .map(|path| bern_ir::ResourceDef {
+            name: format!(
+                "{}/{}",
+                bern_target_api::WEB_UI_FOLDER,
+                path.to_string_lossy().replace('\\', "/")
+            ),
+            declared: Default::default(),
+            picture: None,
+        })
+        .collect())
+}
+
 fn build(options: &Options) -> ExitCode {
     let Some(manifest) = manifest(options) else {
         eprintln!(
@@ -894,7 +983,16 @@ fn build(options: &Options) -> ExitCode {
         );
         // The lengths the styles set for this target's platforms, on the
         // application with its named corners already at their radii.
-        let app = bern_target_api::style::for_platforms(&app, target.descriptor().platforms);
+        let mut app = bern_target_api::style::for_platforms(&app, target.descriptor().platforms);
+        if let Some(page) = &target_config.web_ui {
+            let release = options.release || options.command == "package";
+            match web_ui_page(
+                &config, &compiled, &workspace, &registry, framework, page, release,
+            ) {
+                Ok(files) => app.to_mut().resources.extend(files),
+                Err(code) => return code,
+            }
+        }
         let files = match target.generate(&app, &context) {
             Ok(files) => files,
             Err(errors) => {

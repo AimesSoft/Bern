@@ -413,3 +413,36 @@ The same day, whole-page acceptance of the same app (Chromium, light and dark):
 - Drop-down menus depend on the Popover API (from Chromium 114, Safari 17, Firefox 125); older browsers have no fallback.
 - The media progress bar does not show buffered ranges.
 - When a segmented control still does not fit with each segment shrunk to 4 on each side, it overflows its container (and is clipped inside a vertical scroll view), and labels get no ellipsis. Resizing the window after a popover opens does not reposition it.
+
+## A WebUI inside a native app
+
+A native target that writes `web_ui = "<target>"`, naming a `web_mode = "ui"` target, has `bern build` compile that target's page first (not its engine host) and put the page's files among the app's resources, in `__bern_web_ui/`:
+
+```toml
+[targets.macos]
+platform = "macos"
+web_ui = "web_ui"
+
+[targets.web_ui]
+ui = "web"
+platform = "browser"
+web_mode = "ui"
+application_transport = "websocket"
+application_codec = "json"
+```
+
+At run time the app listens to nothing by default. The engine says what it wants through `bern::web_ui`:
+
+```rust
+bern::web_ui::set(Some(bern::web_ui::Options { port: 8080, routes: None }));
+match bern::web_ui::status() { /* Stopped, Running { port }, Failed(message) */ }
+```
+
+- `set` is declarative: the engine can call it before the server exists, and the runtime follows once it is up; changed options restart the server. `available()` says, once the engine is up, whether this build has a page.
+- A page is one more UI session of the engine: it shares the engine's state with the windows and keeps its own drafts and windows. Its commands come through `Entry::Web`, which the engine reads with `bern::current_entry()` while it runs them, for example to play in the page a video the page started.
+- This server listens on every interface, takes any `Host` and asks no token, because another device must be able to open the address alone; an application offers it as something the user turns on. The WebSocket upgrade still requires the server's own `Origin`, so a page of another site cannot drive the engine.
+- `Options.routes` are the application's own HTTP routes on the same port. They answer before the page, and `None` leaves the request to the page's files. They run on the connection's thread and may run engine commands through `host`. `Body::File` sends part of a file; ranges are the application's to decide.
+- `file:` pictures the engine names reach a page through `/__bern/file`, limited to the app's cache and data folders.
+- An engine host (the `<program>-host` of `web_mode = "ui"`) can open up the same way; its own 127.0.0.1 server keeps its token.
+
+Verification: the `bern-transport-ws` tests run over real TCP connections and cover any `Host`, routes before the page, `HEAD`, and the limits on app files; a configuration test covers `web_ui` having to name a `web_mode = "ui"` target. Measured on macOS with a real application: the page opened from the server inside the app with the running native app as its engine, 1080p HEVC decoded and played in the browser, and a LAN client read files by range through the application's routes.

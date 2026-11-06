@@ -30,6 +30,7 @@ bern-compiler.workspace = true
 bern-protocol.workspace = true
 bern-syntax.workspace = true
 bern-transport-ws.workspace = true
+bern-ir.workspace = true
 bern-target-api.workspace = true
 bern-backend-swiftui.workspace = true
 bern-backend-web.workspace = true
@@ -41,6 +42,5 @@ serde_json.workspace = true
 toml.workspace = true
 
 [dev-dependencies]
-bern-ir.workspace = true
 bern-svg.workspace = true
 png = "0.18"

@@ -18,6 +18,14 @@
 //!
 //! [`FileServer`] serves a page alone, without a channel, for builds whose
 //! engine runs in the page itself.
+//!
+//! An engine may also ask for the page to reach other devices (see
+//! `bern_command::web_ui`). [`install`] lets it: that server listens on every
+//! interface and takes any `Host`, since a browser opens it by whatever address
+//! it found, and asks no token, since the address alone must open it. The
+//! upgrade still requires the `Origin` of the server itself, so a page of
+//! another site cannot drive the engine. The application's routes answer
+//! first, and the page answers the rest.
 
 mod channel;
 mod digest;
@@ -27,7 +35,7 @@ mod http;
 pub use channel::{Connection, Env, Outbound};
 
 use bern_adapter_json::ServerMessage;
-use bern_command::Host;
+use bern_command::{Host, web_ui};
 use bern_media::MediaHub;
 use bern_runtime::Sessions;
 use std::io::{self, BufReader, Write};
@@ -39,12 +47,46 @@ use std::thread;
 
 /// Path of the WebSocket endpoint.
 pub const ENDPOINT: &str = "/bern";
+/// Where a page reads a file of the app by its `file:` URL, such as a picture
+/// the engine named.
+const FILES: &str = "/__bern/file";
 
 /// A running browser channel. Dropping it stops accepting connections.
 pub struct Server {
     address: SocketAddr,
-    token: String,
+    token: Option<String>,
     stop: Arc<AtomicBool>,
+}
+
+/// How one server treats a request.
+#[derive(Clone)]
+struct Policy {
+    /// Any `Host` is welcome.
+    open: bool,
+    routes: Option<Arc<dyn web_ui::Routes>>,
+}
+
+/// Lets the engine serve this page to other devices, through
+/// `bern_command::web_ui`, for as long as it wants to.
+pub fn install(host: Host, sessions: Sessions, media: MediaHub, root: PathBuf) {
+    web_ui::install(Box::new(move |options| {
+        let server = Server::start_open(
+            host.clone(),
+            sessions.clone(),
+            media.clone(),
+            root.clone(),
+            options,
+        )
+        .map_err(|error| match error.kind() {
+            io::ErrorKind::AddrInUse => format!("port {} is in use", options.port),
+            io::ErrorKind::PermissionDenied => {
+                format!("no permission to listen on port {}", options.port)
+            }
+            _ => error.to_string(),
+        })?;
+        let port = server.address().port();
+        Ok((Box::new(server) as web_ui::Running, port))
+    }));
 }
 
 impl Server {
@@ -59,9 +101,41 @@ impl Server {
         port: u16,
     ) -> io::Result<Server> {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, port))?;
-        let address = listener.local_addr()?;
         let token = digest::random_token(16)?;
-        let env = Env::new(host, sessions, media, token.clone());
+        let env = Env::new(host, sessions, media, Some(token.clone()));
+        let policy = Policy {
+            open: false,
+            routes: None,
+        };
+        Self::accept(listener, env, root, policy, Some(token))
+    }
+
+    /// The same for other devices: on every interface, with no token, and
+    /// the application's routes before the page.
+    pub fn start_open(
+        host: Host,
+        sessions: Sessions,
+        media: MediaHub,
+        root: PathBuf,
+        options: &web_ui::Options,
+    ) -> io::Result<Server> {
+        let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, options.port))?;
+        let env = Env::new(host, sessions, media, None);
+        let policy = Policy {
+            open: true,
+            routes: options.routes.clone(),
+        };
+        Self::accept(listener, env, root, policy, None)
+    }
+
+    fn accept(
+        listener: TcpListener,
+        env: Arc<Env>,
+        root: PathBuf,
+        policy: Policy,
+        token: Option<String>,
+    ) -> io::Result<Server> {
+        let address = listener.local_addr()?;
         let stop = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&stop);
         let root = Arc::new(root);
@@ -75,10 +149,11 @@ impl Server {
                     let Ok(stream) = stream else { continue };
                     let env = Arc::clone(&env);
                     let root = Arc::clone(&root);
+                    let policy = policy.clone();
                     let _ = thread::Builder::new()
                         .name("bern-ws-connection".into())
                         .spawn(move || {
-                            let _ = serve(stream, env, &root, address.port());
+                            let _ = serve(stream, env, &root, address.port(), &policy);
                         });
                 }
             })?;
@@ -93,20 +168,21 @@ impl Server {
         self.address
     }
 
-    /// The page address with its credential in the fragment.
+    /// The page address, with its credential in the fragment if it has one.
     pub fn url(&self) -> String {
-        format!(
-            "http://127.0.0.1:{}/#token={}",
-            self.address.port(),
-            self.token
-        )
+        let port = self.address.port();
+        match &self.token {
+            Some(token) => format!("http://127.0.0.1:{port}/#token={token}"),
+            None => format!("http://127.0.0.1:{port}/"),
+        }
     }
 }
 
 impl Drop for Server {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
-        let _ = TcpStream::connect(self.address);
+        // The accepting thread wakes by a connection of its own.
+        let _ = TcpStream::connect((Ipv4Addr::LOCALHOST, self.address.port()));
     }
 }
 
@@ -117,11 +193,21 @@ fn own_host(value: &str, port: u16) -> bool {
         .any(|name| value.eq_ignore_ascii_case(&format!("{name}:{port}")))
 }
 
-fn serve(stream: TcpStream, env: Arc<Env>, root: &std::path::Path, port: u16) -> io::Result<()> {
+fn serve(
+    stream: TcpStream,
+    env: Arc<Env>,
+    root: &std::path::Path,
+    port: u16,
+    policy: &Policy,
+) -> io::Result<()> {
+    let peer = stream.peer_addr().ok().map(|address| address.ip());
     let mut writer = stream.try_clone()?;
     let mut reader = BufReader::new(stream);
     let request = http::read_request(&mut reader)?;
-    let Some(host) = request.header("Host").filter(|host| own_host(host, port)) else {
+    let Some(host) = request
+        .header("Host")
+        .filter(|host| policy.open || own_host(host, port))
+    else {
         return http::error(&mut writer, "403 Forbidden");
     };
     if request.path == ENDPOINT {
@@ -150,7 +236,53 @@ fn serve(stream: TcpStream, env: Arc<Env>, root: &std::path::Path, port: u16) ->
         writer.flush()?;
         return websocket(reader, writer, env);
     }
+    if request.path == FILES {
+        return match app_file(&request.query) {
+            Some(file) => http::serve_file(
+                &mut writer,
+                &file,
+                request.header("Range"),
+                request.method == "HEAD",
+            ),
+            None => http::error(&mut writer, "404 Not Found"),
+        };
+    }
+    if let Some(routes) = &policy.routes {
+        let asked = web_ui::Request {
+            body: http::read_body(&mut reader, &request)?,
+            method: request.method.clone(),
+            path: request.path.clone(),
+            query: request.query.clone(),
+            headers: request.headers.clone(),
+            peer,
+        };
+        if let Some(response) = routes.handle(&asked, &env.host) {
+            return http::send(&mut writer, &response, request.method == "HEAD");
+        }
+    }
     serve_files(&mut writer, &request, root)
+}
+
+/// The file `url=` names, if it is in the app's own folders: a page sees what
+/// the app keeps, and nothing else of the device.
+fn app_file(query: &str) -> Option<PathBuf> {
+    let url = query
+        .split('&')
+        .find_map(|pair| pair.strip_prefix("url="))
+        .map(web_ui::decode)?;
+    let path = web_ui::decode(&url.strip_prefix("file://")?.replace('+', "%2B"));
+    #[cfg(windows)]
+    let path = path.trim_start_matches('/').to_string();
+    let file = std::fs::canonicalize(path).ok()?;
+    [
+        bern_command::storage::cache_dir(),
+        bern_command::storage::data_dir(),
+    ]
+    .into_iter()
+    .flatten()
+    .filter_map(|folder| std::fs::canonicalize(folder).ok())
+    .any(|folder| file.starts_with(folder))
+    .then_some(file)
 }
 
 /// Answer a request for a file below `root`.

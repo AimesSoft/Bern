@@ -10,7 +10,7 @@ use bern_target_api::glue::{
     WindowPresentation, engine_expr, module_dependencies, path, players_expr, resources_expr,
     session_spec, session_spec_with,
 };
-pub use bern_target_api::glue::{cli_rs, mcp_rs};
+pub use bern_target_api::glue::{cli_rs, mcp_rs, tools_cargo_toml};
 
 /// The iOS engine library's switch for native windows, which the app sets
 /// before it starts the engine.

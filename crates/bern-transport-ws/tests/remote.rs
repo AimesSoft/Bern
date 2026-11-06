@@ -149,7 +149,7 @@ fn a_page_runs_against_a_separate_engine_host() {
         host.clone(),
         Sessions::new(),
         MediaHub::new(&[]),
-        "secret".into(),
+        Some("secret".into()),
     );
     let page: Arc<OnceLock<AppPtr>> = Arc::new(OnceLock::new());
     let statuses: Arc<Mutex<Vec<serde_json::Value>>> = Arc::default();

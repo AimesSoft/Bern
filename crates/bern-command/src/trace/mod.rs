@@ -145,6 +145,7 @@ pub mod entry {
     /// A query subscription of the UI: `origin` subscription, `aux`
     /// version.
     pub const QUERY: u32 = 5;
+    pub const WEB: u32 = 6;
 
     pub fn name(entry: u32) -> &'static str {
         match entry {
@@ -152,6 +153,7 @@ pub mod entry {
             CLI => "cli",
             JSON => "json",
             MCP => "mcp",
+            WEB => "web",
             TEST => "test",
             QUERY => "query",
             _ => "other",
@@ -422,6 +424,7 @@ pub(crate) fn job(catalog: u16, command: usize, context: &CallContext) -> Option
                 Entry::Cli => entry::CLI,
                 Entry::Json => entry::JSON,
                 Entry::Mcp => entry::MCP,
+                Entry::Web => entry::WEB,
                 Entry::Test => entry::TEST,
             },
             hash(&context.request_id),

@@ -402,6 +402,7 @@ dependencies = [
  "bern-runtime",
  "bern-script",
  "bern-transport-ipc",
+ "bern-transport-ws",
  "jni-sys",
  "ndk-context",
  "serde_json",

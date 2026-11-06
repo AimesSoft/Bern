@@ -1,17 +1,21 @@
 //! The minimal HTTP/1.1 the engine host needs: static files of the page,
-//! with byte ranges for media, and the WebSocket upgrade. Every response
-//! closes the connection.
+//! with byte ranges for media, the WebSocket upgrade, and the application's
+//! own routes. Every response closes the connection.
 
+use bern_command::web_ui;
 use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::net::TcpStream;
 use std::path::{Component, Path, PathBuf};
 
 const MAX_HEAD: usize = 16 * 1024;
+/// The largest request body the application's routes are given.
+const MAX_BODY: u64 = 32 * 1024 * 1024;
 
 pub struct Request {
     pub method: String,
     pub path: String,
-    headers: Vec<(String, String)>,
+    pub query: String,
+    pub headers: Vec<(String, String)>,
 }
 
 impl Request {
@@ -52,7 +56,9 @@ pub fn read_request(reader: &mut BufReader<TcpStream>) -> io::Result<Request> {
         .split(' ');
     let method = parts.next().unwrap_or_default().to_string();
     let target = parts.next().unwrap_or_default();
-    let path = target.split(['?', '#']).next().unwrap_or("/").to_string();
+    let target = target.split('#').next().unwrap_or("/");
+    let (path, query) = target.split_once('?').unwrap_or((target, ""));
+    let (path, query) = (path.to_string(), query.to_string());
     let headers = lines[1..]
         .iter()
         .filter_map(|line| {
@@ -63,8 +69,94 @@ pub fn read_request(reader: &mut BufReader<TcpStream>) -> io::Result<Request> {
     Ok(Request {
         method,
         path,
+        query,
         headers,
     })
+}
+
+/// The body of a request, as long as it says it is.
+pub fn read_body(reader: &mut BufReader<TcpStream>, request: &Request) -> io::Result<Vec<u8>> {
+    let length: u64 = request
+        .header("Content-Length")
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0);
+    if length > MAX_BODY {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "request body too large",
+        ));
+    }
+    let mut body = Vec::with_capacity(length as usize);
+    reader.by_ref().take(length).read_to_end(&mut body)?;
+    Ok(body)
+}
+
+fn reason(status: u16) -> &'static str {
+    match status {
+        200 => "OK",
+        201 => "Created",
+        204 => "No Content",
+        206 => "Partial Content",
+        301 => "Moved Permanently",
+        302 => "Found",
+        304 => "Not Modified",
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        403 => "Forbidden",
+        404 => "Not Found",
+        405 => "Method Not Allowed",
+        409 => "Conflict",
+        413 => "Content Too Large",
+        416 => "Range Not Satisfiable",
+        500 => "Internal Server Error",
+        502 => "Bad Gateway",
+        503 => "Service Unavailable",
+        _ => "",
+    }
+}
+
+/// Send an answer of the application's routes.
+pub fn send(
+    stream: &mut TcpStream,
+    response: &web_ui::Response,
+    head_only: bool,
+) -> io::Result<()> {
+    let size = match &response.body {
+        web_ui::Body::Empty => 0,
+        web_ui::Body::Bytes(bytes) => bytes.len() as u64,
+        web_ui::Body::File { length, .. } => *length,
+    };
+    let mut head = format!(
+        "HTTP/1.1 {} {}\r\n",
+        response.status,
+        reason(response.status)
+    );
+    let mut sized = false;
+    for (name, value) in &response.headers {
+        sized |= name.eq_ignore_ascii_case("Content-Length");
+        head.push_str(&format!("{name}: {value}\r\n"));
+    }
+    if !sized {
+        head.push_str(&format!("Content-Length: {size}\r\n"));
+    }
+    head.push_str("Connection: close\r\n\r\n");
+    stream.write_all(head.as_bytes())?;
+    if !head_only {
+        match &response.body {
+            web_ui::Body::Empty => {}
+            web_ui::Body::Bytes(bytes) => stream.write_all(bytes)?,
+            web_ui::Body::File {
+                path,
+                offset,
+                length,
+            } => {
+                let mut file = std::fs::File::open(path)?;
+                file.seek(SeekFrom::Start(*offset))?;
+                io::copy(&mut file.take(*length), stream)?;
+            }
+        }
+    }
+    stream.flush()
 }
 
 pub fn respond(

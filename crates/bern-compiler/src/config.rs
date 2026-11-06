@@ -303,6 +303,8 @@ struct RawTarget {
     #[serde(default)]
     channels: Vec<String>,
     frontends: Option<Vec<String>>,
+    /// The `web_mode = "ui"` target whose page this native target carries.
+    web_ui: Option<String>,
     /// iOS front ends in one `.ipa` (`one`, the default) or each in its own
     /// (`separate`).
     packages: Option<String>,
@@ -1066,6 +1068,28 @@ fn app_sources(
     }
 }
 
+/// `web_ui` names a page for a native target to carry.
+fn check_web_ui(targets: &[TargetConfig], errors: &mut Vec<Diagnostic>) {
+    for target in targets {
+        let Some(page) = &target.web_ui else {
+            continue;
+        };
+        if target.platform == "browser" {
+            errors.push(Diagnostic::error(format!(
+                "target `{}`: `web_ui` applies to native targets",
+                target.name
+            )));
+        }
+        let named = targets.iter().find(|other| other.name == *page);
+        if named.is_none_or(|other| other.web_mode.as_deref() != Some("ui")) {
+            errors.push(Diagnostic::error(format!(
+                "target `{}`: `web_ui` must name a target with web_mode = \"ui\", not `{page}`",
+                target.name
+            )));
+        }
+    }
+}
+
 /// Check one `[targets.<name>]` table and turn it into its configuration.
 fn target_config(name: String, target: RawTarget, errors: &mut Vec<Diagnostic>) -> TargetConfig {
     check_web_mode(&name, &target, errors);
@@ -1127,6 +1151,8 @@ fn target_config(name: String, target: RawTarget, errors: &mut Vec<Diagnostic>) 
         web_extension: target.web_extension,
         channels: target.channels,
         frontends,
+        web_ui: target.web_ui,
+        page_only: false,
         separate_packages,
         webview: target.webview,
         javascript: target.javascript,
@@ -1498,6 +1524,7 @@ pub fn load_excluding(path: &Path, excluded: &[String]) -> Result<Config, Vec<Di
         .into_iter()
         .map(|(name, target)| target_config(name, target, &mut errors))
         .collect();
+    check_web_ui(&targets, &mut errors);
     let libraries = library_manifests(&dir, &raw.libraries, &mut errors);
     let build_modules = module_selection(&dir, &raw.modules, excluded)?;
     let modules = load_modules(

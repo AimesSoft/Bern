@@ -226,6 +226,47 @@ fn ios_builds_the_current_front_end_unless_told_otherwise() {
 }
 
 #[test]
+fn web_ui_names_a_page_for_a_native_target() {
+    let load = |table: &str| {
+        let dir = write_project(
+            PROTOCOL,
+            "",
+            &format!(
+                r#"
+[targets.macos]
+platform = "macos"
+{table}
+[targets.page]
+ui = "web"
+platform = "browser"
+web_mode = "ui"
+application_transport = "websocket"
+application_codec = "json"
+
+[targets.site]
+ui = "web"
+platform = "browser"
+web_mode = "app"
+"#
+            ),
+        );
+        let result = config::load(&dir.join("Bern.toml"));
+        let _ = std::fs::remove_dir_all(&dir);
+        result
+    };
+    let config = load("web_ui = \"page\"\n").unwrap();
+    let target = config.targets.iter().find(|target| target.name == "macos");
+    assert_eq!(target.unwrap().web_ui.as_deref(), Some("page"));
+    for wrong in ["site", "nothing"] {
+        let errors = load(&format!("web_ui = \"{wrong}\"\n")).unwrap_err();
+        assert!(
+            errors[0].message.contains("web_mode = \"ui\""),
+            "{errors:?}"
+        );
+    }
+}
+
+#[test]
 fn windows_builds_both_front_ends_unless_told_otherwise() {
     let load = |table: &str| {
         let dir = write_project(
@@ -746,6 +787,8 @@ mod independent_target {
                     android: None,
                     channels: vec![],
                     frontends: vec![],
+                    web_ui: None,
+                    page_only: false,
                     separate_packages: false,
                     abis: vec![],
                 },
@@ -779,6 +822,8 @@ mod independent_target {
                 android: None,
                 channels: vec![],
                 frontends: vec![],
+                web_ui: None,
+                page_only: false,
                 separate_packages: false,
                 abis: vec![],
             })
