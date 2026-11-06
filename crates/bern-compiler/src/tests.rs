@@ -256,7 +256,10 @@ web_mode = "app"
         result
     };
     let config = load("web_ui = \"page\"\n").unwrap();
-    let target = config.targets.iter().find(|target| target.name == "desktop");
+    let target = config
+        .targets
+        .iter()
+        .find(|target| target.name == "desktop");
     assert_eq!(target.unwrap().web_ui.as_deref(), Some("page"));
     for wrong in ["site", "nothing"] {
         let errors = load(&format!("web_ui = \"{wrong}\"\n")).unwrap_err();
