@@ -98,6 +98,9 @@ void bern_buffer_free(BernBuffer buffer);
 /// Answer the engine's platform requests, such as `copy_text`: an
 /// operation and its two texts; 0 when done.
 void bern_platform_install(void* context, int32_t (*request)(void*, uint8_t const*, size_t, uint8_t const*, size_t, uint8_t const*, size_t));
+/// The system opened the application with the file at `url` (UTF-8), of a
+/// kind `[[app.opens]]` declares.
+void bern_files_opened(uint8_t const* url, size_t len);
 
 /// An HDR picture decoded by Rust: RGBA rows in linear scRGB with straight
 /// alpha, 1.0 at SDR white.
@@ -496,6 +499,9 @@ struct Catalog {
     std::optional<std::array<uint8_t, 3>> brandSeed;
     /// Extensions of each file kind `files:` names, such as `video`.
     std::vector<std::pair<std::string, std::vector<std::string>>> fileKinds;
+    /// The kinds of `[[app.opens]]`: what no drop area takes goes to the
+    /// engine.
+    std::string opens;
     /// `text { … }` of `style!`: a text style, its weight and its size in
     /// points when the design gives one.
     std::vector<std::tuple<std::string, std::string, std::optional<double>>> textStyles;

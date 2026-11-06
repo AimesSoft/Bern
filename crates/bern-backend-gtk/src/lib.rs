@@ -775,6 +775,12 @@ impl Target for GtkLinux {
                     contents,
                 });
             }
+            for (place, contents) in glue::file_menus(app, &installed.join(&executable), id) {
+                steps.push(BuildStep::Write {
+                    path: root.join(place),
+                    contents: contents.into_bytes(),
+                });
+            }
             let mut programs = Vec::new();
             for file in glue::apparmor_files(
                 app,

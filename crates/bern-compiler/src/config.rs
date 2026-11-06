@@ -234,6 +234,19 @@ struct RawApp {
     /// The application saves pictures to the user's photos.
     #[serde(default)]
     photos: bool,
+    /// Files the system may open the application with.
+    #[serde(default)]
+    opens: Vec<RawOpens>,
+}
+
+/// `[[app.opens]]`: `files` as a control's `files:` names them, and what
+/// the context menu of a file manager shows for them, by language.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawOpens {
+    files: Vec<String>,
+    #[serde(default)]
+    menu: BTreeMap<String, String>,
 }
 
 /// `[app].icon`: one square PNG for every platform, or `[app.icon]` with
@@ -364,6 +377,8 @@ pub struct Config {
     pub overlays: bool,
     /// `[app].photos`.
     pub photos: bool,
+    /// `[[app.opens]]`, with its kinds checked.
+    pub opens: Vec<bern_ir::OpensDef>,
     pub languages: Vec<String>,
     pub default_language: String,
     pub strict: bool,
@@ -1581,6 +1596,27 @@ pub fn load_excluding(path: &Path, excluded: &[String]) -> Result<Config, Vec<Di
         }
     }
 
+    let mut opens = Vec::new();
+    for entry in &raw.app.opens {
+        let files = match bern_ir::spec::parse_file_kinds(&entry.files.join(" ")) {
+            Ok(files) => files,
+            Err(message) => {
+                errors.push(Diagnostic::error(format!("`[[app.opens]]`: {message}")));
+                continue;
+            }
+        };
+        if !entry.menu.is_empty() && !entry.menu.contains_key(&raw.languages.default) {
+            errors.push(Diagnostic::error(format!(
+                "`menu` of `[[app.opens]]` has no text in the default language `{}`",
+                raw.languages.default
+            )));
+        }
+        opens.push(bern_ir::OpensDef {
+            files,
+            menu: entry.menu.clone(),
+        });
+    }
+
     if !errors.is_empty() {
         return Err(errors);
     }
@@ -1602,6 +1638,7 @@ pub fn load_excluding(path: &Path, excluded: &[String]) -> Result<Config, Vec<Di
         background_audio: raw.app.background_audio,
         overlays: raw.app.overlays,
         photos: raw.app.photos,
+        opens,
         languages: raw.languages.supported,
         default_language: raw.languages.default,
         strict: raw.languages.strict,

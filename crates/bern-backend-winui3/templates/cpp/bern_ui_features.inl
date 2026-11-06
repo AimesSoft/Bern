@@ -1656,6 +1656,26 @@ inline void Drop(Parent const& p, Ctx const& ctx, DropProps props, Build const& 
     p.Add(area);
 }
 
+/// Files the system opens the application with go to the engine when
+/// `[[app.opens]]` declares them and no drop area takes them first: those
+/// it started with, then those later launches hand over.
+inline void OpenFilesInEngine() {
+    auto take = [](std::vector<std::string> const& urls) {
+        for (auto const& url : urls)
+            if (Accepts(url, app->catalog.opens.c_str()))
+                bern_files_opened(reinterpret_cast<uint8_t const*>(url.data()), url.size());
+    };
+    Host::onOpen = [take](std::vector<std::string> const& urls) {
+        take(urls);
+        Host::openedFiles.clear();
+    };
+    Host::Post([take] {
+        auto urls = Host::openedFiles;
+        Host::openedFiles.clear();
+        take(urls);
+    });
+}
+
 struct GestureProps {
     char const* id = "";
     Str label;

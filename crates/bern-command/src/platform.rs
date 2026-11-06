@@ -115,6 +115,15 @@ pub fn all_files_answered() {
     }
 }
 
+/// Make the application what opens the files `[[app.opens]]` declares, as
+/// far as the system lets an application do so. macOS and Linux change it at
+/// once, and Windows, which leaves the choice to the user, opens the
+/// application's page in Settings. On Android and iOS the user chooses when
+/// opening a file, so the answer is `platform_unavailable`.
+pub fn make_default_opener() -> Result<(), CommandError> {
+    request("make_default_opener", "", "").map(|_| ())
+}
+
 /// Recursively import a user-selected Android document tree into a local
 /// directory. Returns the new root, named after the selected folder.
 /// Existing local files are never overwritten; colliding names are numbered.

@@ -264,7 +264,7 @@ pub fn info_plist(
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSSupportsAutomaticTermination</key>
-    <false/>{documents}
+    <false/>{documents}{services}
 </dict>
 </plist>
 "#,
@@ -279,25 +279,159 @@ pub fn info_plist(
             ""
         },
         documents = document_types(app, false),
+        services = services(app, executable),
     )
 }
 
-/// The kinds of file the application opens: those of every `Drop` with
-/// `opens: true`, in components and in the content written directly in a
-/// window, each once, in a stable order.
-fn opened_kinds(app: &Application) -> Vec<String> {
-    let mut kinds = std::collections::BTreeSet::new();
-    app.walk(&mut |node, _| {
-        if let bern_ir::Node::Element(element) = node
-            && element.kind == "Drop"
-            && element.keyword("opens") == Some("true")
-        {
-            for word in element.keyword("files").unwrap_or("any").split(' ') {
-                kinds.insert(word.to_string());
+/// The system's content type of a file category.
+fn system_type(kind: &str) -> &'static str {
+    match kind {
+        "video" => "public.movie",
+        "audio" => "public.audio",
+        "picture" => "public.image",
+        "folder" => "public.folder",
+        _ => "public.item",
+    }
+}
+
+/// The content type declared for an extension the system may not know.
+fn imported_type(bundle_id: &str, ext: &str) -> String {
+    format!("{bundle_id}.file.{ext}")
+}
+
+/// The declaration of [`imported_type`], in `UTImportedTypeDeclarations`.
+fn imported_declaration(bundle_id: &str, ext: &str, conforms: &str) -> String {
+    format!(
+        r#"
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>{}</string>
+            <key>UTTypeDescription</key>
+            <string>{}</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>{conforms}</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>{}</string>
+                </array>
+            </dict>
+        </dict>"#,
+        xml(&imported_type(bundle_id, ext)),
+        xml(&ext.to_uppercase()),
+        xml(ext)
+    )
+}
+
+/// `NSServices`: the items of `[[app.opens]]`, which Finder's context menu
+/// shows among its Quick Actions. A service names content types only, so
+/// extensions the system may not know get a type of their own.
+fn services(app: &Application, executable: &str) -> String {
+    let bundle_id = &app.app.bundle_id;
+    let default = &app.languages.default;
+    let mut items = String::new();
+    let mut imported = BTreeMap::new();
+    for opens in &app.app.opens {
+        let Some(title) = opens.menu_text(default, default) else {
+            continue;
+        };
+        let mut types: Vec<String> = opens
+            .kinds()
+            .filter(|kind| !kind.starts_with('.'))
+            .map(|kind| system_type(kind).to_string())
+            .collect();
+        for kind in opens.kinds() {
+            let (extensions, conforms) = match kind.strip_prefix('.') {
+                Some(ext) => (vec![ext], "public.data"),
+                None => (
+                    bern_ir::spec::file_kind_extensions(kind).to_vec(),
+                    system_type(kind),
+                ),
+            };
+            for ext in extensions {
+                types.push(imported_type(bundle_id, ext));
+                imported.insert(ext.to_string(), conforms);
             }
         }
-    });
-    kinds.into_iter().collect()
+        let types: String = types
+            .iter()
+            .map(|kind| format!("\n                <string>{}</string>", xml(kind)))
+            .collect();
+        items.push_str(&format!(
+            r#"
+        <dict>
+            <key>NSMenuItem</key>
+            <dict>
+                <key>default</key>
+                <string>{title}</string>
+            </dict>
+            <key>NSMessage</key>
+            <string>bernOpenFiles</string>
+            <key>NSPortName</key>
+            <string>{executable}</string>
+            <key>NSRequiredContext</key>
+            <dict/>
+            <key>NSSendFileTypes</key>
+            <array>{types}
+            </array>
+        </dict>"#,
+            title = xml(title),
+            executable = xml(executable),
+        ));
+    }
+    if items.is_empty() {
+        return String::new();
+    }
+    let mut out = format!("\n    <key>NSServices</key>\n    <array>{items}\n    </array>");
+    if !imported.is_empty() {
+        let declarations: String = imported
+            .iter()
+            .map(|(ext, conforms)| imported_declaration(bundle_id, ext, conforms))
+            .collect();
+        out.push_str(&format!(
+            "\n    <key>UTImportedTypeDeclarations</key>\n    <array>{declarations}\n    </array>"
+        ));
+    }
+    out
+}
+
+/// `ServicesMenu.strings` per language, which translates the items of
+/// [`services`]: macOS only, relative to `Contents/Resources`.
+pub fn services_menu_files(app: &Application) -> Vec<(PathBuf, String)> {
+    let default = &app.languages.default;
+    let items: Vec<_> = app
+        .app
+        .opens
+        .iter()
+        .filter_map(|opens| Some((opens, opens.menu_text(default, default)?)))
+        .collect();
+    if items.is_empty() {
+        return Vec::new();
+    }
+    app.languages
+        .supported
+        .iter()
+        .map(|language| {
+            let table: String = items
+                .iter()
+                .map(|(opens, title)| {
+                    let text = opens.menu_text(language, default).unwrap_or(title);
+                    format!(
+                        "\"{}\" = \"{}\";\n",
+                        escape_strings(title),
+                        escape_strings(text)
+                    )
+                })
+                .collect();
+            (
+                format!("{language}.lproj/ServicesMenu.strings").into(),
+                table,
+            )
+        })
+        .collect()
 }
 
 /// `CFBundleDocumentTypes` for the kinds the application opens, so the
@@ -305,21 +439,13 @@ fn opened_kinds(app: &Application) -> Vec<String> {
 /// macOS extensions the system may not know are listed as extensions; iOS
 /// only takes types, so it imports one for each and opens files in place.
 fn document_types(app: &Application, ios: bool) -> String {
-    document_entries(&opened_kinds(app), &app.app.bundle_id, ios)
+    document_entries(&app.opened_kinds(), &app.app.bundle_id, ios)
 }
 
 fn document_entries(kinds: &[String], bundle_id: &str, ios: bool) -> String {
     if kinds.is_empty() {
         return String::new();
     }
-    let system_type = |kind: &str| match kind {
-        "video" => "public.movie",
-        "audio" => "public.audio",
-        "picture" => "public.image",
-        "folder" => "public.folder",
-        _ => "public.item",
-    };
-    let imported = |ext: &str| format!("{bundle_id}.file.{ext}");
     // The names Finder shows in an app's document types.
     let title = |kind: &str| match kind.strip_prefix('.') {
         Some(ext) => format!("{} File", ext.to_uppercase()),
@@ -373,30 +499,8 @@ fn document_entries(kinds: &[String], bundle_id: &str, ios: bool) -> String {
         }
         if ios {
             for ext in &extensions {
-                types.push(imported(ext));
-                declarations.push(format!(
-                    r#"
-        <dict>
-            <key>UTTypeIdentifier</key>
-            <string>{}</string>
-            <key>UTTypeDescription</key>
-            <string>{}</string>
-            <key>UTTypeConformsTo</key>
-            <array>
-                <string>{conforms}</string>
-            </array>
-            <key>UTTypeTagSpecification</key>
-            <dict>
-                <key>public.filename-extension</key>
-                <array>
-                    <string>{}</string>
-                </array>
-            </dict>
-        </dict>"#,
-                    xml(&imported(ext)),
-                    xml(&ext.to_uppercase()),
-                    xml(ext)
-                ));
+                types.push(imported_type(bundle_id, ext));
+                declarations.push(imported_declaration(bundle_id, ext, conforms));
             }
             entry(&title(kind), "LSItemContentTypes", &types);
         } else {
@@ -696,10 +800,65 @@ mod tests {
         assert_eq!(document_entries(&[], "dev.example", true), "");
     }
 
+    fn opens(files: &str, menu: &[(&str, &str)]) -> bern_ir::OpensDef {
+        bern_ir::OpensDef {
+            files: files.to_string(),
+            menu: menu
+                .iter()
+                .map(|(language, text)| (language.to_string(), text.to_string()))
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn the_opens_of_the_manifest_become_document_types_and_services() {
+        let mut hello = app("hello");
+        let plain = info_plist(&hello, "Hello", "14.0", false);
+        assert!(!plain.contains("NSServices"), "{plain}");
+        assert!(services_menu_files(&hello).is_empty());
+        hello.app.opens = vec![
+            opens(
+                "audio .cue",
+                &[("en", "Play with Hello"), ("zh-Hans", "播放")],
+            ),
+            opens(".lrc", &[]),
+        ];
+        let mac = info_plist(&hello, "Hello", "14.0", false);
+        assert!(mac.contains("<key>CFBundleDocumentTypes</key>"), "{mac}");
+        assert!(mac.contains("<string>LRC File</string>"), "{mac}");
+        assert!(mac.contains("<key>NSServices</key>"), "{mac}");
+        assert!(mac.contains("<string>Play with Hello</string>"), "{mac}");
+        assert!(mac.contains("<string>bernOpenFiles</string>"), "{mac}");
+        assert!(mac.contains("<string>public.audio</string>"), "{mac}");
+        let id = &hello.app.bundle_id;
+        assert!(
+            mac.contains(&format!("<string>{id}.file.cue</string>")),
+            "{mac}"
+        );
+        // Only what has an item needs a type for it.
+        assert!(
+            !mac.contains(&format!("<string>{id}.file.lrc</string>")),
+            "{mac}"
+        );
+        let ios = info_plist_ios(&hello, "Hello", "17.0");
+        assert!(ios.contains("<key>CFBundleDocumentTypes</key>"), "{ios}");
+        assert!(!ios.contains("NSServices"), "{ios}");
+        let menus = services_menu_files(&hello);
+        assert_eq!(menus.len(), hello.languages.supported.len());
+        assert!(
+            menus[0].1.contains("\"Play with Hello\" = "),
+            "{}",
+            menus[0].1
+        );
+    }
+
     #[test]
     fn the_runtime_takes_the_shared_extensions() {
-        let runtime = crate::runtime_source(include_str!("../templates/BernRuntime.swift"));
+        let runtime =
+            crate::runtime_source(include_str!("../templates/BernRuntime.swift"), "audio .cue");
         assert!(!runtime.contains("bern:file-extensions"));
+        assert!(!runtime.contains("bern:engine-opens"));
+        assert!(runtime.contains(r#"engineKinds = "audio .cue""#));
         assert!(
             runtime.contains(r#""video": ["mp4", "m4v", "mov", "mkv""#),
             "{}",

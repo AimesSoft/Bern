@@ -2466,6 +2466,7 @@ inline bool Launch(xaml::ResourceDictionary const& resources) {
         return false;
     }
     Media::AttachExecutor();
+    if (!app->catalog.opens.empty()) B::OpenFilesInEngine();
     // `BERN_FRAME_RATE`: XAML's frame rate counters over every window.
     if (GetEnvironmentVariableW(L"BERN_FRAME_RATE", nullptr, 0) != 0) xaml::Application::Current().DebugSettings().EnableFrameRateCounter(true);
     WindowManager::OpenInitial();

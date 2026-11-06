@@ -297,13 +297,11 @@ pub fn desktop_entry(app: &Application, executable: &Path, icon: &Path) -> Strin
         let Some(name) = app.app.name.get(language) else {
             continue;
         };
-        // Desktop entries name locales as `lang_COUNTRY`.
-        let locale = match language.as_str() {
-            "zh-Hans" => "zh_CN".to_string(),
-            "zh-Hant" => "zh_TW".to_string(),
-            other => other.replace('-', "_"),
-        };
-        entry.push_str(&format!("Name[{locale}]={}\n", desktop_value(name)));
+        entry.push_str(&format!(
+            "Name[{}]={}\n",
+            desktop_locale(language),
+            desktop_value(name)
+        ));
     }
     let types = opened_types(app);
     if types.is_empty() {
@@ -319,6 +317,105 @@ pub fn desktop_entry(app: &Application, executable: &Path, icon: &Path) -> Strin
     entry.push_str("Terminal=false\nCategories=Utility;\n");
     entry.push_str("StartupNotify=true\nDBusActivatable=false\n");
     entry
+}
+
+/// The name desktop entries give a language: `lang_COUNTRY`.
+fn desktop_locale(language: &str) -> String {
+    match language {
+        "zh-Hans" => "zh_CN".to_string(),
+        "zh-Hant" => "zh_TW".to_string(),
+        other => other.replace('-', "_"),
+    }
+}
+
+/// `Name=` lines of a context menu item, the default language first.
+fn menu_names(app: &Application, opens: &bern_ir::OpensDef) -> String {
+    let default = &app.languages.default;
+    let mut names = format!(
+        "Name={}\n",
+        desktop_value(opens.menu_text(default, default).unwrap_or_default())
+    );
+    for (language, text) in &opens.menu {
+        names.push_str(&format!(
+            "Name[{}]={}\n",
+            desktop_locale(language),
+            desktop_value(text)
+        ));
+    }
+    names
+}
+
+/// The media types of a context menu item, with a pattern for each file
+/// category; the extensions without a known type are not among them.
+fn menu_types(opens: &bern_ir::OpensDef) -> String {
+    let mut types = Vec::new();
+    for kind in opens.kinds() {
+        let named = match kind {
+            "video" => Some("video/*"),
+            "audio" => Some("audio/*"),
+            "picture" => Some("image/*"),
+            "folder" => Some("inode/directory"),
+            "any" => Some("all/all"),
+            ext => ext
+                .strip_prefix('.')
+                .and_then(bern_ir::spec::file_extension_type),
+        };
+        if let Some(named) = named
+            && !types.contains(&named)
+        {
+            types.push(named);
+        }
+    }
+    types.join(";")
+}
+
+/// The context menu items of `[[app.opens]]` for the file managers that read
+/// them from the system, each path relative to the package's root: KDE's
+/// Dolphin, Cinnamon's Nemo, and the file manager actions of PCManFM-Qt and
+/// others. GNOME's Files reads only the user's folder, so the application
+/// writes its item there itself (`bern_gtk`'s host).
+pub fn file_menus(app: &Application, executable: &Path, icon: &str) -> Vec<(PathBuf, String)> {
+    let id = &app.app.bundle_id;
+    let program = path(executable);
+    let mut files = Vec::new();
+    let items = app.app.opens.iter().filter(|opens| !opens.menu.is_empty());
+    for (index, opens) in items.enumerate() {
+        let names = menu_names(app, opens);
+        let types = menu_types(opens);
+        if !types.is_empty() {
+            files.push((
+                format!("usr/share/kio/servicemenus/{id}.{index}.desktop").into(),
+                format!(
+                    "[Desktop Entry]\nType=Service\nX-KDE-ServiceTypes=KonqPopupMenu/Plugin\n\
+                     X-KDE-Priority=TopLevel\nMimeType={types};\nActions=open;\n\n\
+                     [Desktop Action open]\n{names}Icon={icon}\nExec={program} %U\n"
+                ),
+            ));
+            files.push((
+                format!("usr/share/file-manager/actions/{id}.{index}.desktop").into(),
+                format!(
+                    "[Desktop Entry]\nType=Action\n{names}Icon={icon}\nProfiles=open;\n\n\
+                     [X-Action-Profile open]\nMimeTypes={types};\nExec={program} %U\n"
+                ),
+            ));
+        }
+        let mut extensions: Vec<&str> = opens.extensions();
+        if opens.kinds().any(|kind| kind == "folder") {
+            extensions.push("dir");
+        }
+        if opens.kinds().any(|kind| kind == "any") {
+            extensions.push("any");
+        }
+        files.push((
+            format!("usr/share/nemo/actions/{id}.{index}.nemo_action").into(),
+            format!(
+                "[Nemo Action]\n{names}Exec={program} %F\nIcon-Name={icon}\n\
+                 Selection=notnone\nExtensions={};\n",
+                extensions.join(";")
+            ),
+        ));
+    }
+    files
 }
 
 /// A desktop entry string value: line breaks, tabs and backslashes as the
@@ -344,7 +441,7 @@ fn desktop_value(text: &str) -> String {
 /// MIME types of the file kinds `Drop(opens: true)` areas take, in
 /// components and in the content written directly in a window. Extensions
 /// without a known type and `any` register nothing.
-fn opened_types(app: &Application) -> Vec<&'static str> {
+pub fn opened_types(app: &Application) -> Vec<&'static str> {
     const KINDS: &[(&str, &[&str])] = &[
         (
             "video",
@@ -392,27 +489,24 @@ fn opened_types(app: &Application) -> Vec<&'static str> {
         ),
     ];
     let mut types = Vec::new();
-    let mut visit = |node: &bern_ir::Node| {
-        if let bern_ir::Node::Element(element) = node
-            && element.kind == "Drop"
-            && element.keyword("opens") == Some("true")
-        {
-            for word in element
-                .keyword("files")
-                .unwrap_or("any")
-                .split(|c: char| c.is_whitespace() || c == ',')
-            {
-                if let Some((_, mimes)) = KINDS.iter().find(|(kind, _)| *kind == word) {
-                    for mime in *mimes {
-                        if !types.contains(mime) {
-                            types.push(*mime);
-                        }
-                    }
-                }
-            }
+    let mut add = |mime: &'static str| {
+        if !types.contains(&mime) {
+            types.push(mime);
         }
     };
-    app.walk(&mut |node, _| visit(node));
+    for word in app.opened_kinds() {
+        if let Some(ext) = word.strip_prefix('.') {
+            if let Some(mime) = bern_ir::spec::file_extension_type(ext) {
+                add(mime);
+            }
+        } else if word == "folder" {
+            add("inode/directory");
+        } else if let Some((_, mimes)) = KINDS.iter().find(|(kind, _)| *kind == word) {
+            for mime in *mimes {
+                add(mime);
+            }
+        }
+    }
     types
 }
 
@@ -427,6 +521,45 @@ mod tests {
             .join("Bern.toml");
         let config = bern_compiler::config::load(&manifest).unwrap();
         bern_compiler::compile(&config).unwrap().app
+    }
+
+    #[test]
+    fn the_opens_of_the_manifest_reach_the_desktop() {
+        let mut hello = app("hello");
+        let default = hello.languages.default.clone();
+        hello.app.opens = vec![
+            bern_ir::OpensDef {
+                files: "audio folder .srt".to_string(),
+                menu: [(default, "Play".to_string())].into_iter().collect(),
+            },
+            bern_ir::OpensDef {
+                files: ".flac".to_string(),
+                menu: Default::default(),
+            },
+        ];
+        let entry = desktop_entry(&hello, Path::new("/opt/x/hello"), Path::new("x"));
+        assert!(entry.contains(" %U\n"), "{entry}");
+        for kind in ["audio/mpeg;", "audio/flac;", "inode/directory;"] {
+            assert!(entry.contains(kind), "{entry}");
+        }
+        assert!(entry.contains("application/x-subrip;"), "{entry}");
+        // The item of the first entry, for each kind of file manager.
+        let menus = file_menus(&hello, Path::new("/opt/x/hello"), "x");
+        assert_eq!(menus.len(), 3, "{menus:?}");
+        let id = &hello.app.bundle_id;
+        assert_eq!(
+            menus[0].0,
+            PathBuf::from(format!("usr/share/kio/servicemenus/{id}.0.desktop"))
+        );
+        assert!(
+            menus[0]
+                .1
+                .contains("MimeType=audio/*;inode/directory;application/x-subrip;\n"),
+            "{}",
+            menus[0].1
+        );
+        assert!(menus[1].1.contains("Name=Play\n"), "{}", menus[1].1);
+        assert!(menus[2].1.contains(";srt;dir;\n"), "{}", menus[2].1);
     }
 
     #[test]

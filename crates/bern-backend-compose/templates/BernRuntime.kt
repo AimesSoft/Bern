@@ -836,6 +836,7 @@ object BernNative {
     external fun nowPlayingCommand(name: ByteArray)
     external fun overlayPressed(overlay: ByteArray, button: ByteArray)
     external fun allFilesAnswered()
+    external fun filesOpened(url: ByteArray)
     external fun stop(app: Long)
     external fun snapshot(app: Long): ByteArray
     external fun engineId(app: Long): ByteArray

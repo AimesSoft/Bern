@@ -773,7 +773,27 @@ final class BernAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        MainActor.assumeIsolated { BernStatusArea.launched() }
+        MainActor.assumeIsolated {
+            BernStatusArea.launched()
+            // The items of `[[app.opens]]` in Finder's context menu.
+            if Bundle.main.object(forInfoDictionaryKey: "NSServices") != nil {
+                NSApp.servicesProvider = self
+                NSUpdateDynamicServices()
+            }
+        }
+    }
+
+    /// An item of `[[app.opens]]` chosen in Finder's context menu.
+    @objc func bernOpenFiles(
+        _ pasteboard: NSPasteboard, userData: String, error: AutoreleasingUnsafeMutablePointer<NSString>
+    ) {
+        let urls = pasteboard.readObjects(
+            forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL] ?? []
+        MainActor.assumeIsolated {
+            NSApp.activate()
+            BernFiles.open(urls)
+        }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
@@ -1552,6 +1572,15 @@ extension View {
 // MARK: - Open panel
 
 extension BernFiles {
+    /// Makes the app what opens the kinds of `[[app.opens]]`.
+    static func makeDefault() {
+        for type in types(engineKinds) where type != .folder && type != .item {
+            NSWorkspace.shared.setDefaultApplication(at: Bundle.main.bundleURL, toOpen: type) { error in
+                if let error { NSLog("bern: cannot open %@ by default: %@", type.identifier, error.localizedDescription) }
+            }
+        }
+    }
+
     /// Asks for one file of `kinds` with the system's open panel, as a
     /// sheet on the key window; `give` runs once one is chosen.
     static func pick(_ kinds: String, then give: @escaping @MainActor (URL) -> Void) {

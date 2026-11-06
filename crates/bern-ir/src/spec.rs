@@ -245,6 +245,27 @@ pub fn file_kind_extensions(kind: &str) -> &'static [&'static str] {
         .map_or(&[], |(_, extensions)| extensions)
 }
 
+/// The media type of an extension outside the file categories, for the
+/// systems that offer applications by media type; `None` for one without a
+/// known type.
+pub fn file_extension_type(ext: &str) -> Option<&'static str> {
+    Some(match ext {
+        "srt" => "application/x-subrip",
+        "ass" | "ssa" => "text/x-ssa",
+        "vtt" => "text/vtt",
+        "xml" => "text/xml",
+        "json" => "application/json",
+        "txt" => "text/plain",
+        "pdf" => "application/pdf",
+        "mkv" => "video/x-matroska",
+        "webm" => "video/webm",
+        "mp4" | "m4v" => "video/mp4",
+        "flac" => "audio/flac",
+        "mp3" => "audio/mpeg",
+        _ => return None,
+    })
+}
+
 /// Normalize the kinds of file a control accepts: categories from
 /// [`FILE_KINDS`] and extensions such as `.ass`, separated by spaces or
 /// commas, each once.

@@ -142,6 +142,7 @@ impl Generator<'_> {
         self.catalog_commands(&mut out);
         self.catalog_sessions(&mut out);
         out.line(format!("c.primary = {};", string(&app.windows.primary)));
+        out.line(format!("c.opens = {};", string(&app.engine_kinds())));
         let players: Vec<_> = app
             .players
             .iter()

@@ -2653,6 +2653,36 @@ for entry in all.iter().filter(|entry| !entry.folder) {
 - 限制：网页中所选文件夹的内容在选择时定下，之后放进去的文件看不到，再选一次才有；浏览器不交出没有文件的文件夹，选了空文件夹动作不执行；拖放区只接一个文件，拖入文件夹不支持。WebUI 中原生运行的引擎读不到页面的文件夹。
 - 实现进度（2026-11-02）：`bern-command` 的单元测试覆盖本地文件夹的列举与遍历（隐藏项由 `keep` 拒绝、链接绕回上层只进入一次、文件、已删除的文件夹与 http(s) 地址的答复）、经宿主打开方式遍历文档树，以及宿主交来的列举格式；Web 的运行时测试检查所选文件夹在页面中按层记下、每个文件有自己的地址、交给引擎的列举文本；`bern-ffi` 与 `bern-command` 分别为 Android 与 wasm32 编译通过。Android 模拟器（API 36）上用实际应用实测：在系统选择器里选 `Music` 下的一个文件夹并允许访问，引擎经 `walk` 列出两首歌、一个 `.lrc` 与子文件夹 `Live` 里的一首，文件夹名取自显示名；引擎经 `open` 读出标签、时长与内嵌封面，按列举中同名的 `.lrc` 显示歌词，播放从文档地址读入（音量 0），子文件夹里的歌同样播放；强制停止再启动后授权仍在，启动时重新遍历得到同样的三首。未授权的文档树（`primary:Download`）答复 `source_unavailable`。Web 只跑了运行时测试，没有在浏览器里选文件夹（系统的选择框无法在自动化中操作）；macOS、iOS、Linux 与 Windows 走 `std::fs` 的同一段代码，只在 macOS 上由单元测试验证。
 
+### 系统用应用打开文件
+
+`Bern.toml` 里的 `[[app.opens]]` 声明系统可以用应用打开哪些文件，以及文件管理器的右键菜单为它们显示什么：
+
+```toml
+[[app.opens]]
+files = ["audio", ".cue"]   # 写法与控件的 `files:` 相同
+menu = { "en" = "Play with Demo", "zh-Hans" = "用 Demo 播放" }   # 可选；必须有默认语言
+```
+
+可以写多条，每条有自己的菜单项。引擎在 `wake` 里取文件；引擎启动时宿主会运行一次 `wake`，之后每来一个文件再运行一次：
+
+```rust
+for url in bern::files::take_opened() {
+    let name = bern::files::name(&url);   // 和用户交来的其他文件一样读取
+}
+```
+
+屏幕上能接收这种文件的 `Drop(opens: true)` 优先拿到文件，它本身也算声明；没有 `Drop` 接收的文件，只要 `[[app.opens]]` 声明过，就交给引擎。两种情况下主窗口都会回到前台。`bern::platform::make_default_opener()` 在系统允许的范围内把应用设为这些文件的默认打开方式，供设置页里的按钮调用。
+
+| 平台 | 打开方式 | 右键菜单 | 默认应用 |
+| --- | --- | --- | --- |
+| macOS | `Info.plist` 的文档类型，等级 `Alternate`：用户修改之前仍按系统的选择 | `NSServices`：Finder 把菜单项列在快速操作里 | Finder 的“全部更改”；`make_default_opener` 通过 `NSWorkspace` 设置 |
+| Windows | `setup.exe` 为当前用户注册文件类型，每个扩展名写入 `OpenWithProgids`，卸载时移除 | `SystemFileAssociations` 下的动词，`folder` 用 `Directory`，`any` 用 `*`；Windows 11 显示在“显示更多选项”里，因为它的第一层菜单只接受打包应用 | `RegisteredApplications` 让应用出现在“设置 > 默认应用”；`make_default_opener` 打开应用在那里的页面，因为 Windows 把选择权留给用户 |
+| Linux | `.deb` 桌面文件的 `MimeType`；`folder` 对应 `inode/directory`，媒体类型未知的扩展名不写入 | `.deb` 安装 Dolphin 服务菜单、Nemo 动作和文件管理器动作（PCManFM-Qt 等读取）；GNOME 文件只读用户自己的目录，所以已安装的应用启动时把菜单项写进“脚本”，应用卸载后脚本会删除自己 | 系统设置；`make_default_opener` 通过 GIO 设置，文件夹除外 |
+| Android | `VIEW`、`SEND` 和 `SEND_MULTIPLE` intent；`folder` 不适用 | 不适用 | 系统选择器里的“始终”；`make_default_opener` 返回 `platform_unavailable` |
+| iOS | 文档类型，原地打开，每个扩展名导入一个类型 | 不适用 | 用户在“文件”里选择；`make_default_opener` 返回 `platform_unavailable` |
+
+不安装直接运行的 `.zip` 和 `.tar.gz` 不注册任何内容。tvOS 和浏览器没有这类文件。GPUI 目标暂未声明。
+
 ## 工程组织
 
 Bern 在一个 Rust workspace 中开发，不为编译器另外创建仓库。建议按职责拆分，初期可以合并小型 crate：

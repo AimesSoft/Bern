@@ -920,7 +920,8 @@ private func bernOnMediaState(_ context: UnsafeMutableRawPointer?, _ bytes: Unsa
 
 /// The engine's platform requests: `copy_text` puts the text on the
 /// clipboard, on the main thread; `save_image` saves a picture to the photo
-/// library, answering 2 when the user does not allow it.
+/// library, answering 2 when the user does not allow it; on macOS
+/// `make_default_opener` makes the app what opens the kinds of `[[app.opens]]`.
 private func bernPlatformRequest(
     _ context: UnsafeMutableRawPointer?, _ operation: UnsafePointer<UInt8>?, _ operationLength: Int,
     _ first: UnsafePointer<UInt8>?, _ firstLength: Int, _ second: UnsafePointer<UInt8>?, _ secondLength: Int
@@ -936,6 +937,11 @@ private func bernPlatformRequest(
         return 0
     case "save_image":
         return BernPhotos.save(text(first, firstLength))
+    #if os(macOS)
+    case "make_default_opener":
+        DispatchQueue.main.async { MainActor.assumeIsolated { BernFiles.makeDefault() } }
+        return 0
+    #endif
     default:
         return 1
     }
@@ -2549,6 +2555,9 @@ enum BernFiles {
         return types
     }
 
+    /// The kinds of `[[app.opens]]`: what no drop takes goes to the engine.
+    static let engineKinds = "/*bern:engine-opens*/"
+
     /// Drops that also take the files the system opens with the app, and
     /// files that wait for one.
     private static var openers: [UUID: (kinds: String, give: @MainActor (URL) -> Void)] = [:]
@@ -2564,8 +2573,9 @@ enum BernFiles {
     }
 
     /// Files the system opens with the app: each goes to a drop that takes
-    /// its kind. With no such drop on screen the primary window comes back
-    /// and the files wait for one; files no drop takes are left alone.
+    /// its kind, else to the engine if `[[app.opens]]` declares it. With no
+    /// drop on screen the primary window comes back and the files the
+    /// engine does not take wait for one; files nothing takes are left alone.
     static func open(_ urls: [URL]) {
         waiting += urls
         if openers.isEmpty { bernShowPrimaryWindow() }
@@ -2573,11 +2583,17 @@ enum BernFiles {
     }
 
     private static func deliver() {
-        guard !openers.isEmpty else { return }
         let urls = waiting
         waiting = []
         for url in urls {
-            openers.values.first { accepts(url, kinds: $0.kinds) }?.give(url)
+            if let opener = openers.values.first(where: { accepts(url, kinds: $0.kinds) }) {
+                opener.give(url)
+            } else if !engineKinds.isEmpty, accepts(url, kinds: engineKinds) {
+                var address = url.absoluteString
+                address.withUTF8 { bern_files_opened($0.baseAddress, $0.count) }
+            } else if openers.isEmpty {
+                waiting.append(url)
+            }
         }
     }
 

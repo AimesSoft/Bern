@@ -13,8 +13,41 @@ use bern_protocol::CommandError;
 use std::collections::HashSet;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime};
+
+/// Files the system opened the application with, until the engine takes
+/// them.
+static OPENED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// The engine that took them last, to wake for the next ones.
+static TAKER: Mutex<Option<crate::wake::Waker>> = Mutex::new(None);
+
+/// The system opened the application with the file at `url`, of a kind
+/// `[[app.opens]]` declares: what the host calls.
+pub fn opened(url: &str) {
+    OPENED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push(url.to_string());
+    let taker = TAKER.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    if let Some(waker) = taker {
+        waker.wake();
+    }
+}
+
+/// The URLs of the files the system opened the application with since the
+/// last call, the earliest first: from the file manager's "Open With" and
+/// context menu, or as the default application of their kind. Read them
+/// with [`open`] and [`name`].
+///
+/// Call it in `wake`. The first `wake` brings the files the application
+/// started with, and every later file wakes the engine that called.
+pub fn take_opened() -> Vec<String> {
+    if let Some(waker) = crate::wake::waker() {
+        *TAKER.lock().unwrap_or_else(|e| e.into_inner()) = Some(waker);
+    }
+    std::mem::take(&mut *OPENED.lock().unwrap_or_else(|e| e.into_inner()))
+}
 
 /// A file opened for reading, with its length in bytes.
 pub struct SourceFile {
@@ -537,6 +570,14 @@ mod web {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opened_files_wait_for_the_engine() {
+        opened("file:///a.mp3");
+        opened("file:///b.mp3");
+        assert_eq!(take_opened(), ["file:///a.mp3", "file:///b.mp3"]);
+        assert!(take_opened().is_empty());
+    }
 
     #[test]
     fn file_urls_become_local_paths() {

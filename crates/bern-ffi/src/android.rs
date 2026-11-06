@@ -831,6 +831,20 @@ pub unsafe extern "system" fn Java_dev_bern_runtime_BernNative_overlayPressed(
     }
 }
 
+/// Another app opened this one with a file of a kind `[[app.opens]]`
+/// declares.
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn Java_dev_bern_runtime_BernNative_filesOpened(
+    env: *mut JNIEnv,
+    _: jobject,
+    url: jbyteArray,
+) {
+    let url = unsafe { bytes_in(env, url) };
+    if let Ok(url) = std::str::from_utf8(&url) {
+        bern_command::files::opened(url);
+    }
+}
+
 /// The user came back from what `bern::platform::ask_all_files` showed.
 #[unsafe(no_mangle)]
 pub unsafe extern "system" fn Java_dev_bern_runtime_BernNative_allFilesAnswered(
