@@ -278,39 +278,75 @@ fn mix((r, g, b): (u8, u8, u8), toward: f64, amount: f64) -> (u8, u8, u8) {
     (channel(r), channel(g), channel(b))
 }
 
+/// CSS that sets libadwaita's named `colors`, each a name and a value.
+///
+/// Libadwaita's rules read CSS variables since 1.6. Its own stylesheet takes
+/// them from the named colors, but a distribution's may set them outright,
+/// as Ubuntu's Yaru does, so each color is set both ways. GTK before 4.16
+/// has no variables.
+pub(crate) fn named_colors(colors: &[(&str, String)]) -> String {
+    colors_sheet(colors, gtk::check_version(4, 16, 0).is_none())
+}
+
+fn colors_sheet(colors: &[(&str, String)], variables: bool) -> String {
+    let mut css = String::new();
+    for (name, value) in colors {
+        css.push_str(&format!("@define-color {name} {value};\n"));
+    }
+    if variables && !colors.is_empty() {
+        css.push_str(":root {\n");
+        for (name, value) in colors {
+            css.push_str(&format!("  --{}: {value};\n", name.replace('_', "-")));
+            // Yaru's own names for the same colors.
+            let yaru: &[&str] = match *name {
+                "accent_bg_color" => &["--yaru-accent-bg-color"],
+                "accent_color" => &[
+                    "--yaru-accent-color",
+                    "--yaru-link-color",
+                    "--yaru-link-visited-color",
+                ],
+                _ => &[],
+            };
+            for variable in yaru {
+                css.push_str(&format!("  {variable}: {value};\n"));
+            }
+        }
+        css.push_str("}\n");
+    }
+    css
+}
+
 fn reload_accent() {
     let accent = ACCENT.with(|accent| *accent.borrow());
-    let mut css = match accent {
-        None => String::new(),
-        Some((light, dark)) => {
-            let night = is_dark();
-            let background = if night { dark } else { light };
-            // Text in the accent color stays readable on the window: a
-            // little darker on light windows, lighter on dark ones.
-            let text = if night {
-                mix(background, 1.0, 0.3)
-            } else {
-                mix(background, 0.0, 0.2)
-            };
-            let foreground = if luminance(background) > 0.4 {
-                "rgba(0, 0, 0, 0.8)"
-            } else {
-                "#ffffff"
-            };
-            let rgb = |(r, g, b): (u8, u8, u8)| format!("rgb({r}, {g}, {b})");
-            format!(
-                "@define-color accent_bg_color {};\n@define-color accent_color {};\n@define-color accent_fg_color {foreground};\n",
-                rgb(background),
-                rgb(text)
-            )
-        }
-    };
+    let rgb = |(r, g, b): (u8, u8, u8)| format!("rgb({r}, {g}, {b})");
+    let mut colors: Vec<(&str, String)> = Vec::new();
+    if let Some((light, dark)) = accent {
+        let night = is_dark();
+        let background = if night { dark } else { light };
+        // Text in the accent color stays readable on the window: a
+        // little darker on light windows, lighter on dark ones.
+        let text = if night {
+            mix(background, 1.0, 0.3)
+        } else {
+            mix(background, 0.0, 0.2)
+        };
+        let foreground = if luminance(background) > 0.4 {
+            "rgba(0, 0, 0, 0.8)"
+        } else {
+            "#ffffff"
+        };
+        colors.push(("accent_bg_color", rgb(background)));
+        colors.push(("accent_color", rgb(text)));
+        colors.push(("accent_fg_color", foreground.to_string()));
+    }
+    let mut css = String::new();
     CUSTOM_PALETTE.with(|palette| {
         for (role, (light, dark)) in palette.borrow().iter() {
-            let (r, g, b) = if is_dark() { *dark } else { *light };
+            let color = if is_dark() { *dark } else { *light };
             let token = role.replace('.', "_");
             css.push_str(&format!(
-                "@define-color bern_palette_{token} rgb({r}, {g}, {b});\n"
+                "@define-color bern_palette_{token} {};\n",
+                rgb(color)
             ));
             let aliases: &[&str] = match role.as_str() {
                 "surface.canvas" => &["window_bg_color"],
@@ -328,10 +364,11 @@ fn reload_accent() {
                 _ => &[],
             };
             for alias in aliases {
-                css.push_str(&format!("@define-color {alias} rgb({r}, {g}, {b});\n"));
+                colors.push((*alias, rgb(color)));
             }
         }
     });
+    css.push_str(&named_colors(&colors));
     ACCENT_CSS.with(|provider| {
         let mut provider = provider.borrow_mut();
         let provider = provider.get_or_insert_with(|| {
@@ -628,6 +665,28 @@ mod tests {
         let color = Color::Fixed((1, 2, 3), (250, 251, 252));
         assert_eq!(css(&color, Some(false)), "rgb(1, 2, 3)");
         assert_eq!(css(&color, Some(true)), "rgb(250, 251, 252)");
+    }
+
+    #[test]
+    fn colors_reach_the_named_colors_and_the_variables() {
+        let colors = [
+            ("accent_bg_color", "rgb(1, 2, 3)".to_string()),
+            ("accent_color", "rgb(4, 5, 6)".to_string()),
+            ("window_bg_color", "rgb(7, 8, 9)".to_string()),
+        ];
+        let css = colors_sheet(&colors, true);
+        assert!(css.contains("@define-color accent_bg_color rgb(1, 2, 3);"));
+        assert!(css.contains("--accent-bg-color: rgb(1, 2, 3);"));
+        assert!(css.contains("--yaru-accent-bg-color: rgb(1, 2, 3);"));
+        assert!(css.contains("--accent-color: rgb(4, 5, 6);"));
+        assert!(css.contains("--yaru-link-color: rgb(4, 5, 6);"));
+        assert!(css.contains("--window-bg-color: rgb(7, 8, 9);"));
+
+        // GTK before 4.16 would warn of the variables.
+        let old = colors_sheet(&colors, false);
+        assert!(old.contains("@define-color window_bg_color rgb(7, 8, 9);"));
+        assert!(!old.contains(":root"));
+        assert_eq!(colors_sheet(&[], true), "");
     }
 
     #[test]
