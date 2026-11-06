@@ -819,32 +819,55 @@ inline std::vector<std::wstring> PanelTypes(char const* kinds) {
     return types;
 }
 
-/// The system's open panel for `kinds`, on the context's window; `give`
-/// runs with the chosen file's URL, nothing on cancel.
-inline winrt::fire_and_forget PickFile(Ctx ctx, char const* kinds, std::function<void(std::string const&)> give) {
-    auto hwnd = ctx.win ? ctx.win->hwnd : nullptr;
-    auto alive = ctx.win ? std::weak_ptr<bool>(ctx.win->life) : std::weak_ptr<bool>();
-    try {
-        bool folder = false;
-        for (auto const& word : FileWords(kinds)) folder = folder || word == "folder";
-        std::string url;
-        if (folder) {
-            winrt::Windows::Storage::Pickers::FolderPicker picker;
-            picker.as<IInitializeWithWindow>()->Initialize(hwnd);
-            picker.FileTypeFilter().Append(L"*");
-            auto chosen = co_await picker.PickSingleFolderAsync();
-            if (chosen) url = Host::FileUrl(std::wstring(chosen.Path()));
-        } else {
-            winrt::Windows::Storage::Pickers::FileOpenPicker picker;
-            picker.as<IInitializeWithWindow>()->Initialize(hwnd);
-            for (auto const& type : PanelTypes(kinds)) picker.FileTypeFilter().Append(type);
-            auto chosen = co_await picker.PickSingleFileAsync();
-            if (chosen) url = Host::FileUrl(std::wstring(chosen.Path()));
-        }
-        if (!url.empty() && (!ctx.win || !alive.expired())) give(url);
-    } catch (winrt::hresult_error const& error) {
-        Report("open panel: " + Utf8(error.message()));
+/// The shell's open dialog, for a folder or for `types`; the path chosen,
+/// nothing on cancel. It runs its own message loop.
+inline std::optional<std::wstring> OpenDialog(HWND hwnd, bool folder, std::vector<std::wstring> const& types) {
+    auto dialog = winrt::create_instance<IFileOpenDialog>(CLSID_FileOpenDialog);
+    FILEOPENDIALOGOPTIONS options{};
+    winrt::check_hresult(dialog->GetOptions(&options));
+    options |= FOS_FORCEFILESYSTEM;
+    if (folder) options |= FOS_PICKFOLDERS;
+    winrt::check_hresult(dialog->SetOptions(options));
+    std::wstring spec;
+    for (auto const& type : types) {
+        if (!spec.empty()) spec += L';';
+        spec += type == L"*" ? L"*.*" : L"*" + type;
     }
+    if (!folder) {
+        COMDLG_FILTERSPEC filter{spec.c_str(), spec.c_str()};
+        winrt::check_hresult(dialog->SetFileTypes(1, &filter));
+    }
+    auto shown = dialog->Show(hwnd);
+    if (shown == HRESULT_FROM_WIN32(ERROR_CANCELLED)) return std::nullopt;
+    winrt::check_hresult(shown);
+    winrt::com_ptr<IShellItem> item;
+    winrt::check_hresult(dialog->GetResult(item.put()));
+    PWSTR path = nullptr;
+    winrt::check_hresult(item->GetDisplayName(SIGDN_FILESYSPATH, &path));
+    std::wstring chosen(path);
+    CoTaskMemFree(path);
+    return chosen;
+}
+
+/// The system's open panel for `kinds`, on the context's window; `give`
+/// runs with the chosen file's URL, nothing on cancel. Not the WinRT pickers:
+/// in a XAML island on Windows 10 they show nothing and report nothing.
+inline void PickFile(Ctx ctx, char const* kinds, std::function<void(std::string const&)> give) {
+    bool folder = false;
+    for (auto const& word : FileWords(kinds)) folder = folder || word == "folder";
+    auto types = PanelTypes(kinds);
+    bool windowed = ctx.win != nullptr;
+    auto hwnd = windowed ? ctx.win->hwnd : nullptr;
+    auto alive = windowed ? std::weak_ptr<bool>(ctx.win->life) : std::weak_ptr<bool>();
+    // After the click that asked: the dialog's loop would run inside it.
+    Host::Post([=] {
+        try {
+            auto chosen = OpenDialog(hwnd, folder, types);
+            if (chosen && (!windowed || !alive.expired())) give(Host::FileUrl(*chosen));
+        } catch (winrt::hresult_error const& error) {
+            Report("open panel: " + Utf8(error.message()));
+        }
+    });
 }
 
 // ---------------------------------------------------------------------------

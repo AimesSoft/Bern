@@ -96,6 +96,58 @@ impl Slides {
     }
 }
 
+mod clear_box {
+    use super::*;
+
+    #[derive(Default)]
+    pub struct ClearBox {
+        pub solid: Cell<bool>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for ClearBox {
+        const NAME: &'static str = "BernClearBox";
+        type Type = super::ClearBox;
+        type ParentType = gtk::Box;
+    }
+
+    impl ObjectImpl for ClearBox {}
+
+    impl WidgetImpl for ClearBox {
+        fn contains(&self, x: f64, y: f64) -> bool {
+            self.solid.get() && self.parent_contains(x, y)
+        }
+    }
+
+    impl BoxImpl for ClearBox {}
+}
+
+glib::wrapper! {
+    /// A column or row. Only what stands in it takes input: GTK counts a box
+    /// as hit wherever it lies, so a layer over other content would catch
+    /// every press meant for that content.
+    pub struct ClearBox(ObjectSubclass<clear_box::ClearBox>)
+        @extends gtk::Box, gtk::Widget,
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget, gtk::Orientable;
+}
+
+impl ClearBox {
+    pub fn new(orientation: gtk::Orientation, spacing: i32) -> Self {
+        glib::Object::builder()
+            .property("orientation", orientation)
+            .property("spacing", spacing)
+            .build()
+    }
+}
+
+/// Have `widget` take input all over: what watches the pointer over a column
+/// or row needs it there between the items too.
+pub(crate) fn hold_input(widget: &gtk::Widget) {
+    if let Some(column) = widget.downcast_ref::<ClearBox>() {
+        column.imp().solid.set(true);
+    }
+}
+
 mod layers {
     use super::*;
 
@@ -1062,6 +1114,11 @@ mod sized {
     }
 
     impl WidgetImpl for Sized {
+        /// Only its child takes input, as in a column or row.
+        fn contains(&self, _x: f64, _y: f64) -> bool {
+            false
+        }
+
         fn request_mode(&self) -> gtk::SizeRequestMode {
             self.obj()
                 .first_child()

@@ -1818,14 +1818,14 @@ pub fn Stack(p: &Parent, ctx: &Ctx, props: StackProps, children: Build) {
             (reflow.upcast(), inner)
         }
         None => {
-            let container = gtk::Box::new(orientation, 8);
+            let container = crate::layout::ClearBox::new(orientation, 8);
             if let Some(gap) = &props.gap {
                 let spaced = container.clone();
                 bind_number(ctx, gap, props.animate, &container, move |value| {
                     spaced.set_spacing(value.round().max(0.0) as i32);
                 });
             }
-            let inner = Parent::of_aligned_box(&container, cross);
+            let inner = Parent::of_aligned_box(container.upcast_ref(), cross);
             (container.upcast(), inner)
         }
     };
@@ -2475,6 +2475,8 @@ fn progress_ring(p: &Parent, ctx: &Ctx, value: Get, props: &ProgressProps) {
 pub fn Spacer(p: &Parent) {
     let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     spacer.add_css_class(crate::scene::SPACER);
+    // Empty room: what lies under it takes the press.
+    spacer.set_can_target(false);
     if p.is_horizontal() {
         spacer.set_hexpand(true);
     } else {

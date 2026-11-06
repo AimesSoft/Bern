@@ -515,7 +515,7 @@ inline void GiveFile(Ctx const& ctx, Field field, std::string const& url) {
     ctx.Write(field, type.kind == BType::Kind::Optional ? Value::Some(value) : value);
 }
 
-inline winrt::fire_and_forget PickFile(Ctx ctx, char const* kinds, std::function<void(std::string const&)> give);
+inline void PickFile(Ctx ctx, char const* kinds, std::function<void(std::string const&)> give);
 inline winrt::fire_and_forget PasteText(Ctx ctx, Field field, std::function<void()> then);
 
 struct MenuItemDef {
