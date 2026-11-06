@@ -458,6 +458,10 @@ pub struct AndroidOptions {
     pub multicast: bool,
     /// The engine changes how the system plays its audio.
     pub audio_settings: bool,
+    /// The engine reads and writes the user's files anywhere on shared
+    /// storage, by path, once the user allows it
+    /// (`bern::platform::ask_all_files`).
+    pub all_files_access: bool,
 }
 
 impl TargetConfig {

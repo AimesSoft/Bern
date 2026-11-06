@@ -7,7 +7,7 @@
 
 use bern_protocol::CommandError;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 /// The host implementation, installed before commands are accepted.
 pub trait Services: Send + Sync {
@@ -79,6 +79,42 @@ pub fn open_path(path: impl AsRef<Path>) -> Result<(), CommandError> {
     request("open_path", path_text(path.as_ref())?, "").map(|_| ())
 }
 
+/// Whether the user lets the application reach every file on shared
+/// storage by path, with `std::fs`: `false` on Android until the user allows
+/// it, `true` everywhere else, where there is nothing to ask.
+pub fn all_files_allowed() -> bool {
+    #[cfg(target_os = "android")]
+    return request("all_files_allowed", "", "").is_ok_and(|answer| answer == "yes");
+    #[cfg(not(target_os = "android"))]
+    true
+}
+
+/// The engine that asked last, to wake when the user has answered.
+static ASKED: Mutex<Option<crate::wake::Waker>> = Mutex::new(None);
+
+/// Let the user allow reaching every file on shared storage (Android, whose
+/// target needs `android = { all_files_access = true }`); nothing elsewhere.
+/// Android 11 and later open the application's page in the system's
+/// settings, and earlier versions show the storage permissions. Ask from a
+/// command: when the user comes back the engine's `wake` runs, whatever the
+/// answer, and reads [`all_files_allowed`] again. `platform_failed` when the
+/// target does not declare it or the system has no such page.
+pub fn ask_all_files() -> Result<(), CommandError> {
+    *ASKED.lock().unwrap_or_else(|e| e.into_inner()) = crate::wake::waker();
+    #[cfg(target_os = "android")]
+    return request("all_files_ask", "", "").map(|_| ());
+    #[cfg(not(target_os = "android"))]
+    Ok(())
+}
+
+/// The user came back from what [`ask_all_files`] showed: what the host calls.
+pub fn all_files_answered() {
+    let asked = ASKED.lock().unwrap_or_else(|e| e.into_inner()).take();
+    if let Some(waker) = asked {
+        waker.wake();
+    }
+}
+
 /// Recursively import a user-selected Android document tree into a local
 /// directory. Returns the new root, named after the selected folder.
 /// Existing local files are never overwritten; colliding names are numbered.
@@ -91,4 +127,29 @@ pub fn import_folder(uri: &str, destination: impl AsRef<Path>) -> Result<PathBuf
 /// The source is retained, and the selected tree must have write permission.
 pub fn export_path(source: impl AsRef<Path>, tree_uri: &str) -> Result<String, CommandError> {
     request("export_path", path_text(source.as_ref())?, tree_uri)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::wake::{Waker, enter};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn the_answer_wakes_the_engine_that_asked_once() {
+        let woken = Arc::new(AtomicUsize::new(0));
+        let count = woken.clone();
+        let waker = Waker::new(move || {
+            count.fetch_add(1, Ordering::SeqCst);
+            true
+        });
+        {
+            let _running = enter(&waker);
+            ask_all_files().unwrap();
+        }
+        all_files_answered();
+        waker.taken();
+        all_files_answered();
+        assert_eq!(woken.load(Ordering::SeqCst), 1);
+    }
 }

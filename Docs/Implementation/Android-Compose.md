@@ -124,10 +124,12 @@ The Rust engine's network access cannot be inferred from the UI, so it is declar
 [targets.android]
 platform = "android"
 channels = ["ipc"]
-android = { network = true, multicast = true, audio_settings = true }
+android = { network = true, multicast = true, audio_settings = true, all_files_access = true }
 ```
 
 `audio_settings` generates `MODIFY_AUDIO_SETTINGS`, for an engine that changes how the system plays its audio. `network` generates the `INTERNET` permission; `multicast` generates both `INTERNET` and `CHANGE_WIFI_MULTICAST_STATE`, and holds a non-reference-counted `WifiManager.MulticastLock` from the Activity's `onStart`, releasing it in `onStop`, to receive the Wi-Fi multicast of LAN discovery in the foreground. Both are off by default; apps that declare media or network images still get network permission by the existing rules. The `android` options can only be used on Android targets, and unknown fields are reported as errors. Continuous receiving in the background needs separate support for Android background services; this lock does not keep the app running.
+
+`all_files_access` is for an engine that reads and writes the user's files anywhere on shared storage by path, with `std::fs`. It generates `MANAGE_EXTERNAL_STORAGE`, plus `READ_EXTERNAL_STORAGE` and `WRITE_EXTERNAL_STORAGE` up to Android 10, and `requestLegacyExternalStorage`. The manifest alone grants nothing: `bern::platform::all_files_allowed()` says whether the user allowed it, and `bern::platform::ask_all_files()`, called from a command, opens the app's page in the system's settings on Android 11 and later and shows the storage permissions before. When the user comes back the engine's `wake` runs, whatever the answer, and reads `all_files_allowed()` again. Off by default. Google Play accepts this permission only for apps whose core purpose needs it, after a declaration in Play Console; most apps should use the document picker. Some Android TV systems have no such page, and `ask_all_files` then fails with `platform_failed`.
 
 ```bash
 rustup target add aarch64-linux-android

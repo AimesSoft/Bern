@@ -834,6 +834,7 @@ object BernNative {
     external fun start(fingerprint: Long, resources: ByteArray, bridge: BernBridge): ByteArray
     external fun nowPlayingCommand(name: ByteArray)
     external fun overlayPressed(overlay: ByteArray, button: ByteArray)
+    external fun allFilesAnswered()
     external fun stop(app: Long)
     external fun snapshot(app: Long): ByteArray
     external fun engineId(app: Long): ByteArray
@@ -974,6 +975,8 @@ class BernBridge(context: Context) {
             "overlay_show" -> onMain { BernOverlay.show(application, first, second); "" }
             "overlay_lit" -> onMain { BernOverlay.lit(first, second); "" }
             "overlay_hide" -> onMain { BernOverlay.hide(application, first); "" }
+            "all_files_allowed" -> if (BernFiles.allFilesAllowed(application)) "yes" else "no"
+            "all_files_ask" -> onMain { BernFiles.askAllFiles(application); "" }
             "import_folder" -> importFolder(Uri.parse(first), File(second)).absolutePath
             "export_path" -> exportPath(File(first), Uri.parse(second)).toString()
             else -> error("Unsupported platform operation: $operation")

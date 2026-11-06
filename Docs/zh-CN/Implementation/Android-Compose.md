@@ -124,10 +124,12 @@ Rust 引擎的网络访问不能从 UI 推断，使用显式 Android 目标选�
 [targets.android]
 platform = "android"
 channels = ["ipc"]
-android = { network = true, multicast = true, audio_settings = true }
+android = { network = true, multicast = true, audio_settings = true, all_files_access = true }
 ```
 
 `audio_settings` 生成 `MODIFY_AUDIO_SETTINGS`，供需要改变系统音频播放方式的引擎使用。`network` 生成 `INTERNET` 权限；`multicast` 同时生成 `INTERNET` 与 `CHANGE_WIFI_MULTICAST_STATE`，并在 Activity 的 `onStart` 持有非引用计数的 `WifiManager.MulticastLock`，在 `onStop` 释放，以接收前台局域网发现的 Wi-Fi 组播。两项默认关闭；声明媒体或网络图片的应用仍按原规则获得网络权限。`android` 选项只能用于 Android 目标，未知字段会报错。后台持续接收需另外的 Android 后台服务支持，不由这个锁保持应用运行。
+
+`all_files_access` 供要按路径（`std::fs`）读写共享存储上任意文件的引擎使用。它生成 `MANAGE_EXTERNAL_STORAGE`，Android 10 及以下再生成 `READ_EXTERNAL_STORAGE` 与 `WRITE_EXTERNAL_STORAGE`，并设置 `requestLegacyExternalStorage`。只写进清单不会得到权限：`bern::platform::all_files_allowed()` 说明用户是否已允许；`bern::platform::ask_all_files()` 要在命令里调用，Android 11 及以上打开系统设置里本应用的授权页，更早的版本显示存储权限弹窗。用户返回后，无论是否允许，引擎的 `wake` 都会运行，在那里重新读 `all_files_allowed()`。默认关闭。Google Play 只接受核心功能确实需要此权限的应用，并要在 Play Console 里申报；多数应用应该用文档选择器。部分 Android TV 系统没有这个页面，这时 `ask_all_files` 返回 `platform_failed`。
 
 ```bash
 rustup target add aarch64-linux-android
