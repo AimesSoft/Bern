@@ -837,6 +837,7 @@ object BernNative {
     external fun overlayPressed(overlay: ByteArray, button: ByteArray)
     external fun allFilesAnswered()
     external fun filesOpened(url: ByteArray)
+    external fun filesRead(url: ByteArray): ByteArray?
     external fun stop(app: Long)
     external fun snapshot(app: Long): ByteArray
     external fun engineId(app: Long): ByteArray

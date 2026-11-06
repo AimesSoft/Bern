@@ -101,6 +101,11 @@ void bern_platform_install(void* context, int32_t (*request)(void*, uint8_t cons
 /// The system opened the application with the file at `url` (UTF-8), of a
 /// kind `[[app.opens]]` declares.
 void bern_files_opened(uint8_t const* url, size_t len);
+/// Whether the engine serves `url` (`bern::files::serve`).
+uint8_t bern_files_served(uint8_t const* url, size_t len);
+/// The bytes the engine serves at `url`, empty when there are none. Blocks
+/// until its stream ends.
+BernBuffer bern_files_read(uint8_t const* url, size_t len);
 
 /// An HDR picture decoded by Rust: RGBA rows in linear scRGB with straight
 /// alpha, 1.0 at SDR white.
@@ -602,6 +607,10 @@ inline bool atLogin = false;
 /// this instance.
 inline std::vector<std::string> openedFiles;
 inline std::function<void(std::vector<std::string> const&)> onOpen;
+/// Whether the engine serves `url`, and the bytes it serves there: away
+/// from the UI thread, as a stream takes as long as it takes.
+bool Serves(std::string const& url);
+std::vector<uint8_t> ServedBytes(std::string const& url);
 /// The `file:` URL of a path, and the path of a `file:` URL.
 std::string FileUrl(std::wstring const& path);
 std::optional<std::wstring> FilePath(std::string const& url);

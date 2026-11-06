@@ -2653,6 +2653,24 @@ for entry in all.iter().filter(|entry| !entry.folder) {
 - 限制：网页中所选文件夹的内容在选择时定下，之后放进去的文件看不到，再选一次才有；浏览器不交出没有文件的文件夹，选了空文件夹动作不执行；拖放区只接一个文件，拖入文件夹不支持。WebUI 中原生运行的引擎读不到页面的文件夹。
 - 实现进度（2026-11-02）：`bern-command` 的单元测试覆盖本地文件夹的列举与遍历（隐藏项由 `keep` 拒绝、链接绕回上层只进入一次、文件、已删除的文件夹与 http(s) 地址的答复）、经宿主打开方式遍历文档树，以及宿主交来的列举格式；Web 的运行时测试检查所选文件夹在页面中按层记下、每个文件有自己的地址、交给引擎的列举文本；`bern-ffi` 与 `bern-command` 分别为 Android 与 wasm32 编译通过。Android 模拟器（API 36）上用实际应用实测：在系统选择器里选 `Music` 下的一个文件夹并允许访问，引擎经 `walk` 列出两首歌、一个 `.lrc` 与子文件夹 `Live` 里的一首，文件夹名取自显示名；引擎经 `open` 读出标签、时长与内嵌封面，按列举中同名的 `.lrc` 显示歌词，播放从文档地址读入（音量 0），子文件夹里的歌同样播放；强制停止再启动后授权仍在，启动时重新遍历得到同样的三首。未授权的文档树（`primary:Download`）答复 `source_unavailable`。Web 只跑了运行时测试，没有在浏览器里选文件夹（系统的选择框无法在自动化中操作）；macOS、iOS、Linux 与 Windows 走 `std::fs` 的同一段代码，只在 macOS 上由单元测试验证。
 
+### 引擎提供的图片
+
+图片不一定是文件。`bern::files::serve` 为应用自己的协议提供一个流，从头到尾读一次，`Image(source:)` 就能直接显示这个协议的 URL，不需要临时文件：
+
+```rust
+bern::files::serve("archive", |url| {
+    let (file, entry) = url["archive:".len()..].split_once('#').unwrap_or_default();
+    let output = Command::new("7zz").args(["x", "-so", file, entry]).output()?;
+    Ok(Box::new(Cursor::new(output.stdout)) as Box<dyn Read + Send>)
+});
+self.state.page = MediaSource::new("archive:/books/one.7z#01.jpg");
+```
+
+- 解码器要拿到完整文件，还要能回头读（方向、帧、按显示尺寸采样），所以宿主在自己的线程上把流读到结束，再在内存里解码，各平台用自己的解码器和采样方式。解码时一张图片在内存里，和下载的图片一样。
+- 宿主按 URL 保留解码后的图片，所以一个 URL 代表一张图片。流失败或没有内容时不显示图片，视图再次出现时才重试。
+- `files::open` 和 `files::name` 也能读这些 URL；`open` 会缓冲流，得到可以跳转的 `SourceFile`。
+- 支持 macOS、iOS、tvOS、Android、Windows 和 Linux。浏览器和 GPUI 目标暂不读取：页面没有读流的线程，而 WebUI 服务器会把这些 URL 交给网络上的任何人。
+
 ### 系统用应用打开文件
 
 `Bern.toml` 里的 `[[app.opens]]` 声明系统可以用应用打开哪些文件，以及文件管理器的右键菜单为它们显示什么：

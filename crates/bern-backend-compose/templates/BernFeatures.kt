@@ -1067,9 +1067,10 @@ object BernPictures {
                 is BernTry.Failed -> return read
             }
             "file", "content" -> null
-            else -> return BernTry.Absent
+            // A scheme the engine serves: its stream, decoded in memory.
+            else -> BernNative.filesRead(url.toByteArray()) ?: return BernTry.Absent
         }
-        val unreadable = if (bytes != null) BernTry.Refused else BernTry.Absent
+        val unreadable = if (scheme == "http" || scheme == "https") BernTry.Refused else BernTry.Absent
         fun pixels(options: BitmapFactory.Options): Bitmap? = when {
             bytes != null -> BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
             scheme == "file" -> BitmapFactory.decodeFile(uri.path, options)

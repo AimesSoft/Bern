@@ -1,4 +1,5 @@
-//! Pictures from files and http(s) addresses, read in the background.
+//! Pictures from files, http(s) addresses and what the engine serves, read
+//! in the background.
 //!
 //! An address the network could not reach, or that stays silent, is tried
 //! again, each wait longer than the one before, for as long as something
@@ -59,9 +60,17 @@ fn remote(url: &str) -> bool {
     url.starts_with("http://") || url.starts_with("https://")
 }
 
-/// One try at the bytes at `url`: a `file://` URL or path, or an http(s)
-/// address.
+/// One try at the bytes at `url`: a `file://` URL or path, an http(s)
+/// address, or a URL the engine serves.
 async fn read(url: &str) -> Reading {
+    if bern_ffi::files::served(url) {
+        let address = url.to_string();
+        let bytes = gio::spawn_blocking(move || bern_ffi::files::read_served(&address)).await;
+        return match bytes {
+            Ok(Some(bytes)) => Reading::Bytes(glib::Bytes::from_owned(bytes)),
+            _ => Reading::Absent,
+        };
+    }
     if !remote(url) {
         let file = if url.contains("://") {
             gio::File::for_uri(url)

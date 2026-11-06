@@ -2430,14 +2430,38 @@ final class BernPictures {
         return URLSession(configuration: configuration)
     }
 
+    /// Whether the engine serves `url` (`bern::files::serve`).
+    private nonisolated static func served(_ url: String) -> Bool {
+        var address = url
+        return address.withUTF8 { bern_files_served($0.baseAddress, $0.count) } != 0
+    }
+
+    /// What the engine serves at `url`, read away from the threads of Swift's
+    /// tasks: a stream takes as long as it takes.
+    private nonisolated static func stream(_ url: String) async -> Data? {
+        await withCheckedContinuation { waiting in
+            DispatchQueue.global(qos: .userInitiated).async {
+                var address = url
+                let buffer = address.withUTF8 { bern_files_read($0.baseAddress, $0.count) }
+                defer { bern_buffer_free(buffer) }
+                waiting.resume(returning: buffer.len > 0 ? Data(bytes: buffer.ptr, count: buffer.len) : nil)
+            }
+        }
+    }
+
     /// One try at `request`'s picture, off the interface thread.
     private nonisolated static func read(_ request: Request, through session: URLSession) async -> Reading {
-        guard let location = URL(string: request.url) else { return .absent }
         let data: Data
-        if location.isFileURL {
+        var remote = false
+        if served(request.url) {
+            guard let contents = await stream(request.url) else { return .absent }
+            data = contents
+        } else if let location = URL(string: request.url), location.isFileURL {
             guard let contents = try? Data(contentsOf: location) else { return .absent }
             data = contents
         } else {
+            guard let location = URL(string: request.url) else { return .absent }
+            remote = true
             do {
                 let (contents, response) = try await session.data(from: location)
                 if let status = (response as? HTTPURLResponse)?.statusCode, !(200..<300).contains(status) {
@@ -2455,7 +2479,7 @@ final class BernPictures {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               let picture = BernImage.decode(source, pixels: BernImage.sampledPixels(
                 source, width: request.width, height: request.height, fit: request.fit, scale: request.scale))
-        else { return location.isFileURL ? .absent : .refused }
+        else { return remote ? .refused : .absent }
         return .picture(picture)
     }
 
