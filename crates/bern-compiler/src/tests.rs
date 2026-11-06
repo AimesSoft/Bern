@@ -222,8 +222,7 @@ fn ios_builds_the_current_front_end_unless_told_otherwise() {
     assert!(message("frontends = [\"uikit\"]").contains("unknown front end `uikit`"));
     assert!(message(&format!("{both}packages = \"many\"\n")).contains("`many`"));
     assert!(
-        message("frontends = [\"swiftui\"]\npackages = \"separate\"\n")
-            .contains("both front ends")
+        message("frontends = [\"swiftui\"]\npackages = \"separate\"\n").contains("both front ends")
     );
 }
 
