@@ -304,6 +304,29 @@ counter-mcp   # 同一份命令目录，提供给 AI Agent
 
 不指定 UI 技术时使用平台的默认技术；默认技术不可用时直接报错，不会悄悄换成另一套技术。
 
+### Windows 与 iOS 各有两个前端
+
+这两个平台的系统跨度大，一个 UI 框架覆盖不全，所以同一份声明各生成两个前端。默认两个都编译进同一个包，应用启动时按系统自动选择，用户和应用代码都不用管。
+
+| 平台 | 前端 | `frontends` 里的名字 | 运行在 |
+| --- | --- | --- | --- |
+| Windows | WinUI 3 | `winui3` | 有 Windows App Runtime 2 的系统，Mica 背景与 Windows 11 外观 |
+| Windows | 系统 XAML，经 XAML Islands | `xaml-islands` | 其余的 Windows 10 与 11，不需要安装运行时 |
+| iOS | SwiftUI | `swiftui` | iOS 17 起，所有 Apple 目标共用这个前端 |
+| iOS | SwiftUI 的 iOS 16 版 | `swiftui-16` | iOS 16，由同一份生成代码改写而成 |
+
+只要一个前端时写明：
+
+```toml
+[targets.windows]
+frontends = ["winui3"]   # 没有运行时的系统上会提示安装
+
+[targets.ios]
+frontends = ["swiftui"]  # 最低 iOS 17
+```
+
+iOS 两个前端都留着时，写 `packages = "separate"` 可以打成两个 `.ipa`。选择规则见 [Windows](Docs/zh-CN/Implementation/Windows-WinUI3.md) 与 [iOS](Docs/zh-CN/Implementation/iOS-SwiftUI.md) 的实现记录，iOS 16 上有几项功能会降级，也写在那里。
+
 ## 与其他跨平台框架对比
 
 <p align="center">

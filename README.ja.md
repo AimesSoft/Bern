@@ -303,6 +303,29 @@ counter-mcp   # 同じカタログを AI エージェントへ
 
 UI 技術を省略するとプラットフォームの既定が選ばれます。既定が使えないときは、別の技術へ黙って切り替えずにエラーになります。
 
+### Windows と iOS にはフロントエンドが 2 つある
+
+この 2 つのプラットフォームは対応するシステムの幅が広く、1 つの UI フレームワークでは覆いきれないため、同じ宣言からフロントエンドを 2 つ生成します。既定では両方を同じパッケージに含め、アプリの起動時にシステムに応じて自動で選びます。利用者もアプリのコードも意識する必要はありません。
+
+| プラットフォーム | フロントエンド | `frontends` での名前 | 動作環境 |
+| --- | --- | --- | --- |
+| Windows | WinUI 3 | `winui3` | Windows App Runtime 2 があるシステム。Mica 背景と Windows 11 の外観 |
+| Windows | システムの XAML（XAML Islands 経由） | `xaml-islands` | それ以外の Windows 10 と 11。ランタイムのインストールは不要 |
+| iOS | SwiftUI | `swiftui` | iOS 17 以降。すべての Apple ターゲットで共通のフロントエンド |
+| iOS | SwiftUI の iOS 16 版 | `swiftui-16` | iOS 16。同じ生成コードを書き換えたもの |
+
+1 つだけ使うときは明記します。
+
+```toml
+[targets.windows]
+frontends = ["winui3"]   # ランタイムのないシステムではインストールを促す
+
+[targets.ios]
+frontends = ["swiftui"]  # iOS 17 以降
+```
+
+iOS で両方を残したまま `packages = "separate"` と書くと、`.ipa` を 2 つに分けられます。選択の規則は [Windows](Docs/Implementation/Windows-WinUI3.md) と [iOS](Docs/Implementation/iOS-SwiftUI.md) の実装記録にあり、iOS 16 で機能が制限される項目もそこに書いてあります。
+
 ## 他のフレームワークとの比較
 
 <p align="center">
