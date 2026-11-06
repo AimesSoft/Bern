@@ -1184,14 +1184,45 @@ pub unsafe extern "C" fn bern_platform_install(context: *mut c_void, request: Pl
 /// `url` must point to `len` readable bytes.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bern_files_opened(url: *const u8, len: usize) {
-    if url.is_null() {
-        return;
-    }
-    // SAFETY: the caller guarantees `len` readable bytes at `url`.
-    let bytes = unsafe { std::slice::from_raw_parts(url, len) };
-    if let Ok(url) = std::str::from_utf8(bytes) {
+    // SAFETY: the caller's contract.
+    if let Some(url) = unsafe { url_text(url, len) } {
         bern_command::files::opened(url);
     }
+}
+
+/// Whether the engine serves `url` (UTF-8), through `bern::files::serve`.
+///
+/// # Safety
+/// `url` must point to `len` readable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bern_files_served(url: *const u8, len: usize) -> u8 {
+    // SAFETY: the caller's contract.
+    unsafe { url_text(url, len) }.is_some_and(bern_command::files::served) as u8
+}
+
+/// The bytes the engine serves at `url` (UTF-8), empty when there are none.
+/// Blocks until its stream ends, so call it away from the interface thread.
+/// Release the buffer with `bern_buffer_free`.
+///
+/// # Safety
+/// `url` must point to `len` readable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bern_files_read(url: *const u8, len: usize) -> BernBuffer {
+    // SAFETY: the caller's contract.
+    let bytes = unsafe { url_text(url, len) }.and_then(bern_command::files::read_served);
+    BernBuffer::from_vec(bytes.unwrap_or_default())
+}
+
+/// `url` as text.
+///
+/// # Safety
+/// `url` must point to `len` readable bytes, or be null.
+unsafe fn url_text<'a>(url: *const u8, len: usize) -> Option<&'a str> {
+    if url.is_null() {
+        return None;
+    }
+    // SAFETY: the caller's contract.
+    std::str::from_utf8(unsafe { std::slice::from_raw_parts(url, len) }).ok()
 }
 
 /// Release a buffer returned by this library.

@@ -845,6 +845,23 @@ pub unsafe extern "system" fn Java_dev_bern_runtime_BernNative_filesOpened(
     }
 }
 
+/// The bytes the engine serves at `url`; null when it serves none there.
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn Java_dev_bern_runtime_BernNative_filesRead(
+    env: *mut JNIEnv,
+    _: jobject,
+    url: jbyteArray,
+) -> jbyteArray {
+    let url = unsafe { bytes_in(env, url) };
+    let bytes = std::str::from_utf8(&url)
+        .ok()
+        .and_then(bern_command::files::read_served);
+    match bytes {
+        Some(bytes) => unsafe { bytes_out(env, &bytes) },
+        None => std::ptr::null_mut(),
+    }
+}
+
 /// The user came back from what `bern::platform::ask_all_files` showed.
 #[unsafe(no_mangle)]
 pub unsafe extern "system" fn Java_dev_bern_runtime_BernNative_allFilesAnswered(

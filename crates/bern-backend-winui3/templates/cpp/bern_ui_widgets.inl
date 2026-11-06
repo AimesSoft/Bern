@@ -2883,7 +2883,8 @@ struct ImageProps {
     /// The declared resource shown in place of `source` where the picture
     /// is dark: the system's, the application's or its part's theme.
     char const* darkSource = nullptr;
-    /// Or a `MediaSource` the engine gives: a file or an http(s) URL.
+    /// Or a `MediaSource` the engine gives: a file, an http(s) URL or a URL
+    /// it serves.
     Get url;
     Str label;
     Len width;
@@ -3134,6 +3135,9 @@ inline void Image(Parent const& p, Ctx const& ctx, ImageProps props) {
                 if (auto path = Host::FilePath(*next)) {
                     std::wstring file = *path;
                     ShowRead(frame, ctx, file, [file] { return FileBytes(file); }, *next, picture, name);
+                } else if (Host::Serves(*next)) {
+                    std::string served = *next;
+                    ShowRead(frame, ctx, L"served:" + std::wstring(Wide(served)), [served] { return Host::ServedBytes(served); }, served, picture, name);
                 } else {
                     std::wstring key = L"url:" + std::wstring(Wide(*next));
                     if (auto bytes = Recent::Find(key)) ShowPicture(frame, ctx, bytes, picture, name);

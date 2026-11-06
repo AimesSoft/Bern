@@ -1063,6 +1063,15 @@ static int32_t OnPlatformRequest(void*, uint8_t const* operation, size_t operati
     return 0;
 }
 
+bool Serves(std::string const& url) {
+    return bern_files_served(reinterpret_cast<uint8_t const*>(url.data()), url.size()) != 0;
+}
+
+std::vector<uint8_t> ServedBytes(std::string const& url) {
+    auto bytes = Take(bern_files_read(reinterpret_cast<uint8_t const*>(url.data()), url.size()));
+    return {bytes.begin(), bytes.end()};
+}
+
 std::optional<std::string> Start(Catalog const& app, std::string const& resources) {
     catalog = &app;
     engine.clear();

@@ -2653,6 +2653,24 @@ for entry in all.iter().filter(|entry| !entry.folder) {
 - Limits: on the web the content of a chosen folder is fixed at the time of choosing, and files put in later are not seen until it is chosen again; browsers do not hand over folders with no files, so choosing an empty folder does not run the action; drop zones take only one file, and dropping a folder is not supported. An engine running natively in WebUI cannot read the page's folders.
 - Implementation progress (2026-11-02): `bern-command`'s unit tests cover listing and walking local folders (hidden entries rejected by `keep`, links looping back up entered only once, and the replies for files, deleted folders and http(s) addresses), walking a document tree through the host's opener, and the listing format the host hands over; the Web runtime tests check that a chosen folder is recorded level by level in the page, that each file has its own address, and the listing text handed to the engine; `bern-ffi` and `bern-command` compile for Android and wasm32 respectively. Measured on an Android emulator (API 36) with a real app: after choosing a folder under `Music` in the system picker and allowing access, the engine lists two songs, an `.lrc` and a song in the subfolder `Live` through `walk`, with the folder name taken from the display name; through `open` the engine reads the tags, duration and embedded cover, shows the lyrics from the `.lrc` of the same name in the listing, and playback reads from the document address (volume 0), with the song in the subfolder playing too; after a force stop and restart the grant is still there, and walking again at startup gives the same three songs. A document tree without a grant (`primary:Download`) replies `source_unavailable`. The web only ran the runtime tests, without choosing a folder in a browser (the system's picker cannot be operated in automation); macOS, iOS, Linux and Windows go through the same `std::fs` code, verified by unit tests only on macOS.
 
+### Pictures the engine serves
+
+A picture does not have to be a file. `bern::files::serve` gives a scheme of the application's own a stream, read once from start to end, and `Image(source:)` shows URLs of that scheme with no temporary file:
+
+```rust
+bern::files::serve("archive", |url| {
+    let (file, entry) = url["archive:".len()..].split_once('#').unwrap_or_default();
+    let output = Command::new("7zz").args(["x", "-so", file, entry]).output()?;
+    Ok(Box::new(Cursor::new(output.stdout)) as Box<dyn Read + Send>)
+});
+self.state.page = MediaSource::new("archive:/books/one.7z#01.jpg");
+```
+
+- The picture's decoders need the whole file and to go back in it (orientation, frames, sampling to the size shown), so the host reads the stream to its end on a thread of its own and decodes the bytes in memory, each platform with its own decoder and sampling. One picture is in memory at a time while it decodes, as for a download.
+- Hosts keep decoded pictures by URL, so a URL stands for one picture. A stream that fails or gives nothing shows no picture and is not tried again until the view appears again.
+- `files::open` and `files::name` read these URLs too; `open` buffers the stream to give a `SourceFile` that can seek.
+- macOS, iOS, tvOS, Android, Windows and Linux. Browsers and GPUI targets do not read them yet: a page has no thread to read the stream on, and a WebUI server would hand these URLs to anyone on the network.
+
 ### Files the system opens the application with
 
 `[[app.opens]]` in `Bern.toml` declares the files the system may open the application with, and what the context menu of a file manager shows for them:

@@ -137,6 +137,7 @@
 | WinUI 3 上首次显示后才填充的列表、只出现一次的提示、Android 的返回即 `escape`（2026-11-03） | WinUI 3：来自列、空时被折叠的懒加载列表在行到达时让外层容器重新测量，直到滚动视图为止；原先它保留折叠时的零宽，窗口改变大小前一直是空的。WinUI 3、GTK 与 Web 的 `Toast` 只在键或文字变化时再次出现：它的读取函数读到的状态会因别的原因变化，每次变化都会让它再出现一次。Compose：手机与平板上 `Shortcut(key: "escape")` 同时是系统的返回（`BackHandler`），在 `enabled` 成立时生效。Web 运行时测试检查读取的状态变化时提示保持不变、键变化时再次出现 | 一台 Windows 11 电脑，用 MSVC 构建，应用启动在桌面会话中：103、152、289 首的歌单打开后立即显示各行；一个每句歌词都更新任务栏浮窗的插件，安装提示在 30 秒播放中只出现一次，原先每两三秒出现一次。Android 16 模拟器：在标签页之上升起的页面按返回关闭，详情页按返回后退，第一页按返回离开应用。GTK 在 macOS 上编译通过；Web 运行时测试通过 |
 | `WebPage`、`nudge_motion`、`Pages(all:)`、Android TV 的启动器、侧边栏与焦点（2026-11-04） | 各后端的生成器测试；SwiftUI 针对 macOS、iOS 和 tvOS 做了类型检查；Compose 随 Android 构建编译 | `WebPage` 在 macOS 上用 Cookie 文件登录。在 Android TV 16 模拟器上，启动器通过 `LEANBACK_LAUNCHER` 列出应用，`Tabs` 是遥控器进入时展开并跟随遥控器的侧边栏，获得焦点的控件放大并有白色外框，返回键运行 `escape`，`default_focus` 在控件可用后取得焦点。在 tvOS 27 模拟器上，启动后标签有变化的 `Tabs` 会重建，`Text(bold:)` 可以跟随状态 |
 | 系统用应用打开文件：`[[app.opens]]`、`bern::files::take_opened`、`make_default_opener`（2026-11-06） | macOS、Windows、Linux、Android 和 iOS 的打开方式、右键菜单和默认应用，见设计文档“系统用应用打开文件”。声明由各后端的生成器测试覆盖 |
+| 引擎提供的图片：`bern::files::serve`（2026-11-07） | macOS、iOS、tvOS、Android、Windows 和 Linux 上，`Image(source:)` 能显示引擎提供的协议 URL，在内存里解码，不用临时文件，见设计文档“引擎提供的图片”。浏览器和 GPUI 目标暂不读取 |
 
 Firefox 与 Safari 手机布局尚未实测。用于验收的应用在 macOS 上由应用自带的媒体内核播放，其他平台的播放器仍有模拟状态；播放器界面和图片过渡的验收不等于已接入完整媒体播放功能。
 

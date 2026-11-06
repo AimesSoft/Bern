@@ -136,6 +136,8 @@ fn not_a_folder(url: &str) -> CommandError {
 type Openers = Vec<(String, Arc<dyn Opener>)>;
 
 static OPENERS: RwLock<Openers> = RwLock::new(Vec::new());
+/// The schemes the engine serves itself, through [`serve`].
+static SERVED: RwLock<Vec<String>> = RwLock::new(Vec::new());
 
 /// Resolve the URLs of `scheme` through `opener` from now on. Hosts install
 /// their openers before the engine handles its first command; a later
@@ -145,6 +147,91 @@ pub fn install(scheme: &str, opener: impl Opener + 'static) {
     let mut openers = OPENERS.write().unwrap_or_else(|error| error.into_inner());
     openers.retain(|(existing, _)| *existing != scheme);
     openers.push((scheme, Arc::new(opener)));
+}
+
+/// What [`serve`] opens the URLs of a scheme with.
+type Stream = dyn Fn(&str) -> io::Result<Box<dyn Read + Send>> + Send + Sync;
+
+/// The URLs of a scheme the engine serves.
+struct Served {
+    open: Box<Stream>,
+}
+
+impl Opener for Served {
+    /// The last part of the address, after a `#` when it has one.
+    fn name(&self, url: &str) -> Option<String> {
+        let last = url.rsplit(['/', '#', ':']).next()?;
+        let name = String::from_utf8(percent_decode(last)).ok()?;
+        (!name.is_empty()).then_some(name)
+    }
+
+    fn open(&self, url: &str) -> Result<SourceFile, CommandError> {
+        let unavailable =
+            |error: io::Error| CommandError::new("source_unavailable", format!("{url}: {error}"));
+        let mut bytes = Vec::new();
+        (self.open)(url)
+            .and_then(|mut stream| stream.read_to_end(&mut bytes))
+            .map_err(unavailable)?;
+        let len = bytes.len() as u64;
+        Ok(SourceFile::new(io::Cursor::new(bytes), len))
+    }
+}
+
+/// Serve the URLs of `scheme` from the engine: `open` gives what one holds
+/// as a stream, read once from start to end, such as the output of a program
+/// or an entry of an archive. `Image(source:)` then shows such a URL with no
+/// file in between: the host reads the stream on a thread of its own and
+/// decodes the bytes in memory, keeping the picture by its URL, so a URL
+/// stands for one picture. [`open`] and [`name`] read it too.
+///
+/// ```no_run
+/// use std::io::{Cursor, Read};
+/// use std::process::Command;
+///
+/// bern_command::files::serve("archive", |url| {
+///     let (file, entry) = url["archive:".len()..].split_once('#').unwrap_or_default();
+///     let output = Command::new("7zz").args(["x", "-so", file, entry]).output()?;
+///     Ok(Box::new(Cursor::new(output.stdout)) as Box<dyn Read + Send>)
+/// });
+/// ```
+pub fn serve(
+    scheme: &str,
+    open: impl Fn(&str) -> io::Result<Box<dyn Read + Send>> + Send + Sync + 'static,
+) {
+    install(
+        scheme,
+        Served {
+            open: Box::new(open),
+        },
+    );
+    let scheme = scheme.to_ascii_lowercase();
+    let mut served = SERVED.write().unwrap_or_else(|error| error.into_inner());
+    if !served.contains(&scheme) {
+        served.push(scheme);
+    }
+}
+
+/// Whether the engine serves `url`, through [`serve`].
+pub fn served(url: &str) -> bool {
+    scheme(url).is_some_and(|scheme| {
+        SERVED
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .contains(&scheme)
+    })
+}
+
+/// The bytes the engine serves at `url`: what a host shows a picture from.
+/// Blocks until the stream ends. `None` when the engine does not serve `url`
+/// or the stream gives nothing.
+pub fn read_served(url: &str) -> Option<Vec<u8>> {
+    if !served(url) {
+        return None;
+    }
+    let mut file = open(url).ok()?;
+    let mut bytes = Vec::with_capacity(file.len() as usize);
+    file.read_to_end(&mut bytes).ok()?;
+    (!bytes.is_empty()).then_some(bytes)
 }
 
 fn installed(scheme: &str) -> Option<Arc<dyn Opener>> {
@@ -570,6 +657,50 @@ mod web {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A stream that only reads, as a pipe does.
+    struct Pipe(io::Cursor<Vec<u8>>);
+
+    impl Read for Pipe {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            self.0.read(buffer)
+        }
+    }
+
+    #[test]
+    fn the_engine_serves_what_a_stream_gives() {
+        assert!(!served("pages:/a.7z#1.jpg"));
+        assert_eq!(read_served("pages:/a.7z#1.jpg"), None);
+        serve("Pages", |url| {
+            if url.ends_with("gone.jpg") {
+                return Err(io::Error::from(io::ErrorKind::NotFound));
+            }
+            let bytes = if url.ends_with("empty.jpg") {
+                Vec::new()
+            } else {
+                url.as_bytes().to_vec()
+            };
+            Ok(Box::new(Pipe(io::Cursor::new(bytes))) as Box<dyn Read + Send>)
+        });
+        let url = "pages:/a.7z#page%201.jpg";
+        assert!(served(url));
+        assert!(!served("file:///a.jpg"));
+        assert_eq!(read_served(url).as_deref(), Some(url.as_bytes()));
+        assert_eq!(name(url).as_deref(), Some("page 1.jpg"));
+        // What reads a file reads it too, and can seek in it.
+        let mut file = open(url).unwrap();
+        assert_eq!(file.len(), url.len() as u64);
+        file.seek(SeekFrom::Start(6)).unwrap();
+        let mut rest = String::new();
+        file.read_to_string(&mut rest).unwrap();
+        assert_eq!(rest, &url[6..]);
+        assert_eq!(read_served("pages:/gone.jpg"), None);
+        assert_eq!(read_served("pages:/empty.jpg"), None);
+        assert_eq!(
+            open("pages:/gone.jpg").err().map(|error| error.code),
+            Some("source_unavailable".to_string())
+        );
+    }
 
     #[test]
     fn opened_files_wait_for_the_engine() {
