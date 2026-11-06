@@ -1383,7 +1383,9 @@ object BernHost {
             } else {
                 val code = reader.text()
                 val message = reader.text()
-                failure = BernFailure(pending.window, code, message)
+                // A control of a module that was just switched off: its
+                // state is on the way, and nothing went wrong for the user.
+                if (code != "module_disabled") failure = BernFailure(pending.window, code, message)
                 pending.completion?.invoke(BernCommandFailure(code, message))
             }
         } catch (error: Exception) {
