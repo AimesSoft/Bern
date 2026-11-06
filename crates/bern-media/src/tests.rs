@@ -454,6 +454,47 @@ fn executor_failures_and_timeouts_are_explicit() {
 }
 
 #[test]
+fn a_runner_keeps_what_it_opened_until_it_goes() {
+    let (hub, executor) = hub();
+    let page = Arc::new(Executor::default());
+    let runner: Arc<dyn MediaExecutor> = page.clone();
+    hub.dispatch_from(
+        Arc::clone(&runner),
+        MediaCommand::Open,
+        vec![text("preview"), source("blob:page")],
+        |_| {},
+    );
+    hub.dispatch(
+        MediaCommand::SetMuted,
+        vec![text("preview"), Value::Bool(true)],
+        |_| {},
+    );
+    assert_eq!(page.take().len(), 2);
+    assert!(executor.take().is_empty());
+
+    hub.forget_runner(&runner);
+    assert_eq!(phase(&hub, "preview"), Phase::Idle);
+    hub.dispatch(
+        MediaCommand::Open,
+        vec![text("preview"), source("file:///a.mkv")],
+        |_| {},
+    );
+    assert!(page.take().is_empty());
+    assert_eq!(executor.take().len(), 1);
+}
+
+#[test]
+fn only_the_attached_executor_can_detach_itself() {
+    let (hub, executor) = hub();
+    let other: Arc<dyn MediaExecutor> = Arc::new(Executor::default());
+    hub.detach_executor_if(&other);
+    assert!(hub.has_executor());
+    let attached: Arc<dyn MediaExecutor> = executor;
+    hub.detach_executor_if(&attached);
+    assert!(!hub.has_executor());
+}
+
+#[test]
 fn a_detached_executor_makes_players_unavailable() {
     let (hub, executor) = hub();
     dispatch(

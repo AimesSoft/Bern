@@ -360,6 +360,64 @@ fn players_run_on_the_page_that_holds_them() {
 }
 
 #[test]
+fn a_page_and_the_engine_each_run_what_they_open() {
+    #[derive(Default)]
+    struct Native(Mutex<Vec<ExecRequest>>);
+    impl MediaExecutor for Native {
+        fn execute(&self, request: ExecRequest) {
+            self.0.lock().unwrap().push(request);
+        }
+    }
+    let (env, connection, page) = connect();
+    let native = Arc::new(Native::default());
+    env.media.attach_executor(
+        Arc::clone(&native) as Arc<dyn MediaExecutor>,
+        MediaCapabilities {
+            backend: "native".into(),
+            backend_version: "1".into(),
+            background_playback: true,
+            multi_view: true,
+        },
+    );
+    let open_on_device = |url: &str| {
+        env.media.dispatch(
+            MediaCommand::Open,
+            vec![
+                Value::Text("preview".into()),
+                Value::Record(vec![Value::Text(url.into())]),
+            ],
+            |_| {},
+        );
+    };
+    send(&connection, hello("secret"));
+    send(
+        &connection,
+        json!({"type":"media_attach","backend":"browser","backend_version":"1","background_playback":true,"multi_view":false}),
+    );
+    open_on_device("file:///device.mkv");
+    assert_eq!(native.0.lock().unwrap().len(), 1);
+    assert!(
+        page.position(|m| m["type"] == "media_request").is_none(),
+        "a page connecting must not take playback from the engine"
+    );
+
+    send(
+        &connection,
+        json!({"type":"command","request_id":"open","engine_id":env.host.engine_id().to_string(),
+        "command":"media.open","params":{"player_id":"preview","source":{"url":"blob:page"}}}),
+    );
+    let load = page.wait(|m| m["type"] == "media_request" && m["op"] == "load");
+    assert_eq!(load["url"], "blob:page");
+    assert_eq!(native.0.lock().unwrap().len(), 1);
+
+    open_on_device("file:///again.mkv");
+    assert_eq!(native.0.lock().unwrap().len(), 2);
+
+    connection.closed();
+    assert!(env.media.has_executor());
+}
+
+#[test]
 fn local_media_commands_return_to_the_initiating_executor() {
     let (env, first, page) = connect();
     send(&first, hello("secret"));

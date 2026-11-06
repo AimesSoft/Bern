@@ -511,12 +511,11 @@ impl Connection {
                             let me = Arc::clone(self);
                             // The initiating executor holds browser-local sources.
                             // A view mounted in another tab must not steal its load.
-                            if self.lock().executor
-                                && let Some(Value::Text(player)) = params.first()
-                            {
+                            let page = self.lock().executor;
+                            if page && let Some(Value::Text(player)) = params.first() {
                                 env.router.claim(player, self.id);
                             }
-                            env.media.dispatch(media_command, params, move |result| {
+                            let answer = move |result: Result<Value, CommandError>| {
                                 let (types, _) = media_catalog();
                                 me.send(&ServerMessage::Result {
                                     request_id,
@@ -529,7 +528,14 @@ impl Connection {
                                         .map(|value| to_json(value, &spec.result, &types)),
                                     error: result.err(),
                                 });
-                            });
+                            };
+                            if page {
+                                let router = Arc::clone(&env.router) as Arc<dyn MediaExecutor>;
+                                env.media
+                                    .dispatch_from(router, media_command, params, answer);
+                            } else {
+                                env.media.dispatch(media_command, params, answer);
+                            }
                         }
                     }
                 } else {
@@ -728,7 +734,9 @@ impl Connection {
             } => {
                 self.lock().executor = true;
                 let first = env.router.attach(self.id, Arc::clone(&self.out));
-                if first {
+                // An engine that plays on its own device keeps doing so: a page
+                // that connects runs only what it opens itself.
+                if first && !env.media.has_executor() {
                     env.media.attach_executor(
                         Arc::clone(&env.router) as Arc<dyn MediaExecutor>,
                         MediaCapabilities {
@@ -742,7 +750,13 @@ impl Connection {
             }
             ClientMessage::MediaCreate { player, owner } => {
                 match env.media.create(&player, &owner) {
-                    Ok(()) => env.router.claim(&player, self.id),
+                    Ok(()) => {
+                        env.router.claim(&player, self.id);
+                        if self.lock().executor {
+                            let router = Arc::clone(&env.router) as Arc<dyn MediaExecutor>;
+                            env.media.run_on(&player, &router);
+                        }
+                    }
                     Err(problem) => self.send(&ServerMessage::Error {
                         request_id: None,
                         error: problem,
@@ -827,7 +841,9 @@ impl Connection {
             self.env.media.release_window(&window);
         }
         if executor && self.env.router.detach(self.id) {
-            self.env.media.detach_executor();
+            let router = Arc::clone(&self.env.router) as Arc<dyn MediaExecutor>;
+            self.env.media.forget_runner(&router);
+            self.env.media.detach_executor_if(&router);
         }
     }
 }
