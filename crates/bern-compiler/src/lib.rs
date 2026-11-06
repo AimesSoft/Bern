@@ -2253,6 +2253,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
                 background_audio: config.background_audio,
                 overlays: config.overlays,
                 photos: config.photos,
+                opens: config.opens.clone(),
             },
             languages: ir::Languages {
                 supported: config.languages.clone(),

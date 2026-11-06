@@ -878,8 +878,7 @@ static std::vector<std::string> CommandLineFiles() {
         wchar_t full[MAX_PATH * 4];
         DWORD length = GetFullPathNameW(argument.c_str(), MAX_PATH * 4, full, nullptr);
         if (length == 0 || length >= MAX_PATH * 4) continue;
-        auto attributes = GetFileAttributesW(full);
-        if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+        if (GetFileAttributesW(full) == INVALID_FILE_ATTRIBUTES) continue;
         if (auto url = FileUrl(full); !url.empty()) urls.push_back(url);
     }
     LocalFree(arguments);
@@ -1037,9 +1036,18 @@ static void OnQuery(void*, uint64_t subscription, uint8_t const* bytes, size_t l
 }
 
 /// The engine's platform requests, from any of its threads: the
-/// clipboard is set on the interface thread.
+/// clipboard is set on the interface thread, and for
+/// `make_default_opener` Settings opens on the application's page, as
+/// Windows leaves the choice to the user.
 static int32_t OnPlatformRequest(void*, uint8_t const* operation, size_t operationLen, uint8_t const* first, size_t firstLen, uint8_t const*, size_t) {
     std::string_view name(reinterpret_cast<char const*>(operation), operationLen);
+    if (name == "make_default_opener") {
+        Post([] {
+            auto page = L"ms-settings:defaultapps?registeredAppUser=" + std::wstring(Wide(catalog->bundleId));
+            ShellExecuteW(nullptr, L"open", page.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        });
+        return 0;
+    }
     if (name != "copy_text") return 1;
     Post([text = std::string(reinterpret_cast<char const*>(first), firstLen)] {
         using namespace winrt::Windows::ApplicationModel::DataTransfer;

@@ -1618,6 +1618,7 @@ pub(crate) mod tests {
                 background_audio: false,
                 overlays: false,
                 photos: false,
+                opens: Vec::new(),
             },
             languages: Languages {
                 supported: vec!["en".into()],

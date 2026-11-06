@@ -8,6 +8,11 @@ bundle_id = "dev.bern.gallery"
 version = "0.1.0"
 name = { "zh-Hans" = "图案集", "en" = "Gallery" }
 
+# Videos open from the file manager, whose context menu has an item for them.
+[[app.opens]]
+files = ["video"]
+menu = { "zh-Hans" = "在图案集中播放", "en" = "Play in Gallery" }
+
 [languages]
 supported = ["zh-Hans", "en"]
 default = "zh-Hans"

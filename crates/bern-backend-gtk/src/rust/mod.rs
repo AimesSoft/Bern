@@ -525,6 +525,31 @@ impl<'a> Generator<'a> {
             })
             .collect();
         out.line(format!("file_kinds: &[{}],", kinds.join(", ")));
+        out.line(format!("opens: {},", string(&app.engine_kinds())));
+        // A folder keeps opening in the file manager.
+        let types: Vec<String> = crate::glue::opened_types(app)
+            .into_iter()
+            .filter(|kind| *kind != "inode/directory")
+            .map(string)
+            .collect();
+        out.line(format!("opened_types: &[{}],", types.join(", ")));
+        let menus: Vec<String> = app
+            .app
+            .opens
+            .iter()
+            .filter(|opens| !opens.menu.is_empty())
+            .map(|opens| {
+                // The default language first.
+                let mut texts: Vec<_> = opens.menu.iter().collect();
+                texts.sort_by_key(|(language, _)| **language != app.languages.default);
+                let texts: Vec<String> = texts
+                    .iter()
+                    .map(|(language, text)| format!("({}, {})", string(language), string(text)))
+                    .collect();
+                format!("&[{}]", texts.join(", "))
+            })
+            .collect();
+        out.line(format!("file_menus: &[{}],", menus.join(", ")));
         let status_item = app.windows.status_item.as_ref().map(|item| {
             // `image`: the pictures the build drew beside this file.
             let image: Vec<String> = if item.resource("image").is_some() {

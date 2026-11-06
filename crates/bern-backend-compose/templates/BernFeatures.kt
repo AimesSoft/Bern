@@ -1199,6 +1199,8 @@ object BernClipboard {
 object BernFiles {
     /// Extensions each category takes besides the system's own types.
     private val extensions: Map<String, List<String>> = mapOf(/*bern:file-extensions*/)
+    /// The kinds of `[[app.opens]]`: what no drop takes goes to the engine.
+    private const val engineKinds = "/*bern:engine-opens*/"
     private var pick: ActivityResultLauncher<Array<String>>? = null
     private var pickFolder: ActivityResultLauncher<Uri?>? = null
     private var allFilesPage: ActivityResultLauncher<Intent>? = null
@@ -1339,28 +1341,44 @@ object BernFiles {
         openers.remove(token)
     }
 
-    /// A file another app opens with this one; it waits for a drop that
-    /// takes its kind to be on screen.
+    /// Files another app opens with this one: a drop that takes their kind
+    /// gets each, else the engine if `[[app.opens]]` declares it; the others
+    /// wait for such a drop to be on screen.
     fun opened(intent: Intent?) {
-        val uri = when (intent?.action) {
-            Intent.ACTION_VIEW -> intent.data
-            Intent.ACTION_SEND -> if (Build.VERSION.SDK_INT >= 33) {
-                intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
-            } else {
-                @Suppress("DEPRECATION") intent.getParcelableExtra(Intent.EXTRA_STREAM)
-            }
-            else -> null
-        } ?: return
-        waiting.add(uri.toString())
+        val uris: List<Uri> = when (intent?.action) {
+            Intent.ACTION_VIEW -> listOfNotNull(intent.data)
+            Intent.ACTION_SEND -> listOfNotNull(
+                if (Build.VERSION.SDK_INT >= 33) {
+                    intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                } else {
+                    @Suppress("DEPRECATION") intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+                },
+            )
+            Intent.ACTION_SEND_MULTIPLE -> (
+                if (Build.VERSION.SDK_INT >= 33) {
+                    intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                } else {
+                    @Suppress("DEPRECATION") intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)
+                }
+            ).orEmpty()
+            else -> emptyList()
+        }
+        if (uris.isEmpty()) return
+        uris.mapTo(waiting) { it.toString() }
         deliver()
     }
 
     private fun deliver() {
-        if (openers.isEmpty()) return
         val urls = ArrayList(waiting)
         waiting.clear()
         for (url in urls) {
-            openers.values.firstOrNull { accepts(url, it.first) }?.second?.invoke(url)
+            val opener = openers.values.firstOrNull { accepts(url, it.first) }
+            when {
+                opener != null -> opener.second.invoke(url)
+                engineKinds.isNotEmpty() && accepts(url, engineKinds) ->
+                    BernNative.filesOpened(url.toByteArray())
+                openers.isEmpty() -> waiting.add(url)
+            }
         }
     }
 }

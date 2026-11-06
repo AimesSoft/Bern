@@ -201,7 +201,7 @@ const RUNTIME: &str = include_str!("../templates/BernRuntime.swift");
 
 /// The runtime template with the extensions of each file kind from the
 /// shared table, so pickers, drops and the Info.plist agree.
-pub(crate) fn runtime_source(template: &str) -> String {
+pub(crate) fn runtime_source(template: &str, engine_kinds: &str) -> String {
     let table: Vec<String> = bern_ir::spec::FILE_KIND_EXTENSIONS
         .iter()
         .map(|(kind, extensions)| {
@@ -209,10 +209,12 @@ pub(crate) fn runtime_source(template: &str) -> String {
             format!("\"{kind}\": [{}]", list.join(", "))
         })
         .collect();
-    template.replace("/*bern:file-extensions*/", &table.join(", "))
+    template
+        .replace("/*bern:file-extensions*/", &table.join(", "))
+        .replace("/*bern:engine-opens*/", engine_kinds)
 }
 pub(crate) fn runtime_with_svg(app: &Application, source: &str) -> String {
-    let mut source = runtime_source(source);
+    let mut source = runtime_source(source, &app.engine_kinds());
     if bern_target_api::svg::used(app) {
         source.push_str(&bern_target_api::svg::template(
             include_str!("../templates/BernSvg.swift"),
@@ -403,7 +405,10 @@ impl Target for SwiftUiMacos {
                 contents,
             });
         }
-        for (path, table) in resources::localization_files(app) {
+        for (path, table) in resources::localization_files(app)
+            .into_iter()
+            .chain(resources::services_menu_files(app))
+        {
             files.push(GeneratedFile::text(
                 bundle.join("Contents/Resources").join(path),
                 table,
@@ -645,6 +650,7 @@ impl Target for SwiftUiMacos {
                     .collect(),
                 keep: resources::localization_files(app)
                     .into_iter()
+                    .chain(resources::services_menu_files(app))
                     .map(|(path, _)| path)
                     .chain([PathBuf::from(ICON_FILE)])
                     .chain(

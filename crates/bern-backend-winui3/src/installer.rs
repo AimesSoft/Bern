@@ -152,6 +152,59 @@ fn windows(path: &Path) -> String {
     path.display().to_string().replace('/', "\\")
 }
 
+/// What the installer tells Windows about the files the application opens:
+/// `.ext`, `folder` or `*`, each with the index of its context menu item,
+/// -1 for none. Only an extension takes part in “Open with” and the default
+/// apps, so the others stand here only with an item.
+fn file_types(app: &Application) -> Vec<(String, i32)> {
+    let mut types: Vec<(String, i32)> = Vec::new();
+    let mut add = |kind: &str, menu: i32| {
+        let names: Vec<String> = match kind {
+            "any" => vec!["*".to_string()],
+            "folder" => vec!["folder".to_string()],
+            ext if ext.starts_with('.') => vec![ext.to_string()],
+            kind => bern_ir::spec::file_kind_extensions(kind)
+                .iter()
+                .map(|ext| format!(".{ext}"))
+                .collect(),
+        };
+        for name in names {
+            let known = types
+                .iter()
+                .any(|(type_, item)| *type_ == name && (*item == menu || menu < 0));
+            if !known && (menu >= 0 || name.starts_with('.')) {
+                types.push((name, menu));
+            }
+        }
+    };
+    let mut items = 0;
+    for opens in &app.app.opens {
+        let menu = if opens.menu.is_empty() {
+            -1
+        } else {
+            items += 1;
+            items - 1
+        };
+        for kind in opens.kinds() {
+            add(kind, menu);
+        }
+    }
+    for kind in app.opened_kinds() {
+        add(&kind, -1);
+    }
+    types
+}
+
+/// The texts of the context menu items in `language`, in the order
+/// [`file_types`] counts them.
+fn menu_texts<'a>(app: &'a Application, language: &str) -> Vec<&'a str> {
+    app.app
+        .opens
+        .iter()
+        .filter_map(|opens| opens.menu_text(language, &app.languages.default))
+        .collect()
+}
+
 /// `setup_info.h`: what the installer installs and how it talks.
 pub fn setup_info(app: &Application, executable: &str, files: &[Payload]) -> String {
     let default_name = name_in(app, &app.languages.default);
@@ -168,7 +221,17 @@ pub fn setup_info(app: &Application, executable: &str, files: &[Payload]) -> Str
          wchar_t const* installing;\n    wchar_t const* installed;\n    wchar_t const* open;\n    \
          wchar_t const* uninstall;\n    wchar_t const* uninstalling;\n    wchar_t const* uninstalled;\n    \
          wchar_t const* done;\n    wchar_t const* retry;\n    wchar_t const* close_first;\n    \
-         wchar_t const* failed;\n};\n\n",
+         wchar_t const* failed;\n    wchar_t const* menus[kMenus];\n};\n\n\
+         struct FileType {\n    wchar_t const* type;\n    int menu;\n};\n\n",
+    );
+    // An array needs a length: without items it holds one empty text.
+    let items = menu_texts(app, &app.languages.default).len();
+    out = out.replace(
+        "struct Texts {",
+        &format!(
+            "inline constexpr int kMenus = {};\n\nstruct Texts {{",
+            items.max(1)
+        ),
     );
     for (name, value) in [
         ("kKey", app.app.bundle_id.clone()),
@@ -191,9 +254,17 @@ pub fn setup_info(app: &Application, executable: &str, files: &[Payload]) -> Str
     for (language, texts) in TEXTS {
         let mut fields = vec![wide(language), wide(&name_in(app, language))];
         fields.extend(texts.iter().map(|text| wide(text)));
+        let menus: Vec<String> = menu_texts(app, language).into_iter().map(wide).collect();
+        fields.push(format!("{{{}}}", menus.join(", ")));
         out.push_str(&format!("    {{{}}},\n", fields.join(", ")));
     }
-    out.push_str("};\n\ninline constexpr wchar_t const* kFiles[] = {\n");
+    out.push_str(
+        "};\n\n// The last entry ends the list.\ninline constexpr FileType kFileTypes[] = {\n",
+    );
+    for (name, menu) in file_types(app) {
+        out.push_str(&format!("    {{{}, {menu}}},\n", wide(&name)));
+    }
+    out.push_str("    {nullptr, -1},\n};\n\ninline constexpr wchar_t const* kFiles[] = {\n");
     for file in files {
         out.push_str(&format!("    {},\n", wide(&windows(&file.path))));
     }
@@ -415,9 +486,41 @@ mod tests {
         // Each text in `Texts`, with the language and the name before them.
         assert_eq!(
             header.matches("wchar_t const* ").count(),
-            fields + 2 + 1,
-            "and kFiles"
+            fields + 2 + 3,
+            "and the menus, a file type and kFiles"
         );
+    }
+
+    #[test]
+    fn the_installer_knows_what_the_application_opens() {
+        let opens = |files: &str, menu: &str| bern_ir::OpensDef {
+            files: files.to_string(),
+            menu: [("en".to_string(), menu.to_string())]
+                .into_iter()
+                .filter(|_| !menu.is_empty())
+                .collect(),
+        };
+        let mut app = hello();
+        app.languages.default = "en".to_string();
+        let plain = setup_info(&app, "hello", &[]);
+        assert!(plain.contains("kMenus = 1;"), "{plain}");
+        assert!(plain.contains("kFileTypes[] = {\n    {nullptr, -1},"), "{plain}");
+        app.app.opens = vec![
+            opens("audio folder", "Play"),
+            opens(".lrc", ""),
+            opens("any", "Inspect"),
+        ];
+        let info = setup_info(&app, "hello", &[]);
+        for expected in [
+            "kMenus = 2;",
+            r#"{L".mp3", 0},"#,
+            r#"{L"folder", 0},"#,
+            r#"{L".lrc", -1},"#,
+            r#"{L"*", 1},"#,
+            r#"{L"Play", L"Inspect"}},"#,
+        ] {
+            assert!(info.contains(expected), "{expected} in {info}");
+        }
     }
 
     #[test]

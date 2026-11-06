@@ -292,10 +292,12 @@ pub(crate) fn add_opener(kinds: &'static str, give: Rc<dyn Fn(String)>) {
 }
 
 /// Files the system hands the application, as from a file manager's “Open
-/// With”: the newest drop area that takes the kind gets each; the primary
-/// window comes forward, and files wait for a drop area to appear.
+/// With”: the newest drop area that takes the kind gets each, else the
+/// engine when `[[app.opens]]` declares it; the primary window comes
+/// forward, and the other files wait for a drop area to appear.
 fn open_files(files: &[gio::File]) {
     windows::reopen_primary();
+    let opens = host().def.opens;
     for file in files {
         let url = file.uri().to_string();
         let taker = OPENERS.with(|openers| {
@@ -308,7 +310,66 @@ fn open_files(files: &[gio::File]) {
         });
         match taker {
             Some(give) => give(url),
+            None if !opens.is_empty() && crate::features::accepts(&url, opens) => {
+                bern_ffi::files::opened(&url);
+            }
             None => WAITING.with(|waiting| waiting.borrow_mut().push(url)),
+        }
+    }
+}
+
+/// The context menu items of `[[app.opens]]` in GNOME's Files, which reads
+/// them only from the user's own scripts folder. Written for the installed
+/// application alone, in the interface language, and each removes itself
+/// once the application is gone.
+fn write_file_scripts(def: &AppDef) {
+    let Ok(program) = std::env::current_exe() else {
+        return;
+    };
+    if !program.starts_with(std::path::Path::new("/opt").join(def.bundle_id)) {
+        return;
+    }
+    let folder = glib::user_data_dir().join("nautilus/scripts");
+    let language = text::language();
+    let quoted = format!("'{}'", program.display().to_string().replace('\'', r"'\''"));
+    let script =
+        format!("#!/bin/sh\n[ -x {quoted} ] || {{ rm -f -- \"$0\"; exit 0; }}\nexec {quoted} \"$@\"\n");
+    for texts in def.file_menus {
+        let there = |name: &str| folder.join(name.replace('/', "-"));
+        if texts.iter().any(|(_, name)| there(*name).exists()) {
+            continue;
+        }
+        let chosen = texts.iter().find(|(tag, _)| *tag == language).or(texts.first());
+        let Some((_, name)) = chosen else {
+            continue;
+        };
+        let written = std::fs::create_dir_all(&folder)
+            .and_then(|()| std::fs::write(there(*name), &script))
+            .and_then(|()| {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(there(*name), std::fs::Permissions::from_mode(0o755))
+            });
+        if let Err(error) = written {
+            eprintln!("bern: cannot write the file manager's script: {error}");
+        }
+    }
+}
+
+/// Make the application what opens its media types, when the desktop knows
+/// it from an installed entry.
+fn make_default_opener() {
+    let def = host().def;
+    let entry = format!("{}.desktop", def.bundle_id);
+    let found = gio::AppInfo::all()
+        .into_iter()
+        .find(|app| app.id().is_some_and(|id| id == entry));
+    let Some(app) = found else {
+        eprintln!("bern: {entry} is not installed");
+        return;
+    };
+    for kind in def.opened_types {
+        if let Err(error) = app.set_as_default_for_type(kind) {
+            eprintln!("bern: cannot open {kind} by default: {error}");
         }
     }
 }
@@ -455,6 +516,10 @@ impl bern_ffi::platform::Services for Services {
                 });
                 Ok(String::new())
             }
+            "make_default_opener" => {
+                glib::MainContext::default().invoke(make_default_opener);
+                Ok(String::new())
+            }
             _ => Err(bern_ffi::protocol::CommandError::new(
                 "platform_unavailable",
                 format!("Linux has no `{operation}`"),
@@ -513,6 +578,7 @@ pub fn run(def: AppDef, start: StartEngine) -> glib::ExitCode {
         if let Some(item) = &def.status_item {
             crate::status::show(item);
         }
+        write_file_scripts(def);
         // The engine keeps running without windows, as the session's
         // entries may still use it; activating the application again
         // opens the primary window.
@@ -605,6 +671,9 @@ pub(crate) mod tests {
             text_styles: &[],
             theme: None,
             file_kinds: &[],
+            opens: "",
+            opened_types: &[],
+            file_menus: &[],
             status_item: None,
         }
     }

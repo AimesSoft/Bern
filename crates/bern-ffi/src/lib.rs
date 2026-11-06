@@ -42,7 +42,7 @@ use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-pub use bern_command::{overlay, platform};
+pub use bern_command::{files, overlay, platform};
 pub use bern_media as media_contract;
 pub use bern_protocol as protocol;
 pub use bern_runtime as runtime;
@@ -1174,6 +1174,24 @@ pub unsafe extern "C" fn bern_platform_install(context: *mut c_void, request: Pl
         context: context as usize,
         request,
     });
+}
+
+/// The system opened the application with the file at `url` (UTF-8), of a
+/// kind `[[app.opens]]` declares: the engine takes it with
+/// `bern::files::take_opened`. Hosts may call it before `bern_app_start`.
+///
+/// # Safety
+/// `url` must point to `len` readable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bern_files_opened(url: *const u8, len: usize) {
+    if url.is_null() {
+        return;
+    }
+    // SAFETY: the caller guarantees `len` readable bytes at `url`.
+    let bytes = unsafe { std::slice::from_raw_parts(url, len) };
+    if let Ok(url) = std::str::from_utf8(bytes) {
+        bern_command::files::opened(url);
+    }
 }
 
 /// Release a buffer returned by this library.

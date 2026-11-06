@@ -237,6 +237,14 @@ pub struct AppDef {
     pub theme: Option<ThemeDef>,
     /// Extensions of the file kinds `files:` names.
     pub file_kinds: &'static [(&'static str, &'static [&'static str])],
+    /// The kinds of `[[app.opens]]`, separated by spaces: what no drop area
+    /// takes goes to the engine.
+    pub opens: &'static str,
+    /// The media types the application can be made the default for.
+    pub opened_types: &'static [&'static str],
+    /// The context menu items of `[[app.opens]]`: language and text, the
+    /// default language first.
+    pub file_menus: &'static [&'static [(&'static str, &'static str)]],
     /// The `StatusItem` in the desktop's status area.
     pub status_item: Option<StatusItemDef>,
 }

@@ -47,6 +47,41 @@ pub struct Application {
 }
 
 impl Application {
+    /// The kinds of file the application opens: those of `[[app.opens]]`
+    /// and of every `Drop` with `opens: true`, in components and in the
+    /// content written directly in a window, each once, in a stable order.
+    pub fn opened_kinds(&self) -> Vec<String> {
+        let mut kinds = std::collections::BTreeSet::new();
+        for opens in &self.app.opens {
+            kinds.extend(opens.kinds().map(str::to_string));
+        }
+        self.walk(&mut |node, _| {
+            if let Node::Element(element) = node
+                && element.kind == "Drop"
+                && element.keyword("opens") == Some("true")
+            {
+                for word in element.keyword("files").unwrap_or("any").split(' ') {
+                    kinds.insert(word.to_string());
+                }
+            }
+        });
+        kinds.into_iter().collect()
+    }
+
+    /// The kinds of file the engine takes: those of `[[app.opens]]`,
+    /// separated by spaces, each once. Hosts hand it what no `Drop` takes.
+    pub fn engine_kinds(&self) -> String {
+        let mut kinds: Vec<&str> = Vec::new();
+        for opens in &self.app.opens {
+            for kind in opens.kinds() {
+                if !kinds.contains(&kind) {
+                    kinds.push(kind);
+                }
+            }
+        }
+        kinds.join(" ")
+    }
+
     /// Visit the nodes of every component and then of every window's
     /// content, depth first, each with the kind of the nearest element
     /// around it.
@@ -389,6 +424,55 @@ pub struct AppInfo {
     /// (`bern::platform::save_image`), which iOS asks the user to allow.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub photos: bool,
+    /// `[[app.opens]]`: the files the system may open the application with,
+    /// and what file managers show for them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub opens: Vec<OpensDef>,
+}
+
+/// One `[[app.opens]]`: files the system may open the application with.
+/// They reach the engine through `bern::files::take_opened`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpensDef {
+    /// The kinds, as `files:` of a control takes them, separated by spaces.
+    pub files: String,
+    /// What the context menu of a file manager shows for these files, by
+    /// language; empty without an item there.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub menu: BTreeMap<String, String>,
+}
+
+impl OpensDef {
+    /// The kinds, one by one.
+    pub fn kinds(&self) -> impl Iterator<Item = &str> {
+        self.files.split(' ')
+    }
+
+    /// The text of the menu item in `language`, else in `default`; `None`
+    /// without an item.
+    pub fn menu_text(&self, language: &str, default: &str) -> Option<&str> {
+        self.menu
+            .get(language)
+            .or_else(|| self.menu.get(default))
+            .map(String::as_str)
+    }
+
+    /// The file extensions of the kinds, without their dots, each once.
+    pub fn extensions(&self) -> Vec<&str> {
+        let mut extensions = Vec::new();
+        for kind in self.kinds() {
+            let named = match kind.strip_prefix('.') {
+                Some(ext) => vec![ext],
+                None => spec::file_kind_extensions(kind).to_vec(),
+            };
+            for ext in named {
+                if !extensions.contains(&ext) {
+                    extensions.push(ext);
+                }
+            }
+        }
+        extensions
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

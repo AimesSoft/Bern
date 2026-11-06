@@ -203,21 +203,6 @@ dependencies {{
 /// The kinds of file the application opens: those of every `Drop` with
 /// `opens: true`, in components and in the content written directly in a
 /// window.
-fn opened_kinds(app: &bern_ir::Application) -> Vec<String> {
-    let mut kinds = std::collections::BTreeSet::new();
-    app.walk(&mut |node, _| {
-        if let bern_ir::Node::Element(element) = node
-            && element.kind == "Drop"
-            && element.keyword("opens") == Some("true")
-        {
-            for word in element.keyword("files").unwrap_or("any").split(' ') {
-                kinds.insert(word.to_string());
-            }
-        }
-    });
-    kinds.into_iter().collect()
-}
-
 /// Whether the application reads pictures or media from the network,
 /// anywhere in its components or windows.
 fn uses_network(app: &bern_ir::Application) -> bool {
@@ -234,24 +219,6 @@ fn uses_network(app: &bern_ir::Application) -> bool {
 }
 
 /// The media type files with `ext` usually carry.
-fn extension_type(ext: &str) -> Option<&'static str> {
-    Some(match ext {
-        "srt" => "application/x-subrip",
-        "ass" | "ssa" => "text/x-ssa",
-        "vtt" => "text/vtt",
-        "xml" => "text/xml",
-        "json" => "application/json",
-        "txt" => "text/plain",
-        "pdf" => "application/pdf",
-        "mkv" => "video/x-matroska",
-        "webm" => "video/webm",
-        "mp4" | "m4v" => "video/mp4",
-        "flac" => "audio/flac",
-        "mp3" => "audio/mpeg",
-        _ => return None,
-    })
-}
-
 /// The application manifest: one activity that handles its own
 /// configuration changes, so turning the phone or resizing keeps the
 /// windows and their drafts; `round_icon` when the launcher icon has a
@@ -360,7 +327,12 @@ pub fn manifest(
     };
     // Other apps offer this one for the kinds it opens ("Open with"); a
     // file opened while it runs arrives in the running activity.
-    let kinds = opened_kinds(app);
+    // Nothing on Android opens a folder with an app.
+    let kinds: Vec<String> = app
+        .opened_kinds()
+        .into_iter()
+        .filter(|kind| kind != "folder")
+        .collect();
     let (launch_mode, opens) = if kinds.is_empty() {
         ("", String::new())
     } else {
@@ -370,7 +342,7 @@ pub fn manifest(
                 // Files other apps hand over carry a media type; an
                 // extension without a known one is not offered.
                 Some(ext) => {
-                    if let Some(mime) = extension_type(ext) {
+                    if let Some(mime) = bern_ir::spec::file_extension_type(ext) {
                         types.insert(mime.to_string());
                     }
                 }
@@ -403,6 +375,7 @@ pub fn manifest(
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
                 <category android:name="android.intent.category.DEFAULT" />{data}
             </intent-filter>"#
             ),
@@ -682,6 +655,23 @@ mod tests {
         let compressed = build.find("useLegacyPackaging.set(true)").unwrap();
         let release = build.find("withBuildType(\"release\")").unwrap();
         assert!(release < compressed, "{build}");
+    }
+
+    #[test]
+    fn the_opens_of_the_manifest_become_intents() {
+        let mut hello = app("hello");
+        hello.app.opens = vec![bern_ir::OpensDef {
+            files: "audio folder".to_string(),
+            menu: Default::default(),
+        }];
+        let audio = manifest(&hello, false, None, &[]);
+        assert!(audio.contains("android:mimeType=\"audio/*\""), "{audio}");
+        assert!(audio.contains("action.SEND_MULTIPLE"), "{audio}");
+        assert!(audio.contains("singleTask"), "{audio}");
+        assert!(!audio.contains("*/*\""), "{audio}");
+        hello.app.opens[0].files = "folder".to_string();
+        let folder = manifest(&hello, false, None, &[]);
+        assert!(!folder.contains("singleTask"), "{folder}");
     }
 
     #[test]

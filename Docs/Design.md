@@ -2653,6 +2653,36 @@ for entry in all.iter().filter(|entry| !entry.folder) {
 - Limits: on the web the content of a chosen folder is fixed at the time of choosing, and files put in later are not seen until it is chosen again; browsers do not hand over folders with no files, so choosing an empty folder does not run the action; drop zones take only one file, and dropping a folder is not supported. An engine running natively in WebUI cannot read the page's folders.
 - Implementation progress (2026-11-02): `bern-command`'s unit tests cover listing and walking local folders (hidden entries rejected by `keep`, links looping back up entered only once, and the replies for files, deleted folders and http(s) addresses), walking a document tree through the host's opener, and the listing format the host hands over; the Web runtime tests check that a chosen folder is recorded level by level in the page, that each file has its own address, and the listing text handed to the engine; `bern-ffi` and `bern-command` compile for Android and wasm32 respectively. Measured on an Android emulator (API 36) with a real app: after choosing a folder under `Music` in the system picker and allowing access, the engine lists two songs, an `.lrc` and a song in the subfolder `Live` through `walk`, with the folder name taken from the display name; through `open` the engine reads the tags, duration and embedded cover, shows the lyrics from the `.lrc` of the same name in the listing, and playback reads from the document address (volume 0), with the song in the subfolder playing too; after a force stop and restart the grant is still there, and walking again at startup gives the same three songs. A document tree without a grant (`primary:Download`) replies `source_unavailable`. The web only ran the runtime tests, without choosing a folder in a browser (the system's picker cannot be operated in automation); macOS, iOS, Linux and Windows go through the same `std::fs` code, verified by unit tests only on macOS.
 
+### Files the system opens the application with
+
+`[[app.opens]]` in `Bern.toml` declares the files the system may open the application with, and what the context menu of a file manager shows for them:
+
+```toml
+[[app.opens]]
+files = ["audio", ".cue"]   # as `files:` of a control takes them
+menu = { "en" = "Play with Demo", "zh-Hans" = "用 Demo 播放" }   # optional; needs the default language
+```
+
+There may be several entries, each with its own item. The engine takes the files in `wake`, which the host runs once as the engine starts and again for every later file:
+
+```rust
+for url in bern::files::take_opened() {
+    let name = bern::files::name(&url);   // read like any other file the user handed over
+}
+```
+
+A `Drop(opens: true)` on screen that takes the kind gets the file first, and declares it too; what no drop takes goes to the engine when `[[app.opens]]` declares it. The primary window comes forward either way. `bern::platform::make_default_opener()` makes the application what opens the declared files, as far as the system lets an application do so, for a button in its settings.
+
+| Platform | Open with | Context menu | Default application |
+| --- | --- | --- | --- |
+| macOS | Document types in `Info.plist`, at rank `Alternate`: the system's choice stays until the user changes it | `NSServices`: Finder lists the item among its Quick Actions | Finder's "Change All"; `make_default_opener` sets it through `NSWorkspace` |
+| Windows | `setup.exe` registers a file type for the user, with `OpenWithProgids` for each extension, and removes it on uninstalling | Verbs under `SystemFileAssociations`, `Directory` for `folder`, `*` for `any`; Windows 11 shows them under "Show more options", as its first menu takes only packaged applications | `RegisteredApplications` lists the application in Settings > Default apps; `make_default_opener` opens its page there, since Windows leaves the choice to the user |
+| Linux | `MimeType` in the desktop entry of the `.deb`; `folder` is `inode/directory`, and an extension without a known media type is left out | The `.deb` installs a Dolphin service menu, a Nemo action and a file manager action (PCManFM-Qt and others); GNOME Files reads only the user's folder, so the installed application writes the item into `Scripts` when it starts, and the script removes itself once the application is gone | The system's settings; `make_default_opener` sets it through GIO, except for folders |
+| Android | `VIEW`, `SEND` and `SEND_MULTIPLE` intents; `folder` does not apply | Not applicable | "Always" in the system's chooser; `make_default_opener` answers `platform_unavailable` |
+| iOS | Document types, opened in place, with a type imported for each extension | Not applicable | The user's choice in Files; `make_default_opener` answers `platform_unavailable` |
+
+The `.zip` and `.tar.gz`, which run without installing, register nothing. tvOS and browsers have no such files. GPUI targets declare nothing yet.
+
 ## Project organization
 
 Bern is developed in one Rust workspace; the compiler does not get a separate repository. A split by responsibility is recommended; small crates can be merged at first:

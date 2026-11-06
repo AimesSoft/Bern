@@ -242,6 +242,13 @@ impl gallery::Engine for GalleryEngine {
     fn state(&self) -> &State {
         &self.state
     }
+
+    /// A video the system opened the application with goes to the player.
+    fn wake(&mut self) {
+        for url in bern::files::take_opened() {
+            let _ = gallery::Commands::play(self, MediaSource::new(url));
+        }
+    }
 }
 
 /// What the notice says about a clip: the name the user knows it by, and,

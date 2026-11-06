@@ -165,7 +165,7 @@ const FEATURES_BUILT: &[&str] = &[
 
 /// The features template with the extensions of each file kind from the
 /// shared table, so pickers, drops and the manifest agree.
-fn features_source() -> String {
+fn features_source(engine_kinds: &str) -> String {
     let table: Vec<String> = bern_ir::spec::FILE_KIND_EXTENSIONS
         .iter()
         .map(|(kind, extensions)| {
@@ -173,7 +173,9 @@ fn features_source() -> String {
             format!("\"{kind}\" to listOf({})", list.join(", "))
         })
         .collect();
-    FEATURES.replace("/*bern:file-extensions*/", &table.join(", "))
+    FEATURES
+        .replace("/*bern:file-extensions*/", &table.join(", "))
+        .replace("/*bern:engine-opens*/", engine_kinds)
 }
 
 /// The views template with the icon branches from the icon table.
@@ -442,7 +444,7 @@ impl Target for ComposeAndroid {
             GeneratedFile::text(sources.join("dev/bern/runtime/BernStyle.kt"), STYLE),
             GeneratedFile::text(
                 sources.join("dev/bern/runtime/BernFeatures.kt"),
-                features_source(),
+                features_source(&app.engine_kinds()),
             ),
             GeneratedFile::text(
                 sources.join("dev/bern/runtime/BernPictureTries.kt"),

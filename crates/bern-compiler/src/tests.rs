@@ -2644,6 +2644,39 @@ fn module_protocols_use_the_types_of_their_dependencies() {
 }
 
 #[test]
+fn the_files_an_application_opens_are_checked() {
+    let hello = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello");
+    let text = std::fs::read_to_string(hello.join("Bern.toml")).unwrap();
+    let language = config::load(&hello.join("Bern.toml"))
+        .unwrap()
+        .default_language;
+    let load = |opens: &str| {
+        let manifest = hello.join(format!("Bern-opens-{}.toml", std::process::id()));
+        std::fs::write(&manifest, format!("{text}\n[[app.opens]]\n{opens}\n")).unwrap();
+        let config = config::load(&manifest);
+        let _ = std::fs::remove_file(&manifest);
+        config
+    };
+    let menu = format!("files = [\"audio\", \".CUE\"]\nmenu = {{ \"{language}\" = \"Play\" }}");
+    let config = load(&menu).unwrap();
+    assert_eq!(config.opens[0].files, "audio .cue");
+    assert_eq!(config.opens[0].menu_text("xx", &language), Some("Play"));
+    let wrong = |opens: &str, message: &str| {
+        let errors = load(opens).err().expect("refused");
+        assert!(
+            errors.iter().any(|error| error.message.contains(message)),
+            "{errors:?}"
+        );
+    };
+    wrong("files = [\"sound\"]", "neither a kind");
+    wrong("files = []", "at least one kind");
+    wrong(
+        "files = [\"audio\"]\nmenu = { \"xx\" = \"Play\" }",
+        "default language",
+    );
+}
+
+#[test]
 fn module_manifests_are_checked() {
     let planner = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/planner");
     let text = std::fs::read_to_string(planner.join("Bern.toml")).unwrap();

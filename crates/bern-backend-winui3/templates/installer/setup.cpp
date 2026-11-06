@@ -1,8 +1,9 @@
 // Bern installer. Puts the application in the user's own programs folder
 // (%LOCALAPPDATA%\Programs), with a Start menu shortcut and an entry in
-// Settings > Apps, and removes it again. No administrator rights; nothing
-// is downloaded; the files travel inside this program, compressed by
-// pack.cpp into one resource.
+// Settings > Apps, and removes it again. The files it opens are registered
+// for the user: "Open with", Default apps and the context menu of Explorer.
+// No administrator rights; nothing is downloaded; the files travel inside
+// this program, compressed by pack.cpp into one resource.
 //
 //   setup.exe              install, from a small window
 //   setup.exe /S           install silently
@@ -237,6 +238,114 @@ bool Register(std::wstring const& folder) {
     return true;
 }
 
+std::wstring Classes(std::wstring const& key) { return L"Software\\Classes\\" + key; }
+/// What Windows knows the application's files by.
+std::wstring ProgId() { return std::wstring(kKey) + L".file"; }
+std::wstring OwnKey() { return std::wstring(L"Software\\") + kKey; }
+std::wstring Capabilities() { return OwnKey() + L"\\Capabilities"; }
+
+/// Sets `name` of the key at `path`, or its default value without a name.
+void SetValue(std::wstring const& path, wchar_t const* name, std::wstring const& value) {
+    HKEY key = nullptr;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, path.c_str(), 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS)
+        return;
+    SetString(key, name, value);
+    RegCloseKey(key);
+}
+
+/// Removes the application's context menu items from the verbs at `shell`.
+void RemoveMenuItems(std::wstring const& shell) {
+    HKEY key = nullptr;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, shell.c_str(), 0, KEY_READ, &key) != ERROR_SUCCESS) return;
+    std::wstring const prefix = std::wstring(kKey) + L".";
+    std::vector<std::wstring> items;
+    wchar_t name[256];
+    for (DWORD index = 0;; ++index) {
+        DWORD size = static_cast<DWORD>(std::size(name));
+        if (RegEnumKeyExW(key, index, name, &size, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS) break;
+        if (std::wcsncmp(name, prefix.c_str(), prefix.size()) == 0) items.push_back(name);
+    }
+    RegCloseKey(key);
+    for (auto const& item : items) RegDeleteTreeW(HKEY_CURRENT_USER, (shell + L"\\" + item).c_str());
+}
+
+/// Takes back what was registered for the application's files, going by
+/// what the registry says, so an update drops what it no longer opens. What
+/// the user chose as default stays theirs: Windows falls back by itself.
+void ForgetFileTypes() {
+    HKEY key = nullptr;
+    auto associations = Capabilities() + L"\\FileAssociations";
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, associations.c_str(), 0, KEY_READ, &key) == ERROR_SUCCESS) {
+        wchar_t name[256];
+        for (DWORD index = 0;; ++index) {
+            DWORD size = static_cast<DWORD>(std::size(name));
+            if (RegEnumValueW(key, index, name, &size, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS) break;
+            std::wstring type = name;
+            RegDeleteKeyValueW(HKEY_CURRENT_USER, Classes(type + L"\\OpenWithProgids").c_str(), ProgId().c_str());
+            RemoveMenuItems(Classes(L"SystemFileAssociations\\" + type + L"\\shell"));
+        }
+        RegCloseKey(key);
+    }
+    RemoveMenuItems(Classes(L"Directory\\shell"));
+    RemoveMenuItems(Classes(L"*\\shell"));
+    RegDeleteTreeW(HKEY_CURRENT_USER, Classes(ProgId()).c_str());
+    RegDeleteTreeW(HKEY_CURRENT_USER, Classes(std::wstring(L"Applications\\") + kExecutable).c_str());
+    RegDeleteTreeW(HKEY_CURRENT_USER, Capabilities().c_str());
+    RegDeleteKeyW(HKEY_CURRENT_USER, OwnKey().c_str());
+    RegDeleteKeyValueW(HKEY_CURRENT_USER, L"Software\\RegisteredApplications", kKey);
+}
+
+/// A context menu item among the verbs at `shell`. Several selected files
+/// each start the program, and the running instance takes them all.
+void AddMenuItem(std::wstring const& shell, int menu, std::wstring const& program, std::wstring const& command) {
+    auto item = shell + L"\\" + kKey + L"." + std::to_wstring(menu);
+    SetValue(item, L"MUIVerb", Text().menus[menu]);
+    SetValue(item, L"Icon", program);
+    SetValue(item, L"MultiSelectModel", L"Player");
+    SetValue(item + L"\\command", nullptr, command);
+}
+
+/// Registers the application's files for the user: a file type with
+/// "Open with", the application in Default apps, where the user can make it
+/// the default for each extension, and the context menu items.
+void RegisterFileTypes(std::wstring const& folder) {
+    ForgetFileTypes();
+    if (kFileTypes[0].type) {
+        std::wstring const program = folder + L"\\" + kExecutable;
+        std::wstring const command = L"\"" + program + L"\" \"%1\"";
+        auto progId = Classes(ProgId());
+        SetValue(progId, nullptr, kDisplayName);
+        SetValue(progId + L"\\DefaultIcon", nullptr, program + L",0");
+        SetValue(progId + L"\\shell\\open", L"FriendlyAppName", kDisplayName);
+        SetValue(progId + L"\\shell\\open\\command", nullptr, command);
+        auto application = Classes(std::wstring(L"Applications\\") + kExecutable);
+        SetValue(application, L"FriendlyAppName", kDisplayName);
+        SetValue(application + L"\\shell\\open\\command", nullptr, command);
+        SetValue(Capabilities(), L"ApplicationName", kDisplayName);
+        SetValue(Capabilities(), L"ApplicationDescription", kDisplayName);
+        SetValue(L"Software\\RegisteredApplications", kKey, Capabilities());
+        for (auto const* file = kFileTypes; file->type; ++file) {
+            std::wstring const type = file->type;
+            bool const extension = type[0] == L'.';
+            if (extension) {
+                HKEY key = nullptr;
+                auto list = Classes(type + L"\\OpenWithProgids");
+                if (RegCreateKeyExW(HKEY_CURRENT_USER, list.c_str(), 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) == ERROR_SUCCESS) {
+                    RegSetValueExW(key, ProgId().c_str(), 0, REG_NONE, nullptr, 0);
+                    RegCloseKey(key);
+                }
+                SetValue(application + L"\\SupportedTypes", type.c_str(), L"");
+                SetValue(Capabilities() + L"\\FileAssociations", type.c_str(), ProgId());
+            }
+            if (file->menu < 0) continue;
+            std::wstring shell = extension ? L"SystemFileAssociations\\" + type + L"\\shell"
+                                           : std::wstring(type == L"folder" ? L"Directory\\shell" : L"*\\shell");
+            AddMenuItem(Classes(shell), file->menu, program, command);
+        }
+    }
+    SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST | SHCNF_FLUSH, nullptr, nullptr);
+}
+
 /// The version in Settings > Apps, if one is installed.
 std::wstring InstalledVersion() {
     wchar_t version[64] = {};
@@ -265,6 +374,7 @@ Outcome Install() {
     }
     if (!CopyFileW(ThisProgram().c_str(), (folder + L"\\uninstall.exe").c_str(), FALSE) || !Register(folder)) return Outcome::Failed;
     MakeShortcut(folder + L"\\" + kExecutable, folder);
+    RegisterFileTypes(folder);
     reached = 1;
     return Outcome::Finished;
 }
@@ -283,6 +393,8 @@ Outcome Uninstall() {
     }
     if (!removed) return Outcome::Failed;
     DeleteFileW(Shortcut().c_str());
+    ForgetFileTypes();
+    SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST | SHCNF_FLUSH, nullptr, nullptr);
     RegDeleteTreeW(HKEY_CURRENT_USER, UninstallKey().c_str());
     // “Open at Login” of the application's status item, and Task Manager's
     // note on it.
