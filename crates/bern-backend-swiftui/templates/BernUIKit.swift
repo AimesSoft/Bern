@@ -1381,8 +1381,25 @@ struct BernSearchInput: UIViewRepresentable {
 @MainActor enum BernOrientation {
     static var allowed: UIInterfaceOrientationMask = .all
 
-    /// Turn the phone's windows to landscape or portrait; iPads and a
-    /// window that asks nothing keep the device's orientation.
+    /// The shorter side from which a phone's screen is a tablet's: the
+    /// inner screen of a foldable, which turns as the device does.
+    private static let tabletSide: CGFloat = 600
+
+    private static func isRoomy(_ scene: UIWindowScene) -> Bool {
+        let bounds = scene.screen.bounds
+        return min(bounds.width, bounds.height) >= tabletSide
+    }
+
+    /// What the system may show `window` in. Asked again whenever the device
+    /// turns or folds, so a foldable's outer screen gets the phone's rule back.
+    static func mask(for window: UIWindow?) -> UIInterfaceOrientationMask {
+        guard let scene = window?.windowScene, !isRoomy(scene) else { return .all }
+        return allowed
+    }
+
+    /// Turn the phone's windows to landscape or portrait; iPads, a foldable's
+    /// inner screen and a window that asks nothing keep the device's
+    /// orientation.
     static func turn(landscape: Bool?) {
         guard let landscape, UIDevice.current.userInterfaceIdiom == .phone else { return }
         allowed = landscape ? .landscape : .portrait
@@ -1390,7 +1407,9 @@ struct BernSearchInput: UIViewRepresentable {
             for window in scene.windows {
                 window.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
             }
-            scene.requestGeometryUpdate(.iOS(interfaceOrientations: allowed)) { _ in }
+            if !isRoomy(scene) {
+                scene.requestGeometryUpdate(.iOS(interfaceOrientations: allowed)) { _ in }
+            }
         }
     }
 }
@@ -1398,7 +1417,7 @@ struct BernSearchInput: UIViewRepresentable {
 /// Answers the system with the orientations the windows allow now.
 final class BernOrientationDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
-        MainActor.assumeIsolated { BernOrientation.allowed }
+        MainActor.assumeIsolated { BernOrientation.mask(for: window) }
     }
 }
 #endif
