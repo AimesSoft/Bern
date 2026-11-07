@@ -1109,6 +1109,8 @@ Stack(align: bottom_leading) {
 
 坐标与尺寸以画布的点为单位，原点在左上角。`Shape` 不写尺寸时延伸到画布边缘；`Canvas` 不写 `width` 或 `height` 时在该方向上填满可用空间。两个方向都不写尺寸的 `Canvas` 直接作为 `Stack` 的一层时，是其他层的底板：取其他层给 `Stack` 的尺寸（`Stack` 写了尺寸时取它的尺寸），不让 `Stack` 变大，也不让它沿所在行或列的方向撑开；`Stack` 没写宽度、放在列（或网格单元格）里时，像列里的块一样横向填满，底板随之铺满这一宽度；`Stack` 里只有底板时照常填满。例如侧栏选中项的底色只有那一行高，设置页里横幅的底图与正文同宽。绘图元素按书写顺序绘制，后写的在上面；画布只直接包含绘图元素，不写条件，需要时把整个画布放进条件。
 
+`Canvas(bleed: true)` 用于铺在内容后面的底色：布局里的位置不变，画面越过它碰到的每条安全区边缘，一直画到屏幕边，比如滚动内容里页头后面的渐变，不会停在手机横放时的刘海或折叠屏侧边的状态栏旁。竖向 `ScrollView` 的内容顶边由滚动视图自己留位：滚动内容里的画布不越过顶部的状态栏，滚动时才移到它下面。SwiftUI 在 iOS 与 tvOS 上实现；macOS 窗口的安全区只有标题栏，这个属性不起作用；Compose、Web、GTK 与 WinUI 3 尚未实现，写了不报错，画布留在内容区内。
+
 图案在 `style!` 的 `pattern` 块中声明，由画布中的 `Pattern(name:)` 引用。`band(颜色, 宽度, 不透明度)` 是一条色带，`gap(宽度)` 是一段空隙，至少要有一条有宽度的色带：
 
 ```rust
@@ -1299,6 +1301,8 @@ Adaptive(id: clip_choice) {
 - `window.keyboard`：连着实体键盘。macOS、Linux、Windows 总是成立；iOS 与 tvOS 跟随 GameController 报告的键盘连接与断开；Android 读当前配置里的硬键盘（全键盘且未收起），插拔时随配置变化更新；浏览器不报告键盘，主指针不是粗指针（触屏）时成立，按下一个有名字的实体键后成立（屏幕键盘的按键没有名字）。用来在没有键盘时藏起只对键盘有用的内容，例如快捷键设置。
 - `window.app_version`：`[app]` 的 `version`，是文本。由编译器写入，各目标不需要读取。
 - `window.short`：窗口高度低于 `compact_below` 断点，例如手机横过来时（iPhone 横屏高 390），与宽度档位无关，需要 `[layouts]`。能力 `window_short`：SwiftUI 与 Web 已实现，其他目标构建失败。窗口的 `landscape` 是另一回事：手机上条件成立时请求横屏、不成立时回到竖屏（能力 `window_landscape`：iOS、Android 与 Web 实现，Web 只在浏览器允许锁定方向时生效，多为手机浏览器全屏或作为已安装的应用运行时；电视总是横屏、桌面窗口没有方向，tvOS、macOS、Linux、Windows 视为不适用，同样声明这项能力而不警告；未声明的目标给出警告并保持设备方向）。
+- `window.rail`：`SplitView` 的 `Sidebar` 显示成导航轨，也就是 Material 平板内容旁的样子。项目是图标在上、名称在下，这时页头和页脚要做窄。只有 Android 目标有。
+- `window.unfolded`、`window.tabletop` 和 `window.fold`：折叠设备的姿态。`unfolded` 是展开且折痕竖在中间，这时 `window.compact` 等档位按一半宽度算；`tabletop` 是半开放在桌上、折痕横着；`fold` 是折痕到窗口左边的距离，是数字，用来定折痕左边内容的宽度，因为展开时的状态栏让窗口不以折痕为中心。只有 iOS 目标会读，来自 `UIHingeInteraction`，且要用 iOS 27.1 或更新的 SDK 构建。
 - **量到宽度之前**：窗口和 `Adaptive` 第一次构建时还没有量到宽度，这时也按将得到的宽度选择，不先按最宽的档构建、量到后再换掉——白做的构建会带出入场动画、控件登记、播放器绑定等副作用。窗口在首次布局前按打开时将得到的尺寸计算 `window.compact` 等档位与 `window.short`：iOS 取场景的尺寸，能开独立窗口时（iPad）取屏幕的尺寸；Android 取屏幕的宽度或对话框声明的宽度；Web 的主窗口取页面的尺寸，对话框与浮动窗口取声明的尺寸（浮动窗口有位置记录时取记录）并以页面为限；GTK 取声明的尺寸并以最大的显示器为限；Windows 取打开时设定的尺寸，对话框取声明的宽度（未声明时最多 548）并以所在窗口为限。`Adaptive` 在量到自己的可用宽度之前按所在窗口的宽度选择，它的可用宽度不会比窗口更宽。因此手机上新挂的子树——应用启动时的，或条件切换时新建的 `Adaptive`——只构建手机布局，`Modal(cover: compact)` 一开始就铺满；iOS 与 Web 的估计不小于实际尺寸，宽窗口也不会先构建窄布局。macOS 在首次布局前不知道窗口尺寸（SwiftUI 可能恢复上次的窗口大小），窗口字段仍从最宽的档开始；窗口量到宽度后再插入的 `Adaptive` 按窗口宽度选择。Compose 的 `Adaptive` 在布局阶段按实际约束组合，本来就不会先构建别的布局。测试：SwiftUI 在屏幕外窗口里统计各布局的构建次数，Web 在 DOM 夹具里检查 `Adaptive` 的首次构建与窗口的估计尺寸，GTK 检查打开尺寸的计算。实测（2026-10-20）：iPhone 17 模拟器与浏览器 375 宽的视口上，启动时与插入时的 `Adaptive` 都只构建 `compact`，盖满式模态一开始就铺满，1280 宽的视口只构建 `expanded`；Linux 虚拟机（GTK，经 Broadway）上声明 900 宽的窗口打开即为 `medium`，切到胶片页时新挂的 `Adaptive` 只构建一次 `medium`，对话框按声明的 360 打开即为 `compact`；Windows PC（WinUI 3）上声明 400 与 900 宽的窗口打开即为 `compact` 与 `medium`，启动时与插入时的 `Adaptive` 各只构建一次，窄窗口里盖满式模态一开始就铺满。两种情况仍会多构建一次：`Adaptive` 所在位置比窗口窄一档时（例如旁边有侧栏），先按窗口宽构建大一档的布局，量到后再换（GTK 上实测）；GTK 窗口的内容最小宽度大于显示器时，窗口比估计宽，先按窄一档构建（Broadway 上实测）。
 - **电视**：`Layout(size: tv)` 是电视上的布局，可选、最多一个，不受尺寸档的必需与回退规则约束：在电视上，有它的 `Adaptive` 只显示它；不是电视时它不被选中，其余布局照常按宽度选择。表达式可读 `window.tv`，电视上为真，不需要 `[layouts]`。电视的窗口永远是整个屏幕（1920 × 1080 点），所以只运行在电视上的目标（tvOS）构建时就知道这些条件：只保留 `tv` 布局，`window.tv`、尺寸档与 `window.short` 按屏幕求值，已知为假的分支与只被它们放置的组件不生成，能力检查只看电视显示的部分，手机布局里的选文件不会让 tvOS 构建失败。其他目标在运行时判断：Android 按系统的电视模式或 leanback 特性，Web 按电视浏览器的用户代理，macOS、iOS、Windows、Linux 恒为假。实现进度：tvOS 在模拟器上实测；Android 与 Web 的判断未在电视设备上验证。
 - 状态保留规则：引擎状态与会话草稿不在视图树中，切换布局不受影响；控件身份是“组件 + 控件 `id`”，两个布局中 `id` 相同的控件是同一控件，切换后焦点迁移到它（目标支持焦点迁移时）；滚动位置与未提交的局部编辑首版不迁移。
@@ -2670,6 +2674,17 @@ self.state.page = MediaSource::new("archive:/books/one.7z#01.jpg");
 - 宿主按 URL 保留解码后的图片，所以一个 URL 代表一张图片。流失败或没有内容时不显示图片，视图再次出现时才重试。
 - `files::open` 和 `files::name` 也能读这些 URL；`open` 会缓冲流，得到可以跳转的 `SourceFile`。
 - 支持 macOS、iOS、tvOS、Android、Windows 和 Linux。浏览器和 GPUI 目标暂不读取：页面没有读流的线程，而 WebUI 服务器会把这些 URL 交给网络上的任何人。
+
+### 明文 http 地址
+
+苹果各平台与 Android 9 起的系统网络层默认拒绝 `http`，`Image(source:)` 的 `http` 地址在这些平台上不显示。服务只提供明文时，在 `Bern.toml` 里声明：
+
+```toml
+[app]
+cleartext_http = true
+```
+
+生成时写入 `Info.plist` 的 `NSAppTransportSecurity`（`NSAllowsArbitraryLoads`）与 Android 清单的 `android:usesCleartextTraffic`。这是应用级的声明：苹果的例外域名不接受 IP 地址，没有更窄的键；上架 App Store 时要向审核说明理由。引擎自己的网络客户端不经过这层限制，Windows 与 Linux 也没有。
 
 ### 系统用应用打开文件
 

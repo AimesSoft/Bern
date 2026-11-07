@@ -1927,6 +1927,64 @@ fn scene_layers_bleed_and_window_buttons_keep_the_traffic_lights_room() {
     );
 }
 
+/// A backdrop that bleeds keeps its place and draws past the safe area on
+/// a phone; a Mac window has no safe area at its sides to pass.
+#[test]
+fn a_bleeding_canvas_passes_the_safe_area_on_a_phone() {
+    use bern_ir::{Element, Node, Prop};
+    let (config, mut compiled) = showcase();
+    compiled.app.components[0].body = Node::Element(Element {
+        kind: "Canvas".into(),
+        id: None,
+        path: "test.Canvas".into(),
+        props: [
+            ("height".into(), Prop::Number { value: 400.0 }),
+            (
+                "bleed".into(),
+                Prop::Keyword {
+                    value: "true".into(),
+                },
+            ),
+        ]
+        .into_iter()
+        .collect(),
+        template: None,
+        children: vec![],
+        action: None,
+        source: SourceLocation {
+            file: "canvas.rs".into(),
+            line: 1,
+            column: 1,
+        },
+    });
+    let source = |files: Vec<bern_target_api::GeneratedFile>| {
+        let generated = files
+            .iter()
+            .find(|f| f.path == Path::new("Sources/BernGenerated.swift"))
+            .unwrap();
+        String::from_utf8_lossy(&generated.contents).into_owned()
+    };
+    let output = workspace().join("target/bern-test/canvas-bleed");
+    let phone = source(
+        SwiftUiIos
+            .generate(&compiled.app, &context(&config, &compiled, "ios", &output))
+            .unwrap(),
+    );
+    assert!(
+        phone.contains("SwiftUI.Color.clear\n") && phone.contains(".ignoresSafeArea(.container)\n"),
+        "{phone}"
+    );
+    let mac = source(
+        SwiftUiMacos
+            .generate(
+                &compiled.app,
+                &context(&config, &compiled, "macos", &output),
+            )
+            .unwrap(),
+    );
+    assert!(!mac.contains(".ignoresSafeArea(.container)\n"), "{mac}");
+}
+
 const STAGE_PROTOCOL: &str = r#"
 #[bern::protocol(namespace = "stage", version = 1)]
 pub mod stage {

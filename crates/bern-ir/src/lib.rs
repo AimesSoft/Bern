@@ -411,6 +411,11 @@ pub struct AppInfo {
     /// in the Files app, for files the user puts there for it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub files_folder: bool,
+    /// `[app].cleartext_http`: the system's network stack may reach `http`
+    /// addresses, which Apple's platforms and Android refuse by default, so
+    /// `Image(source:)` shows them there too.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cleartext_http: bool,
     /// `[app].background_audio`: the application's own audio plays on
     /// behind the lock screen and in the background (iOS's audio background
     /// mode).

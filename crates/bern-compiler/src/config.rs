@@ -224,6 +224,9 @@ struct RawApp {
     /// iOS shows the application's Documents folder in Files.
     #[serde(default)]
     files_folder: bool,
+    /// The system's network stack may reach `http` addresses.
+    #[serde(default)]
+    cleartext_http: bool,
     /// The application plays audio on behind the lock screen and in the
     /// background.
     #[serde(default)]
@@ -371,6 +374,8 @@ pub struct Config {
     pub publisher: Option<String>,
     /// `[app].files_folder`.
     pub files_folder: bool,
+    /// `[app].cleartext_http`.
+    pub cleartext_http: bool,
     /// `[app].background_audio`.
     pub background_audio: bool,
     /// `[app].overlays`.
@@ -1635,6 +1640,7 @@ pub fn load_excluding(path: &Path, excluded: &[String]) -> Result<Config, Vec<Di
             .map(|publisher| publisher.trim().to_string())
             .filter(|publisher| !publisher.is_empty()),
         files_folder: raw.app.files_folder,
+        cleartext_http: raw.app.cleartext_http,
         background_audio: raw.app.background_audio,
         overlays: raw.app.overlays,
         photos: raw.app.photos,

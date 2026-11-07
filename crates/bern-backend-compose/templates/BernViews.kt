@@ -119,6 +119,7 @@ import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SegmentedButton
@@ -1529,19 +1530,35 @@ fun BernSplitView(
     detail: @Composable () -> Unit,
 ) {
     var showingDetail by showingDetail
+    val rail = LocalBernWindow.current.rail
+    val side = if (rail) 8.dp else 16.dp
     // The sidebar's own top and bottom areas, such as the application's
     // name and the account, stay put while the destinations scroll.
     val list: @Composable (() -> Unit) -> Unit = { showDetail ->
-        Column(Modifier.fillMaxHeight()) {
-            if (header != null) {
-                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) { header() }
-            }
-            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 12.dp)) {
-                sidebar(showDetail)
-            }
-            if (footer != null) {
-                HorizontalDivider()
-                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) { footer() }
+        CompositionLocalProvider(LocalBernRail provides rail) {
+            Column(
+                Modifier.fillMaxHeight(),
+                horizontalAlignment = if (rail) Alignment.CenterHorizontally else Alignment.Start,
+            ) {
+                if (header != null) {
+                    Column(
+                        Modifier.fillMaxWidth().padding(horizontal = side, vertical = 12.dp),
+                        horizontalAlignment = if (rail) Alignment.CenterHorizontally else Alignment.Start,
+                    ) { header() }
+                }
+                Column(
+                    Modifier.weight(1f).verticalScroll(rememberScrollState())
+                        .padding(horizontal = if (rail) 0.dp else 12.dp),
+                ) {
+                    sidebar(showDetail)
+                }
+                if (footer != null) {
+                    if (!rail) HorizontalDivider()
+                    Column(
+                        Modifier.fillMaxWidth().padding(horizontal = side, vertical = 8.dp),
+                        horizontalAlignment = if (rail) Alignment.CenterHorizontally else Alignment.Start,
+                    ) { footer() }
+                }
             }
         }
     }
@@ -1550,7 +1567,7 @@ fun BernSplitView(
             // A detail without a title leaves the bar out, and its room.
             BernChrome(title = title.ifEmpty { null })
             Row(Modifier.fillMaxSize()) {
-                Box(Modifier.width(sidebarWidth).fillMaxHeight()) { list {} }
+                Box(Modifier.width(if (rail) 96.dp else sidebarWidth).fillMaxHeight()) { list {} }
                 VerticalDivider()
                 Box(Modifier.weight(1f).fillMaxHeight()) { detail() }
             }
@@ -1576,8 +1593,20 @@ fun BernSidebarSection(title: String?, content: @Composable () -> Unit) {
     content()
 }
 
+/// Whether the sidebar is drawn as a navigation rail: `window.rail`.
+val LocalBernRail = androidx.compose.runtime.compositionLocalOf { false }
+
 @Composable
 fun BernSidebarItem(label: String, icon: ImageVector?, selected: Boolean, badge: Long? = null, onClick: () -> Unit) {
+    if (LocalBernRail.current) {
+        NavigationRailItem(
+            selected = selected,
+            onClick = onClick,
+            icon = { icon?.let { Icon(it, contentDescription = null) } },
+            label = { Text(label, maxLines = 1) },
+        )
+        return
+    }
     NavigationDrawerItem(
         label = { Text(label, fontWeight = if (selected) androidx.compose.ui.text.font.FontWeight.Bold else null) },
         icon = icon?.let { { Icon(it, contentDescription = null) } },

@@ -4919,6 +4919,12 @@ class Win {
     this.large = cell(false);
     /// `window.short`: shorter than the compact breakpoint.
     this.short = cell(false);
+    /// `window.rail`, `window.unfolded`, `window.tabletop`, `window.fold`:
+    /// what a page does not have.
+    this.rail = cell(false);
+    this.unfolded = cell(false);
+    this.tabletop = cell(false);
+    this.fold = cell(0);
     /// `window.tv`: the page is on a television.
     this.tv = cell(television);
     /// `window.keyboard`: a hardware keyboard is attached. A browser does

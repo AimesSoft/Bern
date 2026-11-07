@@ -2250,6 +2250,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
                 alternate_icons: config.alternate_icons.clone(),
                 publisher: config.publisher.clone(),
                 files_folder: config.files_folder,
+                cleartext_http: config.cleartext_http,
                 background_audio: config.background_audio,
                 overlays: config.overlays,
                 photos: config.photos,

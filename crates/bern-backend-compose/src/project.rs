@@ -314,6 +314,12 @@ pub fn manifest(
     } else {
         ("", "")
     };
+    // `[app].cleartext_http`: refused by default from Android 9.
+    let cleartext = if app.app.cleartext_http {
+        "\n        android:usesCleartextTraffic=\"true\""
+    } else {
+        ""
+    };
     // `[app].background_audio`: a foreground service of the media playback
     // kind keeps the music playing behind other apps.
     let (background, playback) = if app.app.background_audio {
@@ -450,7 +456,7 @@ pub fn manifest(
         android:icon="@mipmap/ic_launcher"{round}{banner}
         android:theme="@style/BernTheme"
         android:supportsRtl="true"
-        android:enableOnBackInvokedCallback="true"{legacy_storage}>
+        android:enableOnBackInvokedCallback="true"{legacy_storage}{cleartext}>
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${{applicationId}}.bern.files"
@@ -677,6 +683,17 @@ mod tests {
         hello.app.opens[0].files = "folder".to_string();
         let folder = manifest(&hello, false, None, &[]);
         assert!(!folder.contains("singleTask"), "{folder}");
+    }
+
+    #[test]
+    fn cleartext_http_is_declared_only_when_asked() {
+        const CLEARTEXT: &str = "android:usesCleartextTraffic=\"true\"";
+        let mut hello = app("hello");
+        let plain = manifest(&hello, false, None, &[]);
+        assert!(!plain.contains(CLEARTEXT), "{plain}");
+        hello.app.cleartext_http = true;
+        let cleartext = manifest(&hello, false, None, &[]);
+        assert!(cleartext.contains(CLEARTEXT), "{cleartext}");
     }
 
     #[test]

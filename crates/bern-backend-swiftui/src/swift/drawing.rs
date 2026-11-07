@@ -1,14 +1,60 @@
 //! `Canvas` drawings: shapes, series and patterns.
 
-use super::{Generator, Out};
+use super::{Generator, Out, Platform};
 use crate::names::{double, string};
 use bern_ir::{Element, Node};
 use bern_protocol::Type;
 
 impl Generator<'_> {
-    /// A `Canvas`: its drawing runs on values captured when the view is
-    /// built, so state the drawing reads still updates the view.
+    /// A `Canvas`.
     pub(super) fn canvas(&self, out: &mut Out, element: &Element) {
+        let length = |name| self.length(element, name).unwrap_or_else(|| "nil".into());
+        let (width, height) = (length("width"), length("height"));
+        let frame = format!(
+            ".frame(width: {width}, height: {height}){}",
+            match (element.prop("width"), element.prop("height")) {
+                (None, None) => ".frame(maxWidth: .infinity, maxHeight: .infinity)",
+                (None, Some(_)) => ".frame(maxWidth: .infinity)",
+                (Some(_), None) => ".frame(maxHeight: .infinity)",
+                _ => "",
+            }
+        );
+        // What bleeds draws behind the place it keeps: a view grows past the
+        // safe area only where it can stretch, and a written height can't.
+        // A Mac window's only safe area is its title bar.
+        if element.keyword("bleed") == Some("true")
+            && matches!(self.platform, Platform::Ios | Platform::Tvos)
+        {
+            out.line("SwiftUI.Color.clear");
+            out.line(frame);
+            out.open(".background {");
+            self.drawing_view(out, element);
+            out.line(".ignoresSafeArea(.container)");
+            out.close("}");
+        } else {
+            self.drawing_view(out, element);
+            out.line(frame);
+        }
+        match self.text_prop(element, "label") {
+            Some(label) => {
+                out.line(".accessibilityElement(children: .ignore)");
+                out.line(".accessibilityAddTraits(.isImage)");
+                out.line(format!(
+                    ".accessibilityLabel(SwiftUI.Text(verbatim: {label}))"
+                ));
+            }
+            None => out.line(".accessibilityHidden(true)"),
+        }
+        // Without a size, a layer of a stack is its backdrop: as large as
+        // the other layers, without making the stack larger.
+        if element.prop("width").is_none() && element.prop("height").is_none() {
+            out.line(".bernFillsLayers()");
+        }
+    }
+
+    /// The drawing runs on values captured when the view is built, so state
+    /// the drawing reads still updates the view.
+    fn drawing_view(&self, out: &mut Out, element: &Element) {
         let mut captures = Vec::new();
         let mut body = Out {
             indent: out.indent + 1,
@@ -31,32 +77,6 @@ impl Generator<'_> {
         out.line(format!("SwiftUI.Canvas {{ {list}context, size in"));
         out.lines.extend(body.lines);
         out.line("}");
-        let length = |name| self.length(element, name).unwrap_or_else(|| "nil".into());
-        let (width, height) = (length("width"), length("height"));
-        out.line(format!(
-            ".frame(width: {width}, height: {height}){}",
-            match (element.prop("width"), element.prop("height")) {
-                (None, None) => ".frame(maxWidth: .infinity, maxHeight: .infinity)",
-                (None, Some(_)) => ".frame(maxWidth: .infinity)",
-                (Some(_), None) => ".frame(maxHeight: .infinity)",
-                _ => "",
-            }
-        ));
-        match self.text_prop(element, "label") {
-            Some(label) => {
-                out.line(".accessibilityElement(children: .ignore)");
-                out.line(".accessibilityAddTraits(.isImage)");
-                out.line(format!(
-                    ".accessibilityLabel(SwiftUI.Text(verbatim: {label}))"
-                ));
-            }
-            None => out.line(".accessibilityHidden(true)"),
-        }
-        // Without a size, a layer of a stack is its backdrop: as large as
-        // the other layers, without making the stack larger.
-        if element.prop("width").is_none() && element.prop("height").is_none() {
-            out.line(".bernFillsLayers()");
-        }
     }
 
     fn drawing(&self, out: &mut Out, nodes: &[Node], captures: &mut Vec<String>) {
