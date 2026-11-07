@@ -993,7 +993,7 @@ struct BernBleedingLayer: ViewModifier {
 
 /// The coordinate space of what a vertical scroll view scrolls, whose top
 /// is the top of its content however far it has scrolled.
-let bernScrollContentSpace = "bern.scroll.content"
+let bernScrollContentSpace = "bern.scrollContent"
 
 private struct BernScrollTopRoomKey: EnvironmentKey {
     static let defaultValue: CGFloat = 0
