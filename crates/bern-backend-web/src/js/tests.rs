@@ -22,6 +22,7 @@ fn app() -> Application {
             alternate_icons: BTreeMap::new(),
             publisher: None,
             files_folder: false,
+            cleartext_http: false,
             background_audio: false,
             overlays: false,
             photos: false,

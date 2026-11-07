@@ -264,7 +264,7 @@ pub fn info_plist(
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSSupportsAutomaticTermination</key>
-    <false/>{documents}{services}
+    <false/>{documents}{services}{cleartext}
 </dict>
 </plist>
 "#,
@@ -279,6 +279,7 @@ pub fn info_plist(
             ""
         },
         documents = document_types(app, false),
+        cleartext = cleartext_http(app),
         services = services(app, executable),
     )
 }
@@ -631,7 +632,7 @@ pub fn info_plist_ios(app: &Application, executable: &str, minimum_ios: &str) ->
         <string>UIInterfaceOrientationPortraitUpsideDown</string>
         <string>UIInterfaceOrientationLandscapeLeft</string>
         <string>UIInterfaceOrientationLandscapeRight</string>
-    </array>{documents}{files}{audio}{photos}
+    </array>{documents}{files}{audio}{photos}{cleartext}
 </dict>
 </plist>
 "#,
@@ -642,6 +643,7 @@ pub fn info_plist_ios(app: &Application, executable: &str, minimum_ios: &str) ->
         version = xml(&app.app.version),
         documents = document_types(app, true),
         files = files_folder(app),
+        cleartext = cleartext_http(app),
         audio = if app.app.background_audio {
             "\n    <key>UIBackgroundModes</key>\n    <array>\n        <string>audio</string>\n    </array>"
         } else {
@@ -656,6 +658,17 @@ pub fn info_plist_ios(app: &Application, executable: &str, minimum_ios: &str) ->
             String::new()
         },
     )
+}
+
+/// `[app].cleartext_http`: App Transport Security lets the system's loaders
+/// reach `http` addresses. Its narrower keys name domains, and an IP address
+/// is not one.
+fn cleartext_http(app: &Application) -> &'static str {
+    if app.app.cleartext_http {
+        "\n    <key>NSAppTransportSecurity</key>\n    <dict>\n        <key>NSAllowsArbitraryLoads</key>\n        <true/>\n    </dict>"
+    } else {
+        ""
+    }
 }
 
 /// `[app].files_folder`: the Documents folder in the Files app, opened in
@@ -750,7 +763,7 @@ pub fn info_plist_tvos(app: &Application, executable: &str, minimum_tvos: &str) 
         <string>arm64</string>
     </array>
     <key>UIUserInterfaceStyle</key>
-    <string>Automatic</string>
+    <string>Automatic</string>{cleartext}
 </dict>
 </plist>
 "#,
@@ -759,6 +772,7 @@ pub fn info_plist_tvos(app: &Application, executable: &str, minimum_tvos: &str) 
         executable = xml(executable),
         bundle = xml(&app.app.bundle_id),
         version = xml(&app.app.version),
+        cleartext = cleartext_http(app),
     )
 }
 

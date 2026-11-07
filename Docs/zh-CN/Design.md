@@ -2675,6 +2675,17 @@ self.state.page = MediaSource::new("archive:/books/one.7z#01.jpg");
 - `files::open` 和 `files::name` 也能读这些 URL；`open` 会缓冲流，得到可以跳转的 `SourceFile`。
 - 支持 macOS、iOS、tvOS、Android、Windows 和 Linux。浏览器和 GPUI 目标暂不读取：页面没有读流的线程，而 WebUI 服务器会把这些 URL 交给网络上的任何人。
 
+### 明文 http 地址
+
+苹果各平台与 Android 9 起的系统网络层默认拒绝 `http`，`Image(source:)` 的 `http` 地址在这些平台上不显示。服务只提供明文时，在 `Bern.toml` 里声明：
+
+```toml
+[app]
+cleartext_http = true
+```
+
+生成时写入 `Info.plist` 的 `NSAppTransportSecurity`（`NSAllowsArbitraryLoads`）与 Android 清单的 `android:usesCleartextTraffic`。这是应用级的声明：苹果的例外域名不接受 IP 地址，没有更窄的键；上架 App Store 时要向审核说明理由。引擎自己的网络客户端不经过这层限制，Windows 与 Linux 也没有。
+
 ### 系统用应用打开文件
 
 `Bern.toml` 里的 `[[app.opens]]` 声明系统可以用应用打开哪些文件，以及文件管理器的右键菜单为它们显示什么：

@@ -1615,6 +1615,7 @@ pub(crate) mod tests {
                 alternate_icons: Default::default(),
                 publisher: None,
                 files_folder: false,
+                cleartext_http: false,
                 background_audio: false,
                 overlays: false,
                 photos: false,

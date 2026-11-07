@@ -2675,6 +2675,17 @@ self.state.page = MediaSource::new("archive:/books/one.7z#01.jpg");
 - `files::open` and `files::name` read these URLs too; `open` buffers the stream to give a `SourceFile` that can seek.
 - macOS, iOS, tvOS, Android, Windows and Linux. Browsers and GPUI targets do not read them yet: a page has no thread to read the stream on, and a WebUI server would hand these URLs to anyone on the network.
 
+### Cleartext http addresses
+
+Apple's platforms, and Android from version 9, refuse `http` in the system's network stack by default, so an `http` address in `Image(source:)` shows nothing there. When a service offers only cleartext, declare it in `Bern.toml`:
+
+```toml
+[app]
+cleartext_http = true
+```
+
+This writes `NSAppTransportSecurity` (`NSAllowsArbitraryLoads`) into `Info.plist` and `android:usesCleartextTraffic` into the Android manifest. The declaration covers the whole application: Apple's exception domains don't accept IP addresses, so there is no narrower key, and App Store review asks for a reason. An engine's own network client isn't subject to this, and Windows and Linux have no such limit.
+
 ### Files the system opens the application with
 
 `[[app.opens]]` in `Bern.toml` declares the files the system may open the application with, and what the context menu of a file manager shows for them:
