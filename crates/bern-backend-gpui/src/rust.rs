@@ -353,7 +353,7 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
         ],
     ),
     ("Slot", &["id"]),
-    ("Canvas", &["width", "height", "label"]),
+    ("Canvas", &["width", "height", "label", "bleed"]),
     (
         "Shape",
         &[

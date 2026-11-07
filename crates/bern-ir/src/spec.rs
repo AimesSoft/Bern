@@ -1289,9 +1289,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             opt("width", PropKind::Length),
             opt("height", PropKind::Length),
             opt("label", PropKind::DisplayText),
+            opt("bleed", PropKind::Flag),
         ],
         Children::Only(&["Shape", "Series", "Pattern"]),
-        "A drawing of shapes, data series and patterns in order; `label` describes what it shows, without one it is decorative",
+        "A drawing of shapes, data series and patterns in order; `label` describes what it shows, without one it is decorative; with `bleed`, a backdrop continues past each edge of the safe area it reaches, to the edge of the screen, keeping its place in the layout",
     ),
     ComponentSpec {
         placement: Placement::Within(&["Canvas"]),
