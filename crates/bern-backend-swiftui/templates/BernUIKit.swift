@@ -1466,7 +1466,10 @@ final class BernHingeView: UIView {
                 window.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
             }
             if !isRoomy(scene) {
-                scene.requestGeometryUpdate(.iOS(interfaceOrientations: allowed)) { _ in }
+                // No error handler: a request that times out, as on a screen
+                // that is just going dark, calls it off the main thread, and
+                // a closure written here would trap there as main-actor code.
+                scene.requestGeometryUpdate(.iOS(interfaceOrientations: allowed))
             }
         }
     }
