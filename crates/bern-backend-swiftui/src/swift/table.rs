@@ -123,9 +123,8 @@ impl Generator<'_> {
                 } else {
                     String::new()
                 };
-                out.open(format!(
-                    "SwiftUI.TableColumn(SwiftUI.Text(verbatim: {title}){using}) {{ bernRow in"
-                ));
+                // iOS 16.0 takes a title as a string; a `Text` waits for 16.6.
+                out.open(format!("SwiftUI.TableColumn({title}{using}) {{ bernRow in"));
                 out.line(format!("let {var} = bernRow.value"));
                 out.open("SwiftUI.Group {");
                 self.nodes(out, &column.children, ctx);

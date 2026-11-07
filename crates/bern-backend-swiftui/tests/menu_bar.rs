@@ -4,12 +4,12 @@
 //! their keys from state on all three. The Swift is type-checked against
 //! each system's SDK.
 
-use bern_backend_swiftui::{
-    MINIMUM_IOS, MINIMUM_MACOS, MINIMUM_TVOS, SwiftUiIos, SwiftUiMacos, SwiftUiTvos,
-};
+use bern_backend_swiftui::{MINIMUM_MACOS, MINIMUM_TVOS, SwiftUiIos, SwiftUiMacos, SwiftUiTvos};
 use bern_target_api::{BuildContext, Framework, Target};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+mod support;
 
 fn workspace() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -338,6 +338,10 @@ fn ios_and_tvos_show_no_menu_bar_or_status_item() {
 /// the SDK is installed.
 fn typecheck(name: &str) {
     let root = workspace();
+    if name == "ios" {
+        support::check_ios(&root, &root.join("target/bern-test/menu-bar-ios"));
+        return;
+    }
     let architecture = if std::env::consts::ARCH == "x86_64" {
         "x86_64"
     } else {
@@ -348,11 +352,6 @@ fn typecheck(name: &str) {
             "macosx",
             format!("{architecture}-apple-macos{MINIMUM_MACOS}"),
             "BernAppKit.swift",
-        ),
-        "ios" => (
-            "iphonesimulator",
-            format!("{architecture}-apple-ios{MINIMUM_IOS}-simulator"),
-            "BernUIKit.swift",
         ),
         _ => (
             "appletvsimulator",
