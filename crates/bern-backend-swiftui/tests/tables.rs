@@ -5,12 +5,12 @@
 //! a text in a status color and the login item's switch, which only macOS
 //! shows. The Swift is type-checked against each system's SDK.
 
-use bern_backend_swiftui::{
-    MINIMUM_IOS, MINIMUM_MACOS, MINIMUM_TVOS, SwiftUiIos, SwiftUiMacos, SwiftUiTvos,
-};
+use bern_backend_swiftui::{MINIMUM_MACOS, MINIMUM_TVOS, SwiftUiIos, SwiftUiMacos, SwiftUiTvos};
 use bern_target_api::{BuildContext, Framework, Target};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+mod support;
 
 fn workspace() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -267,7 +267,7 @@ fn macos_and_ios_show_the_system_table() {
             // The heading's order shows the column state says; a click
             // runs the column's action.
             ", sortOrder: SwiftUI.Binding(get: { if bernEngine.byName {",
-            "SwiftUI.TableColumn(SwiftUI.Text(verbatim: ",
+            "SwiftUI.TableColumn(BernText.string(",
             ".width(min: 40, ideal: 200.0)",
             ".contextMenu(forSelectionType: Int64.self, menu: { ids in",
             ", primaryAction: { ids in ",
@@ -328,6 +328,10 @@ fn tvos_lists_row_buttons_and_has_no_clipboard() {
 /// the SDK is installed.
 fn typecheck(name: &str) {
     let root = workspace();
+    if name == "ios" {
+        support::check_ios(&root, &root.join("target/bern-test/tables-ios"));
+        return;
+    }
     let architecture = if std::env::consts::ARCH == "x86_64" {
         "x86_64"
     } else {
@@ -338,11 +342,6 @@ fn typecheck(name: &str) {
             "macosx",
             format!("{architecture}-apple-macos{MINIMUM_MACOS}"),
             "BernAppKit.swift",
-        ),
-        "ios" => (
-            "iphonesimulator",
-            format!("{architecture}-apple-ios{MINIMUM_IOS}-simulator"),
-            "BernUIKit.swift",
         ),
         _ => (
             "appletvsimulator",

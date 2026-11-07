@@ -7,6 +7,8 @@ use bern_target_api::{BuildContext, BuildPlan, BuildStep, Framework, Target};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod support;
+
 fn workspace() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
@@ -871,7 +873,7 @@ fn showcase_generates_ios_swift_that_type_checks() {
             "generated iOS Swift without style overrides uses `{forbidden}`"
         );
     }
-    typecheck_ios(&root, &output);
+    support::check_ios(&root, &output);
 }
 
 /// An app of both iOS front ends: the executable is the rewritten source,
@@ -916,124 +918,7 @@ fn both_ios_front_ends_compile_from_one_source() {
     assert!(compiled_for[0].contains("ios17.0"), "{compiled_for:?}");
     assert!(compiled_for[1].contains("ios16.0"), "{compiled_for:?}");
 
-    check_front_end(
-        &root,
-        &output.join("Sources"),
-        &output.join("Sources/bern.h"),
-        "16.0",
-        &["BernCompat16.swift", "BernLaunch16.swift"],
-    );
-    check_front_end(
-        &root,
-        &output.join("Sources17"),
-        &output.join("Sources/bern.h"),
-        MINIMUM_IOS,
-        &["BernEntry17.swift"],
-    );
-}
-
-/// Compile a front end as far as the compiler's own checks go, which is
-/// further than type-checking: it decides, for example, whether a stored
-/// property is initialized.
-fn check_front_end(root: &Path, sources: &Path, header: &Path, minimum: &str, extra: &[&str]) {
-    if !Command::new("xcrun")
-        .args(["--sdk", "iphonesimulator", "--show-sdk-path"])
-        .output()
-        .is_ok_and(|o| o.status.success())
-    {
-        eprintln!("no iOS simulator SDK; skipping the check");
-        return;
-    }
-    let architecture = if std::env::consts::ARCH == "x86_64" {
-        "x86_64"
-    } else {
-        "arm64"
-    };
-    let mut command = Command::new("xcrun");
-    command
-        .args([
-            "--sdk",
-            "iphonesimulator",
-            "swiftc",
-            "-wmo",
-            "-emit-sil",
-            "-o",
-            "/dev/null",
-        ])
-        .args(["-swift-version", "6", "-parse-as-library"])
-        .arg("-target")
-        .arg(format!("{architecture}-apple-ios{minimum}-simulator"))
-        .arg("-module-cache-path")
-        .arg(root.join("target/bern-swift-module-cache"))
-        .arg("-import-objc-header")
-        .arg(header);
-    for file in [
-        "BernRuntime.swift",
-        "BernMedia.swift",
-        "BernStyle.swift",
-        "BernUIKit.swift",
-        "BernGenerated.swift",
-    ]
-    .iter()
-    .chain(extra)
-    {
-        command.arg(sources.join(file));
-    }
-    let result = command.output().unwrap();
-    assert!(
-        result.status.success(),
-        "swiftc rejected the front end for iOS {minimum}:\n{}",
-        String::from_utf8_lossy(&result.stderr)
-    );
-}
-
-/// Type-check generated iOS Swift against the simulator SDK, when it is
-/// installed.
-fn typecheck_ios(root: &Path, output: &Path) {
-    let Some(sdk) = Command::new("xcrun")
-        .args(["--sdk", "iphonesimulator", "--show-sdk-path"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-    else {
-        eprintln!("no iOS simulator SDK; skipping type check");
-        return;
-    };
-    let architecture = if std::env::consts::ARCH == "x86_64" {
-        "x86_64"
-    } else {
-        "arm64"
-    };
-    let sources = output.join("Sources");
-    let result = Command::new("xcrun")
-        .args([
-            "swiftc",
-            "-typecheck",
-            "-swift-version",
-            "6",
-            "-parse-as-library",
-            "-sdk",
-        ])
-        .arg(sdk)
-        .arg("-target")
-        .arg(format!("{architecture}-apple-ios{MINIMUM_IOS}-simulator"))
-        .arg("-module-cache-path")
-        .arg(root.join("target/bern-swift-module-cache"))
-        .arg("-import-objc-header")
-        .arg(sources.join("bern.h"))
-        .arg(sources.join("BernRuntime.swift"))
-        .arg(sources.join("BernMedia.swift"))
-        .arg(sources.join("BernStyle.swift"))
-        .arg(sources.join("BernUIKit.swift"))
-        .arg(sources.join("BernGenerated.swift"))
-        .output()
-        .unwrap();
-    assert!(
-        result.status.success(),
-        "swiftc rejected the generated iOS code:\n{}",
-        String::from_utf8_lossy(&result.stderr)
-    );
+    support::check_ios(&root, &output);
 }
 
 const DYNAMIC_PROTOCOL: &str = r#"
@@ -1341,7 +1226,7 @@ platform = "ios"
             !ios_generated.contains("SwiftUI.List(selection:"),
             "{ios_generated}"
         );
-        typecheck_ios(&root, &ios_output);
+        support::check_ios(&root, &ios_output);
         let navigation = ios_generated
             .lines()
             .find(|line| line.contains(".bernSidebarNavigation("))
@@ -1555,7 +1440,7 @@ platform = "ios"
         std::fs::read_to_string(ios_output.join("Sources/BernGenerated.swift")).unwrap();
     assert!(ios_generated.contains("BernSearchPaletteHost {"));
     assert!(ios_generated.contains("BernSearchPalette(text:"));
-    typecheck_ios(&root, &ios_output);
+    support::check_ios(&root, &ios_output);
     if !Command::new("xcrun")
         .arg("--find")
         .arg("swiftc")
@@ -2242,7 +2127,7 @@ fn a_style_variant_in_a_window_is_defined() {
             .unwrap_or_else(|| panic!("{name}: the button does not use its style:\n{generated}"));
         assert!(defined < used, "{generated}");
     }
-    typecheck_ios(&root, &root.join("target/bern-test/swiftui-stage-ios"));
+    support::check_ios(&root, &root.join("target/bern-test/swiftui-stage-ios"));
     if !Command::new("xcrun")
         .arg("--find")
         .arg("swiftc")
@@ -2400,7 +2285,7 @@ fn content_in_a_window_starts_at_its_top_leading_corner() {
             "{name}:\n{component}"
         );
     }
-    typecheck_ios(&root, &root.join("target/bern-test/swiftui-place-ios"));
+    support::check_ios(&root, &root.join("target/bern-test/swiftui-place-ios"));
     if !Command::new("xcrun")
         .arg("--find")
         .arg("swiftc")
