@@ -32,7 +32,7 @@ impl Generator<'_> {
                 Self::path(format!("c.local({})", string(name)), path)
             }
             // No foldable runs this target.
-            Binding::Window { field } if field == "fold" => "0.0".to_string(),
+            Binding::Window { field } if field == "fold" => literal(&Value::Float(0.0)),
             // `window.idle` and the window's layout size, kept per window.
             Binding::Window { field } => format!("c.window({})", string(field)),
         }

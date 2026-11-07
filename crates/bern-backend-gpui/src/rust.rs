@@ -3793,7 +3793,7 @@ pub fn app() -> b::AppDef {{
             ),
             Binding::Local { name, path: p, .. } => path(format!("c.local({})", string(name)), p),
             // No foldable runs this target.
-            Binding::Window { field } if field == "fold" => "0.0".to_string(),
+            Binding::Window { field } if field == "fold" => value_expr(&Value::Float(0.0)),
             Binding::Window { field } => {
                 if !matches!(
                     field.as_str(),
