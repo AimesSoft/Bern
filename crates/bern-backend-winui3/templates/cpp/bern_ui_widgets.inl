@@ -3496,43 +3496,89 @@ struct MenuLook {
     bool hideDisabled = false;
 };
 
-/// The items of a menu in `flyout`, dividers where an item is missing.
-/// Each item is registered on its own, so external entries reach it while
-/// the menu is closed.
-inline void MenuEntries(Ctx const& ctx, controls::MenuFlyout const& flyout, std::vector<std::optional<MenuItemDef>> const& items, bool hideDisabled = false) {
+/// An item of a menu, ready before the menu exists: what it shows and
+/// what it does.
+struct MenuEntry {
+    MenuItemDef def;
+    Ctx ctx;
+    TextFn label;
+    std::function<bool()> enabled;
+    ButtonRun run;
+};
+
+/// The entries of a menu, `nullopt` for a divider. Each item is registered
+/// on its own, so external entries reach it while the menu is closed, and
+/// before it was ever made.
+inline std::vector<std::optional<MenuEntry>> MenuPlan(Ctx const& ctx, std::vector<std::optional<MenuItemDef>> const& items) {
+    std::vector<std::optional<MenuEntry>> plan;
     for (auto const& item : items) {
         if (!item) {
+            plan.emplace_back(std::nullopt);
+            continue;
+        }
+        auto label = item->label ? Bound(ctx, item->label) : TextFn([] { return winrt::hstring(); });
+        auto enabled = Enabled(ctx, item->enabled);
+        auto run = RunOf(ctx, item->pick, item->files, item->action, item->paste);
+        Controls::Register(ctx, item->id, "button", label, enabled, Actions{.activate = run.activate, .setFile = run.give, .files = item->files});
+        plan.emplace_back(MenuEntry{*item, ctx, std::move(label), std::move(enabled), std::move(run)});
+    }
+    return plan;
+}
+
+/// The items of `plan` in `flyout`, each following what it shows.
+inline void MenuItems(controls::MenuFlyout const& flyout, std::vector<std::optional<MenuEntry>> const& plan, bool hideDisabled = false) {
+    for (auto const& planned : plan) {
+        if (!planned) {
             flyout.Items().Append(controls::MenuFlyoutSeparator());
             continue;
         }
+        auto const& item = *planned;
         controls::MenuFlyoutItem entry;
-        if (item->icon) entry.Icon(Icons::Icon(item->icon));
-        auto itemLabel = item->label ? Bound(ctx, item->label) : TextFn([] { return winrt::hstring(); });
-        Reactive::Run([entry, itemLabel] { entry.Text(itemLabel()); });
-        auto isEnabled = Enabled(ctx, item->enabled);
-        if (isEnabled) Reactive::Run([entry, isEnabled, hideDisabled] {
+        if (item.def.icon) entry.Icon(Icons::Icon(item.def.icon));
+        Reactive::Run([entry, label = item.label] { entry.Text(label()); });
+        if (item.enabled) Reactive::Run([entry, isEnabled = item.enabled, hideDisabled] {
             bool enabled = isEnabled();
             entry.IsEnabled(enabled);
             if (hideDisabled) entry.Visibility(enabled ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
         });
-        auto run = RunOf(ctx, item->pick, item->files, item->action, item->paste);
-        if (run.activate) entry.Click([activate = run.activate](auto&&, auto&&) { activate(); });
-        if (item->shortcut) entry.KeyboardAcceleratorTextOverride(ShortcutText(item->shortcut));
-        if (item->boundShortcut)
-            Reactive::Run([entry, ctx, keys = item->boundShortcut] {
+        if (item.run.activate) entry.Click([activate = item.run.activate](auto&&, auto&&) { activate(); });
+        if (item.def.shortcut) entry.KeyboardAcceleratorTextOverride(ShortcutText(item.def.shortcut));
+        if (item.def.boundShortcut)
+            Reactive::Run([entry, ctx = item.ctx, keys = item.def.boundShortcut] {
                 entry.KeyboardAcceleratorTextOverride(ShortcutText(Utf8(keys(ctx)).c_str()));
             });
         flyout.Items().Append(entry);
-        Controls::Register(ctx, item->id, "button", itemLabel, isEnabled, Actions{.activate = run.activate, .setFile = run.give, .files = item->files});
     }
 }
 
-/// A context menu: Windows opens the flyout on a secondary click, on the
-/// menu key and on pressing and holding with touch or a pen.
+/// The items of a menu in `flyout`, dividers where an item is missing.
+inline void MenuEntries(Ctx const& ctx, controls::MenuFlyout const& flyout, std::vector<std::optional<MenuItemDef>> const& items, bool hideDisabled = false) {
+    MenuItems(flyout, MenuPlan(ctx, items), hideDisabled);
+}
+
+/// A context menu: Windows asks for it on a secondary click, on the menu
+/// key and on pressing and holding with touch or a pen. Its items are made
+/// the first time it is asked for, so a page of rows that each have a menu
+/// makes none until one opens; they are registered at once all the same.
 inline void ContextMenuOn(Ctx const& ctx, xaml::UIElement const& element, std::vector<std::optional<MenuItemDef>> const& items) {
-    controls::MenuFlyout flyout;
-    MenuEntries(ctx, flyout, items);
-    element.ContextFlyout(flyout);
+    auto plan = std::make_shared<std::vector<std::optional<MenuEntry>>>(MenuPlan(ctx, items));
+    // What the items follow ends with the element's scope, though they are
+    // made later.
+    auto scope = std::make_shared<Scope>();
+    Reactive::OnCleanup([scope] { scope->Dispose(); });
+    auto flyout = std::make_shared<controls::MenuFlyout>(nullptr);
+    element.ContextRequested([plan, scope, flyout](xaml::UIElement const& sender, xaml::Input::ContextRequestedEventArgs const& args) {
+        if (scope->disposed) return;
+        if (!*flyout) {
+            *flyout = controls::MenuFlyout();
+            scope->Run([&] { MenuItems(*flyout, *plan); });
+        }
+        controls::Primitives::FlyoutShowOptions options;
+        winrt::Windows::Foundation::Point point{};
+        if (args.TryGetPosition(sender, point)) options.Position(point);
+        flyout->ShowAt(sender, options);
+        args.Handled(true);
+    });
 }
 
 /// A menu button. Each item is registered on its own, so external entries

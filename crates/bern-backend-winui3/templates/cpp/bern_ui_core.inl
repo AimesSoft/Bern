@@ -1326,27 +1326,35 @@ inline double parsing = 0;
 /// The dictionary of `xaml`, parsed once and kept for the process: parsing
 /// markup is the slow part of building a page, and every element with the
 /// same look takes the same dictionary.
-inline xaml::ResourceDictionary Dictionary(std::wstring const& xaml, bool fresh = false) {
+inline xaml::ResourceDictionary Dictionary(std::wstring const& xaml) {
     static auto* cache = new std::unordered_map<std::wstring, xaml::ResourceDictionary>();
-    if (!fresh)
-        if (auto found = cache->find(xaml); found != cache->end()) return found->second;
+    if (auto found = cache->find(xaml); found != cache->end()) return found->second;
     auto began = std::chrono::steady_clock::now();
     auto dictionary = xaml::Markup::XamlReader::Load(xaml).as<xaml::ResourceDictionary>();
     ++parsed;
     parsing += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count();
-    if (!fresh) cache->emplace(xaml, dictionary);
+    cache->emplace(xaml, dictionary);
     return dictionary;
+}
+
+/// A dictionary of its own with the entries of `shared`, theme dictionaries
+/// included: the values are the same objects. A dictionary merged into one
+/// element cannot be merged into another, and copying the few entries is
+/// far cheaper than parsing the markup again.
+inline xaml::ResourceDictionary Copy(xaml::ResourceDictionary const& shared) {
+    xaml::ResourceDictionary copy;
+    for (auto const& entry : shared) copy.Insert(entry.Key(), entry.Value());
+    for (auto const& theme : shared.ThemeDictionaries()) {
+        xaml::ResourceDictionary inner;
+        for (auto const& entry : theme.Value().as<xaml::ResourceDictionary>()) inner.Insert(entry.Key(), entry.Value());
+        copy.ThemeDictionaries().Insert(theme.Key(), inner);
+    }
+    return copy;
 }
 
 inline void Restyle(xaml::FrameworkElement const& element, std::wstring const& xaml) {
     try {
-        auto merged = element.Resources().MergedDictionaries();
-        try {
-            merged.Append(Dictionary(xaml));
-        } catch (winrt::hresult_error const&) {
-            // A dictionary that will not be shared: one of its own.
-            merged.Append(Dictionary(xaml, true));
-        }
+        element.Resources().MergedDictionaries().Append(Copy(Dictionary(xaml)));
     } catch (winrt::hresult_error const& error) {
         Report("styles: " + Utf8(error.message()));
     }
