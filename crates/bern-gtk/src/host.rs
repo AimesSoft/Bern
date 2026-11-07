@@ -337,7 +337,7 @@ fn write_file_scripts(def: &AppDef) {
     );
     for texts in def.file_menus {
         let there = |name: &str| folder.join(name.replace('/', "-"));
-        if texts.iter().any(|(_, name)| there(*name).exists()) {
+        if texts.iter().any(|(_, name)| there(name).exists()) {
             continue;
         }
         let chosen = texts
@@ -348,10 +348,10 @@ fn write_file_scripts(def: &AppDef) {
             continue;
         };
         let written = std::fs::create_dir_all(&folder)
-            .and_then(|()| std::fs::write(there(*name), &script))
+            .and_then(|()| std::fs::write(there(name), &script))
             .and_then(|()| {
                 use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(there(*name), std::fs::Permissions::from_mode(0o755))
+                std::fs::set_permissions(there(name), std::fs::Permissions::from_mode(0o755))
             });
         if let Err(error) = written {
             eprintln!("bern: cannot write the file manager's script: {error}");
