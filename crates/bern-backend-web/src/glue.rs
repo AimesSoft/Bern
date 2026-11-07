@@ -340,6 +340,9 @@ fn main() {{
         eprintln!("error: no page in {{}}; pass --root", root.display());
         std::process::exit(2);
     }}
+    // Its settings and data live in the application's folders, as a native
+    // host's do; without them an engine keeps nothing past this run.
+    bern_command::storage::Store::install_application({bundle:?});
     // The engine names resources; the page loads them from `resources/`.
     let names: Vec<String> = vec![{resources}];
     if let Err(message) = bern_command::resources::Resources::served(
@@ -377,6 +380,7 @@ fn usage() -> ! {{
 }}
 "#,
         namespace = app.protocol.namespace,
+        bundle = app.app.bundle_id,
         program = program(app),
         engine = engine_expr(context),
         resources = resources_expr(app),
