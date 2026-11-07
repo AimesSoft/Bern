@@ -585,6 +585,18 @@ impl Generator<'_> {
                 "BernOpenCenter(at: {at}, horizontal: {horizontal}) {{"
             ));
         }
+        // On a phone or a television, the top of what a vertical scroll
+        // view scrolls is where a canvas that bleeds starts filling the
+        // room the scroll view keeps above it. Its content is one view in
+        // that space: a single element as it is, several in the stack
+        // SwiftUI would put them in.
+        let marks_top = !horizontal && matches!(self.platform, Platform::Ios | Platform::Tvos);
+        let one_view = match element.children.as_slice() {
+            [Node::Component(_)] => true,
+            [Node::Element(child)] => child.kind != "ForEach",
+            _ => false,
+        };
+        let content_space = marks_top.then_some(".coordinateSpace(.named(bernScrollContentSpace))");
         if snap.is_some() || position.is_some() {
             // The items to rest on and to scroll to are those of
             // the layout inside.
@@ -603,11 +615,23 @@ impl Generator<'_> {
             if let Some(entrance) = &entrance {
                 out.line(entrance);
             }
-        } else if let Some(entrance) = &entrance {
-            out.open("SwiftUI.Group {");
+            if let Some(space) = content_space {
+                out.line(space);
+            }
+        } else if entrance.is_some() || marks_top {
+            out.open(if marks_top && !one_view {
+                "SwiftUI.VStack {"
+            } else {
+                "SwiftUI.Group {"
+            });
             self.nodes(out, &element.children, ctx);
             out.close("}");
-            out.line(entrance);
+            if let Some(entrance) = &entrance {
+                out.line(entrance);
+            }
+            if let Some(space) = content_space {
+                out.line(space);
+            }
         } else {
             self.nodes(out, &element.children, ctx);
         }
@@ -615,6 +639,9 @@ impl Generator<'_> {
             out.close("}");
         }
         out.close("}");
+        if marks_top {
+            out.line(".bernScrollTopRoom()");
+        }
         if let Some(snap) = snap {
             out.line(format!(
                 ".bernSnap(center: {}, axis: {axis})",

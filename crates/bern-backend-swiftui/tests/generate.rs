@@ -1928,35 +1928,46 @@ fn scene_layers_bleed_and_window_buttons_keep_the_traffic_lights_room() {
 }
 
 /// A backdrop that bleeds keeps its place and draws past the safe area on
-/// a phone; a Mac window has no safe area at its sides to pass.
+/// a phone, at the top of a vertical scroll view's content also through
+/// the room the scroll view keeps above it; a Mac window has no safe area
+/// at its sides to pass.
 #[test]
 fn a_bleeding_canvas_passes_the_safe_area_on_a_phone() {
     use bern_ir::{Element, Node, Prop};
     let (config, mut compiled) = showcase();
-    compiled.app.components[0].body = Node::Element(Element {
-        kind: "Canvas".into(),
-        id: None,
-        path: "test.Canvas".into(),
-        props: [
-            ("height".into(), Prop::Number { value: 400.0 }),
+    let element = |kind: &str, props: Vec<(&str, Prop)>, children: Vec<Node>| {
+        Node::Element(Element {
+            kind: kind.into(),
+            id: None,
+            path: format!("test.{kind}"),
+            props: props
+                .into_iter()
+                .map(|(name, prop)| (name.into(), prop))
+                .collect(),
+            template: None,
+            children,
+            action: None,
+            source: SourceLocation {
+                file: "canvas.rs".into(),
+                line: 1,
+                column: 1,
+            },
+        })
+    };
+    let canvas = element(
+        "Canvas",
+        vec![
+            ("height", Prop::Number { value: 400.0 }),
             (
-                "bleed".into(),
+                "bleed",
                 Prop::Keyword {
                     value: "true".into(),
                 },
             ),
-        ]
-        .into_iter()
-        .collect(),
-        template: None,
-        children: vec![],
-        action: None,
-        source: SourceLocation {
-            file: "canvas.rs".into(),
-            line: 1,
-            column: 1,
-        },
-    });
+        ],
+        vec![],
+    );
+    compiled.app.components[0].body = element("ScrollView", vec![], vec![canvas]);
     let source = |files: Vec<bern_target_api::GeneratedFile>| {
         let generated = files
             .iter()
@@ -1971,7 +1982,13 @@ fn a_bleeding_canvas_passes_the_safe_area_on_a_phone() {
             .unwrap(),
     );
     assert!(
-        phone.contains("SwiftUI.Color.clear\n") && phone.contains(".ignoresSafeArea(.container)\n"),
+        phone.contains("SwiftUI.Color.clear\n") && phone.contains(".bernBleed {\n"),
+        "{phone}"
+    );
+    // The scroll view marks the top of its content and the room above it.
+    assert!(
+        phone.contains(".coordinateSpace(.named(bernScrollContentSpace))\n")
+            && phone.contains(".bernScrollTopRoom()\n"),
         "{phone}"
     );
     let mac = source(
@@ -1982,7 +1999,10 @@ fn a_bleeding_canvas_passes_the_safe_area_on_a_phone() {
             )
             .unwrap(),
     );
-    assert!(!mac.contains(".ignoresSafeArea(.container)\n"), "{mac}");
+    assert!(
+        !mac.contains(".bernBleed") && !mac.contains(".bernScrollTopRoom()"),
+        "{mac}"
+    );
 }
 
 const STAGE_PROTOCOL: &str = r#"
