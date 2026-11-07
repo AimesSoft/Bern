@@ -21,15 +21,16 @@ impl Generator<'_> {
         );
         // What bleeds draws behind the place it keeps: a view grows past the
         // safe area only where it can stretch, and a written height can't.
-        // A Mac window's only safe area is its title bar.
+        // At the top of a vertical scroll view's content it also fills the
+        // room the scroll view keeps above it. A Mac window's only safe
+        // area is its title bar.
         if element.keyword("bleed") == Some("true")
             && matches!(self.platform, Platform::Ios | Platform::Tvos)
         {
             out.line("SwiftUI.Color.clear");
             out.line(frame);
-            out.open(".background {");
+            out.open(".bernBleed {");
             self.drawing_view(out, element);
-            out.line(".ignoresSafeArea(.container)");
             out.close("}");
         } else {
             self.drawing_view(out, element);

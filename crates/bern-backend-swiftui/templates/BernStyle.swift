@@ -991,6 +991,109 @@ struct BernBleedingLayer: ViewModifier {
     }
 }
 
+/// The coordinate space of what a vertical scroll view scrolls, whose top
+/// is the top of its content however far it has scrolled.
+let bernScrollContentSpace = "bern.scrollContent"
+
+private struct BernScrollTopRoomKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 0
+}
+
+extension EnvironmentValues {
+    /// The room a vertical scroll view keeps above its content: the part
+    /// of the status bar's safe area it reaches into. None elsewhere.
+    var bernScrollTopRoom: CGFloat {
+        get { self[BernScrollTopRoomKey.self] }
+        set { self[BernScrollTopRoomKey.self] = newValue }
+    }
+}
+
+extension View {
+    /// A vertical scroll view tells what it scrolls how much room it
+    /// keeps above it.
+    func bernScrollTopRoom() -> some View {
+        modifier(BernScrollTopRoom())
+    }
+
+    /// `drawing` behind this view, reaching past each edge of the safe
+    /// area the view reaches. At the top of a vertical scroll view's
+    /// content it also fills the room the scroll view keeps above that,
+    /// under the status bar, and scrolls with the content.
+    func bernBleed(@ViewBuilder _ drawing: () -> some View) -> some View {
+        modifier(BernBleed(drawing: drawing()))
+    }
+}
+
+private struct BernScrollTopRoom: ViewModifier {
+    @State private var room: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.bernScrollTopRoom, room)
+            .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { room = $0 }
+            .modifier(BernStatusBarEdge(reaches: room > 0))
+    }
+}
+
+/// What scrolls up under the status bar fades into the system's scroll
+/// edge effect there, as it does under a bar, so the time and the icons
+/// stay legible over it (iOS 26 and later). The system draws the effect
+/// only behind the content of a bar, never under the status bar alone,
+/// and not for an empty bar or one of clear color: the scroll view gets a
+/// bar holding a blank text that takes no height, so the effect covers
+/// the status bar and the page keeps its place. The effect also reaches a
+/// little below the status bar, where a page that hasn't scrolled has its
+/// header, and darkens what bleeds up under the status bar: it shows only
+/// once the content has scrolled. A scroll view that doesn't reach the
+/// status bar keeps an empty bar, which draws nothing, rather than
+/// changing what it is and losing its scroll.
+private struct BernStatusBarEdge: ViewModifier {
+    let reaches: Bool
+    @State private var scrolled = false
+
+    @ViewBuilder func body(content: Content) -> some View {
+        #if os(iOS)
+        if #available(iOS 26.0, *) {
+            content
+                .onScrollGeometryChange(for: Bool.self) { geometry in
+                    geometry.contentOffset.y + geometry.contentInsets.top > 0.5
+                } action: { _, now in
+                    withAnimation(.easeInOut(duration: 0.2)) { scrolled = now }
+                }
+                .safeAreaBar(edge: .top, spacing: 0) {
+                    if reaches && scrolled {
+                        Text(verbatim: " ").frame(height: 0).accessibilityHidden(true)
+                    }
+                }
+        } else {
+            content
+        }
+        #else
+        content
+        #endif
+    }
+}
+
+private struct BernBleed<Drawing: View>: ViewModifier {
+    let drawing: Drawing
+    @Environment(\.bernScrollTopRoom) private var room
+    /// The view starts where its scroll view's content starts.
+    @State private var opensContent = false
+
+    func body(content: Content) -> some View {
+        content
+            .onGeometryChange(for: Bool.self) { proxy in
+                // Half a point of slack, as for a scene's layers.
+                proxy.frame(in: .named(bernScrollContentSpace)).minY < 0.5
+            } action: { opensContent = $0 }
+            .background {
+                drawing
+                    .padding(.top, opensContent ? -room : 0)
+                    .ignoresSafeArea(.container)
+            }
+    }
+}
+
 private struct BernSystemButtonLook: ViewModifier {
     let look: BernButtonLook
     @Environment(\.bernControlGroupHeight) private var groupHeight
@@ -5243,16 +5346,48 @@ private struct BernModalLayer<Content: View>: View {
             // content too: the stage places the backdrop and one card.
             presentation(AnyView(ZStack { content }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: 24))
-                .background {
-                    RoundedRectangle(cornerRadius: 24).fill(.background)
-                        .shadow(color: .black.opacity(0.28), radius: 40, y: 20)
-                }
-                .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(.primary.opacity(0.12), lineWidth: 0.5))
+                .modifier(BernModalSurface())
                 .accessibilityAddTraits(.isModal)
                 .scaleEffect(scale)))
         }.ignoresSafeArea()
         }
+    }
+}
+
+/// The surface of a floating modal's card, the system's own for what it
+/// presents over a window: on iOS 26 and later the glass its alerts are
+/// made of; before that the elevated background, which in dark mode is
+/// lighter than the page under it, where the page's own color made the
+/// card pure black. A Mac card keeps the window's background.
+private struct BernModalSurface: ViewModifier {
+    private let shape = RoundedRectangle(cornerRadius: 24)
+
+    @ViewBuilder func body(content: Content) -> some View {
+        #if os(iOS)
+        if #available(iOS 26.0, *) {
+            content
+                .clipShape(shape)
+                .glassEffect(.regular, in: shape)
+        } else {
+            drawn(content) {
+                shape.fill(Color(uiColor: UIColor { traits in
+                    UIColor.systemBackground.resolvedColor(with: UITraitCollection(traitsFrom: [
+                        traits, UITraitCollection(userInterfaceLevel: .elevated),
+                    ]))
+                }))
+            }
+        }
+        #else
+        drawn(content) { shape.fill(.background) }
+        #endif
+    }
+
+    /// A card drawn over `fill`, with a shadow and a hairline edge.
+    private func drawn(_ content: Content, fill: () -> some View) -> some View {
+        content
+            .clipShape(shape)
+            .background { fill().shadow(color: .black.opacity(0.28), radius: 40, y: 20) }
+            .overlay(shape.strokeBorder(.primary.opacity(0.12), lineWidth: 0.5))
     }
 }
 
