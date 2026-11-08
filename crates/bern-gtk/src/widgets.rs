@@ -165,7 +165,9 @@ fn text_attributes(label: &gtk::Label, size: Option<f64>, line_height: Option<f6
         let metrics = label.pango_context().metrics(None, None);
         let em = size.unwrap_or(f64::from(metrics.ascent() + metrics.descent()) / scale);
         Some(line_height.unwrap_or(0.0).max(em * 2.1))
-    } else { line_height };
+    } else {
+        line_height
+    };
     if let Some(height) = line_height {
         attributes.insert(gtk::pango::AttrInt::new_line_height_absolute(
             (height.max(0.0) * scale).round() as i32,
@@ -282,8 +284,7 @@ pub fn Text(p: &Parent, ctx: &Ctx, props: TextProps) {
                 props.lit_since.clone(),
             );
             effect(move || {
-                let read =
-                    |value: &Option<Num>| value.as_ref().map_or(0.0, |value| value.now(&at));
+                let read = |value: &Option<Num>| value.as_ref().map_or(0.0, |value| value.now(&at));
                 let route = if lit.now(&at) < 0.0 {
                     Route::default()
                 } else {
@@ -298,32 +299,63 @@ pub fn Text(p: &Parent, ctx: &Ctx, props: TextProps) {
     };
     let shown: gtk::Widget = if let Some(ruby) = &props.ruby {
         let wrapped = RubyText::new(&shown, &label);
-        let (at, ruby, weak, label) = (ctx.clone(), bound_text(ctx, &ruby), wrapped.downgrade(), label.clone());
+        let (at, ruby, weak, label) = (
+            ctx.clone(),
+            bound_text(ctx, &ruby),
+            wrapped.downgrade(),
+            label.clone(),
+        );
         let (size, height) = (props.font_size.clone(), props.line_height.clone());
         let content = props.content.clone();
         let markdown = props.markdown;
         let mapped_label = label.clone();
         effect(move || {
             let label = &mapped_label;
-            let source = content.as_ref().map_or_else(String::new, |content| content(&at));
+            let source = content
+                .as_ref()
+                .map_or_else(String::new, |content| content(&at));
             let mut ranges = ruby_text_ranges(&source, &ruby());
             if markdown {
-                ranges = ranges.into_iter().filter_map(|(range, reading)| {
-                    if source.contains(['\u{fdd0}', '\u{fdd1}']) { return None; }
-                    let marked = format!("{}\u{fdd0}{}\u{fdd1}{}", &source[..range.start], &source[range.clone()], &source[range.end..]);
-                    let (_, mapped, _) = gtk::pango::parse_markup(&crate::markdown::markup(&marked), '\0').ok()?;
-                    if mapped.replace(['\u{fdd0}', '\u{fdd1}'], "") != label.text() { return None; }
-                    let start = mapped.find('\u{fdd0}')?;
-                    let end = mapped.find('\u{fdd1}')?.checked_sub('\u{fdd0}'.len_utf8())?;
-                    (start < end).then_some((start..end, reading))
-                }).collect();
+                ranges = ranges
+                    .into_iter()
+                    .filter_map(|(range, reading)| {
+                        if source.contains(['\u{fdd0}', '\u{fdd1}']) {
+                            return None;
+                        }
+                        let marked = format!(
+                            "{}\u{fdd0}{}\u{fdd1}{}",
+                            &source[..range.start],
+                            &source[range.clone()],
+                            &source[range.end..]
+                        );
+                        let (_, mapped, _) =
+                            gtk::pango::parse_markup(&crate::markdown::markup(&marked), '\0')
+                                .ok()?;
+                        if mapped.replace(['\u{fdd0}', '\u{fdd1}'], "") != label.text() {
+                            return None;
+                        }
+                        let start = mapped.find('\u{fdd0}')?;
+                        let end = mapped
+                            .find('\u{fdd1}')?
+                            .checked_sub('\u{fdd0}'.len_utf8())?;
+                        (start < end).then_some((start..end, reading))
+                    })
+                    .collect();
             }
             if let Some(wrapped) = weak.upgrade() {
                 use gtk::subclass::prelude::*;
                 let active = !ranges.is_empty();
                 *wrapped.imp().ranges.borrow_mut() = ranges;
-                if active { label.add_css_class("bern-ruby"); } else { label.remove_css_class("bern-ruby"); }
-                text_attributes(&label, size.as_ref().map(|v| v.now(&at)), height.as_ref().map(|v| v.now(&at)));
+                if active {
+                    label.add_css_class("bern-ruby");
+                } else {
+                    label.remove_css_class("bern-ruby");
+                }
+                text_attributes(
+                    &label,
+                    size.as_ref().map(|v| v.now(&at)),
+                    height.as_ref().map(|v| v.now(&at)),
+                );
                 wrapped.queue_resize();
                 wrapped.queue_draw();
             }
@@ -335,10 +367,19 @@ pub fn Text(p: &Parent, ctx: &Ctx, props: TextProps) {
             bind_number(ctx, lit, None, &label, move |value| bound.set_lit(value));
             if let Some(path) = &props.lit_path {
                 let (at, path, bound) = (ctx.clone(), bound_text(ctx, path), wrapped.clone());
-                let (lit, clock, since) = (lit.clone(), props.lit_clock.clone(), props.lit_since.clone());
+                let (lit, clock, since) = (
+                    lit.clone(),
+                    props.lit_clock.clone(),
+                    props.lit_since.clone(),
+                );
                 effect(move || {
-                    let read = |value: &Option<Num>| value.as_ref().map_or(0.0, |value| value.now(&at));
-                    bound.follow_lit(if lit.now(&at) < 0.0 { Route::default() } else { Route::new(&path(), read(&clock), read(&since)) });
+                    let read =
+                        |value: &Option<Num>| value.as_ref().map_or(0.0, |value| value.now(&at));
+                    bound.follow_lit(if lit.now(&at) < 0.0 {
+                        Route::default()
+                    } else {
+                        Route::new(&path(), read(&clock), read(&since))
+                    });
                 });
             }
         }
@@ -350,15 +391,31 @@ pub fn Text(p: &Parent, ctx: &Ctx, props: TextProps) {
 }
 
 fn ruby_text_ranges(content: &str, source: &str) -> Vec<(std::ops::Range<usize>, String)> {
-    let Ok(ranges) = serde_json::from_str::<Vec<(usize, usize, String)>>(source) else { return Vec::new(); };
-    let offsets: Vec<_> = content.char_indices().map(|(i, _)| i).chain(std::iter::once(content.len())).collect();
+    let Ok(ranges) = serde_json::from_str::<Vec<(usize, usize, String)>>(source) else {
+        return Vec::new();
+    };
+    let offsets: Vec<_> = content
+        .char_indices()
+        .map(|(i, _)| i)
+        .chain(std::iter::once(content.len()))
+        .collect();
     let mut previous = 0;
     let mut result = Vec::new();
     for (start, end, reading) in ranges {
-        if start < previous || start >= end || end >= offsets.len() || reading.is_empty() || reading.contains(['\n', '\r']) { continue; }
+        if start < previous
+            || start >= end
+            || end >= offsets.len()
+            || reading.is_empty()
+            || reading.contains(['\n', '\r'])
+        {
+            continue;
+        }
         let range = offsets[start]..offsets[end];
-        if content[range.clone()].contains(['\n', '\r']) { continue; }
-        result.push((range, reading)); previous = end;
+        if content[range.clone()].contains(['\n', '\r']) {
+            continue;
+        }
+        result.push((range, reading));
+        previous = end;
     }
     result
 }
@@ -385,28 +442,51 @@ mod ruby_text {
     }
     impl ObjectImpl for RubyText {
         fn dispose(&self) {
-            while let Some(child) = self.obj().first_child() { child.unparent(); }
+            while let Some(child) = self.obj().first_child() {
+                child.unparent();
+            }
         }
     }
     impl WidgetImpl for RubyText {
-        fn request_mode(&self) -> gtk::SizeRequestMode { gtk::SizeRequestMode::HeightForWidth }
+        fn request_mode(&self) -> gtk::SizeRequestMode {
+            gtk::SizeRequestMode::HeightForWidth
+        }
         fn measure(&self, orientation: gtk::Orientation, for_size: i32) -> (i32, i32, i32, i32) {
-            self.obj().first_child().map_or((0, 0, -1, -1), |child| child.measure(orientation, if orientation == gtk::Orientation::Horizontal { -1 } else { for_size }))
+            self.obj().first_child().map_or((0, 0, -1, -1), |child| {
+                child.measure(
+                    orientation,
+                    if orientation == gtk::Orientation::Horizontal {
+                        -1
+                    } else {
+                        for_size
+                    },
+                )
+            })
         }
         fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
-            if let Some(child) = self.obj().first_child() { child.allocate(width, height, baseline, None); }
+            if let Some(child) = self.obj().first_child() {
+                child.allocate(width, height, baseline, None);
+            }
         }
         fn snapshot(&self, snapshot: &gtk::Snapshot) {
-            if let Some(child) = self.obj().first_child() { self.obj().snapshot_child(&child, snapshot); }
-            let Some(label) = self.label.get() else { return; };
+            if let Some(child) = self.obj().first_child() {
+                self.obj().snapshot_child(&child, snapshot);
+            }
+            let Some(label) = self.label.get() else {
+                return;
+            };
             let layout = label.layout();
             let source = label.text();
             let lit = self.obj().lit_place();
             self.drawn.set(lit);
-            let cut = (lit >= 0.0).then(|| source.char_indices().nth(lit as usize)).flatten();
+            let cut = (lit >= 0.0)
+                .then(|| source.char_indices().nth(lit as usize))
+                .flatten();
             let scale = f64::from(gtk::pango::SCALE);
             let (offset_x, offset_y) = label.layout_offsets();
-            let offset = label.compute_point(&*self.obj(), &gtk::graphene::Point::new(0.0, 0.0)).unwrap_or_default();
+            let offset = label
+                .compute_point(&*self.obj(), &gtk::graphene::Point::new(0.0, 0.0))
+                .unwrap_or_default();
             let mut iter = layout.iter();
             loop {
                 if let Some(line) = iter.line_readonly() {
@@ -415,20 +495,38 @@ mod ruby_text {
                     for (range, reading) in self.ranges.borrow().iter() {
                         let a = range.start.max(start);
                         let b = range.end.min(end);
-                        if a >= b || range.end > source.len() || !source.is_char_boundary(a) || !source.is_char_boundary(b) { continue; }
+                        if a >= b
+                            || range.end > source.len()
+                            || !source.is_char_boundary(a)
+                            || !source.is_char_boundary(b)
+                        {
+                            continue;
+                        }
                         let total = source[range.clone()].chars().count();
                         let before = source[range.start..a].chars().count();
                         let through = source[range.start..b].chars().count();
                         let chars: Vec<_> = reading.chars().collect();
-                        let reading: String = chars[chars.len() * before / total..chars.len() * through / total].iter().collect();
-                        if reading.is_empty() { continue; }
+                        let reading: String = chars
+                            [chars.len() * before / total..chars.len() * through / total]
+                            .iter()
+                            .collect();
+                        if reading.is_empty() {
+                            continue;
+                        }
                         let ink = label.create_pango_layout(Some(&reading));
-                        let mut font = layout.font_description().unwrap_or_else(|| label.pango_context().font_description().unwrap_or_default());
+                        let mut font = layout.font_description().unwrap_or_else(|| {
+                            label.pango_context().font_description().unwrap_or_default()
+                        });
                         // Per-label absolute font size attributes take priority over CSS.
                         let mut em = f64::from(font.size()) / scale;
                         if let Some(attrs) = label.attributes() {
                             let iterator = attrs.iterator();
-                            if let Some(size) = iterator.get(gtk::pango::AttrType::AbsoluteSize).and_then(|a| a.downcast::<gtk::pango::AttrSize>().ok()) { em = f64::from(size.size()) / scale; }
+                            if let Some(size) = iterator
+                                .get(gtk::pango::AttrType::AbsoluteSize)
+                                .and_then(|a| a.downcast::<gtk::pango::AttrSize>().ok())
+                            {
+                                em = f64::from(size.size()) / scale;
+                            }
                         }
                         font.set_absolute_size(em.max(1.0) * scale);
                         let metrics = layout.context().metrics(Some(&font), None);
@@ -439,9 +537,15 @@ mod ruby_text {
                             let mut iterator = attrs.iterator();
                             while iterator.range().1 <= a as i32 && iterator.next_style_change() {}
                             let reading_attrs = gtk::pango::AttrList::new();
-                            for kind in [gtk::pango::AttrType::Weight, gtk::pango::AttrType::Style, gtk::pango::AttrType::Family, gtk::pango::AttrType::Foreground] {
+                            for kind in [
+                                gtk::pango::AttrType::Weight,
+                                gtk::pango::AttrType::Style,
+                                gtk::pango::AttrType::Family,
+                                gtk::pango::AttrType::Foreground,
+                            ] {
                                 if let Some(mut attr) = iterator.get(kind) {
-                                    attr.set_start_index(0); attr.set_end_index(u32::MAX);
+                                    attr.set_start_index(0);
+                                    attr.set_end_index(u32::MAX);
                                     reading_attrs.insert(attr);
                                 }
                             }
@@ -452,12 +556,20 @@ mod ruby_text {
                             let left = f64::from(pair[0].min(pair[1])) / scale;
                             let width = f64::from((pair[1] - pair[0]).abs()) / scale;
                             let (ink_width, _) = ink.pixel_size();
-                            if width <= 0.0 || ink_width <= 0 { continue; }
+                            if width <= 0.0 || ink_width <= 0 {
+                                continue;
+                            }
                             let fit = (width / f64::from(ink_width)).min(1.0);
                             snapshot.save();
                             snapshot.translate(&gtk::graphene::Point::new(
-                                offset.x() + offset_x as f32 + (left + (width - f64::from(ink_width) * fit) / 2.0) as f32,
-                                offset.y() + offset_y as f32 + (f64::from(iter.baseline() - metrics.ascent()) / scale - height) as f32));
+                                offset.x()
+                                    + offset_x as f32
+                                    + (left + (width - f64::from(ink_width) * fit) / 2.0) as f32,
+                                offset.y()
+                                    + offset_y as f32
+                                    + (f64::from(iter.baseline() - metrics.ascent()) / scale
+                                        - height) as f32,
+                            ));
                             snapshot.scale(fit as f32, fit as f32);
                             if let Some((at, _)) = cut {
                                 let alpha = if at >= b { 1.0 } else { 0.4 };
@@ -466,11 +578,19 @@ mod ruby_text {
                                 snapshot.pop();
                                 if at >= a && at < b {
                                     let position = layout.index_to_pos(at as i32);
-                                    let edge = (f64::from(position.x()) + f64::from(position.width()) * lit.fract()) / scale;
+                                    let edge = (f64::from(position.x())
+                                        + f64::from(position.width()) * lit.fract())
+                                        / scale;
                                     let origin = left + (width - f64::from(ink_width) * fit) / 2.0;
-                                    let lit_width = ((edge - origin) / fit).clamp(0.0, f64::from(ink_width));
+                                    let lit_width =
+                                        ((edge - origin) / fit).clamp(0.0, f64::from(ink_width));
                                     let (_, ink_height) = ink.pixel_size();
-                                    snapshot.push_clip(&gtk::graphene::Rect::new(0.0, 0.0, lit_width as f32, ink_height as f32));
+                                    snapshot.push_clip(&gtk::graphene::Rect::new(
+                                        0.0,
+                                        0.0,
+                                        lit_width as f32,
+                                        ink_height as f32,
+                                    ));
                                     snapshot.append_layout(&ink, &label.color());
                                     snapshot.pop();
                                 }
@@ -481,7 +601,9 @@ mod ruby_text {
                         }
                     }
                 }
-                if !iter.next_line() { break; }
+                if !iter.next_line() {
+                    break;
+                }
             }
         }
     }
@@ -497,7 +619,11 @@ impl RubyText {
         use gtk::subclass::prelude::*;
         let lit = self.imp().lit.get().unwrap_or(-1.0);
         let route = self.imp().route.borrow();
-        if lit < 0.0 || route.points.is_empty() { lit } else { route.place() }
+        if lit < 0.0 || route.points.is_empty() {
+            lit
+        } else {
+            route.place()
+        }
     }
 
     fn set_lit(&self, value: f64) {
@@ -514,15 +640,20 @@ impl RubyText {
 
     fn keep_lit_moving(&self) {
         use gtk::subclass::prelude::*;
-        let moving = self.imp().lit.get().is_some_and(|lit| lit >= 0.0) && self.imp().route.borrow().moving();
+        let moving = self.imp().lit.get().is_some_and(|lit| lit >= 0.0)
+            && self.imp().route.borrow().moving();
         let mut tick = self.imp().tick.borrow_mut();
         if moving && tick.is_none() {
             *tick = Some(self.add_tick_callback(|widget, _| {
-                if (widget.lit_place() - widget.imp().drawn.get()).abs() >= 1.0 / 48.0 { widget.queue_draw(); }
+                if (widget.lit_place() - widget.imp().drawn.get()).abs() >= 1.0 / 48.0 {
+                    widget.queue_draw();
+                }
                 gtk::glib::ControlFlow::Continue
             }));
         } else if !moving {
-            if let Some(id) = tick.take() { id.remove(); }
+            if let Some(id) = tick.take() {
+                id.remove();
+            }
         }
         self.queue_draw();
     }
@@ -3237,11 +3368,17 @@ mod tests {
 
     #[test]
     fn ruby_ranges_use_scalars_and_leave_plain_text_for_empty_input() {
-        assert_eq!(ruby_text_ranges("字𠮷文", r#"[[1,2,"よし"]]"#), vec![(3..7, "よし".into())]);
+        assert_eq!(
+            ruby_text_ranges("字𠮷文", r#"[[1,2,"よし"]]"#),
+            vec![(3..7, "よし".into())]
+        );
         for source in ["", "[]", "null", r#"[[2,1,"x"]]"#, r#"[[0,4,"x"]]"#] {
             assert!(ruby_text_ranges("字𠮷文", source).is_empty());
         }
-        assert_eq!(ruby_text_ranges("文字", r#"[[0,1,"も"],[0,2,"じ"]]"#), vec![(0..3, "も".into())]);
+        assert_eq!(
+            ruby_text_ranges("文字", r#"[[0,1,"も"],[0,2,"じ"]]"#),
+            vec![(0..3, "も".into())]
+        );
     }
 
     #[test]

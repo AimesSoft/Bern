@@ -159,7 +159,11 @@ pub fn text(c: &Ctx, content: String, props: TextProps) -> El {
     if let Some(inline) = &inline {
         annotations = ruby_markdown_ranges(&content, &inline.text, annotations);
     }
-    let line = if annotations.is_empty() { props.line_height.unwrap_or(line) } else { props.line_height.unwrap_or(line).max(size * 2.1) };
+    let line = if annotations.is_empty() {
+        props.line_height.unwrap_or(line)
+    } else {
+        props.line_height.unwrap_or(line).max(size * 2.1)
+    };
     let element = match props.style {
         TextStyle::Code => div().font_family(MONOSPACE),
         _ => div(),
@@ -182,8 +186,21 @@ pub fn text(c: &Ctx, content: String, props: TextProps) -> El {
         None => element,
     };
     let element = c.grow().apply(element);
-    let element = if annotations.is_empty() { element } else {
-        element.relative().child(ruby_ink(inline.as_ref().map_or_else(|| content.clone(), |inline| inline.text.clone()), annotations, inline.as_ref().map_or_else(Vec::new, |inline| inline.marks.clone()), c.color("accent.text"), px(line), props.lines))
+    let element = if annotations.is_empty() {
+        element
+    } else {
+        element.relative().child(ruby_ink(
+            inline
+                .as_ref()
+                .map_or_else(|| content.clone(), |inline| inline.text.clone()),
+            annotations,
+            inline
+                .as_ref()
+                .map_or_else(Vec::new, |inline| inline.marks.clone()),
+            c.color("accent.text"),
+            px(line),
+            props.lines,
+        ))
     };
     // Blurred, the text keeps its place but is drawn as spread copies.
     let blur = c.blur();
@@ -222,94 +239,202 @@ pub fn text(c: &Ctx, content: String, props: TextProps) -> El {
 
 /// Resolve scalar indices once, before native shaping uses UTF-8 offsets.
 fn ruby_ranges(content: &str, source: &str) -> Vec<(std::ops::Range<usize>, String)> {
-    let Ok(ranges) = serde_json::from_str::<Vec<(usize, usize, String)>>(source) else { return Vec::new(); };
-    let offsets: Vec<_> = content.char_indices().map(|(i, _)| i).chain(std::iter::once(content.len())).collect();
+    let Ok(ranges) = serde_json::from_str::<Vec<(usize, usize, String)>>(source) else {
+        return Vec::new();
+    };
+    let offsets: Vec<_> = content
+        .char_indices()
+        .map(|(i, _)| i)
+        .chain(std::iter::once(content.len()))
+        .collect();
     let mut previous = 0;
     let mut result = Vec::new();
     for (start, end, reading) in ranges {
-        if start < previous || start >= end || end >= offsets.len() || reading.is_empty() || reading.contains(['\n', '\r']) { continue; }
+        if start < previous
+            || start >= end
+            || end >= offsets.len()
+            || reading.is_empty()
+            || reading.contains(['\n', '\r'])
+        {
+            continue;
+        }
         let range = offsets[start]..offsets[end];
-        if content[range.clone()].contains(['\n', '\r']) { continue; }
-        result.push((range, reading)); previous = end;
+        if content[range.clone()].contains(['\n', '\r']) {
+            continue;
+        }
+        result.push((range, reading));
+        previous = end;
     }
     result
 }
 
 /// Carry source ranges through the existing parser, accepting a mapping
 /// only when adding boundary sentinels did not change Markdown semantics.
-fn ruby_markdown_ranges(source: &str, plain: &str, ranges: Vec<(std::ops::Range<usize>, String)>) -> Vec<(std::ops::Range<usize>, String)> {
-    if source.contains(['\u{fdd0}', '\u{fdd1}']) { return Vec::new(); }
-    ranges.into_iter().filter_map(|(range, reading)| {
-        let marked = format!("{}\u{fdd0}{}\u{fdd1}{}", &source[..range.start], &source[range.clone()], &source[range.end..]);
-        let mapped = crate::markdown::parse(&marked).text;
-        if mapped.replace(['\u{fdd0}', '\u{fdd1}'], "") != plain { return None; }
-        let start = mapped.find('\u{fdd0}')?;
-        let end = mapped.find('\u{fdd1}')?.checked_sub('\u{fdd0}'.len_utf8())?;
-        (start < end).then_some((start..end, reading))
-    }).collect()
+fn ruby_markdown_ranges(
+    source: &str,
+    plain: &str,
+    ranges: Vec<(std::ops::Range<usize>, String)>,
+) -> Vec<(std::ops::Range<usize>, String)> {
+    if source.contains(['\u{fdd0}', '\u{fdd1}']) {
+        return Vec::new();
+    }
+    ranges
+        .into_iter()
+        .filter_map(|(range, reading)| {
+            let marked = format!(
+                "{}\u{fdd0}{}\u{fdd1}{}",
+                &source[..range.start],
+                &source[range.clone()],
+                &source[range.end..]
+            );
+            let mapped = crate::markdown::parse(&marked).text;
+            if mapped.replace(['\u{fdd0}', '\u{fdd1}'], "") != plain {
+                return None;
+            }
+            let start = mapped.find('\u{fdd0}')?;
+            let end = mapped
+                .find('\u{fdd1}')?
+                .checked_sub('\u{fdd0}'.len_utf8())?;
+            (start < end).then_some((start..end, reading))
+        })
+        .collect()
 }
 
 /// Readings are painted from the same shaped base glyph advances; they do
 /// not add characters to the text element or change its wrap opportunities.
-fn ruby_ink(content: String, ranges: Vec<(std::ops::Range<usize>, String)>, marks: Vec<(std::ops::Range<usize>, crate::markdown::Mark)>, accent: gpui::Rgba, line: gpui::Pixels, lines: Option<usize>) -> El {
-    gpui::canvas(|_, _, _| {}, move |bounds, (), window, cx| {
-        let style = window.text_style();
-        let size = style.font_size.to_pixels(window.rem_size());
-        let mut boundaries = vec![0, content.len()];
-        for (range, _) in &marks { boundaries.extend([range.start, range.end]); }
-        boundaries.sort_unstable(); boundaries.dedup();
-        let style_at = |at: usize| {
-            let mut style = style.clone();
-            for (range, mark) in &marks {
-                if !range.contains(&at) { continue; }
-                style = style.highlight(match mark {
-                    crate::markdown::Mark::Strong => gpui::HighlightStyle { font_weight: Some(FontWeight::BOLD), ..Default::default() },
-                    crate::markdown::Mark::Emphasis => gpui::HighlightStyle { font_style: Some(gpui::FontStyle::Italic), ..Default::default() },
-                    crate::markdown::Mark::Link => gpui::HighlightStyle { color: Some(accent.into()), ..Default::default() },
-                    _ => gpui::HighlightStyle::default(),
-                });
+fn ruby_ink(
+    content: String,
+    ranges: Vec<(std::ops::Range<usize>, String)>,
+    marks: Vec<(std::ops::Range<usize>, crate::markdown::Mark)>,
+    accent: gpui::Rgba,
+    line: gpui::Pixels,
+    lines: Option<usize>,
+) -> El {
+    gpui::canvas(
+        |_, _, _| {},
+        move |bounds, (), window, cx| {
+            let style = window.text_style();
+            let size = style.font_size.to_pixels(window.rem_size());
+            let mut boundaries = vec![0, content.len()];
+            for (range, _) in &marks {
+                boundaries.extend([range.start, range.end]);
             }
-            style
-        };
-        let runs: Vec<_> = boundaries.windows(2).map(|pair| style_at(pair[0]).to_run(pair[1] - pair[0])).collect();
-        let Ok(shaped) = window.text_system().shape_text(content.clone().into(), size, &runs, (lines != Some(1)).then_some(bounds.size.width), lines) else { return; };
-        let mut paragraph_offset = 0;
-        let mut row = 0;
-        for paragraph in &shaped {
-            let layout = &paragraph.unwrapped_layout;
-            let mut start = 0;
-            let mut ends: Vec<_> = paragraph.wrap_boundaries.iter().map(|b| layout.runs[b.run_ix].glyphs[b.glyph_ix].index).collect();
-            ends.push(paragraph.text.len());
-            for end in ends {
-                if lines.is_some_and(|limit| row >= limit) { return; }
-                for (range, reading) in &ranges {
-                    let a = range.start.max(paragraph_offset + start);
-                    let b = range.end.min(paragraph_offset + end);
-                    if a >= b { continue; }
-                    let total = content[range.clone()].chars().count();
-                    let before = content[range.start..a].chars().count();
-                    let through = content[range.start..b].chars().count();
-                    let chars: Vec<_> = reading.chars().collect();
-                    let reading: String = chars[chars.len() * before / total..chars.len() * through / total].iter().collect();
-                    if reading.is_empty() { continue; }
-                    let x1 = layout.x_for_index(a - paragraph_offset);
-                    let x2 = layout.x_for_index(b - paragraph_offset);
-                    let width = (x2 - x1).abs();
-                    if width <= px(0.0) { continue; }
-                    let reading_run = style_at(a).to_run(reading.len());
-                    let mut ink = window.text_system().shape_line(reading.clone().into(), size * 0.5, &[reading_run.clone()], None);
-                    if ink.width > width {
-                        ink = window.text_system().shape_line(reading.into(), size * (0.5 * f32::from(width) / f32::from(ink.width)), &[reading_run], None);
+            boundaries.sort_unstable();
+            boundaries.dedup();
+            let style_at = |at: usize| {
+                let mut style = style.clone();
+                for (range, mark) in &marks {
+                    if !range.contains(&at) {
+                        continue;
                     }
-                    let origin = point(bounds.origin.x + x1.min(x2) - layout.x_for_index(start) + (width - ink.width) / 2.0,
-                        bounds.origin.y + line * row as f32 + (line - size) / 2.0 - size * 0.55);
-                    let _ = ink.paint(origin, size * 0.55, gpui::TextAlign::Left, Some(width), window, cx);
+                    style = style.highlight(match mark {
+                        crate::markdown::Mark::Strong => gpui::HighlightStyle {
+                            font_weight: Some(FontWeight::BOLD),
+                            ..Default::default()
+                        },
+                        crate::markdown::Mark::Emphasis => gpui::HighlightStyle {
+                            font_style: Some(gpui::FontStyle::Italic),
+                            ..Default::default()
+                        },
+                        crate::markdown::Mark::Link => gpui::HighlightStyle {
+                            color: Some(accent.into()),
+                            ..Default::default()
+                        },
+                        _ => gpui::HighlightStyle::default(),
+                    });
                 }
-                start = end; row += 1;
+                style
+            };
+            let runs: Vec<_> = boundaries
+                .windows(2)
+                .map(|pair| style_at(pair[0]).to_run(pair[1] - pair[0]))
+                .collect();
+            let Ok(shaped) = window.text_system().shape_text(
+                content.clone().into(),
+                size,
+                &runs,
+                (lines != Some(1)).then_some(bounds.size.width),
+                lines,
+            ) else {
+                return;
+            };
+            let mut paragraph_offset = 0;
+            let mut row = 0;
+            for paragraph in &shaped {
+                let layout = &paragraph.unwrapped_layout;
+                let mut start = 0;
+                let mut ends: Vec<_> = paragraph
+                    .wrap_boundaries
+                    .iter()
+                    .map(|b| layout.runs[b.run_ix].glyphs[b.glyph_ix].index)
+                    .collect();
+                ends.push(paragraph.text.len());
+                for end in ends {
+                    if lines.is_some_and(|limit| row >= limit) {
+                        return;
+                    }
+                    for (range, reading) in &ranges {
+                        let a = range.start.max(paragraph_offset + start);
+                        let b = range.end.min(paragraph_offset + end);
+                        if a >= b {
+                            continue;
+                        }
+                        let total = content[range.clone()].chars().count();
+                        let before = content[range.start..a].chars().count();
+                        let through = content[range.start..b].chars().count();
+                        let chars: Vec<_> = reading.chars().collect();
+                        let reading: String = chars
+                            [chars.len() * before / total..chars.len() * through / total]
+                            .iter()
+                            .collect();
+                        if reading.is_empty() {
+                            continue;
+                        }
+                        let x1 = layout.x_for_index(a - paragraph_offset);
+                        let x2 = layout.x_for_index(b - paragraph_offset);
+                        let width = (x2 - x1).abs();
+                        if width <= px(0.0) {
+                            continue;
+                        }
+                        let reading_run = style_at(a).to_run(reading.len());
+                        let mut ink = window.text_system().shape_line(
+                            reading.clone().into(),
+                            size * 0.5,
+                            &[reading_run.clone()],
+                            None,
+                        );
+                        if ink.width > width {
+                            ink = window.text_system().shape_line(
+                                reading.into(),
+                                size * (0.5 * f32::from(width) / f32::from(ink.width)),
+                                &[reading_run],
+                                None,
+                            );
+                        }
+                        let origin = point(
+                            bounds.origin.x + x1.min(x2) - layout.x_for_index(start)
+                                + (width - ink.width) / 2.0,
+                            bounds.origin.y + line * row as f32 + (line - size) / 2.0 - size * 0.55,
+                        );
+                        let _ = ink.paint(
+                            origin,
+                            size * 0.55,
+                            gpui::TextAlign::Left,
+                            Some(width),
+                            window,
+                            cx,
+                        );
+                    }
+                    start = end;
+                    row += 1;
+                }
+                paragraph_offset += paragraph.text.len() + 1;
             }
-            paragraph_offset += paragraph.text.len() + 1;
-        }
-    }).absolute().size_full().into_any_element()
+        },
+    )
+    .absolute()
+    .size_full()
+    .into_any_element()
 }
 
 /// `Text(mark:)`: a capsule of `color` under each line of `content`, from
@@ -771,7 +896,11 @@ pub enum Fit {
 /// no input. The round ends are discs: the path's stroke has flat ends, and
 /// an arc cannot close on itself, so a whole ring stops just short.
 pub fn progress_ring(c: &Ctx, value: f64, total: f64, width: f32, stroke: f32) -> El {
-    let fraction = if total > 0.0 { (value / total).clamp(0.0, 1.0) as f32 } else { 0.0 };
+    let fraction = if total > 0.0 {
+        (value / total).clamp(0.0, 1.0) as f32
+    } else {
+        0.0
+    };
     let color = c.color("accent");
     canvas(
         |_, _, _| {},
@@ -781,7 +910,10 @@ pub fn progress_ring(c: &Ctx, value: f64, total: f64, width: f32, stroke: f32) -
             let radius = (bounds.size.width.min(bounds.size.height) - px(stroke)) / 2.0;
             let angle = shown * std::f32::consts::TAU;
             let start = point(center.x, center.y - radius);
-            let end = point(center.x + radius * angle.sin(), center.y - radius * angle.cos());
+            let end = point(
+                center.x + radius * angle.sin(),
+                center.y - radius * angle.cos(),
+            );
             let mut arc = PathBuilder::stroke(px(stroke));
             arc.move_to(start);
             arc.arc_to(point(radius, radius), px(0.0), shown > 0.5, true, end);
@@ -792,8 +924,20 @@ pub fn progress_ring(c: &Ctx, value: f64, total: f64, width: f32, stroke: f32) -
             for at in [start, end] {
                 let mut disc = PathBuilder::fill();
                 disc.move_to(point(at.x - cap, at.y));
-                disc.arc_to(point(cap, cap), px(0.0), false, true, point(at.x + cap, at.y));
-                disc.arc_to(point(cap, cap), px(0.0), false, true, point(at.x - cap, at.y));
+                disc.arc_to(
+                    point(cap, cap),
+                    px(0.0),
+                    false,
+                    true,
+                    point(at.x + cap, at.y),
+                );
+                disc.arc_to(
+                    point(cap, cap),
+                    px(0.0),
+                    false,
+                    true,
+                    point(at.x - cap, at.y),
+                );
                 disc.close();
                 if let Ok(path) = disc.build() {
                     window.paint_path(path, color);
@@ -853,7 +997,10 @@ mod ruby_tests {
 
     #[test]
     fn scalar_ranges_become_utf8_ranges_without_touching_text() {
-        assert_eq!(ruby_ranges("字𠮷文", r#"[[1,2,"よし"]]"#), vec![(3..7, "よし".into())]);
+        assert_eq!(
+            ruby_ranges("字𠮷文", r#"[[1,2,"よし"]]"#),
+            vec![(3..7, "よし".into())]
+        );
         for source in ["", "[]", "null", r#"[[1,4,"x"]]"#, r#"[[1,1,"x"]]"#] {
             assert!(ruby_ranges("字𠮷文", source).is_empty());
         }
@@ -863,6 +1010,9 @@ mod ruby_tests {
     fn markdown_mapping_keeps_original_source_scalar_indices() {
         let source = "**漢字**";
         let ranges = ruby_ranges(source, r#"[[2,4,"かんじ"]]"#);
-        assert_eq!(ruby_markdown_ranges(source, "漢字", ranges), vec![(0..6, "かんじ".into())]);
+        assert_eq!(
+            ruby_markdown_ranges(source, "漢字", ranges),
+            vec![(0..6, "かんじ".into())]
+        );
     }
 }

@@ -278,7 +278,6 @@ fn show(id: &str, overlay: &Overlay) {
     input_region(&window, &bar);
 }
 
-
 // A single source label supplies shaping, accessibility and scalar-to-glyph
 // geometry. Readings are snapshot decorations, not text fragments in a row.
 mod ruby_imp {
@@ -302,36 +301,62 @@ mod ruby_imp {
 
     impl ObjectImpl for RubyLine {
         fn dispose(&self) {
-            if let Some(tick) = self.tick.borrow_mut().take() { tick.remove(); }
-            if let Some(label) = self.label.borrow_mut().take() { label.unparent(); }
+            if let Some(tick) = self.tick.borrow_mut().take() {
+                tick.remove();
+            }
+            if let Some(label) = self.label.borrow_mut().take() {
+                label.unparent();
+            }
         }
     }
 
     impl WidgetImpl for RubyLine {
         fn measure(&self, orientation: gtk::Orientation, for_size: i32) -> (i32, i32, i32, i32) {
             let label = self.label.borrow();
-            let Some(label) = label.as_ref() else { return (0, 0, -1, -1) };
+            let Some(label) = label.as_ref() else {
+                return (0, 0, -1, -1);
+            };
             let (min, natural, baseline, natural_baseline) = label.measure(orientation, for_size);
-            let band = if orientation == gtk::Orientation::Vertical { self.band.get() } else { 0 };
-            (min + band, natural + band,
+            let band = if orientation == gtk::Orientation::Vertical {
+                self.band.get()
+            } else {
+                0
+            };
+            (
+                min + band,
+                natural + band,
                 if baseline < 0 { -1 } else { baseline + band },
-                if natural_baseline < 0 { -1 } else { natural_baseline + band })
+                if natural_baseline < 0 {
+                    -1
+                } else {
+                    natural_baseline + band
+                },
+            )
         }
 
         fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
             if let Some(label) = self.label.borrow().as_ref() {
                 let band = self.band.get();
-                label.allocate(width, (height - band).max(0),
+                label.allocate(
+                    width,
+                    (height - band).max(0),
                     if baseline < 0 { -1 } else { baseline - band },
-                    Some(gsk::Transform::new().translate(&graphene::Point::new(0.0, band as f32))));
+                    Some(gsk::Transform::new().translate(&graphene::Point::new(0.0, band as f32))),
+                );
             }
         }
 
         fn snapshot(&self, snapshot: &gtk::Snapshot) {
             let widget = self.obj();
             let (line, label) = (self.line.borrow(), self.label.borrow());
-            let (Some(line), Some(label)) = (line.as_ref(), label.as_ref()) else { return };
-            let place = line.route.as_ref().map(|route| route.place()).or(line.lit)
+            let (Some(line), Some(label)) = (line.as_ref(), label.as_ref()) else {
+                return;
+            };
+            let place = line
+                .route
+                .as_ref()
+                .map(|route| route.place())
+                .or(line.lit)
                 .filter(|place| *place >= 0.0);
             let scale = gtk::pango::SCALE as f32;
             let (offset, _) = label.layout_offsets();
@@ -339,23 +364,41 @@ mod ruby_imp {
             if let Some(place) = place {
                 let width = widget.width() as f32;
                 let height = widget.height() as f32;
-                let edge = line.text.char_indices().nth(place as usize).map_or(width, |(at, _)| {
-                    let rect = layout.index_to_pos(at as i32);
-                    offset as f32 + (rect.x() as f32 + rect.width() as f32 * place.fract() as f32) / scale
-                }).clamp(0.0, width);
+                let edge = line
+                    .text
+                    .char_indices()
+                    .nth(place as usize)
+                    .map_or(width, |(at, _)| {
+                        let rect = layout.index_to_pos(at as i32);
+                        offset as f32
+                            + (rect.x() as f32 + rect.width() as f32 * place.fract() as f32) / scale
+                    })
+                    .clamp(0.0, width);
                 snapshot.push_mask(gsk::MaskMode::Alpha);
-                snapshot.append_color(&gdk::RGBA::new(0.0, 0.0, 0.0, 1.0),
-                    &graphene::Rect::new(0.0, 0.0, edge, height));
-                snapshot.append_color(&gdk::RGBA::new(0.0, 0.0, 0.0, bern_ffi::overlay::FADED as f32),
-                    &graphene::Rect::new(edge, 0.0, width - edge, height));
+                snapshot.append_color(
+                    &gdk::RGBA::new(0.0, 0.0, 0.0, 1.0),
+                    &graphene::Rect::new(0.0, 0.0, edge, height),
+                );
+                snapshot.append_color(
+                    &gdk::RGBA::new(0.0, 0.0, 0.0, bern_ffi::overlay::FADED as f32),
+                    &graphene::Rect::new(edge, 0.0, width - edge, height),
+                );
                 snapshot.pop();
             }
             widget.snapshot_child(label, snapshot);
-            let offsets: Vec<_> = line.text.char_indices().map(|(at, _)| at)
-                .chain(std::iter::once(line.text.len())).collect();
+            let offsets: Vec<_> = line
+                .text
+                .char_indices()
+                .map(|(at, _)| at)
+                .chain(std::iter::once(line.text.len()))
+                .collect();
             let [r, g, b, a] = line.color;
-            let color = gdk::RGBA::new(r as f32 / 255.0, g as f32 / 255.0,
-                b as f32 / 255.0, a as f32 / 255.0);
+            let color = gdk::RGBA::new(
+                r as f32 / 255.0,
+                g as f32 / 255.0,
+                b as f32 / 255.0,
+                a as f32 / 255.0,
+            );
             for (start, end, reading) in self.spans.borrow().iter() {
                 let left = layout.index_to_pos(offsets[*start] as i32).x() as f32 / scale;
                 let right = layout.index_to_pos(offsets[*end] as i32).x() as f32 / scale;
@@ -363,22 +406,37 @@ mod ruby_imp {
                 let ruby = widget.create_pango_layout(Some(reading));
                 let mut font = layout.font_description().unwrap_or_default();
                 font.set_absolute_size(line.size * 0.45 * gtk::pango::SCALE as f64);
-                if line.bold { font.set_weight(gtk::pango::Weight::Bold); }
+                if line.bold {
+                    font.set_weight(gtk::pango::Weight::Bold);
+                }
                 ruby.set_font_description(Some(&font));
                 let (measured, _) = ruby.pixel_size();
-                font.set_absolute_size(line.size * 0.45 * gtk::pango::SCALE as f64
-                    * (available as f64 / measured.max(1) as f64).min(1.0));
+                font.set_absolute_size(
+                    line.size
+                        * 0.45
+                        * gtk::pango::SCALE as f64
+                        * (available as f64 / measured.max(1) as f64).min(1.0),
+                );
                 ruby.set_font_description(Some(&font));
                 let (wide, high) = ruby.pixel_size();
                 snapshot.save();
-                snapshot.translate(&graphene::Point::new(offset as f32 + left.min(right)
-                    + (available - wide as f32) / 2.0, (self.band.get() - high).max(0) as f32));
-                snapshot.push_shadow(&[gsk::Shadow::new(gdk::RGBA::new(0.0, 0.0, 0.0, 0.85), 0.0, 1.0, 3.0)]);
+                snapshot.translate(&graphene::Point::new(
+                    offset as f32 + left.min(right) + (available - wide as f32) / 2.0,
+                    (self.band.get() - high).max(0) as f32,
+                ));
+                snapshot.push_shadow(&[gsk::Shadow::new(
+                    gdk::RGBA::new(0.0, 0.0, 0.0, 0.85),
+                    0.0,
+                    1.0,
+                    3.0,
+                )]);
                 snapshot.append_layout(&ruby, &color);
                 snapshot.pop();
                 snapshot.restore();
             }
-            if place.is_some() { snapshot.pop(); }
+            if place.is_some() {
+                snapshot.pop();
+            }
         }
     }
 }
@@ -410,7 +468,9 @@ impl RubyLine {
                 glib::ControlFlow::Continue
             }));
         } else if !moving {
-            if let Some(id) = tick.take() { id.remove(); }
+            if let Some(id) = tick.take() {
+                id.remove();
+            }
         }
         self.queue_draw();
     }
