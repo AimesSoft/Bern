@@ -1488,16 +1488,9 @@ pub fn Watch(_p: &Parent, ctx: &Ctx, props: WatchProps, action: Option<Act>) {
     let (Some(value), Some(action)) = (props.value, action) else {
         return;
     };
-    let at = ctx.clone();
-    let last = RefCell::new(None);
-    effect(move || {
-        let now = value(&at);
-        if last.borrow().as_ref() == Some(&now) {
-            return;
-        }
-        *last.borrow_mut() = Some(now);
-        untrack(|| action(&at));
-    });
+    let read = ctx.clone();
+    let run = ctx.clone();
+    crate::reactive::watch(move || value(&read), move || action(&run));
 }
 
 // MARK: - Control groups

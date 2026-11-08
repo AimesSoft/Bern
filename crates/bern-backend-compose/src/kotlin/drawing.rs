@@ -102,7 +102,9 @@ impl Generator<'_> {
             }
         }
         if bleed {
-            out.open(format!("Canvas({frame}.bernBleed(bernBleed){semantics}) {{"));
+            out.open(format!(
+                "Canvas({frame}.bernBleed(bernBleed){semantics}) {{"
+            ));
             out.open("bernBleed.draw(this) {");
         } else {
             out.open(format!("Canvas({frame}{semantics}) {{"));

@@ -284,7 +284,15 @@ private struct BernPopoverPresentation<Panel: View>: ViewModifier {
                 release()
             }.allowsHitTesting(false))
         #else
-        content.popover(isPresented: $presented, arrowEdge: .bottom, content: panel)
+        // iOS takes the arrow's edge as asked from iOS 18 on, where it
+        // ignored it before: one asked of a button near the top of the
+        // screen put the popover above it, off the screen. Without one the
+        // system puts the popover where it fits, as it always did.
+        if #available(iOS 18.0, *) {
+            content.popover(isPresented: $presented, attachmentAnchor: .rect(.bounds), arrowEdge: nil, content: panel)
+        } else {
+            content.popover(isPresented: $presented, attachmentAnchor: .rect(.bounds), arrowEdge: .top, content: panel)
+        }
         #endif
     }
 

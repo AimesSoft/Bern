@@ -636,7 +636,10 @@ mod tests {
             out.contains("        } }\n        .bernScrollTopRoom()\n"),
             "{out}"
         );
-        assert!(out.contains("motion: .init { x })\n        .toolbar {"), "{out}");
+        assert!(
+            out.contains("motion: .init { x })\n        .toolbar {"),
+            "{out}"
+        );
     }
 
     #[test]
