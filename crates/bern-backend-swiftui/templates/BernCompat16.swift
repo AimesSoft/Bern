@@ -349,6 +349,85 @@ extension View {
     }
 }
 
+/// What a scroll view scrolls, opening it with the point at `anchor` of the
+/// content at the same point of the view, where `defaultScrollAnchor` of
+/// iOS 17 opens it. A probe behind the content finds the platform scroll
+/// view around it and sets the offset once, when the content has its size.
+struct BernOpenAt16<Content: View>: View {
+    let anchor: UnitPoint
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        content()
+            .background(BernOpenAtProbe16(anchor: anchor))
+    }
+}
+
+private struct BernOpenAtProbe16: UIViewRepresentable {
+    let anchor: UnitPoint
+
+    func makeUIView(context: Context) -> BernOpenAtView16 {
+        BernOpenAtView16(anchor: anchor)
+    }
+
+    func updateUIView(_ view: BernOpenAtView16, context: Context) {}
+}
+
+final class BernOpenAtView16: UIView {
+    /// Scroll views opened already: content of several views has a probe
+    /// behind each, and a probe that comes later must not move the view
+    /// the person has scrolled since.
+    private static let opened = NSHashTable<UIScrollView>.weakObjects()
+
+    let anchor: UnitPoint
+    private var tries = 0
+
+    init(anchor: UnitPoint) {
+        self.anchor = anchor
+        super.init(frame: .zero)
+        isUserInteractionEnabled = false
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil { open() }
+    }
+
+    /// Until the scroll view has measured its content, try again shortly.
+    private func open() {
+        guard window != nil else { return }
+        let scroll = sequence(first: superview, next: { $0?.superview })
+            .lazy.compactMap { $0 as? UIScrollView }.first
+        guard let scroll else { return retry() }
+        guard !Self.opened.contains(scroll) else { return }
+        let inset = scroll.adjustedContentInset
+        let length = scroll.contentSize
+        let port = CGSize(
+            width: scroll.bounds.width - inset.left - inset.right,
+            height: scroll.bounds.height - inset.top - inset.bottom)
+        guard length.width > 0, length.height > 0, port.width > 0, port.height > 0 else {
+            return retry()
+        }
+        Self.opened.add(scroll)
+        var offset = scroll.contentOffset
+        if length.width > port.width {
+            offset.x = min(max(anchor.x, 0), 1) * (length.width - port.width) - inset.left
+        }
+        if length.height > port.height {
+            offset.y = min(max(anchor.y, 0), 1) * (length.height - port.height) - inset.top
+        }
+        scroll.setContentOffset(offset, animated: false)
+    }
+
+    private func retry() {
+        tries += 1
+        guard tries < 40 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in self?.open() }
+    }
+}
+
 /// Where a scroll is about to stop.
 struct ScrollTarget {
     var rect: CGRect
