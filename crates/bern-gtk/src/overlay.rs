@@ -467,10 +467,8 @@ impl RubyLine {
                 widget.queue_draw();
                 glib::ControlFlow::Continue
             }));
-        } else if !moving {
-            if let Some(id) = tick.take() {
-                id.remove();
-            }
+        } else if !moving && let Some(id) = tick.take() {
+            id.remove();
         }
         self.queue_draw();
     }

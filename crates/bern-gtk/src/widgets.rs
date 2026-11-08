@@ -301,7 +301,7 @@ pub fn Text(p: &Parent, ctx: &Ctx, props: TextProps) {
         let wrapped = RubyText::new(&shown, &label);
         let (at, ruby, weak, label) = (
             ctx.clone(),
-            bound_text(ctx, &ruby),
+            bound_text(ctx, ruby),
             wrapped.downgrade(),
             label.clone(),
         );
@@ -352,7 +352,7 @@ pub fn Text(p: &Parent, ctx: &Ctx, props: TextProps) {
                     label.remove_css_class("bern-ruby");
                 }
                 text_attributes(
-                    &label,
+                    label,
                     size.as_ref().map(|v| v.now(&at)),
                     height.as_ref().map(|v| v.now(&at)),
                 );
@@ -552,7 +552,7 @@ mod ruby_text {
                             ink.set_attributes(Some(&reading_attrs));
                         }
                         // Pango returns separate visual ranges for bidirectional text.
-                        for pair in line.x_ranges(a as i32, b as i32).chunks_exact(2) {
+                        for pair in line.x_ranges(a as i32, b as i32).as_chunks::<2>().0 {
                             let left = f64::from(pair[0].min(pair[1])) / scale;
                             let width = f64::from((pair[1] - pair[0]).abs()) / scale;
                             let (ink_width, _) = ink.pixel_size();
@@ -650,10 +650,8 @@ impl RubyText {
                 }
                 gtk::glib::ControlFlow::Continue
             }));
-        } else if !moving {
-            if let Some(id) = tick.take() {
-                id.remove();
-            }
+        } else if !moving && let Some(id) = tick.take() {
+            id.remove();
         }
         self.queue_draw();
     }
