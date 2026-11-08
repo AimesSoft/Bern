@@ -1732,6 +1732,45 @@ fn an_idle_area_is_watched_by_its_window() {
     }
 }
 
+#[test]
+fn ruby_metadata_reaches_the_ordinary_text_runtime() {
+    let root = workspace();
+    let target = std::env::var_os("CARGO_TARGET_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| root.join("target"));
+    let ui = STAGE_UI.replace(
+        "Button(id: mini, label: tr! { \"en\" => \"Add\" }, variant: stage) => app.add()",
+        r#"Text(content: tr! { "en" => "字𠮷文" }, ruby: "[[1,2,\"よし\"]]")"#,
+    );
+    let (config, compiled) = stage_project(&target.join("bern-test/gtk-ruby-project"), &ui);
+    let context = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: target.join("bern-test/gtk-ruby"),
+        target: linux_target(&config),
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    let files = GtkLinux.generate(&compiled.app, &context).unwrap();
+    let generated = files
+        .iter()
+        .map(|file| String::from_utf8_lossy(&file.contents))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        generated.contains("ruby: Some(b::str(|c| rt::plain(&"),
+        "missing ruby getter"
+    );
+    assert!(generated.contains("よし"), "missing ruby metadata");
+}
+
 /// Reset is an opt-in mount/key watcher, not an unconditional path clear.
 #[test]
 fn navigation_reset_is_generated_only_when_requested() {

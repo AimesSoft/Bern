@@ -33,6 +33,7 @@ raw-window-handle = "0.6"
 # Template pictures, recolored in the text color.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 smallvec = "1"
+serde_json = "1"
 sys-locale = "0.3"
 url = "2"
 

@@ -6,6 +6,15 @@
 
 package dev.bern.runtime
 
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.semantics.text
+import androidx.compose.ui.unit.constrainHeight
+import androidx.compose.ui.unit.constrainWidth
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -2210,3 +2219,137 @@ fun bernInlineMarkdown(source: String, link: Color, code: Color): AnnotatedStrin
         open.removeLast()
     }
 }
+
+/// Ruby is painted over the original shaped paragraph; its indices and semantics stay intact.
+@Composable
+fun BernRubyText(
+    text: String, style: androidx.compose.ui.text.TextStyle, color: Color, ruby: String,
+    lines: Int? = null, lit: (() -> Double)? = null, litPath: (() -> String)? = null,
+    litClock: (() -> Double)? = null, litSince: (() -> Double)? = null, mark: BernColor? = null,
+    markdown: Boolean = false,
+) {
+    val spans = remember(text, ruby) { bernRuby(text, ruby) }
+    if (spans.isEmpty()) {
+        if (markdown) BernMarkdownText(text, style, color, lines)
+        else if (mark != null) BernMarkedText(text, style, color, mark, lines)
+        else BernText(text, style, color, lines, lit, litPath, litClock, litSince)
+        return
+    }
+    val measurer = androidx.compose.ui.text.rememberTextMeasurer()
+    val resolved = androidx.compose.material3.LocalTextStyle.current.merge(style).let {
+        it.copy(color = if (color != Color.Unspecified) color else
+            if (it.color != Color.Unspecified) it.color else androidx.compose.material3.LocalContentColor.current)
+    }
+    val small = resolved.copy(fontSize = resolved.fontSize * 0.5f,
+        lineHeight = androidx.compose.ui.unit.TextUnit.Unspecified, letterSpacing = 0.sp)
+    val path = litPath?.invoke() ?: ""
+    val clock = litClock?.invoke() ?: 0.0
+    val since = litSince?.invoke() ?: 0.0
+    val route = remember(path, clock, since) { BernLitRoute(path, clock, since) }
+    val frame = remember { androidx.compose.runtime.mutableLongStateOf(0L) }
+    if (route.moving) androidx.compose.runtime.LaunchedEffect(route) {
+        var drawn = route.place()
+        while (true) androidx.compose.runtime.withFrameNanos {
+            val now = route.place()
+            if (kotlin.math.abs(now - drawn) >= BERN_LIT_STEP && it - frame.longValue >= 15_000_000L) {
+                drawn = now
+                frame.longValue = it
+            }
+        }
+    }
+    val band = mark?.let { bernPalette().color(it) }
+    // Measurement owns these values; clock updates only invalidate drawing.
+    val geometry = remember { arrayOfNulls<androidx.compose.ui.text.TextLayoutResult>(1) }
+    val readings = remember { ArrayList<BernRubyDrawing>() }
+    var reserve = 0f
+    androidx.compose.ui.layout.Layout(content = {}, modifier = Modifier
+        .semantics { this.text = androidx.compose.ui.text.AnnotatedString(text) }
+        .drawBehind {
+            val body = geometry[0] ?: return@drawBehind
+            frame.longValue
+            val value = lit?.invoke() ?: -1.0
+            val at = if (value >= 0 && !route.empty) route.place() else value
+            val count = text.codePointCount(0, text.length)
+            val whole = if (at.isFinite()) at.toInt().coerceIn(0, count) else count
+            val edge = text.offsetByCodePoints(0, whole)
+            for (line in 0 until body.lineCount) {
+                val top = body.getLineTop(line)
+                val bottom = body.getLineBottom(line)
+                translate(top = reserve * (line + 1)) {
+                    if (band != null) drawRoundRect(band,
+                        androidx.compose.ui.geometry.Offset(body.getLineLeft(line), top + (bottom - top) * 0.74f),
+                        androidx.compose.ui.geometry.Size(body.getLineRight(line) - body.getLineLeft(line), (bottom - top) * 0.24f))
+                    clipRect(top = top, bottom = bottom) {
+                        drawText(body, alpha = if (at < 0) 1f else 0.4f)
+                        if (at >= 0) {
+                            val start = body.getLineStart(line)
+                            val end = body.getLineEnd(line, visibleEnd = true)
+                            var offset = start
+                            while (offset < end && offset <= edge) {
+                                val box = body.getBoundingBox(offset)
+                                val fraction = if (offset < edge) 1f else (at - whole).toFloat().coerceIn(0f, 1f)
+                                clipRect(left = box.left, right = box.left + box.width * fraction) { drawText(body) }
+                                offset = text.offsetByCodePoints(offset, 1)
+                            }
+                        }
+                    }
+                }
+            }
+            for (reading in readings) {
+                val progress = if (at < 0) 1f else ((at - reading.scalarStart) / reading.scalarCount).toFloat().coerceIn(0f, 1f)
+                translate(reading.x, reading.y) {
+                    scale(reading.scale, 1f, androidx.compose.ui.geometry.Offset.Zero) {
+                        drawText(reading.layout, alpha = if (at < 0) 1f else 0.4f)
+                        if (at >= 0) clipRect(right = reading.layout.size.width * progress) { drawText(reading.layout) }
+                    }
+                }
+            }
+        }) { _, constraints ->
+        val body = measurer.measure(androidx.compose.ui.text.AnnotatedString(text), resolved,
+            maxLines = lines ?: Int.MAX_VALUE,
+            overflow = if (lines != null) androidx.compose.ui.text.style.TextOverflow.Ellipsis else androidx.compose.ui.text.style.TextOverflow.Clip,
+            constraints = androidx.compose.ui.unit.Constraints(maxWidth = constraints.maxWidth))
+        geometry[0] = body
+        reserve = measurer.measure(androidx.compose.ui.text.AnnotatedString("M"), small).size.height.toFloat() + 1.dp.toPx()
+        readings.clear()
+        for (line in 0 until body.lineCount) {
+            val start = body.getLineStart(line)
+            val end = body.getLineEnd(line, visibleEnd = true)
+            val fragments = spans.mapNotNull { span ->
+                val a = maxOf(start, span.start)
+                val b = minOf(end, span.end)
+                if (a >= b) null else {
+                    val reading = bernRubyReading(text, span, a, b)
+                    if (reading.isEmpty()) null else {
+                        var offset = a
+                        var left = Float.POSITIVE_INFINITY
+                        var right = Float.NEGATIVE_INFINITY
+                        while (offset < b) {
+                            val box = body.getBoundingBox(offset)
+                            left = minOf(left, box.left); right = maxOf(right, box.right)
+                            offset = text.offsetByCodePoints(offset, 1)
+                        }
+                        Triple(a to b, reading, (left + right) / 2)
+                    }
+                }
+            }.sortedBy { it.third }
+            val centers = fragments.map { it.third }
+            fragments.forEachIndexed { index, fragment ->
+                val annotation = measurer.measure(androidx.compose.ui.text.AnnotatedString(fragment.second), small, softWrap = false)
+                val slot = bernRubySlot(centers, index, body.size.width.toFloat())
+                val scale = minOf(1f, ((slot.second - slot.first - 1.dp.toPx()).coerceAtLeast(0f)) / annotation.size.width.coerceAtLeast(1))
+                val width = annotation.size.width * scale
+                val x = (fragment.third - width / 2).coerceIn(slot.first, maxOf(slot.first, slot.second - width))
+                readings.add(BernRubyDrawing(annotation, x, body.getLineTop(line) + reserve * line,
+                    scale, text.codePointCount(0, fragment.first.first), text.codePointCount(fragment.first.first, fragment.first.second)))
+            }
+        }
+        layout(constraints.constrainWidth(body.size.width),
+            constraints.constrainHeight(kotlin.math.ceil(body.size.height + reserve * body.lineCount).toInt())) {}
+    }
+}
+
+private data class BernRubyDrawing(
+    val layout: androidx.compose.ui.text.TextLayoutResult, val x: Float, val y: Float,
+    val scale: Float, val scalarStart: Int, val scalarCount: Int,
+)

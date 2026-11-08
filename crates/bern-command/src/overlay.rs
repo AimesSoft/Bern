@@ -28,6 +28,9 @@ use std::sync::{Arc, Mutex, RwLock};
 #[derive(Clone, Debug, PartialEq)]
 pub struct Line {
     pub text: String,
+    /// JSON `[[start, end, "reading"]]`, in half-open Unicode scalar ranges.
+    /// Empty means no annotations. Invalid and overlapping spans are ignored.
+    pub ruby: String,
     /// In points.
     pub size: f64,
     pub bold: bool,
@@ -150,6 +153,39 @@ impl Route {
 pub const FADED: f64 = 0.4;
 
 impl Line {
+    /// Valid readings in source order; coordinates always refer to the
+    /// original text, never UTF-8 bytes or UTF-16 code units.
+    pub fn ruby_spans(&self) -> Vec<(usize, usize, String)> {
+        let Ok(values) = serde_json::from_str::<Vec<serde_json::Value>>(&self.ruby) else {
+            return Vec::new();
+        };
+        let count = self.text.chars().count();
+        let mut spans: Vec<_> = values
+            .into_iter()
+            .filter_map(|value| {
+                let row = value.as_array()?;
+                if row.len() != 3 {
+                    return None;
+                }
+                let start = usize::try_from(row[0].as_u64()?).ok()?;
+                let end = usize::try_from(row[1].as_u64()?).ok()?;
+                let reading = row[2].as_str()?;
+                (start < end && end <= count && !reading.is_empty())
+                    .then(|| (start, end, reading.to_string()))
+            })
+            .collect();
+        spans.sort_by_key(|span| (span.0, span.1));
+        let mut end = 0;
+        spans.retain(|span| {
+            if span.0 < end {
+                return false;
+            }
+            end = span.1;
+            true
+        });
+        spans
+    }
+
     /// It is lit part of the way, or may come to be.
     pub fn lights(&self) -> bool {
         self.route.is_some() || self.lit.is_some_and(|lit| lit >= 0.0)
@@ -284,6 +320,8 @@ impl Overlay {
         if self == next {
             return Change::Nothing;
         }
+        // Text and ruby are layout, not timing: changing either must rebuild
+        // the native surface even when only the clock also moved.
         let same = |line: &Line, other: &Line| {
             Line {
                 lit: None,
@@ -429,8 +467,9 @@ fn as_json(overlay: &Overlay) -> String {
                 )
             });
             format!(
-                "{{\"text\":{},\"size\":{},\"bold\":{},\"color\":\"#{a:02x}{r:02x}{g:02x}{b:02x}\",\"lit\":{}{route}}}",
+                "{{\"text\":{},\"ruby\":{},\"size\":{},\"bold\":{},\"color\":\"#{a:02x}{r:02x}{g:02x}{b:02x}\",\"lit\":{}{route}}}",
                 text(&line.text),
+                text(&line.ruby),
                 line.size,
                 line.bold,
                 line.lit.unwrap_or(if line.route.is_some() { 0.0 } else { -1.0 })
@@ -499,6 +538,46 @@ mod mac {
     /// How often the pointer is looked for over a panel.
     const POLL: Duration = Duration::from_millis(80);
 
+    #[link(name = "CoreText", kind = "framework")]
+    unsafe extern "C" {
+        fn CTLineCreateWithAttributedString(
+            text: *const std::ffi::c_void,
+        ) -> *const std::ffi::c_void;
+        fn CTLineGetOffsetForStringIndex(
+            line: *const std::ffi::c_void,
+            index: isize,
+            secondary: *mut f64,
+        ) -> f64;
+    }
+
+    #[link(name = "CoreFoundation", kind = "framework")]
+    unsafe extern "C" {
+        fn CFRelease(value: *const std::ffi::c_void);
+    }
+
+    /// Measure an edge in the complete shaped line, including kerning and
+    /// ligatures. The native field adds a two-point inset on either side.
+    fn source_edge(line: &Line, byte: usize, mtm: MainThreadMarker) -> f64 {
+        let field = styled(line, &line.text, 1.0, mtm);
+        let text = field.attributedStringValue();
+        // SAFETY: NSAttributedString is toll-free bridged to its CF type;
+        // the created CTLine is released after its UTF-16 offset is read.
+        unsafe {
+            let shaped =
+                CTLineCreateWithAttributedString((&*text as *const _) as *const std::ffi::c_void);
+            if shaped.is_null() {
+                return 0.0;
+            }
+            let edge = CTLineGetOffsetForStringIndex(
+                shaped,
+                line.text[..byte].encode_utf16().count() as isize,
+                std::ptr::null_mut(),
+            );
+            CFRelease(shaped);
+            edge
+        }
+    }
+
     /// A panel and what changes as the pointer comes and goes.
     struct Shown {
         panel: Retained<NSPanel>,
@@ -523,10 +602,13 @@ mod mac {
     impl Lit {
         fn width_to(&mut self, at: usize, mtm: MainThreadMarker) -> f64 {
             let line = &self.line;
-            *self
-                .widths
-                .entry(at)
-                .or_insert_with(|| styled(line, &line.text[..at], 1.0, mtm).frame().size.width)
+            *self.widths.entry(at).or_insert_with(|| {
+                if line.ruby_spans().is_empty() {
+                    styled(line, &line.text[..at], 1.0, mtm).frame().size.width
+                } else {
+                    source_edge(line, at, mtm) + 4.0
+                }
+            })
         }
 
         /// How wide the line is as far as `place`.
@@ -692,11 +774,11 @@ mod mac {
 
     /// A line: faded, and over it what is lit, cut off inside the character
     /// `Line::lit` stops in.
-    fn label(line: &Line, mtm: MainThreadMarker) -> (Retained<NSTextField>, Option<Lit>) {
+    fn label(line: &Line, mtm: MainThreadMarker) -> (Retained<NSView>, Option<Lit>) {
         if !line.lights() {
-            return (styled(line, &line.text, 1.0, mtm), None);
+            return (annotated(line, 1.0, mtm), None);
         }
-        let label = styled(line, &line.text, super::FADED, mtm);
+        let label = annotated(line, super::FADED, mtm);
         let size = label.frame().size;
         let clip = NSView::initWithFrame(
             NSView::alloc(mtm),
@@ -706,7 +788,7 @@ mod mac {
         // The text, with its blurred shadow, is drawn once: moving the cut
         // only changes the bounds of a layer.
         clip.setWantsLayer(true);
-        let bright = styled(line, &line.text, 1.0, mtm);
+        let bright = annotated(line, 1.0, mtm);
         bright.setWantsLayer(true);
         // SAFETY: `NSViewLayerContentsRedrawNever` is 0.
         let _: () = unsafe { msg_send![&*clip, setLayerContentsRedrawPolicy: 0isize] };
@@ -720,6 +802,54 @@ mod mac {
         };
         lit.show(mtm);
         (label, Some(lit))
+    }
+
+    /// Keep the original line as one shaped, accessible text field. Readings
+    /// occupy a reserved band above their measured source ranges; they do not
+    /// contribute characters to the highlighting clock.
+    fn annotated(line: &Line, alpha: f64, mtm: MainThreadMarker) -> Retained<NSView> {
+        let base = styled(line, &line.text, alpha, mtm);
+        let spans = line.ruby_spans();
+        if spans.is_empty() {
+            return base.into_super().into_super();
+        }
+        let size = base.frame().size;
+        let band = line.size * 0.7 + 4.0;
+        let view = NSView::initWithFrame(
+            NSView::alloc(mtm),
+            NSRect::new(
+                NSPoint::new(0.0, 0.0),
+                NSSize::new(size.width, size.height + band),
+            ),
+        );
+        view.addSubview(&base);
+        let offsets: Vec<_> = line
+            .text
+            .char_indices()
+            .map(|(at, _)| at)
+            .chain(std::iter::once(line.text.len()))
+            .collect();
+        for (start, end, reading) in spans {
+            let start_edge = source_edge(line, offsets[start], mtm) + 2.0;
+            let end_edge = source_edge(line, offsets[end], mtm) + 2.0;
+            let left = start_edge.min(end_edge);
+            let width = (end_edge - start_edge).abs().max(1.0);
+            let mut style = line.clone();
+            style.size *= 0.45;
+            let measured = styled(&style, &reading, alpha, mtm).frame().size.width;
+            style.size *= (width / measured.max(1.0)).min(1.0);
+            let ruby = styled(&style, &reading, alpha, mtm);
+            let ruby_size = ruby.frame().size;
+            ruby.setFrameOrigin(NSPoint::new(
+                left + (width - ruby_size.width) / 2.0,
+                size.height,
+            ));
+            // The original field remains the accessible text, without a
+            // second traversal through the pronunciation decorations.
+            let _: () = unsafe { msg_send![&*ruby, setAccessibilityElement: false] };
+            view.addSubview(&ruby);
+        }
+        view
     }
 
     /// `text` in the style of `line`, its alpha scaled by `alpha`.
@@ -848,7 +978,7 @@ mod mac {
         } else {
             super::saved_place(id)
         };
-        let (labels, lit): (Vec<Retained<NSTextField>>, Vec<Option<Lit>>) = overlay
+        let (labels, lit): (Vec<Retained<NSView>>, Vec<Option<Lit>>) = overlay
             .lines
             .iter()
             .filter(|line| !line.text.is_empty())
@@ -1673,6 +1803,17 @@ mod win {
         }
     }
 
+    type Reading = (IDWriteTextLayout, f32, f32);
+    type DrawnLine = (
+        IDWriteTextLayout,
+        f32,
+        f32,
+        [u8; 4],
+        Option<usize>,
+        Vec<Reading>,
+        f32,
+    );
+
     unsafe fn draw(
         window: &mut Window,
         d2d: &ID2D1Factory,
@@ -1684,7 +1825,7 @@ mod win {
         unsafe {
             let dpi = GetDpiForWindow(hwnd).max(96);
             let scale = dpi as f32 / 96.0;
-            let lines: Vec<(IDWriteTextLayout, f32, f32, [u8; 4], Option<usize>)> = window
+            let lines: Vec<DrawnLine> = window
                 .overlay
                 .lines
                 .iter()
@@ -1692,7 +1833,69 @@ mod win {
                 .filter(|(_, line)| !line.text.is_empty())
                 .filter_map(|(index, line)| {
                     layout(dwrite, line, scale).map(|(layout, w, h)| {
-                        (layout, w, h, line.color, line.lights().then_some(index))
+                        let spans = line.ruby_spans();
+                        let band = if spans.is_empty() {
+                            0.0
+                        } else {
+                            line.size as f32 * scale * 0.7
+                        };
+                        let units: Vec<u32> = line
+                            .text
+                            .chars()
+                            .scan(0, |at, c| {
+                                let start = *at;
+                                *at += c.len_utf16() as u32;
+                                Some(start)
+                            })
+                            .chain(std::iter::once(line.text.encode_utf16().count() as u32))
+                            .collect();
+                        let mut readings = Vec::new();
+                        for (start, end, text) in spans {
+                            let (mut left, mut right, mut y) = (0.0, 0.0, 0.0);
+                            let mut hit = DWRITE_HIT_TEST_METRICS::default();
+                            if layout
+                                .HitTestTextPosition(
+                                    units[start],
+                                    false,
+                                    &mut left,
+                                    &mut y,
+                                    &mut hit,
+                                )
+                                .is_err()
+                                || layout
+                                    .HitTestTextPosition(
+                                        units[end], false, &mut right, &mut y, &mut hit,
+                                    )
+                                    .is_err()
+                            {
+                                continue;
+                            }
+                            let available = (right - left).abs().max(1.0);
+                            let mut style = line.clone();
+                            style.text = text;
+                            style.size *= 0.45;
+                            if let Some((_, measured, _)) = self::layout(dwrite, &style, scale) {
+                                style.size *= (available / measured.max(1.0)).min(1.0) as f64;
+                                if let Some((reading, wide, high)) =
+                                    self::layout(dwrite, &style, scale)
+                                {
+                                    readings.push((
+                                        reading,
+                                        left.min(right) + (available - wide) / 2.0,
+                                        (band - high).max(0.0),
+                                    ));
+                                }
+                            }
+                        }
+                        (
+                            layout,
+                            w,
+                            h + band,
+                            line.color,
+                            line.lights().then_some(index),
+                            readings,
+                            band,
+                        )
                     })
                 })
                 .collect();
@@ -1867,7 +2070,8 @@ mod win {
                 }
                 let shadow = dark(0.75)?;
                 let mut top = margin + bar_height;
-                for (layout, line_width, line_height, [r, g, b, a], index) in &lines {
+                for (layout, line_width, line_height, [r, g, b, a], index, readings, band) in &lines
+                {
                     let left = (width as f32 - line_width) / 2.0;
                     let alpha = if dim && index.is_some() {
                         super::FADED as f32
@@ -1889,15 +2093,40 @@ mod win {
                         target.DrawTextLayout(
                             Vector2 {
                                 X: left + dx * scale,
-                                Y: top + dy * scale,
+                                Y: top + band + dy * scale,
                             },
                             layout,
                             &shadow,
                             D2D1_DRAW_TEXT_OPTIONS_NONE,
                         );
                     }
-                    let at = Vector2 { X: left, Y: top };
+                    let at = Vector2 {
+                        X: left,
+                        Y: top + band,
+                    };
                     target.DrawTextLayout(at, layout, &brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
+                    for (reading, x, y) in readings {
+                        for (dx, dy) in [(1.0, 1.5), (0.0, 1.0), (1.0, 0.0), (-0.5, 1.0)] {
+                            target.DrawTextLayout(
+                                Vector2 {
+                                    X: left + x + dx * scale,
+                                    Y: top + y + dy * scale,
+                                },
+                                reading,
+                                &shadow,
+                                D2D1_DRAW_TEXT_OPTIONS_NONE,
+                            );
+                        }
+                        target.DrawTextLayout(
+                            Vector2 {
+                                X: left + x,
+                                Y: top + y,
+                            },
+                            reading,
+                            &brush,
+                            D2D1_DRAW_TEXT_OPTIONS_NONE,
+                        );
+                    }
                     if let Some(index) = index {
                         let mut edges = Vec::new();
                         let (mut x, mut y) = (0.0, 0.0);
@@ -2041,6 +2270,7 @@ mod tests {
         let overlay = Overlay {
             lines: vec![Line {
                 text: "你好 \"world\"".into(),
+                ruby: String::new(),
                 size: 28.0,
                 bold: true,
                 color: [255, 128, 0, 255],
@@ -2057,7 +2287,7 @@ mod tests {
         };
         assert_eq!(
             as_json(&overlay),
-            r##"{"lines":[{"text":"你好 \"world\"","size":28,"bold":true,"color":"#ffff8000","lit":2}],"place":"taskbar","locked":true,"buttons":[{"id":"lock","symbol":"lock.open.fill","whileLocked":true}]}"##
+            r##"{"lines":[{"text":"你好 \"world\"","ruby":"","size":28,"bold":true,"color":"#ffff8000","lit":2}],"place":"taskbar","locked":true,"buttons":[{"id":"lock","symbol":"lock.open.fill","whileLocked":true}]}"##
         );
     }
 
@@ -2066,6 +2296,7 @@ mod tests {
         let overlay = |text: &str, lit| Overlay {
             lines: vec![Line {
                 text: text.into(),
+                ruby: String::new(),
                 size: 10.0,
                 bold: false,
                 color: [0; 4],
@@ -2079,6 +2310,60 @@ mod tests {
         assert_eq!(shown.change_to(&overlay("a", Some(1.5))), Change::Lit);
         assert_eq!(shown.change_to(&overlay("a", None)), Change::All);
         assert_eq!(shown.change_to(&overlay("b", Some(1.5))), Change::All);
+    }
+
+    fn ruby_line(text: &str, ruby: &str) -> Line {
+        Line {
+            text: text.into(),
+            ruby: ruby.into(),
+            size: 28.0,
+            bold: false,
+            color: [255; 4],
+            lit: Some(0.0),
+            route: None,
+        }
+    }
+
+    #[test]
+    fn ruby_ranges_count_unicode_scalars_and_reject_invalid_spans() {
+        let line = ruby_line(
+            "a😀漢字",
+            r#"[[2,4,"かんじ"],[0,1,"えー"],[1,1,"empty"],[3,5,"outside"],[-1,1,"negative"],[2,3,"overlap"],[1.5,2,"fraction"],[1,2,7]]"#,
+        );
+        // Sorting is stable by source start/end; overlapping entries lose
+        // to the first accepted range, and emoji counts as one scalar.
+        assert_eq!(
+            line.ruby_spans(),
+            vec![(0, 1, "えー".into()), (2, 3, "overlap".into())]
+        );
+        assert_eq!(
+            ruby_line("😀漢字", r#"[[1,3,"かんじ"]]"#).ruby_spans(),
+            vec![(1, 3, "かんじ".into())]
+        );
+        for invalid in ["", "not json", "{}", "[null]", r#"[[0,1,""]]"#] {
+            assert!(ruby_line("漢", invalid).ruby_spans().is_empty());
+        }
+    }
+
+    #[test]
+    fn ruby_is_a_json_string_and_layout_changes_are_not_cheap_lit() {
+        let shown = Overlay {
+            lines: vec![ruby_line("漢😀", r#"[[0,1,"か\"ん\n"]]"#)],
+            ..Overlay::default()
+        };
+        let value: serde_json::Value = serde_json::from_str(&as_json(&shown)).unwrap();
+        assert_eq!(
+            value["lines"][0]["ruby"].as_str(),
+            Some(shown.lines[0].ruby.as_str())
+        );
+        let mut next = shown.clone();
+        next.lines[0].lit = Some(0.5);
+        assert_eq!(shown.change_to(&next), Change::Lit);
+        next.lines[0].ruby = r#"[[0,1,"かん"]]"#.into();
+        assert_eq!(shown.change_to(&next), Change::All);
+        next.lines[0].ruby = shown.lines[0].ruby.clone();
+        next.lines[0].text = "字😀".into();
+        assert_eq!(shown.change_to(&next), Change::All);
     }
 
     #[test]
@@ -2118,6 +2403,7 @@ mod tests {
         let overlay = |clock| Overlay {
             lines: vec![Line {
                 text: "ab".into(),
+                ruby: String::new(),
                 size: 10.0,
                 bold: false,
                 color: [0; 4],

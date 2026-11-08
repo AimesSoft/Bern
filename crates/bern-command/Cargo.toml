@@ -8,6 +8,7 @@ rust-version.workspace = true
 repository.workspace = true
 
 [dependencies]
+serde_json.workspace = true
 bern-protocol.workspace = true
 
 # The system credential stores behind `secrets`, and the system's now

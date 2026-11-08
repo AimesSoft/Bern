@@ -2778,7 +2778,7 @@ internal object BernOverlay {
             val text = line.optString("text")
             if (text.isEmpty()) continue
             val color = android.graphics.Color.parseColor(line.optString("color", "#ffffffff"))
-            view.addView(BernLitLine(context, line.optDouble("lit", -1.0), color, bernLineRoute(line)).apply {
+            view.addView(BernLitLine(context, line.optDouble("lit", -1.0), color, bernLineRoute(line), line.optString("ruby")).apply {
                 this.text = text
                 setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, line.optDouble("size", 18.0).toFloat())
                 setTextColor(color)
@@ -2923,8 +2923,26 @@ private fun bernLineRoute(line: org.json.JSONObject): BernLitRoute? {
 /// it below zero.
 private class BernLitLine(
     context: android.content.Context, private var number: Double, private val color: Int,
-    private var route: BernLitRoute?,
+    private var route: BernLitRoute?, private val ruby: String = "",
 ) : android.widget.TextView(context) {
+    private var rubySpans = emptyList<BernRuby>()
+    private var rubyHeight = 0
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        rubySpans = bernRuby(text.toString(), ruby)
+        if (rubySpans.isNotEmpty()) {
+            val annotation = android.text.TextPaint(paint).apply { textSize = paint.textSize * 0.5f }
+            val metrics = annotation.fontMetrics
+            val height = kotlin.math.ceil((metrics.bottom - metrics.top + resources.displayMetrics.density).toDouble()).toInt()
+            if (height != rubyHeight) {
+                rubyHeight = height
+                setPadding(paddingLeft, height, paddingRight, paddingBottom)
+                setLineSpacing(height.toFloat(), 1f)
+            }
+        }
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+    }
+
     private var drawn = -1.0
     private val frame = object : Runnable {
         override fun run() {
@@ -2952,11 +2970,93 @@ private class BernLitLine(
         super.onDetachedFromWindow()
     }
 
+    private fun drawRuby(canvas: android.graphics.Canvas, shown: String, lines: android.text.Layout, lit: Double) {
+        val faded = (color and 0x00FFFFFF) or ((android.graphics.Color.alpha(color) * 0.4).toInt() shl 24)
+        val count = shown.codePointCount(0, shown.length)
+        val whole = if (lit.isFinite()) lit.toInt().coerceIn(0, count) else count
+        val edge = shown.offsetByCodePoints(0, whole)
+        val annotation = android.text.TextPaint(paint).apply {
+            shader = null
+            textSize = paint.textSize * 0.5f
+        }
+        val saved = canvas.save()
+        canvas.translate(compoundPaddingLeft.toFloat(), extendedPaddingTop.toFloat())
+        for (line in 0 until lines.lineCount) {
+            val top = lines.getLineTop(line).toFloat()
+            val bottom = lines.getLineBottom(line).toFloat()
+            val start = lines.getLineStart(line)
+            val end = lines.getLineVisibleEnd(line)
+            fun horizontal(offset: Int): Float = if (offset >= lines.getLineEnd(line)) {
+                if (lines.getParagraphDirection(line) > 0) lines.getLineRight(line) else lines.getLineLeft(line)
+            } else lines.getPrimaryHorizontal(offset)
+            val clipped = canvas.save()
+            canvas.clipRect(0f, top, lines.width.toFloat(), bottom)
+            paint.shader = null
+            paint.color = if (lit < 0) color else faded
+            lines.draw(canvas)
+            if (lit >= 0) {
+                var offset = start
+                while (offset < end && offset <= edge) {
+                    val next = shown.offsetByCodePoints(offset, 1)
+                    val a = horizontal(offset)
+                    val b = horizontal(next)
+                    val fraction = if (offset < edge) 1f else (lit - whole).toFloat().coerceIn(0f, 1f)
+                    val glyph = canvas.save()
+                    val left = minOf(a, b)
+                    canvas.clipRect(left, top, left + kotlin.math.abs(b - a) * fraction, bottom)
+                    paint.color = color
+                    lines.draw(canvas)
+                    canvas.restoreToCount(glyph)
+                    offset = next
+                }
+            }
+            canvas.restoreToCount(clipped)
+            val fragments = rubySpans.mapNotNull { span ->
+                val a = maxOf(start, span.start)
+                val b = minOf(end, span.end)
+                if (a >= b) null else {
+                    val reading = bernRubyReading(shown, span, a, b)
+                    if (reading.isEmpty()) null else Triple(a to b, reading,
+                        (horizontal(a) + horizontal(b)) / 2)
+                }
+            }.sortedBy { it.third }
+            val centers = fragments.map { it.third }
+            fragments.forEachIndexed { index, fragment ->
+                val slot = bernRubySlot(centers, index, lines.width.toFloat())
+                annotation.textScaleX = 1f
+                val natural = annotation.measureText(fragment.second)
+                annotation.textScaleX = minOf(1f, (slot.second - slot.first - resources.displayMetrics.density).coerceAtLeast(0f) / natural.coerceAtLeast(1f))
+                val width = annotation.measureText(fragment.second)
+                val x = (fragment.third - width / 2).coerceIn(slot.first, maxOf(slot.first, slot.second - width))
+                val y = lines.getLineBaseline(line) + paint.fontMetrics.ascent - annotation.fontMetrics.descent
+                annotation.color = if (lit < 0) color else faded
+                canvas.drawText(fragment.second, x, y, annotation)
+                if (lit >= 0) {
+                    val source = shown.codePointCount(0, fragment.first.first)
+                    val length = shown.codePointCount(fragment.first.first, fragment.first.second)
+                    val progress = ((lit - source) / length).toFloat().coerceIn(0f, 1f)
+                    val clip = canvas.save()
+                    canvas.clipRect(x, y + annotation.fontMetrics.top, x + width * progress, y + annotation.fontMetrics.bottom)
+                    annotation.color = color
+                    canvas.drawText(fragment.second, x, y, annotation)
+                    canvas.restoreToCount(clip)
+                }
+            }
+        }
+        paint.shader = null
+        paint.color = color
+        canvas.restoreToCount(saved)
+    }
+
     override fun onDraw(canvas: android.graphics.Canvas) {
         val shown = text.toString()
         val lines = layout
         val lit = route?.place() ?: number
         drawn = lit
+        if (rubySpans.isNotEmpty() && lines != null) {
+            drawRuby(canvas, shown, lines, lit)
+            return
+        }
         if (lit >= 0 && lines != null) {
             val whole = lit.toInt().coerceAtMost(shown.codePointCount(0, shown.length))
             val at = shown.offsetByCodePoints(0, whole)

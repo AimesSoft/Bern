@@ -171,6 +171,8 @@ inline controls::StackPanel Stacked(TextFn const& label, xaml::UIElement const& 
 
 struct TextProps {
     Str content;
+    /// JSON scalar-indexed [start, end, reading] ranges.
+    Str ruby;
     char const* style = nullptr;
     char const* emphasis = nullptr;
     /// `color:`: the accent or a status role the text is drawn in.
@@ -231,6 +233,11 @@ struct LitPlace {
 /// Give `over` what `block` looks like.
 inline void CopyLook(controls::TextBlock const& block, controls::TextBlock const& over) {
     over.FontSize(block.FontSize());
+    over.FontFamily(block.FontFamily());
+    over.FontStyle(block.FontStyle());
+    over.FontStretch(block.FontStretch());
+    over.CharacterSpacing(block.CharacterSpacing());
+    over.Margin(block.Margin());
     over.FontWeight(block.FontWeight());
     over.Foreground(block.Foreground());
     over.MaxLines(block.MaxLines());
@@ -324,6 +331,11 @@ struct LitRoute {
 /// A `Text` on a route. The system's compositor moves the cut along a line of
 /// text, off the UI thread: this thread only starts it, for each line of text
 /// and whenever the route or its clock changes.
+struct RubyLitInk {
+    composition::CompositionRectangleGeometry clip{nullptr};
+    float left = 0, row = 0, width = 0, height = 0;
+};
+
 struct LitPlay {
     winrt::weak_ref<controls::TextBlock> shown, above;
     bool on = false;
@@ -335,6 +347,8 @@ struct LitPlay {
     /// How many characters stand lit before the cut's line of text.
     std::int64_t lit = -1;
     composition::CompositionRectangleGeometry clip{nullptr};
+    std::vector<RubyLitInk> rubyInk;
+    double rubyPlace = -1;
     /// What is started later belongs to this turn, and a new one ends it.
     std::uint64_t turn = 0;
 };
@@ -363,6 +377,45 @@ inline void MeasureCharacters(controls::TextBlock const& block, std::vector<winr
     }
 }
 
+/// Readings use the same measured character cut and 0.4 faded alpha as
+/// the base text; their compositor clips are animated by PlayLit's stops.
+inline void UpdateRubyLit(std::shared_ptr<LitPlay> const& play, double place) {
+    play->rubyPlace = place;
+    auto block = play->shown.get();
+    if (!block || play->rubyInk.empty()) return;
+    std::vector<winrt::Windows::Foundation::Rect> measured;
+    auto const* characters = &play->characters;
+    if (characters->empty()) { MeasureCharacters(block, measured); characters = &measured; }
+    auto whole = static_cast<size_t>((std::max)(0.0, place));
+    bool all = place < 0 || whole >= characters->size();
+    winrt::Windows::Foundation::Rect cut{};
+    if (!all) cut = (*characters)[whole];
+    float edge = cut.X + cut.Width * static_cast<float>(place - std::floor(place));
+    for (auto const& ink : play->rubyInk) {
+        float width = all || ink.row < cut.Y - 1 ? ink.width : ink.row > cut.Y + 1 ? 0.0f
+            : (std::clamp)(edge - ink.left, 0.0f, ink.width);
+        ink.clip.StopAnimation(L"Size");
+        ink.clip.Size(float2{width, ink.height});
+    }
+}
+
+inline void AnimateRubyLit(std::shared_ptr<LitPlay> const& play, std::vector<std::pair<double, float>> const& stops,
+    double second, double ends, float row) {
+    if (ends - second <= 0.002) return;
+    for (auto const& ink : play->rubyInk) {
+        if (std::abs(ink.row - row) >= 1) continue;
+        auto compositor = ink.clip.Compositor();
+        auto motion = compositor.CreateVector2KeyFrameAnimation();
+        auto even = compositor.CreateLinearEasingFunction();
+        for (auto const& [at, x] : stops) {
+            float progress = static_cast<float>((std::min)(1.0, (at - second) / (ends - second)));
+            motion.InsertKeyFrame(progress, float2{(std::clamp)(x - ink.left, 0.0f, ink.width), ink.height}, even);
+        }
+        motion.Duration(std::chrono::duration_cast<winrt::Windows::Foundation::TimeSpan>(std::chrono::duration<double>(ends - second)));
+        ink.clip.StartAnimation(L"Size", motion);
+    }
+}
+
 /// Start the cut from where the clock has it now, along the line of text it
 /// is in, and come back for the next.
 inline void PlayLit(std::shared_ptr<LitPlay> const& play) {
@@ -374,6 +427,7 @@ inline void PlayLit(std::shared_ptr<LitPlay> const& play) {
         if (play->lit != -1) block.TextHighlighters().Clear();
         play->lit = -1;
         over.Visibility(xaml::Visibility::Collapsed);
+        UpdateRubyLit(play, -1);
     };
     if (!play->on || play->route.points.empty()) return clear();
     if (play->characters.empty()) {
@@ -385,6 +439,7 @@ inline void PlayLit(std::shared_ptr<LitPlay> const& play) {
     double place = (std::max)(0.0, play->route.At(second));
     auto whole = static_cast<size_t>(place);
     if (whole >= characters.size()) return clear();
+    UpdateRubyLit(play, place);
     // The line of text the cut is in.
     auto sameLine = [&](size_t index) { return std::abs(characters[index].Y - characters[whole].Y) < 1; };
     size_t first = whole, last = whole + 1;
@@ -444,6 +499,7 @@ inline void PlayLit(std::shared_ptr<LitPlay> const& play) {
         }
         motion.Duration(std::chrono::duration_cast<winrt::Windows::Foundation::TimeSpan>(std::chrono::duration<double>(length)));
         play->clip.StartAnimation(L"Size", motion);
+        AnimateRubyLit(play, stops, second, ends, top);
     }
     auto wait = std::chrono::milliseconds(static_cast<long long>((ends - second) * 1000) + 20);
     Host::After(wait, [play, turn] {
@@ -499,6 +555,226 @@ inline xaml::FrameworkElement Colored(xaml::FrameworkElement const& shown, char 
     return presenter;
 }
 
+struct RubyRange {
+    size_t start, end;
+    winrt::hstring reading;
+};
+
+/// Scalar boundaries are converted to UTF-16 offsets, never inserted into
+/// the base text (including the indices used by lit_path).
+inline std::vector<size_t> RubyOffsets(std::wstring_view text) {
+    std::vector<size_t> offsets;
+    for (size_t at = 0; at < text.size();) {
+        offsets.push_back(at);
+        at += text[at] >= 0xD800 && text[at] <= 0xDBFF && at + 1 < text.size()
+            && text[at + 1] >= 0xDC00 && text[at + 1] <= 0xDFFF ? 2 : 1;
+    }
+    offsets.push_back(text.size());
+    return offsets;
+}
+
+inline std::vector<RubyRange> RubyRanges(std::wstring_view text, winrt::hstring const& source) {
+    using namespace winrt::Windows::Data::Json;
+    std::vector<RubyRange> ranges;
+    JsonArray array;
+    if (source.empty() || !JsonArray::TryParse(source, array)) return ranges;
+    auto offsets = RubyOffsets(text);
+    size_t previous = 0;
+    for (auto const& value : array) {
+        if (value.ValueType() != JsonValueType::Array) continue;
+        auto item = value.GetArray();
+        if (item.Size() != 3 || item.GetAt(0).ValueType() != JsonValueType::Number
+            || item.GetAt(1).ValueType() != JsonValueType::Number || item.GetAt(2).ValueType() != JsonValueType::String) continue;
+        double a = item.GetNumberAt(0), b = item.GetNumberAt(1);
+        if (!std::isfinite(a) || !std::isfinite(b) || a < previous || a >= b
+            || b >= static_cast<double>(offsets.size()) || std::floor(a) != a || std::floor(b) != b) continue;
+        auto reading = item.GetStringAt(2);
+        auto start = static_cast<size_t>(a), end = static_cast<size_t>(b);
+        if (reading.empty() || std::wstring_view(reading).find_first_of(L"\r\n") != std::wstring_view::npos
+            || text.substr(offsets[start], offsets[end] - offsets[start]).find_first_of(L"\r\n") != std::wstring_view::npos) continue;
+        ranges.push_back({start, end, reading});
+        previous = end;
+    }
+    return ranges;
+}
+
+inline std::vector<RubyRange> RubySourceRanges(winrt::hstring const& raw, winrt::hstring const& plain, winrt::hstring const& source, bool markdown) {
+    auto ranges = RubyRanges(raw, source);
+    if (!markdown) return ranges;
+    std::wstring_view text(raw);
+    if (text.find_first_of(L"\uFDD0\uFDD1") != std::wstring_view::npos) return {};
+    auto offsets = RubyOffsets(text);
+    std::vector<RubyRange> mapped;
+    for (auto const& range : ranges) {
+        std::wstring marked(text.substr(0, offsets[range.start]));
+        marked += L'\uFDD0';
+        marked += text.substr(offsets[range.start], offsets[range.end] - offsets[range.start]);
+        marked += L'\uFDD1';
+        marked += text.substr(offsets[range.end]);
+        std::wstring result(PlainMarkdown(marked));
+        auto start = result.find(L'\uFDD0'), end = result.find(L'\uFDD1');
+        if (start == std::wstring::npos || end == std::wstring::npos || start >= end) continue;
+        result.erase(end, 1); result.erase(start, 1);
+        if (result != std::wstring_view(plain)) continue;
+        auto a = RubyOffsets(std::wstring_view(result).substr(0, start)).size() - 1;
+        auto b = RubyOffsets(std::wstring_view(result).substr(0, end - 1)).size() - 1;
+        if (a < b) mapped.push_back({a, b, range.reading});
+    }
+    return mapped;
+}
+
+/// The annotations use native TextPointer character rectangles, splitting
+/// across the same wrapped rows and shrinking into each base advance.
+inline void DrawRuby(controls::TextBlock const& block, controls::Canvas const& layer, std::vector<RubyRange> const& ranges, std::shared_ptr<LitPlay> const& play) {
+    layer.Children().Clear();
+    if (play) play->rubyInk.clear();
+    auto text = block.Text();
+    auto offsets = RubyOffsets(text);
+    using Direction = xaml::Documents::LogicalDirection;
+    auto first = block.Inlines().Size() ? block.Inlines().GetAt(0).ContentStart() : block.ContentStart();
+    if (!first) return;
+    for (auto const& range : ranges) {
+        if (range.end >= offsets.size()) continue;
+        auto readingOffsets = RubyOffsets(range.reading);
+        for (size_t at = range.start; at < range.end;) {
+            auto pointer = first.GetPositionAtOffset(static_cast<int32_t>(offsets[at]), Direction::Forward);
+            if (!pointer) break;
+            auto rect = pointer.GetCharacterRect(Direction::Forward);
+            if (rect.Height <= 0 || rect.Y >= block.ActualHeight()) break;
+            float left = rect.X, right = rect.X;
+            size_t end = at;
+            while (end < range.end) {
+                auto here = first.GetPositionAtOffset(static_cast<int32_t>(offsets[end]), Direction::Forward);
+                auto next = first.GetPositionAtOffset(static_cast<int32_t>(offsets[end + 1]), Direction::Forward);
+                if (!here || !next) break;
+                auto from = here.GetCharacterRect(Direction::Forward), to = next.GetCharacterRect(Direction::Forward);
+                if (std::abs(from.Y - rect.Y) >= 1) break;
+                left = (std::min)(left, from.X);
+                right = (std::max)(right, std::abs(to.Y - from.Y) < 1 ? to.X : from.X + static_cast<float>(block.FontSize()));
+                ++end;
+            }
+            if (end == at) break;
+            auto count = readingOffsets.size() - 1;
+            size_t a = count * (at - range.start) / (range.end - range.start);
+            size_t b = count * (end - range.start) / (range.end - range.start);
+            if (b > a && right > left) {
+                controls::TextBlock ink;
+                ink.Text(winrt::hstring(std::wstring_view(range.reading).substr(readingOffsets[a], readingOffsets[b] - readingOffsets[a])));
+                ink.FontFamily(block.FontFamily());
+                ink.FontWeight(block.FontWeight());
+                ink.FontStyle(block.FontStyle());
+                ink.FontStretch(block.FontStretch());
+                ink.Foreground(block.Foreground());
+                ink.Opacity(block.Opacity());
+                ink.FontSize(block.FontSize() * 0.5);
+                ink.IsHitTestVisible(false);
+                xaml::Automation::AutomationProperties::SetAccessibilityView(ink, xaml::Automation::Peers::AccessibilityView::Raw);
+                ink.Measure({100000.0f, 100000.0f});
+                double width = ink.DesiredSize().Width;
+                if (width > right - left) {
+                    ink.FontSize(ink.FontSize() * (right - left) / width);
+                    ink.Measure({100000.0f, 100000.0f});
+                }
+                auto origin = block.TransformToVisual(layer).TransformPoint({0, 0});
+                float inkLeft = left + (right - left - ink.DesiredSize().Width) / 2;
+                if (play) {
+                    controls::Grid pair;
+                    pair.Width(ink.DesiredSize().Width);
+                    pair.Height(ink.DesiredSize().Height);
+                    pair.IsHitTestVisible(false);
+                    xaml::Automation::AutomationProperties::SetAccessibilityView(pair, xaml::Automation::Peers::AccessibilityView::Raw);
+                    controls::TextBlock bright;
+                    CopyLook(ink, bright);
+                    bright.Text(ink.Text());
+                    bright.IsHitTestVisible(false);
+                    xaml::Automation::AutomationProperties::SetAccessibilityView(bright, xaml::Automation::Peers::AccessibilityView::Raw);
+                    bright.Opacity(block.Opacity());
+                    ink.Opacity(block.Opacity() * 0.4);
+                    pair.Children().Append(ink);
+                    pair.Children().Append(bright);
+                    auto visual = xaml::Hosting::ElementCompositionPreview::GetElementVisual(bright);
+                    auto clip = visual.Compositor().CreateRectangleGeometry();
+                    clip.Size(float2{static_cast<float>(pair.Width()), static_cast<float>(pair.Height())});
+                    visual.Clip(visual.Compositor().CreateGeometricClip(clip));
+                    play->rubyInk.push_back({clip, inkLeft, rect.Y, static_cast<float>(pair.Width()), static_cast<float>(pair.Height())});
+                    controls::Canvas::SetLeft(pair, origin.X + inkLeft);
+                    controls::Canvas::SetTop(pair, origin.Y + rect.Y - pair.Height());
+                    layer.Children().Append(pair);
+                } else {
+                    controls::Canvas::SetLeft(ink, origin.X + inkLeft);
+                    controls::Canvas::SetTop(ink, origin.Y + rect.Y - ink.DesiredSize().Height);
+                    layer.Children().Append(ink);
+                }
+            }
+            at = end;
+        }
+    }
+    if (play) {
+        UpdateRubyLit(play, play->rubyPlace);
+        if (play->on && !play->route.points.empty()) PlayLit(play);
+    }
+}
+
+/// Attach after native content, marks and the fractional lit layer have
+/// been composed. LayoutUpdated is guarded: drawing never restarts layout.
+inline xaml::FrameworkElement WithRuby(xaml::FrameworkElement const& shown, controls::TextBlock const& block,
+    controls::TextBlock const& over, Ctx const& ctx, TextProps const& props, std::shared_ptr<LitPlay> const& play) {
+    if (!props.ruby) return shown;
+    controls::Grid holder;
+    controls::Canvas layer;
+    layer.IsHitTestVisible(false);
+    holder.Children().Append(shown);
+    holder.Children().Append(layer);
+    auto ranges = std::make_shared<std::vector<RubyRange>>();
+    auto source = Bound(ctx, props.ruby);
+    auto original = Bound(ctx, props.content);
+    bool markdown = props.markdown;
+    auto originalHeight = block.LineHeight();
+    auto originalStrategy = block.LineStackingStrategy();
+    (void)over;
+    auto originalMargin = shown.Margin();
+    auto target = winrt::make_weak(shown);
+    auto minimum = std::make_shared<double>(originalHeight);
+    if (props.lineHeight.Given()) BindLen(ctx, props.lineHeight, nullptr, [minimum](double value) { *minimum = value; });
+    auto revision = std::make_shared<std::uint64_t>(0);
+    Reactive::Run([source, original, markdown, ranges, weak = winrt::make_weak(block), originalMargin, originalStrategy, minimum, revision, target] {
+        if (auto text = weak.get()) {
+            *ranges = RubySourceRanges(original ? original() : winrt::hstring(), text.Text(), source(), markdown);
+            auto margin = originalMargin;
+            if (!ranges->empty()) margin.Top += text.FontSize() * 0.55;
+            if (auto element = target.get()) element.Margin(margin);
+            text.LineStackingStrategy(ranges->empty() ? originalStrategy : xaml::LineStackingStrategy::BlockLineHeight);
+            text.LineHeight(ranges->empty() ? *minimum : (std::max)(*minimum, text.FontSize() * 1.65));
+            ++*revision;
+        }
+    });
+    struct Stamp { winrt::hstring text; double width = -1, height = -1, size = -1, line = -1; uint16_t weight = 0; std::uint64_t revision = 0; };
+    auto stamp = std::make_shared<Stamp>();
+    block.LayoutUpdated([weak = winrt::make_weak(block), layer, source, original, markdown, ranges, stamp, minimum, originalMargin, originalStrategy, revision, target, play](auto&&, auto&&) {
+        auto text = weak.get();
+        if (!text) return;
+        if (stamp->text != text.Text()) { *ranges = RubySourceRanges(original ? original() : winrt::hstring(), text.Text(), source(), markdown); ++*revision; }
+        text.LineStackingStrategy(ranges->empty() ? originalStrategy : xaml::LineStackingStrategy::BlockLineHeight);
+        auto size = text.FontSize();
+        auto height = ranges->empty() ? *minimum : (std::max)(*minimum, size * 1.65);
+        auto margin = originalMargin;
+        if (!ranges->empty()) margin.Top += size * 0.55;
+        if (auto element = target.get()) {
+            if (element.Margin().Top != margin.Top || text.LineHeight() != height) {
+                element.Margin(margin);
+                text.LineHeight(height);
+                stamp->width = -1;
+                return;
+            }
+        }
+        if (stamp->text == text.Text() && stamp->width == text.ActualWidth() && stamp->height == text.ActualHeight()
+            && stamp->size == size && stamp->line == height && stamp->weight == text.FontWeight().Weight && stamp->revision == *revision) return;
+        *stamp = {text.Text(), text.ActualWidth(), text.ActualHeight(), size, height, text.FontWeight().Weight, *revision};
+        DrawRuby(text, layer, *ranges, play);
+    });
+    return holder;
+}
+
 inline void Text(Parent const& p, Ctx const& ctx, TextProps props) {
     auto content = Bound(ctx, props.content);
     if (props.markdown && content) content = [source = content] { return PlainMarkdown(source()); };
@@ -517,6 +793,7 @@ inline void Text(Parent const& p, Ctx const& ctx, TextProps props) {
         });
     }
     controls::TextBlock over{nullptr};
+    std::shared_ptr<LitPlay> rubyPlay;
     if (props.lit.Given()) {
         over = TextOf(content);
         ApplyTextStyle(over, props.style);
@@ -524,6 +801,7 @@ inline void Text(Parent const& p, Ctx const& ctx, TextProps props) {
         over.Visibility(xaml::Visibility::Collapsed);
         auto place = std::make_shared<LitPlace>();
         auto play = std::make_shared<LitPlay>();
+        rubyPlay = play;
         play->shown = winrt::make_weak(block);
         play->above = winrt::make_weak(over);
         auto route = Bound(ctx, props.litPath);
@@ -549,8 +827,9 @@ inline void Text(Parent const& p, Ctx const& ctx, TextProps props) {
         else {
             // The characters stand elsewhere once the lines wrap differently.
             block.SizeChanged([place](auto&&, auto&&) { place->whole = -2; });
-            Reactive::Run([lit = props.lit, ctx, content, weak = winrt::make_weak(block), above = winrt::make_weak(over), place] {
+            Reactive::Run([lit = props.lit, ctx, content, weak = winrt::make_weak(block), above = winrt::make_weak(over), place, play] {
                 double count = lit.Now(ctx);
+                UpdateRubyLit(play, count);
                 auto text = content ? winrt::to_hstring(content()) : winrt::hstring();
                 auto shown = weak.get();
                 if (!shown) return;
@@ -574,11 +853,11 @@ inline void Text(Parent const& p, Ctx const& ctx, TextProps props) {
         controls::Grid holder;
         holder.Children().Append(block);
         holder.Children().Append(over);
-        Place(p, Colored(holder, props.color));
+        Place(p, Colored(WithRuby(holder, block, over, ctx, props, rubyPlay), props.color));
         return;
     }
     if (!props.mark) {
-        Place(p, Colored(block, props.color));
+        Place(p, Colored(WithRuby(block, block, over, ctx, props, rubyPlay), props.color));
         return;
     }
     // The marks lie behind the text in a layer of their own.
@@ -603,7 +882,8 @@ inline void Text(Parent const& p, Ctx const& ctx, TextProps props) {
             });
         }
     });
-    Place(p, Colored(holder, props.color));
+    if (over) holder.Children().Append(over);
+    Place(p, Colored(WithRuby(holder, block, over, ctx, props, rubyPlay), props.color));
 }
 
 struct LabelProps {

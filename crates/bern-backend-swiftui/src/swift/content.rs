@@ -9,6 +9,60 @@ use bern_protocol::Type;
 impl Generator<'_> {
     pub(super) fn text_view(&self, out: &mut Out, element: &Element) {
         let content = self.text_prop(element, "content").unwrap_or_default();
+        let ruby = element.expr("ruby").map(|value| self.expr(value));
+        if let Some(ruby) = &ruby {
+            let style = element.keyword("style").unwrap_or("body");
+            let entry = self
+                .app
+                .style
+                .text_weights
+                .iter()
+                .find(|entry| entry.style == style);
+            let size = self
+                .length(element, "font_size")
+                .or_else(|| entry.and_then(|entry| self.style_size(entry).map(double)))
+                .unwrap_or_else(|| "nil".into());
+            let weight = entry
+                .map(|entry| entry.weight.as_str())
+                .unwrap_or("regular");
+            let bold = element
+                .expr("bold")
+                .map(|value| self.expr(value))
+                .unwrap_or_else(|| "false".into());
+            let color = element
+                .keyword("color")
+                .map(|role| format!("BernColor.role({}).color", string(role)))
+                .unwrap_or_else(|| match element.keyword("emphasis") {
+                    Some("secondary") => "Color.secondary".into(),
+                    Some("tertiary") => "Color.secondary.opacity(0.5)".into(),
+                    _ => "Color.primary".into(),
+                });
+            let lit = self.length(element, "lit").unwrap_or_else(|| "-1".into());
+            let path = self
+                .text_prop(element, "lit_path")
+                .unwrap_or_else(|| "\"\"".into());
+            let clock = self
+                .length(element, "lit_clock")
+                .unwrap_or_else(|| "0".into());
+            let since = self
+                .length(element, "lit_since")
+                .unwrap_or_else(|| "0".into());
+            let height = self
+                .length(element, "line_height")
+                .unwrap_or_else(|| "nil".into());
+            let lines = element
+                .number("lines")
+                .map(|lines| (lines.max(1.0) as i64).to_string())
+                .unwrap_or_else(|| "nil".into());
+            let mark = element
+                .keyword("mark")
+                .map(|role| format!("BernColor.role({}).color", string(role)))
+                .unwrap_or_else(|| "nil".into());
+            out.open(format!(
+                "BernRubyText(text: {content}, ruby: {ruby}, size: {size}, style: {}, weight: {}, bold: {bold}, color: {color}, lineHeight: {height}, lines: {lines}, mark: {mark}, lit: {{ {lit} }}, path: {{ {path} }}, clock: {{ {clock} }}, since: {{ {since} }}) {{",
+                string(style), string(weight)
+            ));
+        }
         if element.keyword("markdown") == Some("true") {
             out.line(format!("SwiftUI.Text(bernMarkdown({content}))"));
         } else if let Some(lit) = self.length(element, "lit") {
@@ -63,6 +117,9 @@ impl Generator<'_> {
         }
         if let Some(role) = element.keyword("mark") {
             out.line(format!(".bernMark(.role({}))", string(role)));
+        }
+        if ruby.is_some() {
+            out.close("}");
         }
     }
 

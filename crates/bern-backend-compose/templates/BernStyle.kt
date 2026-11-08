@@ -962,3 +962,49 @@ fun BernHero(key: String, motion: BernMotion, content: @Composable () -> Unit) {
         ) { content() }
     }
 }
+
+// MARK: - Ruby geometry
+
+/// Protocol positions count Unicode scalars; all platform layout offsets are UTF-16.
+internal data class BernRuby(val start: Int, val end: Int, val reading: String)
+
+internal fun bernRuby(text: String, json: String): List<BernRuby> {
+    if (json.isBlank()) return emptyList()
+    return try {
+        val count = text.codePointCount(0, text.length)
+        val array = org.json.JSONArray(json)
+        val spans = ArrayList<BernRuby>()
+        for (i in 0 until array.length()) {
+            val row = array.optJSONArray(i) ?: continue
+            if (row.length() != 3 || row.opt(2) !is String) continue
+            val a = row.opt(0) as? Number ?: continue
+            val b = row.opt(1) as? Number ?: continue
+            val start = a.toInt()
+            val end = b.toInt()
+            val reading = row.getString(2)
+            if (a.toDouble() != start.toDouble() || b.toDouble() != end.toDouble() ||
+                start < 0 || end <= start || end > count || reading.isBlank()) continue
+            spans.add(BernRuby(text.offsetByCodePoints(0, start), text.offsetByCodePoints(0, end), reading))
+        }
+        var end = 0
+        spans.sortedBy { it.start }.filter {
+            if (it.start < end) false else { end = it.end; true }
+        }
+    } catch (_: Exception) { emptyList() }
+}
+
+/// A wrapped annotation is split by source scalars, never by UTF-16 halves.
+internal fun bernRubyReading(text: String, span: BernRuby, start: Int, end: Int): String {
+    val total = text.codePointCount(span.start, span.end)
+    val count = span.reading.codePointCount(0, span.reading.length)
+    val a = (count.toLong() * text.codePointCount(span.start, start) / total).toInt()
+    val b = (count.toLong() * text.codePointCount(span.start, end) / total).toInt()
+    return span.reading.substring(span.reading.offsetByCodePoints(0, a), span.reading.offsetByCodePoints(0, b))
+}
+
+/// Disjoint horizontal slots keep adjacent readings from colliding, including long readings.
+internal fun bernRubySlot(centers: List<Float>, index: Int, width: Float): Pair<Float, Float> {
+    val left = if (index == 0) 0f else (centers[index - 1] + centers[index]) / 2
+    val right = if (index == centers.lastIndex) width else (centers[index] + centers[index + 1]) / 2
+    return left.coerceIn(0f, width) to right.coerceIn(0f, width)
+}

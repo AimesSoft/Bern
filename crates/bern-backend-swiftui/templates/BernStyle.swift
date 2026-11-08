@@ -9,6 +9,7 @@
 // colors change with a short fade.
 
 import SwiftUI
+import CoreText
 #if os(macOS)
 import AppKit
 #else
@@ -2447,6 +2448,298 @@ enum BernDraw {
                 start += 3
             }
             layer.stroke(lines, with: .color(Color.primary.opacity(0.05)), lineWidth: 0.5)
+        }
+    }
+}
+
+// MARK: - Ruby text
+
+/// Public ranges count Unicode scalars, never UTF-16 code units or ruby glyphs.
+/// Reject malformed, overlapping and out-of-bounds ranges before Core Text sees them.
+struct BernRubySpan {
+    var range: NSRange
+    var reading: String
+
+    static func parse(_ json: String, text: String) -> [BernRubySpan] {
+        guard let data = json.data(using: .utf8),
+              let rows = try? JSONSerialization.jsonObject(with: data) as? [[Any]] else { return [] }
+        let offsets = scalarOffsets(text)
+        var result: [BernRubySpan] = []
+        for row in rows {
+            guard row.count == 3, let start = row[0] as? NSNumber,
+                  let end = row[1] as? NSNumber, let reading = row[2] as? String,
+                  CFGetTypeID(start) != CFBooleanGetTypeID(), CFGetTypeID(end) != CFBooleanGetTypeID(),
+                  start.doubleValue.isFinite, end.doubleValue.isFinite,
+                  start.doubleValue.rounded() == start.doubleValue,
+                  end.doubleValue.rounded() == end.doubleValue,
+                  start.doubleValue >= 0, end.doubleValue < Double(offsets.count),
+                  start.doubleValue < end.doubleValue, !reading.isEmpty else { continue }
+            let a = offsets[start.intValue], b = offsets[end.intValue]
+            let range = NSRange(location: a, length: b - a)
+            guard !result.contains(where: { NSIntersectionRange($0.range, range).length > 0 }),
+                  !(text as NSString).substring(with: range).contains(where: { $0.isNewline }) else { continue }
+            result.append(BernRubySpan(range: range, reading: reading))
+        }
+        return result.sorted { $0.range.location < $1.range.location }
+    }
+
+    static func scalarOffsets(_ text: String) -> [Int] {
+        var offsets = [0]
+        for scalar in text.unicodeScalars { offsets.append(offsets.last! + (scalar.value > 0xFFFF ? 2 : 1)) }
+        return offsets
+    }
+}
+
+/// Empty ruby takes the original SwiftUI Text path, including its modifiers.
+/// Core Text supplies the same shaping and annotation layout on older systems.
+struct BernRubyText<Plain: View>: View, Animatable {
+    let text: String
+    let ruby: String
+    nonisolated var size: CGFloat?
+    nonisolated let style: String
+    nonisolated let weight: String
+    nonisolated let bold: Bool
+    let color: Color
+    let lineHeight: CGFloat?
+    let lines: Int?
+    let mark: Color?
+    let lit: @MainActor () -> Double
+    let path: @MainActor () -> String
+    let clock: @MainActor () -> Double
+    let since: @MainActor () -> Double
+    @ViewBuilder var plain: () -> Plain
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    nonisolated var animatedWeight: CGFloat? = nil
+
+    // The glyphs and their measured bounds must use the same interpolated font.
+    // Otherwise Canvas draws the destination font inside the old animated height.
+    nonisolated var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(size ?? 0, resolvedWeight) }
+        set {
+            size = newValue.first == 0 ? nil : max(1, newValue.first)
+            animatedWeight = newValue.second
+        }
+    }
+
+    nonisolated private var resolvedWeight: CGFloat {
+        if let animatedWeight { return animatedWeight }
+        #if os(macOS)
+        typealias Weight = NSFont.Weight
+        #else
+        typealias Weight = UIFont.Weight
+        #endif
+        let weights: [String: Weight] = ["ultralight": .ultraLight, "thin": .thin, "light": .light,
+            "medium": .medium, "semibold": .semibold, "bold": .bold, "heavy": .heavy, "black": .black]
+        return (bold ? Weight.bold : (weights[weight] ?? (style == "headline" ? .semibold : .regular))).rawValue
+    }
+
+    var body: some View {
+        let spans = BernRubySpan.parse(ruby, text: text)
+        if spans.isEmpty {
+            plain()
+        } else {
+            let document = BernRubyDocument(text: text, spans: spans, font: nativeFont,
+                                            lineHeight: lineHeight, limit: lines)
+            let number = lit()
+            let route = BernLitRoute(number >= 0 ? path() : "")
+            let clock = clock(), since = since()
+            BernRubyLayout(document: document) {
+                TimelineView(.animation(minimumInterval: 1.0 / 60, paused: route.isEmpty || since <= 0)) { timeline in
+                    let place = route.isEmpty ? number : route.place(at: clock + (since > 0 ? timeline.date.timeIntervalSince1970 - since : 0))
+                    Canvas { graphics, size in
+                        let layout = document.layout(width: size.width, color: nativeColor(color))
+                        graphics.withCGContext { context in
+                            layout.draw(in: context, mark: mark.map(nativeColor), lit: place)
+                        }
+                    }
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(verbatim: text))
+        }
+    }
+
+    private var nativeFont: CTFont {
+        // Reading this environment value invalidates layout when accessibility size changes.
+        let _ = dynamicTypeSize
+        #if os(macOS)
+        let styles: [String: NSFont.TextStyle] = [
+            "large_title": .largeTitle, "title": .title1, "title2": .title2, "title3": .title3,
+            "headline": .headline, "subheadline": .subheadline, "callout": .callout,
+            "footnote": .footnote, "caption": .caption1, "caption2": .caption2, "code": .callout]
+        let pointSize = size ?? NSFont.preferredFont(forTextStyle: styles[style] ?? .body).pointSize
+        let w = NSFont.Weight(rawValue: resolvedWeight)
+        let font = style == "code" ? NSFont.monospacedSystemFont(ofSize: pointSize, weight: w) : NSFont.systemFont(ofSize: pointSize, weight: w)
+        #else
+        let styles: [String: UIFont.TextStyle] = [
+            "large_title": .largeTitle, "title": .title1, "title2": .title2, "title3": .title3,
+            "headline": .headline, "subheadline": .subheadline, "callout": .callout,
+            "footnote": .footnote, "caption": .caption1, "caption2": .caption2, "code": .callout]
+        let pointSize = size ?? UIFont.preferredFont(forTextStyle: styles[style] ?? .body).pointSize
+        let w = UIFont.Weight(rawValue: resolvedWeight)
+        let font = style == "code" ? UIFont.monospacedSystemFont(ofSize: pointSize, weight: w) : UIFont.systemFont(ofSize: pointSize, weight: w)
+        #endif
+        return CTFontCreateWithName(font.fontName as CFString, pointSize, nil)
+    }
+
+    private func nativeColor(_ color: Color) -> CGColor {
+        #if os(macOS)
+        var result = NSColor(color).cgColor
+        NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)?.performAsCurrentDrawingAppearance {
+            result = NSColor(color).cgColor
+        }
+        return result
+        #else
+        return UIColor(color).resolvedColor(with: UITraitCollection(userInterfaceStyle: scheme == .dark ? .dark : .light)).cgColor
+        #endif
+    }
+}
+
+/// A single shaped paragraph, not a row of independently laid-out characters.
+struct BernRubyDocument {
+    let text: String
+    let spans: [BernRubySpan]
+    let font: CTFont
+    let lineHeight: CGFloat?
+    let limit: Int?
+
+    func layout(width proposed: CGFloat, color: CGColor = CGColor(gray: 0, alpha: 1)) -> BernRubyDrawing {
+        let width = proposed.isFinite ? max(1, proposed) : 1_000_000
+        let attributed = NSMutableAttributedString(string: text, attributes: [
+            NSAttributedString.Key(kCTFontAttributeName as String): font,
+            NSAttributedString.Key(kCTForegroundColorAttributeName as String): color])
+        for span in spans {
+            let attributes: [String: Any] = [
+                kCTRubyAnnotationSizeFactorAttributeName as String: 0.45,
+                kCTForegroundColorAttributeName as String: color]
+            let annotation = CTRubyAnnotationCreateWithAttributes(
+                .auto, .none, .before, span.reading as CFString, attributes as CFDictionary)
+            attributed.addAttribute(NSAttributedString.Key(kCTRubyAnnotationAttributeName as String), value: annotation, range: span.range)
+        }
+        let typesetter = CTTypesetterCreateWithAttributedString(attributed)
+        var rows: [BernRubyDrawing.Row] = []
+        var start = 0
+        var y: CGFloat = 0
+        var measuredWidth: CGFloat = 0
+        let offsets = BernRubySpan.scalarOffsets(text)
+        while start < attributed.length && rows.count < (limit ?? Int.max) {
+            let suggested = CTTypesetterSuggestLineBreak(typesetter, start, Double(width))
+            let count = suggested > 0 ? suggested : (text as NSString).rangeOfComposedCharacterSequence(at: start).length
+            let end = min(attributed.length, start + count)
+            var line = CTTypesetterCreateLine(typesetter, CFRange(location: start, length: end - start))
+            var visibleEnd = end
+            if rows.count + 1 == limit && end < attributed.length {
+                // Build the remaining text, then let Core Text retain annotation attributes
+                // while truncating it. The ellipsis never acquires a source character index.
+                let remaining = CTTypesetterCreateLine(typesetter, CFRange(location: start, length: attributed.length - start))
+                let token = CTLineCreateWithAttributedString(NSAttributedString(string: "…", attributes: [
+                    NSAttributedString.Key(kCTFontAttributeName as String): font,
+                    NSAttributedString.Key(kCTForegroundColorAttributeName as String): color,
+                    NSAttributedString.Key("BernRubyTruncation"): true]))
+                if let truncated = CTLineCreateTruncatedLine(remaining, Double(width), .end, token) {
+                    line = truncated
+                    visibleEnd = attributed.length
+                }
+            }
+            var ascent: CGFloat = 0, descent: CGFloat = 0, leading: CGFloat = 0
+            let advance = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
+            let range = NSRange(location: start, length: visibleEnd - start)
+            if spans.contains(where: { NSIntersectionRange($0.range, range).length > 0 }) {
+                ascent = max(ascent, CTFontGetAscent(font) + CTFontGetSize(font) * 0.45 + 1)
+            }
+            let natural = ascent + descent + leading
+            let height = max(natural, lineHeight ?? natural)
+            rows.append(.init(line: line, baseline: y + (height - natural) / 2 + ascent,
+                              top: y, height: height, range: range, width: advance,
+                              visible: (CTLineGetGlyphRuns(line) as! [CTRun]).compactMap { run in
+                                  let attributes = CTRunGetAttributes(run) as NSDictionary
+                                  guard attributes["BernRubyTruncation"] == nil else { return nil }
+                                  let range = CTRunGetStringRange(run)
+                                  return NSRange(location: range.location, length: range.length)
+                              }))
+            measuredWidth = max(measuredWidth, advance)
+            y += height
+            start = end
+        }
+        return BernRubyDrawing(rows: rows, offsets: offsets,
+                               size: CGSize(width: proposed.isFinite ? width : ceil(measuredWidth), height: ceil(y)))
+    }
+}
+
+struct BernRubyDrawing {
+    struct Row {
+        var line: CTLine
+        var baseline: CGFloat
+        var top: CGFloat
+        var height: CGFloat
+        var range: NSRange
+        var width: CGFloat
+        var visible: [NSRange]
+    }
+    var rows: [Row]
+    var offsets: [Int]
+    var size: CGSize
+
+    func draw(in context: CGContext, mark: CGColor?, lit: Double) {
+        context.saveGState()
+        defer { context.restoreGState() }
+        context.textMatrix = .identity
+        for row in rows {
+            if let mark {
+                context.setFillColor(mark)
+                let band = CGRect(x: 0, y: row.baseline + 1, width: row.width, height: row.height * 0.15)
+                context.addPath(CGPath(roundedRect: band, cornerWidth: band.height / 2, cornerHeight: band.height / 2, transform: nil))
+                context.fillPath()
+            }
+            func drawLine(alpha: CGFloat) {
+                context.saveGState()
+                context.setAlpha(alpha)
+                context.translateBy(x: 0, y: row.baseline)
+                context.scaleBy(x: 1, y: -1)
+                context.textPosition = .zero
+                CTLineDraw(row.line, context)
+                context.restoreGState()
+            }
+            guard lit >= 0 else { drawLine(alpha: 1); continue }
+            drawLine(alpha: 0.4)
+            // Map source scalar boundaries to shaped positions. Surrogate pairs,
+            // ligatures and ruby do not add extra steps to the highlight clock.
+            context.saveGState()
+            context.beginPath()
+            var hasHighlight = false
+            for index in 0..<(offsets.count - 1) where offsets[index] >= row.range.location && offsets[index] < NSMaxRange(row.range) {
+                let fraction = min(1, max(0, lit - Double(index)))
+                guard fraction > 0, row.visible.contains(where: { NSLocationInRange(offsets[index], $0) }) else { continue }
+                let a = CTLineGetOffsetForStringIndex(row.line, offsets[index], nil)
+                let b = CTLineGetOffsetForStringIndex(row.line, offsets[index + 1], nil)
+                let edge = a + (b - a) * fraction
+                let width = abs(edge - a)
+                guard width > 0 else { continue }
+                context.addRect(CGRect(x: min(a, edge), y: row.top, width: width, height: row.height))
+                hasHighlight = true
+            }
+            // Clipping an empty path does not create an empty clipping region.
+            // A wrapped row with no sung characters must keep only its dim pass.
+            if hasHighlight {
+                context.clip()
+                drawLine(alpha: 1)
+            }
+            context.restoreGState()
+        }
+    }
+}
+
+private struct BernRubyLayout: Layout {
+    let document: BernRubyDocument
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        document.layout(width: proposal.width ?? .infinity).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for view in subviews {
+            view.place(at: bounds.origin, anchor: .topLeading, proposal: ProposedViewSize(bounds.size))
         }
     }
 }
