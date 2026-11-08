@@ -63,6 +63,20 @@ impl Generator<'_> {
                 });
             format!(", lit = {{ {lit} }}{route}")
         });
+        if let Some(ruby) = self.text_prop(element, "ruby") {
+            let mark = element.keyword("mark").map_or_else(String::new, |role| {
+                format!(", mark = BernColor.Role({})", string(role))
+            });
+            let markdown = if element.keyword("markdown") == Some("true") {
+                ", markdown = true"
+            } else {
+                ""
+            };
+            out.line(format!(
+                "BernRubyText({content}, {style}, {color}, ruby = {ruby}{lines}{lit}{mark}{markdown})"
+            ));
+            return;
+        }
         match element.keyword("mark") {
             _ if element.keyword("markdown") == Some("true") => out.line(format!(
                 "BernMarkdownText({content}, {style}, {color}{lines})"

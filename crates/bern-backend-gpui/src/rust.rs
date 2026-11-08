@@ -138,6 +138,7 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
         "Text",
         &[
             "content",
+            "ruby",
             "style",
             "emphasis",
             "lines",
@@ -2480,7 +2481,7 @@ pub fn app() -> b::AppDef {{
                 )
             }
             "Text" => format!(
-                "b::text(c, {}, b::TextProps {{ style: b::TextStyle::{}, emphasis: b::Emphasis::{}, lines: {}, size: {}, color: {}, line_height: {}, markdown: {}, mark: {}, bold: {} }})",
+                "b::text(c, {}, b::TextProps {{ style: b::TextStyle::{}, emphasis: b::Emphasis::{}, lines: {}, size: {}, color: {}, line_height: {}, markdown: {}, mark: {}, bold: {}, ruby: {} }})",
                 text("content"),
                 pascal(element.keyword("style").unwrap_or("body")),
                 pascal(element.keyword("emphasis").unwrap_or("primary")),
@@ -2503,6 +2504,7 @@ pub fn app() -> b::AppDef {{
                     Some(bold) => self.condition(bold),
                     None => "false".into(),
                 },
+                if element.prop("ruby").is_some() { format!("Some({})", text("ruby")) } else { "None".into() },
             ),
             "Label" => format!(
                 "b::label(c, {}, {}, b::TextStyle::{}, {}, {})",
@@ -4080,6 +4082,12 @@ fn pascal(keyword: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::pascal;
+
+    #[test]
+    fn text_supports_the_ruby_display_text_property() {
+        let (_, props) = super::COMPONENTS.iter().find(|(name, _)| *name == "Text").unwrap();
+        assert!(props.contains(&"ruby"));
+    }
 
     #[test]
     fn keywords_become_variants() {

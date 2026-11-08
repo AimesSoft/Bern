@@ -712,10 +712,18 @@ export function markText(node, text, role) {
     layer.replaceChildren();
     if (!text.firstChild) return;
     const range = document.createRange();
-    range.selectNodeContents(text);
+    const rects = [];
+    const walker = document.createTreeWalker(text, NodeFilter.SHOW_TEXT, {
+      acceptNode: child => child.parentElement.closest("rt") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+    });
+    let child;
+    while ((child = walker.nextNode())) {
+      range.selectNodeContents(child);
+      rects.push(...range.getClientRects());
+    }
     const origin = node.getBoundingClientRect();
     const em = parseFloat(getComputedStyle(node).fontSize) || 16;
-    for (const rect of range.getClientRects()) {
+    for (const rect of rects) {
       if (!rect.width) continue;
       const band = rect.height * 0.24;
       const mark = el("span", { class: "bern-mark" });
@@ -735,16 +743,17 @@ export function markText(node, text, role) {
   return draw;
 }
 
-export function MarkedText(p, ctx, { content, style, emphasis, color, mark }) {
-  const node = el("p", { class: `bern-text bern-${B.STYLE_CLASS[style] ?? "body"} bern-emphasis-${emphasis ?? "primary"}` });
-  B.textColor(node, color);
-  const text = el("span", { class: "bern-marked-text" });
+export function MarkedText(p, ctx, props) {
+  const holder = document.createDocumentFragment();
+  B.Text(holder, ctx, props);
+  const text = holder.firstChild;
+  const node = el("div", { class: "bern-marked" });
+  text.classList.add("bern-marked-text");
   node.append(text);
-  const draw = markText(node, text, mark);
-  effect(() => {
-    text.textContent = content();
-    requestAnimationFrame(draw);
-  });
+  const draw = markText(node, text, props.mark);
+  const changes = new MutationObserver(draw);
+  changes.observe(text, { childList: true, subtree: true, characterData: true, attributes: true });
+  onCleanup(() => changes.disconnect());
   p.append(node);
 }
 

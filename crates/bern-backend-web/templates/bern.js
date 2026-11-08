@@ -1584,11 +1584,89 @@ export const STYLE_CLASS = {
   caption2: "caption2", control: "control-font", code: "code",
 };
 
-export function Text(p, ctx, { content, style, emphasis, color, fontSize, lines, lineHeight, markdown, bold, animate }) {
+/// Native ruby leaves base text in the document, with readings hidden from
+/// accessibility and fitted inside their base advance rather than widening it.
+export function bindRubyText(node, content, ruby, markdown = false) {
+  const fit = () => {
+    for (const annotation of node.querySelectorAll("ruby")) {
+      const base = annotation.firstElementChild;
+      const rt = annotation.lastElementChild;
+      const size = parseFloat(getComputedStyle(annotation).fontSize) * 0.5;
+      rt.style.fontSize = `${size}px`;
+      const width = rt.firstElementChild.getBoundingClientRect().width;
+      const available = base.getBoundingClientRect().width;
+      if (width > available && available > 0) rt.style.fontSize = `${size * available / width}px`;
+    }
+  };
+  const observer = new ResizeObserver(fit);
+  observer.observe(node);
+  onCleanup(() => observer.disconnect());
+  document.fonts?.ready.then(fit);
+  effect(() => {
+    const value = String(content?.() ?? "");
+    node.replaceChildren(markdown ? inlineMarkdown(value) : document.createTextNode(value));
+    let ranges;
+    try { ranges = JSON.parse(String(readValue(ruby) ?? "[]") || "[]"); } catch { ranges = []; }
+    if (!Array.isArray(ranges)) ranges = [];
+    const count = Array.from(value).length;
+    let end = 0;
+    ranges = ranges.filter(range => {
+      if (!Array.isArray(range) || range.length !== 3) return false;
+      const [a, b, reading] = range;
+      if (!Number.isSafeInteger(a) || !Number.isSafeInteger(b) || a < end || a >= b || b > count || typeof reading !== "string" || !reading || /[\r\n]/u.test(reading)) return false;
+      end = b;
+      return true;
+    });
+    // Reverse order keeps the earlier text-node offsets stable. Extracting
+    // contents preserves inline Markdown's emphasis and link descendants.
+    for (let [a, b, reading] of ranges.reverse()) {
+      if (markdown) {
+        if (/[\uFDD0\uFDD1]/u.test(value)) continue;
+        const chars = Array.from(value);
+        const marked = chars.slice(0, a).join("") + "\uFDD0" + chars.slice(a, b).join("") + "\uFDD1" + chars.slice(b).join("");
+        const plain = inlineMarkdown(marked).textContent;
+        const expected = inlineMarkdown(value).textContent;
+        if (plain.replace(/[\uFDD0\uFDD1]/gu, "") !== expected) continue;
+        a = Array.from(plain.slice(0, plain.indexOf("\uFDD0"))).length;
+        b = Array.from(plain.slice(0, plain.indexOf("\uFDD1"))).length - 1;
+        if (a >= b) continue;
+      }
+      const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, {
+        acceptNode: text => text.parentElement.closest("rt") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+      });
+      let text, offset = 0, start, finish;
+      while ((text = walker.nextNode())) {
+        const chars = Array.from(text.data);
+        if (!start && a < offset + chars.length) start = [text, chars.slice(0, a - offset).join("").length];
+        if (b <= offset + chars.length) { finish = [text, chars.slice(0, b - offset).join("").length]; break; }
+        offset += chars.length;
+      }
+      if (!start || !finish) continue;
+      const range = document.createRange();
+      range.setStart(...start); range.setEnd(...finish);
+      if (/[\r\n]/u.test(range.toString())) continue;
+      const annotation = document.createElement("ruby");
+      annotation.style.rubyAlign = "center";
+      annotation.style.rubyPosition = "over";
+      const base = document.createElement("span");
+      base.append(range.extractContents());
+      const rt = document.createElement("rt");
+      rt.setAttribute("aria-hidden", "true");
+      rt.style.fontSize = "0px";
+      rt.style.lineHeight = "1";
+      const ink = document.createElement("span");
+      ink.style.whiteSpace = "nowrap";
+      ink.textContent = reading;
+      rt.append(ink); annotation.append(base, rt); range.insertNode(annotation);
+    }
+    requestAnimationFrame(fit);
+  });
+}
+
+export function Text(p, ctx, { content, ruby, style, emphasis, color, fontSize, lines, lineHeight, markdown, bold, animate }) {
   const node = el("p", { class: `bern-text bern-${STYLE_CLASS[style] ?? "body"} bern-emphasis-${emphasis ?? "primary"}` });
   textColor(node, color);
-  if (markdown) effect(() => node.replaceChildren(inlineMarkdown(String(content() ?? ""))));
-  else bindText(node, content);
+  bindRubyText(node, content, ruby, markdown);
   // With `animate`, a bound size springs and the weight eases to bold.
   if (animate && hooks.length) hooks.length(node, "fontSize", fontSize, animate);
   else length(node, "fontSize", fontSize);

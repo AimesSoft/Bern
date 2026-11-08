@@ -1521,3 +1521,53 @@ fn an_idle_area_watches_where_the_mouse_rests() {
     assert!(kotlin.contains("idleAfter = 3.0"), "{kotlin}");
     assert!(kotlin.contains("landscape = true"), "{kotlin}");
 }
+
+#[test]
+fn ruby_text_keeps_source_indices_styles_and_timing_in_compose() {
+    let (config, mut compiled) = compile("showcase");
+    let component = compiled.app.components.iter_mut().find(|component| {
+        matches!(&component.body, bern_ir::Node::Element(body) if body.kind == "Form")
+    }).unwrap();
+    let bern_ir::Node::Element(body) = &mut component.body else { unreachable!() };
+    body.children.push(node("Text", vec![
+        ("content", words("𠮷野\n漢字")),
+        ("ruby", words("[[0,2,\"よしの\"],[3,5,\"かんじ\"]]")),
+        ("font_size", number(24.0)),
+        ("lines", number(2.0)),
+        ("lit", number(1.5)),
+        ("lit_path", words("[[0,0],[1,2]]")),
+        ("lit_clock", number(0.25)),
+        ("lit_since", number(42.0)),
+    ], vec![]));
+    body.children.push(node("Text", vec![
+        ("content", words("plain")), ("ruby", words("[]")),
+    ], vec![]));
+    body.children.push(node("Text", vec![
+        ("content", words("unchanged")),
+    ], vec![]));
+    let kotlin = bern_backend_compose::Generator::new(&compiled.app)
+        .generate("dev.bern.showcase", 0);
+    assert!(kotlin.contains("BernRubyText(BernText.text("));
+    assert!(kotlin.contains("ruby = BernText.text("));
+    assert!(kotlin.contains("lines = 2, lit = { 1.5 }"));
+    assert!(kotlin.contains("litClock = { 0.25 }, litSince = { 42.0 }"));
+    assert!(kotlin.contains("BernText(BernText.text(\"unchanged\")"));
+    let files = ComposeAndroid.generate(&compiled.app, &context(&config, &compiled)).unwrap();
+    let views = file(&files, "BernViews.kt");
+    for expected in [
+        "rememberTextMeasurer()", "if (spans.isEmpty())", "BernText(text, style, color, lines, lit, litPath, litClock, litSince)",
+        "this.text = androidx.compose.ui.text.AnnotatedString(text)", "body.getLineEnd(line, visibleEnd = true)",
+        "body.size.height + reserve * body.lineCount", "bernRubySlot(centers, index", "text.offsetByCodePoints(offset, 1)",
+    ] { assert!(views.contains(expected), "missing {expected}"); }
+    let style = file(&files, "BernStyle.kt");
+    for expected in [
+        "text.offsetByCodePoints(0, start)", "end > count", "row.opt(2) !is String", "if (it.start < end) false",
+        "span.reading.offsetByCodePoints(0, a)", "(centers[index - 1] + centers[index]) / 2",
+    ] { assert!(style.contains(expected), "missing {expected}"); }
+    let runtime = file(&files, "BernRuntime.kt");
+    for expected in [
+        "line.optString(\"ruby\")", "rubySpans = bernRuby(text.toString(), ruby)",
+        "setLineSpacing(height.toFloat(), 1f)", "drawRuby(canvas, shown, lines, lit)",
+        "annotation.textScaleX = minOf(1f", "shown.codePointCount(0, fragment.first.first)",
+    ] { assert!(runtime.contains(expected), "missing {expected}"); }
+}
