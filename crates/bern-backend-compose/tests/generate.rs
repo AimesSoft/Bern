@@ -1393,8 +1393,10 @@ fn a_canvas_with_nothing_to_draw_is_a_spacer() {
 #[test]
 fn a_bleeding_canvas_passes_the_safe_area() {
     let root = workspace();
-    let (config, compiled) =
-        stage_project(&root.join("target/bern-test/compose-bleed-project"), BLEED_UI);
+    let (config, compiled) = stage_project(
+        &root.join("target/bern-test/compose-bleed-project"),
+        BLEED_UI,
+    );
     let problems = ComposeAndroid.check(&compiled.app, &android(&config));
     assert!(problems.is_empty(), "{problems:?}");
     let files = ComposeAndroid
@@ -1407,7 +1409,11 @@ fn a_bleeding_canvas_passes_the_safe_area() {
         "Canvas(Modifier.matchParentSize().bernBleed(bernBleed).clearAndSetSemantics {}) {",
         "bernBleed.draw(this) {",
     ] {
-        assert_eq!(window.matches(expected).count(), 1, "`{expected}`:\n{window}");
+        assert_eq!(
+            window.matches(expected).count(),
+            1,
+            "`{expected}`:\n{window}"
+        );
     }
     assert!(window.contains("BernScrollColumn("), "{window}");
     assert_eq!(window.matches("Canvas(").count(), 2, "{window}");

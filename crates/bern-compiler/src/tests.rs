@@ -5382,6 +5382,13 @@ fn navigation_reset_accepts_stable_keys_but_not_flags() {
         }
         assert_eq!(resets, 1);
     }
-    let errors = compile_ui(&view("draft.on")).err().expect("a boolean is not a root identity");
-    assert!(errors.iter().any(|error| error.message.contains("`reset` identifies")), "{errors:?}");
+    let errors = compile_ui(&view("draft.on"))
+        .err()
+        .expect("a boolean is not a root identity");
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.message.contains("`reset` identifies")),
+        "{errors:?}"
+    );
 }
