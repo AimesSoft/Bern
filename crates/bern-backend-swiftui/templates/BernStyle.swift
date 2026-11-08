@@ -4426,7 +4426,7 @@ extension View {
 // MARK: - Popover buttons
 
 extension View {
-    /// Leave an unstyled macOS popover's surface to the system, including
+    /// Leave an unstyled popover's surface to the system, including
     /// Liquid Glass and its arrow. A custom presentation background replaces
     /// that material, so apply it only when the app supplies a fill.
     @ViewBuilder func bernPopoverBackground(_ background: BernColor?, scheme: ColorScheme) -> some View {
@@ -4435,13 +4435,7 @@ extension View {
                 Rectangle().fill(background.color).environment(\.colorScheme, scheme)
             }
         } else {
-            #if os(macOS)
             preferredColorScheme(scheme)
-            #else
-            presentationBackground {
-                Rectangle().fill(.regularMaterial).environment(\.colorScheme, scheme)
-            }
-            #endif
         }
     }
 }
