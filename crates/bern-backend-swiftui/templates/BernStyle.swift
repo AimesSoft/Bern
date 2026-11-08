@@ -2484,13 +2484,13 @@ struct BernRubySpan {
 
 /// Empty ruby takes the original SwiftUI Text path, including its modifiers.
 /// Core Text supplies the same shaping and annotation layout on older systems.
-struct BernRubyText<Plain: View>: View {
+struct BernRubyText<Plain: View>: View, Animatable {
     let text: String
     let ruby: String
-    let size: CGFloat?
-    let style: String
-    let weight: String
-    let bold: Bool
+    nonisolated var size: CGFloat?
+    nonisolated let style: String
+    nonisolated let weight: String
+    nonisolated let bold: Bool
     let color: Color
     let lineHeight: CGFloat?
     let lines: Int?
@@ -2502,6 +2502,29 @@ struct BernRubyText<Plain: View>: View {
     @ViewBuilder var plain: () -> Plain
     @Environment(\.colorScheme) private var scheme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    nonisolated var animatedWeight: CGFloat? = nil
+
+    // The glyphs and their measured bounds must use the same interpolated font.
+    // Otherwise Canvas draws the destination font inside the old animated height.
+    nonisolated var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(size ?? 0, resolvedWeight) }
+        set {
+            size = newValue.first == 0 ? nil : max(1, newValue.first)
+            animatedWeight = newValue.second
+        }
+    }
+
+    nonisolated private var resolvedWeight: CGFloat {
+        if let animatedWeight { return animatedWeight }
+        #if os(macOS)
+        typealias Weight = NSFont.Weight
+        #else
+        typealias Weight = UIFont.Weight
+        #endif
+        let weights: [String: Weight] = ["ultralight": .ultraLight, "thin": .thin, "light": .light,
+            "medium": .medium, "semibold": .semibold, "bold": .bold, "heavy": .heavy, "black": .black]
+        return (bold ? Weight.bold : (weights[weight] ?? (style == "headline" ? .semibold : .regular))).rawValue
+    }
 
     var body: some View {
         let spans = BernRubySpan.parse(ruby, text: text)
@@ -2538,9 +2561,7 @@ struct BernRubyText<Plain: View>: View {
             "headline": .headline, "subheadline": .subheadline, "callout": .callout,
             "footnote": .footnote, "caption": .caption1, "caption2": .caption2, "code": .callout]
         let pointSize = size ?? NSFont.preferredFont(forTextStyle: styles[style] ?? .body).pointSize
-        let weights: [String: NSFont.Weight] = ["ultralight": .ultraLight, "thin": .thin, "light": .light,
-            "medium": .medium, "semibold": .semibold, "bold": .bold, "heavy": .heavy, "black": .black]
-        let w = bold ? NSFont.Weight.bold : (weights[weight] ?? (style == "headline" ? .semibold : .regular))
+        let w = NSFont.Weight(rawValue: resolvedWeight)
         let font = style == "code" ? NSFont.monospacedSystemFont(ofSize: pointSize, weight: w) : NSFont.systemFont(ofSize: pointSize, weight: w)
         #else
         let styles: [String: UIFont.TextStyle] = [
@@ -2548,9 +2569,7 @@ struct BernRubyText<Plain: View>: View {
             "headline": .headline, "subheadline": .subheadline, "callout": .callout,
             "footnote": .footnote, "caption": .caption1, "caption2": .caption2, "code": .callout]
         let pointSize = size ?? UIFont.preferredFont(forTextStyle: styles[style] ?? .body).pointSize
-        let weights: [String: UIFont.Weight] = ["ultralight": .ultraLight, "thin": .thin, "light": .light,
-            "medium": .medium, "semibold": .semibold, "bold": .bold, "heavy": .heavy, "black": .black]
-        let w = bold ? UIFont.Weight.bold : (weights[weight] ?? (style == "headline" ? .semibold : .regular))
+        let w = UIFont.Weight(rawValue: resolvedWeight)
         let font = style == "code" ? UIFont.monospacedSystemFont(ofSize: pointSize, weight: w) : UIFont.systemFont(ofSize: pointSize, weight: w)
         #endif
         return CTFontCreateWithName(font.fontName as CFString, pointSize, nil)
@@ -2680,16 +2699,24 @@ struct BernRubyDrawing {
             // ligatures and ruby do not add extra steps to the highlight clock.
             context.saveGState()
             context.beginPath()
+            var hasHighlight = false
             for index in 0..<(offsets.count - 1) where offsets[index] >= row.range.location && offsets[index] < NSMaxRange(row.range) {
                 let fraction = min(1, max(0, lit - Double(index)))
                 guard fraction > 0, row.visible.contains(where: { NSLocationInRange(offsets[index], $0) }) else { continue }
                 let a = CTLineGetOffsetForStringIndex(row.line, offsets[index], nil)
                 let b = CTLineGetOffsetForStringIndex(row.line, offsets[index + 1], nil)
                 let edge = a + (b - a) * fraction
-                context.addRect(CGRect(x: min(a, edge), y: row.top, width: abs(edge - a), height: row.height))
+                let width = abs(edge - a)
+                guard width > 0 else { continue }
+                context.addRect(CGRect(x: min(a, edge), y: row.top, width: width, height: row.height))
+                hasHighlight = true
             }
-            context.clip()
-            drawLine(alpha: 1)
+            // Clipping an empty path does not create an empty clipping region.
+            // A wrapped row with no sung characters must keep only its dim pass.
+            if hasHighlight {
+                context.clip()
+                drawLine(alpha: 1)
+            }
             context.restoreGState()
         }
     }

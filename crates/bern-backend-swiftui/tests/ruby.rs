@@ -233,6 +233,35 @@ fn native_ruby_preserves_indices_wraps_and_reserves_annotation_height() {
                 }
             }
         }
+        // Later wrapped rows have no highlighted characters yet. An empty
+        // Core Graphics clipping path must not turn their bright pass on.
+        let wrappedText = "漢字漢字漢字漢字"
+        let wrapped = BernRubyDocument(text: wrappedText,
+            spans: BernRubySpan.parse(#"[[0,2,"かんじ"]]"#, text: wrappedText),
+            font: font, lineHeight: nil, limit: nil).layout(width: 70, color: CGColor(gray: 1, alpha: 1))
+        precondition(wrapped.rows.count > 1)
+        let later = wrapped.rows[1]
+        let faded = CGContext(data: nil, width: 100, height: 300, bitsPerComponent: 8, bytesPerRow: 400,
+                             space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        faded.translateBy(x: 0, y: 300)
+        faded.scaleBy(x: 1, y: -1)
+        wrapped.draw(in: faded, mark: nil, lit: 0.5)
+        let fadedBytes = faded.data!.assumingMemoryBound(to: UInt8.self)
+        var laterInk = 0
+        for y in Int(ceil(later.top))..<Int(floor(later.top + later.height)) {
+            for x in 0..<100 {
+                let alpha = fadedBytes[y * 400 + x * 4 + 3]
+                precondition(alpha <= 103, "a not-yet-sung wrapped row must remain dim")
+                if alpha > 20 { laterInk += 1 }
+            }
+        }
+        precondition(laterInk > 0)
+        var animated = BernRubyText(text: wrappedText, ruby: #"[[0,2,"かんじ"]]"#, size: 32,
+            style: "body", weight: "regular", bold: true, color: .white, lineHeight: nil, lines: nil,
+            mark: nil, lit: { -1 }, path: { "" }, clock: { 0 }, since: { 0 }) { Text(wrappedText) }
+        animated.animatableData = AnimatablePair(28, NSFont.Weight.medium.rawValue)
+        precondition(animated.size == 28)
+        precondition(animated.animatableData.second == NSFont.Weight.medium.rawValue)
         let route = BernLitRoute("0 0 2 4")
         precondition(route.place(at: 1) == 2)
         print("native ruby passed")
