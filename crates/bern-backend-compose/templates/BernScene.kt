@@ -474,7 +474,8 @@ fun BernScaleBox(width: Dp, height: Dp, content: @Composable () -> Unit) {
             y = if (fits) ((outHeight / scale - h) / 2f).coerceAtLeast(0f).toDp() else 0.dp,
         )
         val placeable = subcompose(Unit) {
-            CompositionLocalProvider(LocalBernSceneRoom provides room) {
+            // A scene has no safe area: its layers bleed by `Positioned`.
+            CompositionLocalProvider(LocalBernSceneRoom provides room, LocalBernSafeArea provides null) {
                 Box(contentAlignment = Alignment.TopStart) { content() }
             }
         }.first().measure(Constraints.fixed(w, h))
@@ -824,7 +825,10 @@ private val BernHeadingTop = HorizontalAlignmentLine(::min)
 /// opening with a plain section starts at the top of its page.
 @Composable
 fun BernForm(gap: Dp?, rows: BernRows, content: @Composable ColumnScope.() -> Unit) {
-    CompositionLocalProvider(LocalBernFormRows provides rows) {
+    // It keeps no room around its rows: a canvas that bleeds in it reaches
+    // past the sides alone.
+    val room = remember { BernScrollRoom() }
+    CompositionLocalProvider(LocalBernFormRows provides rows, LocalBernScrollRoom provides room) {
         Column(
             Modifier
                 .fillMaxSize()
