@@ -1,0 +1,14 @@
+Project icons / 项目图标
+
+These are the projects' own icons, resized to 128 x 128 for the showcase.
+图标来自各项目官方仓库，仅缩小到 128 x 128 用于展示。
+
+RustSend
+https://github.com/AimesSoft/RustSend
+https://raw.githubusercontent.com/AimesSoft/RustSend/main/bern/ui/assets/rustsend-512.png
+
+Lambda
+https://github.com/zhaohuaxs/lambda
+https://raw.githubusercontent.com/zhaohuaxs/lambda/main/assets/icon/lambda-logo.png
+
+Retrieved / 获取日期: 2026-11-08

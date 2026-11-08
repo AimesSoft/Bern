@@ -36,6 +36,7 @@
 
 <p>
 <a href="#為什麼選擇-bern">為什麼選擇 Bern</a> ·
+<a href="#誰使用了-bern">誰使用了 Bern</a> ·
 <a href="#為-ai-而建">為 AI 而建</a> ·
 <a href="#實測數據">實測數據</a> ·
 <a href="#與其他跨平台框架比較">比較</a> ·
@@ -69,22 +70,22 @@
 <img alt="為什麼選擇 Bern：編譯成原生介面，一份 Rust 宣告產生各平台自己的 UI 程式碼，執行時沒有 JS 引擎；為 AI 而建，漏寫是編譯錯誤，每個按鈕都是 MCP 工具；輕到不像跨平台，macOS 記憶體 39 MB、0.4 秒出現視窗、應用程式套件 2.7 MB，Windows 35 MB、0.3 秒、4.2 MB，Web 189 KB" src="Docs/Assets/tables/why-zh-Hant-light.svg" width="100%">
 </picture>
 
-## 應用案例
-
-### RustSend · 區域網路檔案傳輸
-
-[RustSend](https://github.com/AimesSoft/RustSend) 是使用 Bern 開發的開源區域網路檔案傳輸工具，相容 LocalSend v2。介面宣告、狀態與傳輸業務統一使用 Rust；Bern 為 macOS 和 iOS 產生 SwiftUI、為 Windows 產生 WinUI 3、為 Linux 產生 GTK 4、為 Android 產生 Jetpack Compose 原生介面。
-
-它支援裝置探索、檔案與文字互傳、接收確認和應用程式內完成提示，桌面小視窗與手機版面共用一套業務邏輯。1.0 的本機 macOS ARM64 Release 建置中，完整 `.app` 為 **8.09 MiB**，下載 `.zip` 為 **3.80 MiB**；建置環境和統計口徑見[測量紀錄](https://github.com/AimesSoft/RustSend/blob/main/docs/measurements.md)。
+## 誰使用了 Bern
 
 <table>
 <tr>
-<td width="50%" align="center"><a href="https://raw.githubusercontent.com/AimesSoft/RustSend/main/docs/screenshots/macos-receive.png"><img src="https://raw.githubusercontent.com/AimesSoft/RustSend/main/docs/screenshots/macos-receive.png" height="360" alt="RustSend 1.0 在 macOS 實機上的接收頁"></a><br><sub><b>macOS</b> · SwiftUI</sub></td>
-<td width="50%" align="center"><a href="https://raw.githubusercontent.com/AimesSoft/RustSend/main/docs/screenshots/android-receive.png"><img src="https://raw.githubusercontent.com/AimesSoft/RustSend/main/docs/screenshots/android-receive.png" height="360" alt="RustSend 1.0 在 Android 實機上的接收頁"></a><br><sub><b>Android</b> · Jetpack Compose</sub></td>
+<td width="50%" valign="top">
+<a href="https://github.com/AimesSoft/RustSend"><img src="Docs/Assets/projects/rustsend.png" width="56" height="56" alt="RustSend"></a>
+<h3><a href="https://github.com/AimesSoft/RustSend">RustSend</a></h3>
+<p>相容 LocalSend 的區域網路檔案傳輸工具，支援檔案、資料夾與文字互傳。</p>
+</td>
+<td width="50%" valign="top">
+<a href="https://github.com/zhaohuaxs/lambda"><img src="Docs/Assets/projects/lambda.png" width="56" height="56" alt="Lambda"></a>
+<h3><a href="https://github.com/zhaohuaxs/lambda">Lambda</a></h3>
+<p>內建 7-Zip 的 Windows / Android 壓縮檔管理器，支援加密壓縮、解壓縮與內容預覽。</p>
+</td>
 </tr>
 </table>
-
-[原始碼儲存庫](https://github.com/AimesSoft/RustSend) · [下載 RustSend](https://github.com/AimesSoft/RustSend/releases/latest) · [五個平台的截圖與執行環境](https://github.com/AimesSoft/RustSend/blob/main/docs/screenshots/README.md)
 
 ## 為 AI 而建
 
