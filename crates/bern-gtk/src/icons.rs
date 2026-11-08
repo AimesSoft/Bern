@@ -29,6 +29,8 @@ mod tests {
     fn bern_names_map_to_symbolic_theme_icons() {
         assert_eq!(name("plus"), "list-add-symbolic");
         assert_eq!(name("star.fill"), "starred-symbolic");
+        assert_eq!(name("checkmark.circle.fill"), "object-select-symbolic");
+        assert_eq!(name("gearshape"), "preferences-system-symbolic");
         assert_eq!(name("no.such.icon"), "image-missing-symbolic");
     }
 
