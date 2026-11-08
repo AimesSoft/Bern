@@ -1731,3 +1731,94 @@ fn an_idle_area_is_watched_by_its_window() {
         assert!(ui.contains(expected), "missing `{expected}`:\n{ui}");
     }
 }
+
+/// Reset is an opt-in mount/key watcher, not an unconditional path clear.
+#[test]
+fn navigation_reset_is_generated_only_when_requested() {
+    use bern_ir::{Binding, Expr, ExprKind, Node, Prop};
+    use bern_protocol::{Type, Value};
+    let mut app = showcase().1.app;
+    let mut navigation = None;
+    app.walk(&mut |node, _| {
+        if let Node::Element(element) = node
+            && element.kind == "Navigation"
+        {
+            navigation = Some(element.clone());
+        }
+    });
+    let mut navigation = navigation.expect("showcase has typed navigation");
+    let (session, field, ty) = app
+        .sessions
+        .iter()
+        .find_map(|session| {
+            session
+                .fields
+                .iter()
+                .enumerate()
+                .find_map(|(index, field)| {
+                    matches!(field.ty, Type::Int | Type::Text | Type::Enum { .. })
+                        .then(|| (session.name.clone(), index, field.ty.clone()))
+                })
+        })
+        .expect("showcase has a key-valued session field");
+    navigation.id = Some("reset_probe".into());
+    // Keep the path's real session and route type while isolating this control.
+    navigation.children.clear();
+    app.components[0].body = Node::Element(navigation.clone());
+    let plain = bern_backend_gtk::Generator::new(&app).generate(0, "{}");
+    let start = plain
+        .find("b::Navigation(p, c")
+        .expect("navigation is generated");
+    assert!(!plain[..start].contains("b::Watch(p, c"));
+    for (ty, kind) in [
+        (
+            Type::Int,
+            ExprKind::Literal {
+                value: Value::Int(874_125),
+            },
+        ),
+        (
+            Type::Text,
+            ExprKind::Literal {
+                value: Value::Text("reset-key-probe".into()),
+            },
+        ),
+        (
+            Type::Enum {
+                name: "Page".into(),
+            },
+            ExprKind::Variant {
+                variant: 0,
+                fields: vec![],
+            },
+        ),
+        (
+            ty,
+            ExprKind::Binding {
+                binding: Binding::Session {
+                    session,
+                    field,
+                    path: vec![],
+                },
+            },
+        ),
+    ] {
+        navigation.props.insert(
+            "reset".into(),
+            Prop::Expr {
+                expr: Expr { ty, kind },
+            },
+        );
+        app.components[0].body = Node::Element(navigation.clone());
+        let code = bern_backend_gtk::Generator::new(&app).generate(0, "{}");
+        let watch = code
+            .find("b::Watch(p, c")
+            .expect("reset uses mount/change state");
+        let navigation = code[watch..].find("b::Navigation(p, c").unwrap() + watch;
+        assert!(
+            watch < navigation,
+            "the old destination must not be built first"
+        );
+        assert!(code[watch..navigation].contains("b::session_set(c,"));
+    }
+}

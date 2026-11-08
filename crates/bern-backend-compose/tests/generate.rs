@@ -1446,3 +1446,98 @@ fn an_idle_area_watches_where_the_mouse_rests() {
     assert!(kotlin.contains("idleAfter = 3.0"), "{kotlin}");
     assert!(kotlin.contains("landscape = true"), "{kotlin}");
 }
+
+#[test]
+fn navigation_reset_is_remembered_only_by_its_key_before_reading_the_path() {
+    use bern_ir::{Binding, Expr, ExprKind, FieldRef, Prop, SessionDef, SessionFieldDef};
+    use bern_protocol::{EnumDef, Type, Value, VariantDef};
+
+    let (_, mut compiled) = compile("hello");
+    let app = &mut compiled.app;
+    app.types.enums.push(EnumDef {
+        name: "RootPage".into(),
+        variants: vec![VariantDef {
+            name: "Home".into(),
+            fields: vec![],
+            label: None,
+        }],
+    });
+    app.sessions.push(SessionDef {
+        name: "NavigationDraft".into(),
+        fields: vec![
+            SessionFieldDef {
+                name: "routes".into(),
+                ty: Type::list(Type::Text),
+                initial: Value::List(vec![]),
+            },
+            SessionFieldDef {
+                name: "root_key".into(),
+                ty: Type::Int,
+                initial: Value::Int(0),
+            },
+        ],
+    });
+    let path = Prop::Field {
+        field: FieldRef {
+            session: "NavigationDraft".into(),
+            field: 0,
+            ty: Type::list(Type::Text),
+        },
+    };
+    let navigation = |reset: Option<Expr>| {
+        let mut props = vec![("path", path.clone())];
+        if let Some(expr) = reset {
+            props.push(("reset", Prop::Expr { expr }));
+        }
+        node("Navigation", props, vec![])
+    };
+    app.windows.windows[0].content = navigation(None);
+    let original = bern_backend_compose::Generator::new(app).generate("test.navigation", 0);
+    assert!(!original.contains("routes = emptyList()"));
+    for (ty, initial) in [
+        (Type::Int, Value::Int(0)),
+        (Type::Text, Value::Text(String::new())),
+        (
+            Type::Enum {
+                name: "RootPage".into(),
+            },
+            Value::unit_variant(0),
+        ),
+    ] {
+        let session = app.sessions.last_mut().unwrap();
+        session.fields[1].ty = ty.clone();
+        session.fields[1].initial = initial;
+        app.windows.windows[0].content = navigation(Some(Expr {
+            ty,
+            kind: ExprKind::Binding {
+                binding: Binding::Session {
+                    session: "NavigationDraft".into(),
+                    field: 1,
+                    path: vec![],
+                },
+            },
+        }));
+        let generated = bern_backend_compose::Generator::new(app).generate("test.navigation", 0);
+        let reset = generated
+            .find("remember(session_NavigationDraft.rootKey) {")
+            .unwrap();
+        let clear = generated
+            .find("session_NavigationDraft.routes = emptyList()")
+            .unwrap();
+        let select = generated
+            .find("if (session_NavigationDraft.routes.isEmpty())")
+            .unwrap();
+        assert!(reset < clear && clear < select, "{generated}");
+        assert_eq!(generated.matches("routes = emptyList()").count(), 1);
+        assert!(!generated.contains("remember(session_NavigationDraft.routes"));
+        assert!(!generated.contains("LaunchedEffect(session_NavigationDraft"));
+    }
+    app.windows.windows[0].content = navigation(None);
+    // The session's declaration changed, but Navigation without reset still
+    // has precisely the original root/destination selection and no clearing.
+    let generated = bern_backend_compose::Generator::new(app).generate("test.navigation", 0);
+    let selection = "if (session_NavigationDraft.routes.isEmpty())";
+    let body = |source: &str| source[source.find(selection).unwrap()..].to_string();
+    assert_eq!(body(&generated), body(&original));
+    assert!(!generated.contains("routes = emptyList()"));
+}

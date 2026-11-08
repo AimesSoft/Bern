@@ -759,3 +759,69 @@ fn a_picture_names_the_one_for_the_dark_appearance() {
         "{generated}"
     );
 }
+
+#[test]
+fn navigation_reset_is_an_optional_live_key_getter() {
+    let mut app = app();
+    app.sessions.push(SessionDef {
+        name: "draft".into(),
+        fields: vec![SessionFieldDef {
+            name: "routes".into(),
+            ty: Type::list(Type::Text),
+            initial: Value::List(vec![]),
+        }],
+    });
+    let mut navigation = element("Navigation");
+    navigation.props.insert(
+        "path".into(),
+        Prop::Field {
+            field: FieldRef {
+                session: "draft".into(),
+                field: 0,
+                ty: Type::list(Type::Text),
+            },
+        },
+    );
+    let generate = |navigation: &Element| {
+        let mut out = Out::default();
+        Generator::new(&app).navigation(&mut out, navigation);
+        out.finish()
+    };
+    let original = generate(&navigation);
+    assert!(
+        original.contains("path: ctx.s.draft.routes },"),
+        "{original}"
+    );
+    assert!(!original.contains("reset:"));
+    for ty in [
+        Type::Int,
+        Type::Text,
+        Type::Enum {
+            name: "Page".into(),
+        },
+    ] {
+        navigation.props.insert(
+            "reset".into(),
+            Prop::Expr {
+                expr: Expr {
+                    ty: ty.clone(),
+                    kind: ExprKind::Binding {
+                        binding: Binding::Local {
+                            name: "root_key".into(),
+                            path: vec![],
+                            root: ty,
+                        },
+                    },
+                },
+            },
+        );
+        let generated = generate(&navigation);
+        assert!(
+            generated.contains("path: ctx.s.draft.routes, reset: () => l_root_key() },"),
+            "{generated}"
+        );
+        assert_eq!(generated.matches("reset:").count(), 1, "{generated}");
+    }
+    navigation.props.remove("reset");
+    assert_eq!(generate(&navigation), original);
+}

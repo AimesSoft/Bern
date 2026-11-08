@@ -2032,3 +2032,204 @@ fn an_idle_area_is_watched_by_its_window() {
     }
     compile(&output);
 }
+
+/// Reset is an opt-in mount/key watcher, not an unconditional path clear.
+#[test]
+fn navigation_reset_is_generated_only_when_requested() {
+    use bern_ir::{Binding, Expr, ExprKind, Node, Prop};
+    use bern_protocol::{Type, Value};
+    let mut app = showcase().1.app;
+    let mut navigation = None;
+    app.walk(&mut |node, _| {
+        if let Node::Element(element) = node
+            && element.kind == "Navigation"
+        {
+            navigation = Some(element.clone());
+        }
+    });
+    let mut navigation = navigation.expect("showcase has typed navigation");
+    let (session, field, ty) = app
+        .sessions
+        .iter()
+        .find_map(|session| {
+            session
+                .fields
+                .iter()
+                .enumerate()
+                .find_map(|(index, field)| {
+                    matches!(field.ty, Type::Int | Type::Text | Type::Enum { .. })
+                        .then(|| (session.name.clone(), index, field.ty.clone()))
+                })
+        })
+        .expect("showcase has a key-valued session field");
+    navigation.id = Some("reset_probe".into());
+    // Keep the path's real session and route type while isolating this control.
+    navigation.children.clear();
+    app.components[0].body = Node::Element(navigation.clone());
+    let plain = bern_backend_winui3::Generator::new(&app).interface();
+    let start = plain
+        .find("B::Navigation(p, c")
+        .expect("navigation is generated");
+    assert!(!plain[..start].contains("B::Watch(p, c"));
+    for (ty, kind) in [
+        (
+            Type::Int,
+            ExprKind::Literal {
+                value: Value::Int(874_125),
+            },
+        ),
+        (
+            Type::Text,
+            ExprKind::Literal {
+                value: Value::Text("reset-key-probe".into()),
+            },
+        ),
+        (
+            Type::Enum {
+                name: "Page".into(),
+            },
+            ExprKind::Variant {
+                variant: 0,
+                fields: vec![],
+            },
+        ),
+        (
+            ty,
+            ExprKind::Binding {
+                binding: Binding::Session {
+                    session,
+                    field,
+                    path: vec![],
+                },
+            },
+        ),
+    ] {
+        navigation.props.insert(
+            "reset".into(),
+            Prop::Expr {
+                expr: Expr { ty, kind },
+            },
+        );
+        app.components[0].body = Node::Element(navigation.clone());
+        let code = bern_backend_winui3::Generator::new(&app).interface();
+        let watch = code
+            .find("B::Watch(p, c")
+            .expect("reset uses mount/change state");
+        let navigation = code[watch..].find("B::Navigation(p, c").unwrap() + watch;
+        assert!(
+            watch < navigation,
+            "the old destination must not be built first"
+        );
+        assert!(code[watch..navigation].contains("c.Write("));
+    }
+}
+
+/// Exercise the actual scope/cell/Watch implementation without a XAML
+/// window. Only its context and value carriers are replaced by test data.
+#[cfg(not(windows))]
+#[test]
+fn navigation_reset_watch_obeys_mount_key_and_unmount() {
+    let base = include_str!("../templates/cpp/bern_base.h");
+    let implementation = include_str!("../templates/cpp/bern_base.cpp");
+    let scene = include_str!("../templates/cpp/bern_ui_scene.inl");
+    let declarations = base
+        .split_once("struct Effect;")
+        .unwrap()
+        .1
+        .split_once("/// A counter cell")
+        .unwrap()
+        .0;
+    let definitions = implementation.split_once("void Scope::OnDispose").unwrap().1
+        .split_once("// ---------------------------------------------------------------------------\n// Text").unwrap().0;
+    let watcher = scene.split_once("struct WatchProps {").unwrap().1
+        .split_once("// ---------------------------------------------------------------------------\n// Control groups").unwrap().0;
+    let code = format!(
+        r#"
+#include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <string>
+#include <variant>
+#include <vector>
+void ReportCurrent(char const*) {{ throw; }}
+struct Effect;
+{declarations}
+void Scope::OnDispose{definitions}
+enum class Root {{ First, Second }};
+using Value = std::variant<int, std::string, Root>;
+struct Parent {{}};
+struct Ctx {{ Cell<Value> key; Cell<std::vector<int>> path; }};
+using Get = std::function<Value(Ctx const&)>;
+using Act = std::function<void(Ctx const&)>;
+struct WatchProps {{{watcher}
+int main() {{
+    for (Value key : {{Value(0), Value(std::string("root")), Value(Root::First)}}) {{
+        Ctx ctx{{Cell<Value>(key), Cell<std::vector<int>>({{1}})}};
+        int clears = 0;
+        auto mount = [&] {{
+            auto scope = std::make_unique<Scope>();
+            scope->Run([&] {{
+                Watch(Parent{{}}, ctx, {{
+                    .value = [](Ctx const& c) {{ return c.key.Get(); }},
+                    .action = [&](Ctx const& c) {{
+                        // A read made while clearing must not subscribe to path.
+                        (void)c.path.Get();
+                        auto path = c.path;
+                        path.Set({{}});
+                        ++clears;
+                    }}
+                }});
+            }});
+            return scope;
+        }};
+        auto scope = mount();
+        assert(ctx.path.Peek().empty() && clears == 1);
+        ctx.path.Set({{2}});
+        ctx.key.Set(key);
+        assert(ctx.path.Peek() == std::vector<int>{{2}} && clears == 1);
+        ctx.key.Set(99);
+        assert(ctx.path.Peek().empty() && clears == 2);
+        ctx.path.Set({{3}});
+        ctx.key.Set(key);
+        assert(ctx.path.Peek().empty() && clears == 3);
+        scope->Dispose();
+        ctx.path.Set({{4}});
+        ctx.key.Set(99);
+        assert(ctx.path.Peek() == std::vector<int>{{4}} && clears == 3);
+        scope = mount();
+        assert(ctx.path.Peek().empty() && clears == 4);
+    }}
+}}
+"#
+    );
+    let dir = std::env::temp_dir().join(format!(
+        "bern-navigation-reset-winui3-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = dir.join("reset.cpp");
+    let binary = dir.join("reset");
+    std::fs::write(&source, code).unwrap();
+    let compiled = std::process::Command::new("c++")
+        .arg("-std=c++20")
+        .arg(&source)
+        .arg("-o")
+        .arg(&binary)
+        .output()
+        .expect("C++ compiler is required for the reactive runtime test");
+    assert!(
+        compiled.status.success(),
+        "{}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+    let result = std::process::Command::new(binary).output().unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}

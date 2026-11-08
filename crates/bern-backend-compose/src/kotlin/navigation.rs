@@ -269,6 +269,14 @@ impl Generator<'_> {
             .collect();
         let mut inner = ctx.within(Scope::Other);
         inner.path = Some(path.clone());
+        // Reset before selecting the root or a destination. Only the reset
+        // key participates in remember, so pushing a route keeps the path.
+        if let Some(reset) = element.expr("reset") {
+            out.open(format!("remember({}) {{", self.expr(reset)));
+            out.line(format!("{path} = emptyList()"));
+            out.line("true");
+            out.close("}");
+        }
         if element.id.is_some() {
             out.line(format!(
                 "BernControl({}, \"navigation\", \"\", actions = BernControlActions(back = {{ if ({path}.isEmpty()) false else {{ {path} = {path}.dropLast(1); true }} }}, value = {{ {path}.size.toString() }}))",

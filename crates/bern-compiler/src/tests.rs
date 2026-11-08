@@ -5358,3 +5358,30 @@ fn paste_reads_the_clipboard_into_a_text_draft() {
     );
     assert!(both.contains("not both"), "{both}");
 }
+
+#[test]
+fn navigation_reset_accepts_stable_keys_but_not_flags() {
+    let view = |key: &str| {
+        wrap(&format!(
+            "Navigation(path: draft.path, reset: {key}) {{ Spacer Destination |route| {{ Spacer }} }}"
+        ))
+        .replace("pub mode: demo::Mode,", "pub mode: demo::Mode, pub path: Vec<demo::Mode>,")
+    };
+    for key in ["draft.mode", "draft.name", "app.count"] {
+        let compiled = compile_ui(&view(key)).unwrap_or_else(|errors| panic!("{errors:?}"));
+        let mut resets = 0;
+        for component in &compiled.app.components {
+            component.body.walk(&mut |node| {
+                if let ir::Node::Element(element) = node
+                    && element.kind == "Navigation"
+                    && element.expr("reset").is_some()
+                {
+                    resets += 1;
+                }
+            });
+        }
+        assert_eq!(resets, 1);
+    }
+    let errors = compile_ui(&view("draft.on")).err().expect("a boolean is not a root identity");
+    assert!(errors.iter().any(|error| error.message.contains("`reset` identifies")), "{errors:?}");
+}

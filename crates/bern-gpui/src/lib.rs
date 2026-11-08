@@ -85,7 +85,8 @@ pub use motion::{
     left_row, moving, reflow_origin, reflowed, rows, staggered,
 };
 pub use navigation::{
-    detail, nav_link, navigation, sidebar, sidebar_item, sidebar_title, split_view,
+    detail, nav_link, navigation, navigation_reset, sidebar, sidebar_item, sidebar_title,
+    split_view,
 };
 pub use overlay::{ModalProps, PopoverProps, SplitProps, modal, popover_button, split_button};
 pub use query::{QueryProps, query};

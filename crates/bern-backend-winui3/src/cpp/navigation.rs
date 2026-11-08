@@ -115,6 +115,12 @@ impl Generator<'_> {
         let Some(path) = self.field(element, "path") else {
             return;
         };
+        if let Some(reset) = element.expr("reset") {
+            out.line(format!(
+                "B::Watch(p, c, {{.value = {}, .action = [](Ctx const& c) {{ c.Write({path}, Value::List(Values{{}})); }}}});",
+                self.getter(reset),
+            ));
+        }
         let destination = element.children.iter().find_map(|node| match node {
             Node::Element(child) if child.kind == "Destination" => Some(child),
             _ => None,
