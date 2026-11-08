@@ -2517,9 +2517,9 @@ struct BernRubyText<Plain: View>: View {
                 TimelineView(.animation(minimumInterval: 1.0 / 60, paused: route.isEmpty || since <= 0)) { timeline in
                     let place = route.isEmpty ? number : route.place(at: clock + (since > 0 ? timeline.date.timeIntervalSince1970 - since : 0))
                     Canvas { graphics, size in
-                        let layout = document.layout(width: size.width)
+                        let layout = document.layout(width: size.width, color: nativeColor(color))
                         graphics.withCGContext { context in
-                            layout.draw(in: context, color: nativeColor(color), mark: mark.map(nativeColor), lit: place)
+                            layout.draw(in: context, mark: mark.map(nativeColor), lit: place)
                         }
                     }
                 }
@@ -2577,15 +2577,15 @@ struct BernRubyDocument {
     let lineHeight: CGFloat?
     let limit: Int?
 
-    func layout(width proposed: CGFloat) -> BernRubyDrawing {
+    func layout(width proposed: CGFloat, color: CGColor = CGColor(gray: 0, alpha: 1)) -> BernRubyDrawing {
         let width = proposed.isFinite ? max(1, proposed) : 1_000_000
         let attributed = NSMutableAttributedString(string: text, attributes: [
             NSAttributedString.Key(kCTFontAttributeName as String): font,
-            NSAttributedString.Key(kCTForegroundColorFromContextAttributeName as String): true])
+            NSAttributedString.Key(kCTForegroundColorAttributeName as String): color])
         for span in spans {
             let attributes: [String: Any] = [
                 kCTRubyAnnotationSizeFactorAttributeName as String: 0.45,
-                kCTForegroundColorFromContextAttributeName as String: true]
+                kCTForegroundColorAttributeName as String: color]
             let annotation = CTRubyAnnotationCreateWithAttributes(
                 .auto, .none, .before, span.reading as CFString, attributes as CFDictionary)
             attributed.addAttribute(NSAttributedString.Key(kCTRubyAnnotationAttributeName as String), value: annotation, range: span.range)
@@ -2608,7 +2608,7 @@ struct BernRubyDocument {
                 let remaining = CTTypesetterCreateLine(typesetter, CFRange(location: start, length: attributed.length - start))
                 let token = CTLineCreateWithAttributedString(NSAttributedString(string: "…", attributes: [
                     NSAttributedString.Key(kCTFontAttributeName as String): font,
-                    NSAttributedString.Key(kCTForegroundColorFromContextAttributeName as String): true,
+                    NSAttributedString.Key(kCTForegroundColorAttributeName as String): color,
                     NSAttributedString.Key("BernRubyTruncation"): true]))
                 if let truncated = CTLineCreateTruncatedLine(remaining, Double(width), .end, token) {
                     line = truncated
@@ -2654,7 +2654,7 @@ struct BernRubyDrawing {
     var offsets: [Int]
     var size: CGSize
 
-    func draw(in context: CGContext, color: CGColor, mark: CGColor?, lit: Double) {
+    func draw(in context: CGContext, mark: CGColor?, lit: Double) {
         context.saveGState()
         defer { context.restoreGState() }
         context.textMatrix = .identity
@@ -2668,7 +2668,6 @@ struct BernRubyDrawing {
             func drawLine(alpha: CGFloat) {
                 context.saveGState()
                 context.setAlpha(alpha)
-                context.setFillColor(color)
                 context.translateBy(x: 0, y: row.baseline)
                 context.scaleBy(x: 1, y: -1)
                 context.textPosition = .zero

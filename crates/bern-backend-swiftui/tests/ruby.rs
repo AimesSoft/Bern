@@ -199,7 +199,39 @@ fn native_ruby_preserves_indices_wraps_and_reserves_annotation_height() {
         let context = CGContext(data: nil, width: 200, height: 300, bitsPerComponent: 8, bytesPerRow: 0,
                                 space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
         for place in [-1.0, 0, 1.5, 3, 100] {
-            narrow.draw(in: context, color: CGColor(gray: 0, alpha: 1), mark: nil, lit: place)
+            narrow.draw(in: context, mark: nil, lit: place)
+        }
+        // Ruby drawing must not reset the foreground to Core Text's default black.
+        // Test saturated and translucent colors, both passes of highlighting,
+        // wrapping and truncation rather than only a black-on-clear layout.
+        for alpha in [1.0, 0.6] {
+            for width in [90.0, 1000.0] {
+                for place in [-1.0, 0.0, 1.5, 100.0] {
+                    let color = CGColor(red: 1, green: 0, blue: 0, alpha: alpha)
+                    // Color emoji deliberately retain their own palette.
+                    let colorText = "東京へ行く。東京へ行く。東京へ行く。"
+                    let colorSpans = BernRubySpan.parse(#"[[0,2,"とうきょう"],[3,4,"い"]]"#, text: colorText)
+                    let drawing = BernRubyDocument(text: colorText, spans: colorSpans, font: font,
+                                                  lineHeight: nil, limit: 2).layout(width: width, color: color)
+                    let pixels = CGContext(data: nil, width: 1000, height: 300, bitsPerComponent: 8,
+                                           bytesPerRow: 4000, space: CGColorSpaceCreateDeviceRGB(),
+                                           bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+                    pixels.translateBy(x: 0, y: 300)
+                    pixels.scaleBy(x: 1, y: -1)
+                    drawing.draw(in: pixels, mark: nil, lit: place)
+                    let data = pixels.data!.assumingMemoryBound(to: UInt8.self)
+                    var ink = 0
+                    for offset in stride(from: 0, to: 4000 * 300, by: 4) where data[offset + 3] > 20 {
+                        ink += 1
+                        // Core Graphics may color-convert red into the device RGB space.
+                        precondition(abs(Int(data[offset]) - Int(data[offset + 3])) <= 3 &&
+                                     Int(data[offset + 1]) * 3 < Int(data[offset]) &&
+                                     Int(data[offset + 2]) * 3 < Int(data[offset]),
+                                     "base text, ruby and ellipsis must retain the requested red")
+                    }
+                    precondition(ink > 0)
+                }
+            }
         }
         let route = BernLitRoute("0 0 2 4")
         precondition(route.place(at: 1) == 2)
