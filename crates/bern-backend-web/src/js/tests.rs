@@ -761,12 +761,12 @@ fn a_picture_names_the_one_for_the_dark_appearance() {
 }
 
 #[test]
-fn text_ruby_is_a_bound_display_text_for_plain_and_marked_text() {
+fn text_ruby_is_bound_metadata_for_plain_and_marked_text() {
     let app = app();
     for marked in [false, true] {
         let mut text = element("Text");
         text.props.insert("content".into(), dynamic_text(literal_expr(Value::Text("字𠮷文".into()), Type::Text)));
-        text.props.insert("ruby".into(), dynamic_text(literal_expr(Value::Text("[[1,2,\"よし\"]]".into()), Type::Text)));
+        text.props.insert("ruby".into(), Prop::Expr { expr: literal_expr(Value::Text("[[1,2,\"よし\"]]".into()), Type::Text) });
         if marked { text.props.insert("mark".into(), keyword("accent")); }
         let mut out = Out::default();
         Generator::new(&app).element(&mut out, &text);

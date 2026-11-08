@@ -1524,6 +1524,10 @@ fn an_idle_area_watches_where_the_mouse_rests() {
 
 #[test]
 fn ruby_text_keeps_source_indices_styles_and_timing_in_compose() {
+    let metadata = |value: &str| {
+        let bern_ir::Prop::Text { text: bern_ir::Text::Dynamic { expr } } = words(value) else { unreachable!() };
+        bern_ir::Prop::Expr { expr }
+    };
     let (config, mut compiled) = compile("showcase");
     let component = compiled.app.components.iter_mut().find(|component| {
         matches!(&component.body, bern_ir::Node::Element(body) if body.kind == "Form")
@@ -1531,7 +1535,7 @@ fn ruby_text_keeps_source_indices_styles_and_timing_in_compose() {
     let bern_ir::Node::Element(body) = &mut component.body else { unreachable!() };
     body.children.push(node("Text", vec![
         ("content", words("𠮷野\n漢字")),
-        ("ruby", words("[[0,2,\"よしの\"],[3,5,\"かんじ\"]]")),
+        ("ruby", metadata("[[0,2,\"よしの\"],[3,5,\"かんじ\"]]")),
         ("font_size", number(24.0)),
         ("lines", number(2.0)),
         ("lit", number(1.5)),
@@ -1540,7 +1544,7 @@ fn ruby_text_keeps_source_indices_styles_and_timing_in_compose() {
         ("lit_since", number(42.0)),
     ], vec![]));
     body.children.push(node("Text", vec![
-        ("content", words("plain")), ("ruby", words("[]")),
+        ("content", words("plain")), ("ruby", metadata("[]")),
     ], vec![]));
     body.children.push(node("Text", vec![
         ("content", words("unchanged")),
@@ -1548,7 +1552,7 @@ fn ruby_text_keeps_source_indices_styles_and_timing_in_compose() {
     let kotlin = bern_backend_compose::Generator::new(&compiled.app)
         .generate("dev.bern.showcase", 0);
     assert!(kotlin.contains("BernRubyText(BernText.text("));
-    assert!(kotlin.contains("ruby = BernText.text("));
+    assert!(kotlin.contains("ruby = \"[[0,2,"));
     assert!(kotlin.contains("lines = 2, lit = { 1.5 }"));
     assert!(kotlin.contains("litClock = { 0.25 }, litSince = { 42.0 }"));
     assert!(kotlin.contains("BernText(BernText.text(\"unchanged\")"));

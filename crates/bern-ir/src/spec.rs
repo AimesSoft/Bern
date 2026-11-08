@@ -1277,7 +1277,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             opt("bold", PropKind::Bool),
             opt("lit", PropKind::Length),
             opt("lit_path", PropKind::DisplayText),
-            opt("ruby", PropKind::DisplayText),
+            opt("ruby", PropKind::TextValue),
             opt("lit_clock", PropKind::Length),
             opt("lit_since", PropKind::Length),
         ],

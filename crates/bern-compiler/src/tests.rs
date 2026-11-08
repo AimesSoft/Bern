@@ -5358,3 +5358,23 @@ fn paste_reads_the_clipboard_into_a_text_draft() {
     );
     assert!(both.contains("not both"), "{both}");
 }
+
+#[test]
+fn ruby_metadata_accepts_literals_and_conditional_text_without_translations() {
+    for value in [r#""""#, r#""[]""#, "draft.name", r#"if draft.on { draft.name } else { "" }"#] {
+        let body = format!("Text(content: app.title, ruby: {value})");
+        let compiled = compile_ui(&wrap(&body)).unwrap_or_else(|errors| panic!("{value}: {errors:?}"));
+        let mut found = false;
+        compiled.app.walk(&mut |node, _| {
+            if let ir::Node::Element(element) = node
+                && element.kind == "Text" && element.prop("ruby").is_some() {
+                assert!(element.expr("ruby").is_some());
+                found = true;
+            }
+        });
+        assert!(found);
+        assert!(!compiled.app.texts.iter().any(|text| text.key.ends_with(".ruby")));
+    }
+    assert!(errors("Text(content: app.title, ruby: 42)").contains("text"));
+    assert!(errors(r#"Text(content: "Hello")"#).contains("B103"));
+}

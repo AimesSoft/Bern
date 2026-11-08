@@ -63,7 +63,12 @@ fn check_front_end(root: &Path, sources: &Path, header: &Path, minimum: &str, ex
         .arg("-target")
         .arg(format!("{architecture}-apple-ios{minimum}-simulator"))
         .arg("-module-cache-path")
-        .arg(root.join("target/bern-swift-module-cache"))
+        .arg(
+            std::env::var_os("CARGO_TARGET_DIR")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| root.join("target"))
+                .join("bern-swift-module-cache"),
+        )
         .arg("-import-objc-header")
         .arg(header);
     for file in [

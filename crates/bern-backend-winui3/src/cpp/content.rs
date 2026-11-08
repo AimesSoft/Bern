@@ -17,7 +17,7 @@ impl Generator<'_> {
             "B::Text(p, c, {});",
             designated(&[
                 ("content", self.text_prop(element, "content")),
-                ("ruby", self.text_prop(element, "ruby")),
+                ("ruby", element.expr("ruby").map(|value| format!("[](Ctx const& c) {{ return R::Plain({}); }}", self.expr(value)))),
                 ("style", Self::keyword(element, "style")),
                 ("emphasis", Self::keyword(element, "emphasis")),
                 ("color", Self::keyword(element, "color")),

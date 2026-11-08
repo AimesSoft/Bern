@@ -2034,16 +2034,17 @@ fn an_idle_area_is_watched_by_its_window() {
 }
 
 #[test]
-fn ruby_display_text_reaches_the_ordinary_text_runtime() {
+fn ruby_metadata_reaches_the_ordinary_text_runtime() {
     let root = workspace();
+    let target = std::env::var_os("CARGO_TARGET_DIR").map(std::path::PathBuf::from).unwrap_or_else(|| root.join("target"));
     let ui = STAGE_UI.replace(
         "Button(id: mini, label: tr! { \"en\" => \"Add\" }, variant: stage) => app.add()",
-        r#"Text(content: tr! { "en" => "字𠮷文" }, ruby: tr! { "en" => "[[1,2,\"よし\"]]" })"#,
+        r#"Text(content: tr! { "en" => "字𠮷文" }, ruby: "[[1,2,\"よし\"]]")"#,
     );
-    let (config, compiled) = stage_project(&root.join("target/bern-test/winui3-ruby-project"), &ui);
+    let (config, compiled) = stage_project(&target.join("bern-test/winui3-ruby-project"), &ui);
     let context = BuildContext {
         project_dir: config.dir.clone(), workspace_dir: root.clone(),
-        output_dir: root.join("target/bern-test/winui3-ruby"),
+        output_dir: target.join("bern-test/winui3-ruby"),
         target: windows_target(&config),
         protocol_package: config.protocol_package.name.clone(), protocol_path: config.protocol_package.dir.clone(),
         protocol_module: compiled.protocol_module.clone(),
@@ -2053,6 +2054,6 @@ fn ruby_display_text_reaches_the_ordinary_text_runtime() {
     };
     let files = WinUi3Windows.generate(&compiled.app, &context).unwrap();
     let generated = files.iter().map(|file| String::from_utf8_lossy(&file.contents)).collect::<Vec<_>>().join("\n");
-    assert!(generated.contains(".ruby ="), "missing ruby getter");
-    assert!(generated.contains("よし"), "missing ruby display text");
+    assert!(generated.contains(".ruby = [](Ctx const& c) { return R::Plain("), "missing ruby getter");
+    assert!(generated.contains("よし"), "missing ruby metadata");
 }

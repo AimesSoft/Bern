@@ -24,7 +24,7 @@ impl Generator<'_> {
             },
             Self::props(vec![
                 ("content", self.text_prop(element, "content")),
-                ("ruby", self.text_prop(element, "ruby")),
+                ("ruby", self.value_prop(element, "ruby")),
                 ("style", Self::keyword(element, "style")),
                 ("emphasis", Self::keyword(element, "emphasis")),
                 ("color", Self::keyword(element, "color")),

@@ -63,7 +63,7 @@ impl Generator<'_> {
                 });
             format!(", lit = {{ {lit} }}{route}")
         });
-        if let Some(ruby) = self.text_prop(element, "ruby") {
+        if let Some(ruby) = element.expr("ruby").map(|value| self.expr(value)) {
             let mark = element.keyword("mark").map_or_else(String::new, |role| {
                 format!(", mark = BernColor.Role({})", string(role))
             });

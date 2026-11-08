@@ -2504,7 +2504,7 @@ pub fn app() -> b::AppDef {{
                     Some(bold) => self.condition(bold),
                     None => "false".into(),
                 },
-                if element.prop("ruby").is_some() { format!("Some({})", text("ruby")) } else { "None".into() },
+                element.expr("ruby").map(|expr| format!("Some(rt::plain(&{}))", self.expr(expr, at))).unwrap_or_else(|| "None".into()),
             ),
             "Label" => format!(
                 "b::label(c, {}, {}, b::TextStyle::{}, {}, {})",
@@ -4084,7 +4084,7 @@ mod tests {
     use super::pascal;
 
     #[test]
-    fn text_supports_the_ruby_display_text_property() {
+    fn text_supports_the_ruby_metadata_property() {
         let (_, props) = super::COMPONENTS.iter().find(|(name, _)| *name == "Text").unwrap();
         assert!(props.contains(&"ruby"));
     }

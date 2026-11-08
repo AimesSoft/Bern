@@ -122,7 +122,7 @@
 | `TableMenu` | 无 | 仅含 ["MenuItem", "Divider"]；无动作；直接位于 ["Table"]；右键或长按一行时打开，该行不在选中行里时先只选中它 |
 | `ContextMenu` | 无 | 仅含 ["MenuItem", "Divider"]；无动作；直接位于 ["Button"]，每个按钮最多一个；不算按钮显示的内容；右键或长按按钮时打开 |
 | `PreviewList` | **`items: Items`**<br>**`key: KeyField`**<br>**`item_height: Number`**<br>`gap: Number`<br>`more_height: Number` | 按可用高度创建能完整放下的前几项；有剩余时为 `+N` 留位，默认高度 22；不滚动，也不创建隐藏项。使用 `\|item\|` 行模板 |
-| `Text` | **`content: DisplayText`**<br>`style: large_title / title / title2 / title3 / headline / subheadline / body / callout / footnote / caption / caption2 / control / code`<br>`emphasis: primary / secondary / tertiary`<br>`color: accent / status.success / status.warning / status.error`<br>`mark: ColorRole`<br>`lines: Number`<br>`font_size: Length`<br>`line_height: Length`<br>`ruby: DisplayText`<br>`markdown: Flag`<br>`bold: Bool`<br>`lit: Length` | 不含子节点；无动作；`color` 与 `emphasis` 二选一 |
+| `Text` | **`content: DisplayText`**<br>`style: large_title / title / title2 / title3 / headline / subheadline / body / callout / footnote / caption / caption2 / control / code`<br>`emphasis: primary / secondary / tertiary`<br>`color: accent / status.success / status.warning / status.error`<br>`mark: ColorRole`<br>`lines: Number`<br>`font_size: Length`<br>`line_height: Length`<br>`ruby: TextValue`<br>`markdown: Flag`<br>`bold: Bool`<br>`lit: Length` | 不含子节点；无动作；`color` 与 `emphasis` 二选一 |
 | `Canvas` | `width: Length`<br>`height: Length`<br>`label: DisplayText` | 仅含 ["Shape", "Series", "Pattern"]；无动作 |
 | `Shape` | **`kind: rect / rounded / capsule / ellipse`**<br>`x: Number`<br>`y: Number`<br>`width: Number`<br>`height: Number`<br>`corner: Number`<br>`fill: ColorRole`<br>`fill_from: ImageResource`<br>`fade: up / down / left / right`<br>`stroke: ColorRole`<br>`stroke_width: Number`<br>`dash: Number`<br>`dash_gap: Number`<br>`opacity: Number` | 不含子节点；无动作；直接位于 ["Canvas"] |
 | `Series` | **`values: NumberList`**<br>`kind: area / line`<br>`max: NumberValue`<br>`fill: ColorRole`<br>`stroke: ColorRole`<br>`stroke_width: Number`<br>`opacity: Number` | 不含子节点；无动作；直接位于 ["Canvas"] |
@@ -155,7 +155,7 @@
 
 有 `lit_path` 时，只要 `lit` 不小于零，前端就自己每帧移动这个位置：`lit_path` 依次列出秒数和字符数，用空格隔开（`"10 0 11 2 12 2"`），位置在相邻两点之间匀速移动。`lit_clock` 是 `lit_since` 那一刻的秒数，`lit_since` 是 Unix 时间（秒），为零表示时钟停着。只有路线或时钟变了状态才变，不用逐步发送。Windows 由合成器移动它。
 
-`Text(ruby:)` 在原文的指定范围上方显示读音。动态字符串是 JSON 数组，例如 `[[0,2,"とうきょう"]]`：起止位置是原文 Unicode 标量的半开区间，不是 UTF-8 字节或 UTF-16 单元。空串或 `[]` 保持普通文字排版。注音为对应的换行预留上方空间，不增加 `lit` 或 `lit_path` 的字符数；浮动文字的 `overlay::Line::ruby` 使用相同格式。非法、重叠和越界范围会被忽略。本次新增能力尚未编译或进行视觉验证。
+`Text(ruby:)` 在原文的指定范围上方显示读音。动态字符串是 JSON 数组，例如 `[[0,2,"とうきょう"]]`：起止位置是原文 Unicode 标量的半开区间，不是 UTF-8 字节或 UTF-16 单元。空串或 `[]` 保持普通文字排版。注音为对应的换行预留上方空间，不增加 `lit` 或 `lit_path` 的字符数；浮动文字的 `overlay::Line::ruby` 使用相同格式。非法、重叠和越界范围会被忽略。注音字符串是元数据，不是待翻译的正文；支持字符串字面量和条件表达式。
 
 `Text` 加 `markdown` 时，内容是行内 Markdown：`**粗体**`、`*斜体*` 或 `_斜体_`、`` `代码` ``、`~~删除线~~` 和 `[链接](地址)`，反斜杠让下一个标记照字面显示。SwiftUI 交给系统的 `AttributedString(markdown:)`，Compose 写成带样式与 `LinkAnnotation` 的 `AnnotatedString`，Web 生成元素（不当作 HTML，链接只接受网页和邮件地址），GTK 转成 Pango 标记；Windows 暂时去掉标记只显示文字。整篇文档（标题、列表、表格等）由应用自己分块，每块用这样的文字显示。
 

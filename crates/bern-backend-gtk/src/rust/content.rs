@@ -10,7 +10,7 @@ impl Generator<'_> {
         out.line(format!(
             "b::Text(p, c, b::TextProps {{ content: {}, ruby: {}, style: {}, emphasis: {}, color: {}, mark: {}, lines: {}, font_size: {}, line_height: {}, markdown: {}, bold: {}, lit: {}, lit_path: {}, lit_clock: {}, lit_since: {}, animate: {} }});",
             some(self.text_prop(element, "content")),
-            some(self.text_prop(element, "ruby")),
+            some(element.expr("ruby").map(|value| format!("b::str(|c| rt::plain(&{}))", self.expr(value)))),
             Self::keyword(element, "style"),
             Self::keyword(element, "emphasis"),
             Self::keyword(element, "color"),

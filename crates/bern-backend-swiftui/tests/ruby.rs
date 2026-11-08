@@ -11,9 +11,22 @@ fn workspace() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
 }
 
+fn test_dir(name: &str) -> PathBuf {
+    std::env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| workspace().join("target"))
+        .join("bern-test")
+        .join(name)
+}
+
 fn generate(platform: &str, backend: &dyn Target) -> PathBuf {
     let root = workspace();
-    let dir = root.join(format!("target/bern-test/ruby-{platform}"));
+    let dir = test_dir(&format!("ruby-{platform}"));
+    let frontends = if platform == "ios" {
+        "frontends = [\"swiftui\", \"swiftui-16\"]"
+    } else {
+        ""
+    };
     for (package, source) in [
         ("ruby-protocol", r#"
 #[bern::protocol(namespace = "ruby", version = 1)]
@@ -21,9 +34,12 @@ pub mod ruby {
     use bern::prelude::*;
     #[state]
     pub struct State {
+        #[content]
         pub text: String,
         pub annotations: String,
+        pub shown: bool,
         pub lit: f64,
+        #[content]
         pub path: String,
         pub clock: f64,
         pub since: f64,
@@ -46,6 +62,7 @@ pub fn app(app: ruby::Client, windows: AppWindows) -> impl View {
                     Text(content: app.text)
                     Text(content: app.text, ruby: "")
                     Text(content: app.text, ruby: "[]")
+                    Text(content: app.text, ruby: if app.shown { app.annotations } else { "" })
                     Text(content: app.text, ruby: app.annotations, font_size: 30,
                          bold: true, color: accent, line_height: 52, lines: 2)
                     Text(content: app.text, ruby: app.annotations, lit: app.lit,
@@ -84,6 +101,7 @@ sources = ["ruby-ui/src/lib.rs"]
 root = "app"
 [targets.{platform}]
 platform = "{platform}"
+{frontends}
 "#)).unwrap();
     let config = bern_compiler::config::load(&dir.join("Bern.toml")).unwrap();
     let compiled = bern_compiler::compile(&config).unwrap_or_else(|errors| panic!("{errors:?}"));
@@ -111,9 +129,9 @@ fn assert_generated(output: &Path, sources: &str) {
     for expected in [
         "BernRubyText(text:", "ruby: \"\"", "ruby: \"[]\"", "size: 30.0",
         "style: \"body\", weight: \"medium\", bold: true", "lineHeight: 52.0, lines: 2",
-        "lit: { bernEngine.lit }", "path: { bernEngine.path }", "clock: { bernEngine.clock }",
-        "since: { bernEngine.since }", "SwiftUI.Text(verbatim: bernEngine.text)",
-        "BernLitText(text: bernEngine.text", "bernLit(bernEngine.text, bernEngine.lit)",
+        "lit: { Double(bernEngine.lit) }", "path: { BernText.text(bernEngine.path) }", "clock: { Double(bernEngine.clock) }",
+        "since: { Double(bernEngine.since) }", "SwiftUI.Text(verbatim: BernText.text(bernEngine.text))",
+        "BernLitText(text: BernText.text(bernEngine.text)", "bernLit(BernText.text(bernEngine.text), Double(bernEngine.lit))",
     ] {
         assert!(generated.contains(expected), "missing {expected}:\n{generated}");
     }
@@ -142,7 +160,7 @@ fn ruby_is_generated_for_macos() {
 #[test]
 fn native_ruby_preserves_indices_wraps_and_reserves_annotation_height() {
     use std::process::Command;
-    let root = workspace().join("target/bern-test/ruby-native");
+    let root = test_dir("ruby-native");
     std::fs::create_dir_all(&root).unwrap();
     let style = include_str!("../templates/BernStyle.swift");
     let ruby = &style[style.find("// MARK: - Ruby text").unwrap()..style.find("// MARK: - Text marks").unwrap()];
