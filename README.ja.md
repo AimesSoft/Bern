@@ -36,6 +36,7 @@
 
 <p>
 <a href="#bern-を選ぶ理由">Bern を選ぶ理由</a> ·
+<a href="#bern-を使っているアプリ">Bern を使っているアプリ</a> ·
 <a href="#ai-のための設計">AI のための設計</a> ·
 <a href="#実測値">実測値</a> ·
 <a href="#他のフレームワークとの比較">比較</a> ·
@@ -69,22 +70,22 @@
 <img alt="Bern を選ぶ理由：ネイティブ UI へコンパイルし、一つの Rust 宣言から各プラットフォーム自身の UI コードを生成、実行時に JS エンジンなし。AI のための設計で、書き漏れはコンパイルエラー、どのボタンも MCP ツール。クロスプラットフォームとは思えない軽さで、macOS は 39 MB・0.4 秒・2.7 MB、Windows は 35 MB・0.3 秒・4.2 MB、Web は 189 KB" src="Docs/Assets/tables/why-ja-light.svg" width="100%">
 </picture>
 
-## Bern で作られたアプリ
-
-### RustSend · LAN ファイル転送
-
-[RustSend](https://github.com/AimesSoft/RustSend) は Bern で開発したオープンソースの LAN ファイル転送ツールで、LocalSend v2 と互換性があります。UI の宣言、状態、転送処理はすべて Rust で書かれ、Bern が macOS と iOS には SwiftUI、Windows には WinUI 3、Linux には GTK 4、Android には Jetpack Compose のネイティブ UI を生成します。
-
-デバイスの検出、ファイルとテキストの送受信、受信の確認、アプリ内の完了通知に対応し、デスクトップの小さなウインドウとスマートフォンのレイアウトが同じビジネスロジックを共有します。1.0 のローカル macOS ARM64 Release ビルドでは、`.app` 全体が **8.09 MiB**、ダウンロード用の `.zip` が **3.80 MiB** です。ビルド環境と計測方法は[計測記録](https://github.com/AimesSoft/RustSend/blob/main/docs/measurements.md)を参照してください。
+## Bern を使っているアプリ
 
 <table>
 <tr>
-<td width="50%" align="center"><a href="https://raw.githubusercontent.com/AimesSoft/RustSend/main/docs/screenshots/macos-receive.png"><img src="https://raw.githubusercontent.com/AimesSoft/RustSend/main/docs/screenshots/macos-receive.png" height="360" alt="macOS 実機での RustSend 1.0 の受信画面"></a><br><sub><b>macOS</b> · SwiftUI</sub></td>
-<td width="50%" align="center"><a href="https://raw.githubusercontent.com/AimesSoft/RustSend/main/docs/screenshots/android-receive.png"><img src="https://raw.githubusercontent.com/AimesSoft/RustSend/main/docs/screenshots/android-receive.png" height="360" alt="Android 実機での RustSend 1.0 の受信画面"></a><br><sub><b>Android</b> · Jetpack Compose</sub></td>
+<td width="50%" valign="top">
+<a href="https://github.com/AimesSoft/RustSend"><img src="Docs/Assets/projects/rustsend.png" width="56" height="56" alt="RustSend"></a>
+<h3><a href="https://github.com/AimesSoft/RustSend">RustSend</a></h3>
+<p>LocalSend と互換性のある LAN ファイル転送ツール。ファイル、フォルダー、テキストをデバイス間で送受信できます。</p>
+</td>
+<td width="50%" valign="top">
+<a href="https://github.com/zhaohuaxs/lambda"><img src="Docs/Assets/projects/lambda.png" width="56" height="56" alt="Lambda"></a>
+<h3><a href="https://github.com/zhaohuaxs/lambda">Lambda</a></h3>
+<p>7-Zip を内蔵した Windows / Android 向けアーカイブマネージャー。暗号化圧縮、展開、内容のプレビューに対応。</p>
+</td>
 </tr>
 </table>
-
-[ソースコード](https://github.com/AimesSoft/RustSend) · [RustSend をダウンロード](https://github.com/AimesSoft/RustSend/releases/latest) · [5 つのプラットフォームのスクリーンショットと実行環境](https://github.com/AimesSoft/RustSend/blob/main/docs/screenshots/README.md)
 
 ## AI のための設計
 
