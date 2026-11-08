@@ -12,10 +12,56 @@ use crate::units::px;
 use crate::{El, icons};
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    FontWeight, InteractiveElement, IntoElement, ParentElement, StatefulInteractiveElement, Styled,
-    div,
+    App, ElementId, FontWeight, InteractiveElement, IntoElement, ParentElement, RenderOnce,
+    StatefulInteractiveElement, Styled, Window, div,
 };
 use std::rc::Rc;
+
+/// Reset before building either page, with state owned by this mounted
+/// element rather than by the session path or the reset key itself.
+pub fn navigation_reset(
+    c: &Ctx,
+    id: &str,
+    path: Field,
+    value: Value,
+    build: impl FnOnce(&Ctx) -> El + 'static,
+) -> El {
+    ResetNavigation {
+        key: ElementId::Name(format!("{}.navigation-reset", c.key(id)).into()),
+        c: c.clone(),
+        path,
+        value,
+        build: Box::new(build),
+    }
+    .into_any_element()
+}
+
+#[derive(IntoElement)]
+struct ResetNavigation {
+    key: ElementId,
+    c: Ctx,
+    path: Field,
+    value: Value,
+    build: Box<dyn FnOnce(&Ctx) -> El>,
+}
+
+fn reset_path(last: &mut Option<Value>, value: Value, clear: impl FnOnce()) {
+    if crate::behaviors::watch_changed(last, value) {
+        clear();
+    }
+}
+
+impl RenderOnce for ResetNavigation {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let last = window.use_keyed_state(self.key, cx, |_, _| None::<Value>);
+        last.update(cx, |last, _| {
+            reset_path(last, self.value, || {
+                self.c.write(self.path, Value::List(Vec::new()));
+            });
+        });
+        (self.build)(&self.c)
+    }
+}
 
 /// `Navigation`: the root content, or the destination of the last route
 /// pushed onto `path` under a bar with the way back.
@@ -359,4 +405,36 @@ pub fn detail(
                 .children(content),
         )
         .into_any_element()
+}
+
+#[cfg(test)]
+mod reset_tests {
+    use super::*;
+
+    #[test]
+    fn navigation_reset_only_clears_on_mount_or_key_change() {
+        for first in [
+            Value::Int(0),
+            Value::Text("root".into()),
+            Value::unit_variant(0),
+        ] {
+            let mut last = None;
+            let mut path = vec![Value::unit_variant(1)];
+            reset_path(&mut last, first.clone(), || path.clear());
+            assert!(path.is_empty());
+            path.push(Value::unit_variant(2));
+            reset_path(&mut last, first.clone(), || path.clear());
+            assert_eq!(path.len(), 1);
+            reset_path(&mut last, Value::Int(99), || path.clear());
+            assert!(path.is_empty());
+            path.push(Value::unit_variant(2));
+            // Returning to an earlier key is another change, not a cache hit.
+            reset_path(&mut last, first.clone(), || path.clear());
+            assert!(path.is_empty());
+            path.push(Value::unit_variant(2));
+            // A new mount starts with no remembered key, even for the same value.
+            reset_path(&mut None, first, || path.clear());
+            assert!(path.is_empty());
+        }
+    }
 }

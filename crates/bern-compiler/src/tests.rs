@@ -5361,20 +5361,68 @@ fn paste_reads_the_clipboard_into_a_text_draft() {
 
 #[test]
 fn ruby_metadata_accepts_literals_and_conditional_text_without_translations() {
-    for value in [r#""""#, r#""[]""#, "draft.name", r#"if draft.on { draft.name } else { "" }"#] {
+    for value in [
+        r#""""#,
+        r#""[]""#,
+        "draft.name",
+        r#"if draft.on { draft.name } else { "" }"#,
+    ] {
         let body = format!("Text(content: app.title, ruby: {value})");
-        let compiled = compile_ui(&wrap(&body)).unwrap_or_else(|errors| panic!("{value}: {errors:?}"));
+        let compiled =
+            compile_ui(&wrap(&body)).unwrap_or_else(|errors| panic!("{value}: {errors:?}"));
         let mut found = false;
         compiled.app.walk(&mut |node, _| {
             if let ir::Node::Element(element) = node
-                && element.kind == "Text" && element.prop("ruby").is_some() {
+                && element.kind == "Text"
+                && element.prop("ruby").is_some()
+            {
                 assert!(element.expr("ruby").is_some());
                 found = true;
             }
         });
         assert!(found);
-        assert!(!compiled.app.texts.iter().any(|text| text.key.ends_with(".ruby")));
+        assert!(
+            !compiled
+                .app
+                .texts
+                .iter()
+                .any(|text| text.key.ends_with(".ruby"))
+        );
     }
     assert!(errors("Text(content: app.title, ruby: 42)").contains("text"));
     assert!(errors(r#"Text(content: "Hello")"#).contains("B103"));
+}
+
+#[test]
+fn navigation_reset_accepts_stable_keys_but_not_flags() {
+    let view = |key: &str| {
+        wrap(&format!(
+            "Navigation(path: draft.path, reset: {key}) {{ Spacer Destination |route| {{ Spacer }} }}"
+        ))
+        .replace("pub mode: demo::Mode,", "pub mode: demo::Mode, pub path: Vec<demo::Mode>,")
+    };
+    for key in ["draft.mode", "draft.name", "app.count"] {
+        let compiled = compile_ui(&view(key)).unwrap_or_else(|errors| panic!("{errors:?}"));
+        let mut resets = 0;
+        for component in &compiled.app.components {
+            component.body.walk(&mut |node| {
+                if let ir::Node::Element(element) = node
+                    && element.kind == "Navigation"
+                    && element.expr("reset").is_some()
+                {
+                    resets += 1;
+                }
+            });
+        }
+        assert_eq!(resets, 1);
+    }
+    let errors = compile_ui(&view("draft.on"))
+        .err()
+        .expect("a boolean is not a root identity");
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.message.contains("`reset` identifies")),
+        "{errors:?}"
+    );
 }

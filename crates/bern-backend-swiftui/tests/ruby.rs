@@ -8,7 +8,10 @@ use std::path::{Path, PathBuf};
 mod support;
 
 fn workspace() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .unwrap()
 }
 
 fn test_dir(name: &str) -> PathBuf {
@@ -28,7 +31,9 @@ fn generate(platform: &str, backend: &dyn Target) -> PathBuf {
         ""
     };
     for (package, source) in [
-        ("ruby-protocol", r#"
+        (
+            "ruby-protocol",
+            r#"
 #[bern::protocol(namespace = "ruby", version = 1)]
 pub mod ruby {
     use bern::prelude::*;
@@ -49,8 +54,11 @@ pub mod ruby {
         fn refresh(&mut self) -> Result<(), CommandError>;
     }
 }
-"#),
-        ("ruby-ui", r#"
+"#,
+        ),
+        (
+            "ruby-ui",
+            r#"
 use bern::prelude::*;
 style! { text { body: font(size: 24, weight: medium), } }
 #[component]
@@ -73,14 +81,22 @@ pub fn app(app: ruby::Client, windows: AppWindows) -> impl View {
         }
     }
 }
-"#),
+"#,
+        ),
         ("ruby-core", ""),
     ] {
         std::fs::create_dir_all(dir.join(package).join("src")).unwrap();
-        std::fs::write(dir.join(package).join("Cargo.toml"), format!("[package]\nname = \"{package}\"\n")).unwrap();
+        std::fs::write(
+            dir.join(package).join("Cargo.toml"),
+            format!("[package]\nname = \"{package}\"\n"),
+        )
+        .unwrap();
         std::fs::write(dir.join(package).join("src/lib.rs"), source).unwrap();
     }
-    std::fs::write(dir.join("Bern.toml"), format!(r#"
+    std::fs::write(
+        dir.join("Bern.toml"),
+        format!(
+            r#"
 [app]
 id = "ruby"
 bundle_id = "dev.bern.ruby"
@@ -102,18 +118,26 @@ root = "app"
 [targets.{platform}]
 platform = "{platform}"
 {frontends}
-"#)).unwrap();
+"#
+        ),
+    )
+    .unwrap();
     let config = bern_compiler::config::load(&dir.join("Bern.toml")).unwrap();
     let compiled = bern_compiler::compile(&config).unwrap_or_else(|errors| panic!("{errors:?}"));
     let context = BuildContext {
-        project_dir: config.dir.clone(), workspace_dir: root.clone(),
-        output_dir: dir.join("generated"), target: config.targets[0].clone(),
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: dir.join("generated"),
+        target: config.targets[0].clone(),
         protocol_package: config.protocol_package.name.clone(),
         protocol_path: config.protocol_package.dir.clone(),
         protocol_module: compiled.protocol_module.clone(),
-        engine_package: config.engine_package.name.clone(), engine_path: config.engine_package.dir.clone(),
-        engine_type: config.engine_type.clone(), modules: Vec::new(),
-        framework: Framework::Path(root.join("crates")), release: false,
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
     };
     let app = compiled.app.on_platform(platform);
     for file in backend.generate(&app, &context).unwrap() {
@@ -125,19 +149,37 @@ platform = "{platform}"
 }
 
 fn assert_generated(output: &Path, sources: &str) {
-    let generated = std::fs::read_to_string(output.join(sources).join("BernGenerated.swift")).unwrap();
+    let generated =
+        std::fs::read_to_string(output.join(sources).join("BernGenerated.swift")).unwrap();
     for expected in [
-        "BernRubyText(text:", "ruby: \"\"", "ruby: \"[]\"", "size: 30.0",
-        "style: \"body\", weight: \"medium\", bold: true", "lineHeight: 52.0, lines: 2",
-        "lit: { Double(bernEngine.lit) }", "path: { BernText.text(bernEngine.path) }", "clock: { Double(bernEngine.clock) }",
-        "since: { Double(bernEngine.since) }", "SwiftUI.Text(verbatim: BernText.text(bernEngine.text))",
-        "BernLitText(text: BernText.text(bernEngine.text)", "bernLit(BernText.text(bernEngine.text), Double(bernEngine.lit))",
+        "BernRubyText(text:",
+        "ruby: \"\"",
+        "ruby: \"[]\"",
+        "size: 30.0",
+        "style: \"body\", weight: \"medium\", bold: true",
+        "lineHeight: 52.0, lines: 2",
+        "lit: { Double(bernEngine.lit) }",
+        "path: { BernText.text(bernEngine.path) }",
+        "clock: { Double(bernEngine.clock) }",
+        "since: { Double(bernEngine.since) }",
+        "SwiftUI.Text(verbatim: BernText.text(bernEngine.text))",
+        "BernLitText(text: BernText.text(bernEngine.text)",
+        "bernLit(BernText.text(bernEngine.text), Double(bernEngine.lit))",
     ] {
-        assert!(generated.contains(expected), "missing {expected}:\n{generated}");
+        assert!(
+            generated.contains(expected),
+            "missing {expected}:\n{generated}"
+        );
     }
     let runtime = std::fs::read_to_string(output.join(sources).join("BernStyle.swift")).unwrap();
-    for expected in ["import CoreText", "CTRubyAnnotationCreateWithAttributes", "CTTypesetterSuggestLineBreak",
-                     "CTLineGetOffsetForStringIndex", ".accessibilityLabel(Text(verbatim: text))", "plain()"] {
+    for expected in [
+        "import CoreText",
+        "CTRubyAnnotationCreateWithAttributes",
+        "CTTypesetterSuggestLineBreak",
+        "CTLineGetOffsetForStringIndex",
+        ".accessibilityLabel(Text(verbatim: text))",
+        "plain()",
+    ] {
         assert!(runtime.contains(expected), "missing {expected}");
     }
 }
@@ -163,8 +205,10 @@ fn native_ruby_preserves_indices_wraps_and_reserves_annotation_height() {
     let root = test_dir("ruby-native");
     std::fs::create_dir_all(&root).unwrap();
     let style = include_str!("../templates/BernStyle.swift");
-    let ruby = &style[style.find("// MARK: - Ruby text").unwrap()..style.find("// MARK: - Text marks").unwrap()];
-    let route = &style[style.find("struct BernLitRoute:").unwrap()..style.find("/// A `Text` lit along").unwrap()];
+    let ruby = &style
+        [style.find("// MARK: - Ruby text").unwrap()..style.find("// MARK: - Text marks").unwrap()];
+    let route = &style[style.find("struct BernLitRoute:").unwrap()
+        ..style.find("/// A `Text` lit along").unwrap()];
     let tests = r##"
 @main struct RubyTest {
     @MainActor static func main() {
@@ -270,10 +314,28 @@ fn native_ruby_preserves_indices_wraps_and_reserves_annotation_height() {
 "##;
     let source = root.join("Ruby.swift");
     let binary = root.join("ruby-test");
-    std::fs::write(&source, format!("import AppKit\nimport SwiftUI\nimport CoreText\n{ruby}\n{route}\n{tests}")).unwrap();
-    let compiled = Command::new("xcrun").args(["swiftc", "-swift-version", "6", "-parse-as-library"])
-        .arg(&source).arg("-o").arg(&binary).output().unwrap();
-    assert!(compiled.status.success(), "{}", String::from_utf8_lossy(&compiled.stderr));
+    std::fs::write(
+        &source,
+        format!("import AppKit\nimport SwiftUI\nimport CoreText\n{ruby}\n{route}\n{tests}"),
+    )
+    .unwrap();
+    let compiled = Command::new("xcrun")
+        .args(["swiftc", "-swift-version", "6", "-parse-as-library"])
+        .arg(&source)
+        .arg("-o")
+        .arg(&binary)
+        .output()
+        .unwrap();
+    assert!(
+        compiled.status.success(),
+        "{}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
     let ran = Command::new(&binary).output().unwrap();
-    assert!(ran.status.success(), "{}\n{}", String::from_utf8_lossy(&ran.stdout), String::from_utf8_lossy(&ran.stderr));
+    assert!(
+        ran.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&ran.stdout),
+        String::from_utf8_lossy(&ran.stderr)
+    );
 }

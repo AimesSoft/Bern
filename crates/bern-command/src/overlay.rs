@@ -160,19 +160,26 @@ impl Line {
             return Vec::new();
         };
         let count = self.text.chars().count();
-        let mut spans: Vec<_> = values.into_iter().filter_map(|value| {
-            let row = value.as_array()?;
-            if row.len() != 3 { return None; }
-            let start = usize::try_from(row[0].as_u64()?).ok()?;
-            let end = usize::try_from(row[1].as_u64()?).ok()?;
-            let reading = row[2].as_str()?;
-            (start < end && end <= count && !reading.is_empty())
-                .then(|| (start, end, reading.to_string()))
-        }).collect();
+        let mut spans: Vec<_> = values
+            .into_iter()
+            .filter_map(|value| {
+                let row = value.as_array()?;
+                if row.len() != 3 {
+                    return None;
+                }
+                let start = usize::try_from(row[0].as_u64()?).ok()?;
+                let end = usize::try_from(row[1].as_u64()?).ok()?;
+                let reading = row[2].as_str()?;
+                (start < end && end <= count && !reading.is_empty())
+                    .then(|| (start, end, reading.to_string()))
+            })
+            .collect();
         spans.sort_by_key(|span| (span.0, span.1));
         let mut end = 0;
         spans.retain(|span| {
-            if span.0 < end { return false; }
+            if span.0 < end {
+                return false;
+            }
             end = span.1;
             true
         });
@@ -533,8 +540,14 @@ mod mac {
 
     #[link(name = "CoreText", kind = "framework")]
     unsafe extern "C" {
-        fn CTLineCreateWithAttributedString(text: *const std::ffi::c_void) -> *const std::ffi::c_void;
-        fn CTLineGetOffsetForStringIndex(line: *const std::ffi::c_void, index: isize, secondary: *mut f64) -> f64;
+        fn CTLineCreateWithAttributedString(
+            text: *const std::ffi::c_void,
+        ) -> *const std::ffi::c_void;
+        fn CTLineGetOffsetForStringIndex(
+            line: *const std::ffi::c_void,
+            index: isize,
+            secondary: *mut f64,
+        ) -> f64;
     }
 
     #[link(name = "CoreFoundation", kind = "framework")]
@@ -550,10 +563,16 @@ mod mac {
         // SAFETY: NSAttributedString is toll-free bridged to its CF type;
         // the created CTLine is released after its UTF-16 offset is read.
         unsafe {
-            let shaped = CTLineCreateWithAttributedString((&*text as *const _) as *const std::ffi::c_void);
-            if shaped.is_null() { return 0.0; }
-            let edge = CTLineGetOffsetForStringIndex(shaped,
-                line.text[..byte].encode_utf16().count() as isize, std::ptr::null_mut());
+            let shaped =
+                CTLineCreateWithAttributedString((&*text as *const _) as *const std::ffi::c_void);
+            if shaped.is_null() {
+                return 0.0;
+            }
+            let edge = CTLineGetOffsetForStringIndex(
+                shaped,
+                line.text[..byte].encode_utf16().count() as isize,
+                std::ptr::null_mut(),
+            );
             CFRelease(shaped);
             edge
         }
@@ -583,16 +602,13 @@ mod mac {
     impl Lit {
         fn width_to(&mut self, at: usize, mtm: MainThreadMarker) -> f64 {
             let line = &self.line;
-            *self
-                .widths
-                .entry(at)
-                .or_insert_with(|| {
-                    if line.ruby_spans().is_empty() {
-                        styled(line, &line.text[..at], 1.0, mtm).frame().size.width
-                    } else {
-                        source_edge(line, at, mtm) + 4.0
-                    }
-                })
+            *self.widths.entry(at).or_insert_with(|| {
+                if line.ruby_spans().is_empty() {
+                    styled(line, &line.text[..at], 1.0, mtm).frame().size.width
+                } else {
+                    source_edge(line, at, mtm) + 4.0
+                }
+            })
         }
 
         /// How wide the line is as far as `place`.
@@ -799,12 +815,20 @@ mod mac {
         }
         let size = base.frame().size;
         let band = line.size * 0.7 + 4.0;
-        let view = NSView::initWithFrame(NSView::alloc(mtm), NSRect::new(
-            NSPoint::new(0.0, 0.0), NSSize::new(size.width, size.height + band),
-        ));
+        let view = NSView::initWithFrame(
+            NSView::alloc(mtm),
+            NSRect::new(
+                NSPoint::new(0.0, 0.0),
+                NSSize::new(size.width, size.height + band),
+            ),
+        );
         view.addSubview(&base);
-        let offsets: Vec<_> = line.text.char_indices().map(|(at, _)| at)
-            .chain(std::iter::once(line.text.len())).collect();
+        let offsets: Vec<_> = line
+            .text
+            .char_indices()
+            .map(|(at, _)| at)
+            .chain(std::iter::once(line.text.len()))
+            .collect();
         for (start, end, reading) in spans {
             let start_edge = source_edge(line, offsets[start], mtm) + 2.0;
             let end_edge = source_edge(line, offsets[end], mtm) + 2.0;
@@ -816,7 +840,10 @@ mod mac {
             style.size *= (width / measured.max(1.0)).min(1.0);
             let ruby = styled(&style, &reading, alpha, mtm);
             let ruby_size = ruby.frame().size;
-            ruby.setFrameOrigin(NSPoint::new(left + (width - ruby_size.width) / 2.0, size.height));
+            ruby.setFrameOrigin(NSPoint::new(
+                left + (width - ruby_size.width) / 2.0,
+                size.height,
+            ));
             // The original field remains the accessible text, without a
             // second traversal through the pronunciation decorations.
             let _: () = unsafe { msg_send![&*ruby, setAccessibilityElement: false] };
@@ -1777,7 +1804,15 @@ mod win {
     }
 
     type Reading = (IDWriteTextLayout, f32, f32);
-    type DrawnLine = (IDWriteTextLayout, f32, f32, [u8; 4], Option<usize>, Vec<Reading>, f32);
+    type DrawnLine = (
+        IDWriteTextLayout,
+        f32,
+        f32,
+        [u8; 4],
+        Option<usize>,
+        Vec<Reading>,
+        f32,
+    );
 
     unsafe fn draw(
         window: &mut Window,
@@ -1799,18 +1834,40 @@ mod win {
                 .filter_map(|(index, line)| {
                     layout(dwrite, line, scale).map(|(layout, w, h)| {
                         let spans = line.ruby_spans();
-                        let band = if spans.is_empty() { 0.0 } else { line.size as f32 * scale * 0.7 };
-                        let units: Vec<u32> = line.text.chars().scan(0, |at, c| {
-                            let start = *at;
-                            *at += c.len_utf16() as u32;
-                            Some(start)
-                        }).chain(std::iter::once(line.text.encode_utf16().count() as u32)).collect();
+                        let band = if spans.is_empty() {
+                            0.0
+                        } else {
+                            line.size as f32 * scale * 0.7
+                        };
+                        let units: Vec<u32> = line
+                            .text
+                            .chars()
+                            .scan(0, |at, c| {
+                                let start = *at;
+                                *at += c.len_utf16() as u32;
+                                Some(start)
+                            })
+                            .chain(std::iter::once(line.text.encode_utf16().count() as u32))
+                            .collect();
                         let mut readings = Vec::new();
                         for (start, end, text) in spans {
                             let (mut left, mut right, mut y) = (0.0, 0.0, 0.0);
                             let mut hit = DWRITE_HIT_TEST_METRICS::default();
-                            if layout.HitTestTextPosition(units[start], false, &mut left, &mut y, &mut hit).is_err()
-                                || layout.HitTestTextPosition(units[end], false, &mut right, &mut y, &mut hit).is_err() {
+                            if layout
+                                .HitTestTextPosition(
+                                    units[start],
+                                    false,
+                                    &mut left,
+                                    &mut y,
+                                    &mut hit,
+                                )
+                                .is_err()
+                                || layout
+                                    .HitTestTextPosition(
+                                        units[end], false, &mut right, &mut y, &mut hit,
+                                    )
+                                    .is_err()
+                            {
                                 continue;
                             }
                             let available = (right - left).abs().max(1.0);
@@ -1819,12 +1876,26 @@ mod win {
                             style.size *= 0.45;
                             if let Some((_, measured, _)) = self::layout(dwrite, &style, scale) {
                                 style.size *= (available / measured.max(1.0)).min(1.0) as f64;
-                                if let Some((reading, wide, high)) = self::layout(dwrite, &style, scale) {
-                                    readings.push((reading, left.min(right) + (available - wide) / 2.0, (band - high).max(0.0)));
+                                if let Some((reading, wide, high)) =
+                                    self::layout(dwrite, &style, scale)
+                                {
+                                    readings.push((
+                                        reading,
+                                        left.min(right) + (available - wide) / 2.0,
+                                        (band - high).max(0.0),
+                                    ));
                                 }
                             }
                         }
-                        (layout, w, h + band, line.color, line.lights().then_some(index), readings, band)
+                        (
+                            layout,
+                            w,
+                            h + band,
+                            line.color,
+                            line.lights().then_some(index),
+                            readings,
+                            band,
+                        )
                     })
                 })
                 .collect();
@@ -1999,7 +2070,8 @@ mod win {
                 }
                 let shadow = dark(0.75)?;
                 let mut top = margin + bar_height;
-                for (layout, line_width, line_height, [r, g, b, a], index, readings, band) in &lines {
+                for (layout, line_width, line_height, [r, g, b, a], index, readings, band) in &lines
+                {
                     let left = (width as f32 - line_width) / 2.0;
                     let alpha = if dim && index.is_some() {
                         super::FADED as f32
@@ -2028,15 +2100,32 @@ mod win {
                             D2D1_DRAW_TEXT_OPTIONS_NONE,
                         );
                     }
-                    let at = Vector2 { X: left, Y: top + band };
+                    let at = Vector2 {
+                        X: left,
+                        Y: top + band,
+                    };
                     target.DrawTextLayout(at, layout, &brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
                     for (reading, x, y) in readings {
                         for (dx, dy) in [(1.0, 1.5), (0.0, 1.0), (1.0, 0.0), (-0.5, 1.0)] {
-                            target.DrawTextLayout(Vector2 { X: left + x + dx * scale, Y: top + y + dy * scale },
-                                reading, &shadow, D2D1_DRAW_TEXT_OPTIONS_NONE);
+                            target.DrawTextLayout(
+                                Vector2 {
+                                    X: left + x + dx * scale,
+                                    Y: top + y + dy * scale,
+                                },
+                                reading,
+                                &shadow,
+                                D2D1_DRAW_TEXT_OPTIONS_NONE,
+                            );
                         }
-                        target.DrawTextLayout(Vector2 { X: left + x, Y: top + y },
-                            reading, &brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
+                        target.DrawTextLayout(
+                            Vector2 {
+                                X: left + x,
+                                Y: top + y,
+                            },
+                            reading,
+                            &brush,
+                            D2D1_DRAW_TEXT_OPTIONS_NONE,
+                        );
                     }
                     if let Some(index) = index {
                         let mut edges = Vec::new();
@@ -2237,12 +2326,20 @@ mod tests {
 
     #[test]
     fn ruby_ranges_count_unicode_scalars_and_reject_invalid_spans() {
-        let line = ruby_line("a😀漢字", r#"[[2,4,"かんじ"],[0,1,"えー"],[1,1,"empty"],[3,5,"outside"],[-1,1,"negative"],[2,3,"overlap"],[1.5,2,"fraction"],[1,2,7]]"#);
+        let line = ruby_line(
+            "a😀漢字",
+            r#"[[2,4,"かんじ"],[0,1,"えー"],[1,1,"empty"],[3,5,"outside"],[-1,1,"negative"],[2,3,"overlap"],[1.5,2,"fraction"],[1,2,7]]"#,
+        );
         // Sorting is stable by source start/end; overlapping entries lose
         // to the first accepted range, and emoji counts as one scalar.
-        assert_eq!(line.ruby_spans(), vec![(0, 1, "えー".into()), (2, 3, "overlap".into())]);
-        assert_eq!(ruby_line("😀漢字", r#"[[1,3,"かんじ"]]"#).ruby_spans(),
-            vec![(1, 3, "かんじ".into())]);
+        assert_eq!(
+            line.ruby_spans(),
+            vec![(0, 1, "えー".into()), (2, 3, "overlap".into())]
+        );
+        assert_eq!(
+            ruby_line("😀漢字", r#"[[1,3,"かんじ"]]"#).ruby_spans(),
+            vec![(1, 3, "かんじ".into())]
+        );
         for invalid in ["", "not json", "{}", "[null]", r#"[[0,1,""]]"#] {
             assert!(ruby_line("漢", invalid).ruby_spans().is_empty());
         }
@@ -2250,9 +2347,15 @@ mod tests {
 
     #[test]
     fn ruby_is_a_json_string_and_layout_changes_are_not_cheap_lit() {
-        let shown = Overlay { lines: vec![ruby_line("漢😀", r#"[[0,1,"か\"ん\n"]]"#)], ..Overlay::default() };
+        let shown = Overlay {
+            lines: vec![ruby_line("漢😀", r#"[[0,1,"か\"ん\n"]]"#)],
+            ..Overlay::default()
+        };
         let value: serde_json::Value = serde_json::from_str(&as_json(&shown)).unwrap();
-        assert_eq!(value["lines"][0]["ruby"].as_str(), Some(shown.lines[0].ruby.as_str()));
+        assert_eq!(
+            value["lines"][0]["ruby"].as_str(),
+            Some(shown.lines[0].ruby.as_str())
+        );
         let mut next = shown.clone();
         next.lines[0].lit = Some(0.5);
         assert_eq!(shown.change_to(&next), Change::Lit);

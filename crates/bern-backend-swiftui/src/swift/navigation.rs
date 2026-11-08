@@ -496,6 +496,12 @@ impl Generator<'_> {
         }
         self.toolbar(out, &content, &inner);
         out.close("}");
+        if let Some(reset) = element.expr("reset") {
+            out.line(format!(
+                ".onChange(of: {}, initial: true) {{ {path}.removeAll() }}",
+                self.expr(reset)
+            ));
+        }
         if element.id.is_some() {
             out.line(format!(
                 ".bernControl({}, role: \"navigation\", label: \"\", actions: BernControlActions(back: {{ guard !{path}.isEmpty else {{ return false }}; {path}.removeLast(); return true }}, value: {{ String({path}.count) }}))",

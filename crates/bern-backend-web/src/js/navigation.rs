@@ -113,8 +113,12 @@ impl Generator<'_> {
             .as_ref()
             .map(|_| format!("id: {}, ", self.id(element)))
             .unwrap_or_default();
+        let reset = element
+            .expr("reset")
+            .map(|reset| format!(", reset: () => {}", self.expr(reset)))
+            .unwrap_or_default();
         out.open(format!(
-            "B.Navigation(p, ctx, {{ {id}path: {path} }}, (p, ctx) => {{"
+            "B.Navigation(p, ctx, {{ {id}path: {path}{reset} }}, (p, ctx) => {{"
         ));
         self.nodes(out, &content);
         let var = destination

@@ -527,13 +527,19 @@ struct Watcher {
 impl RenderOnce for Watcher {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let last = window.use_keyed_state(self.key, cx, |_, _| None::<Value>);
-        let changed = last.read(cx).as_ref() != Some(&self.value);
-        if changed {
-            last.update(cx, |last, _| *last = Some(self.value));
+        if last.update(cx, |last, _| watch_changed(last, self.value)) {
             (self.run)();
         }
         div().absolute()
     }
+}
+
+pub(crate) fn watch_changed(last: &mut Option<Value>, value: Value) -> bool {
+    if last.as_ref() == Some(&value) {
+        return false;
+    }
+    *last = Some(value);
+    true
 }
 
 /// `Watch`: the action when mounted and whenever the value changes.

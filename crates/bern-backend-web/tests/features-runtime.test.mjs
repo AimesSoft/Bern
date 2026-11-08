@@ -1915,3 +1915,102 @@ test("a picked folder is held by the page as the engine lists it", () => {
   assert.deepEqual(Array.from(inside.entries, (entry) => [entry.name, entry.folder, entry.size]), [["c.flac", false, 7]]);
   assert.equal(F.folderURL([]), null, "the browser names no folder without files");
 });
+
+
+for (const [kind, first, same, next] of [
+  ["Int", 0n, 0n, 1n],
+  ["Text", "", "", "other"],
+  ["Enum", 0, 0, 1],
+  ["structural Enum", { tag: 0, fields: ["root"] }, { tag: 0, fields: ["root"] }, { tag: 0, fields: ["other"] }],
+]) {
+  test(`Navigation reset clears only on mount and changed ${kind} keys`, () => {
+    const { B, Element } = runtime();
+    const key = B.cell(first);
+    const unrelated = B.cell(0);
+    const routes = B.cell(["stale"]);
+    let writes = 0, roots = 0, destinations = 0, disposed = 0;
+    const path = {
+      get: () => routes.get(), peek: () => routes.peek(),
+      set(value) { writes++; routes.set(value); },
+    };
+    const parent = new Element("root");
+    const owner = new B.Scope();
+    B.within(owner, () => B.Navigation(parent, {}, {
+      path, reset: () => { unrelated.get(); return key.get(); },
+    }, () => {
+      roots++;
+      assert.equal(routes.peek().length, 0, "clear before the root is built");
+    }, (_, __, route) => {
+      destinations++;
+      assert.notEqual(route(), "stale", "never mount a stale destination");
+      B.onCleanup(() => disposed++);
+    }));
+    assert.equal(writes, 1);
+    assert.equal(roots, 1);
+    assert.equal(destinations, 0);
+    assert.equal(key.readers.size, 1, "one reset watch per mount");
+    assert.equal(routes.readers.size, 1, "only navigation rendering subscribes to path");
+
+    routes.set(["child"]);
+    assert.equal(destinations, 1);
+    assert.equal(parent.children[0].hidden, true);
+    assert.equal(writes, 1, "pushing does not reset");
+    key.set(same);
+    unrelated.set(1);
+    assert.equal(writes, 1, "equal keys and ordinary reactive reruns do not reset");
+    assert.deepEqual(routes.peek(), ["child"]);
+
+    B.batch(() => { key.set(next); unrelated.set(2); });
+    assert.equal(writes, 2, "coalesced dependencies reset only once");
+    assert.equal(routes.peek().length, 0);
+    assert.equal(parent.children[0].hidden, false);
+    assert.equal(parent.children[1].hidden, true);
+    assert.equal(disposed, 1, "the old destination scope is released");
+    assert.equal(roots, 1, "changing the key does not rebuild the root");
+    routes.set(["new child"]);
+    unrelated.set(3);
+    assert.equal(writes, 2);
+    assert.equal(destinations, 2);
+    key.set(first);
+    assert.equal(writes, 3, "returning to an earlier key is still a change");
+    assert.equal(routes.peek().length, 0);
+    unrelated.set(4);
+    assert.equal(writes, 3, "clearing an empty path never loops");
+
+    owner.dispose();
+    assert.equal(key.readers.size, 0);
+    assert.equal(routes.readers.size, 0);
+    routes.set(["unmounted"]);
+    key.set(next);
+    assert.equal(writes, 3, "an unmounted Navigation no longer watches");
+    const remount = new B.Scope();
+    B.within(remount, () => B.Navigation(new Element("root"), {}, {
+      path, reset: () => key.get(),
+    }, () => {}, () => assert.fail("remount must clear first")));
+    assert.equal(writes, 4, "a new mount clears even the same key");
+    assert.equal(routes.peek().length, 0);
+    remount.dispose();
+  });
+}
+
+test("Navigation without reset preserves its path and other Navigation resets are isolated", () => {
+  const { B, Element } = runtime();
+  const routes = B.cell(["restored"]);
+  const untouched = B.cell(["another navigation"]);
+  const key = B.cell("home");
+  const owner = new B.Scope();
+  const shown = [];
+  B.within(owner, () => {
+    B.Navigation(new Element("root"), {}, { path: routes }, () => {}, (_, __, route) => shown.push(route()));
+    B.Navigation(new Element("root"), {}, { path: untouched, reset: () => key.get() }, () => {}, () => {});
+  });
+  assert.deepEqual(routes.peek(), ["restored"]);
+  assert.deepEqual(shown, ["restored"]);
+  untouched.set(["child"]);
+  key.set("other");
+  assert.equal(untouched.peek().length, 0);
+  assert.deepEqual(routes.peek(), ["restored"]);
+  routes.set(["restored", "next"]);
+  assert.deepEqual(shown, ["restored", "next"]);
+  owner.dispose();
+});

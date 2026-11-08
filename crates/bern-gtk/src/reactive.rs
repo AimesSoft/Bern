@@ -261,6 +261,23 @@ pub fn effect(body: impl Fn() + 'static) {
     effect.run();
 }
 
+/// Observe a value once on mount and on changes, without subscribing to
+/// anything the action reads or writes.
+pub(crate) fn watch<T: PartialEq + 'static>(
+    value: impl Fn() -> T + 'static,
+    action: impl Fn() + 'static,
+) {
+    let last = RefCell::new(None);
+    effect(move || {
+        let now = value();
+        if last.borrow().as_ref() == Some(&now) {
+            return;
+        }
+        *last.borrow_mut() = Some(now);
+        untrack(&action);
+    });
+}
+
 /// Apply several changes and re-run each affected effect once afterwards.
 pub fn batch<R>(body: impl FnOnce() -> R) -> R {
     DEPTH.with(|depth| depth.set(depth.get() + 1));
@@ -498,5 +515,56 @@ mod tests {
         });
         assert_eq!(runs.get(), 4);
         scope.dispose();
+    }
+}
+
+#[cfg(test)]
+mod navigation_reset_tests {
+    use super::*;
+
+    #[test]
+    fn navigation_reset_tracks_only_key_and_stops_on_unmount() {
+        let key = Cell::new(0);
+        let path = Cell::new(vec![1]);
+        let clears = Rc::new(StdCell::new(0));
+        let mount = || {
+            let scope = Scope::detached();
+            let (key, path, clears) = (key.clone(), path.clone(), clears.clone());
+            scope.run(|| {
+                watch(
+                    move || key.get(),
+                    move || {
+                        // Deliberately read path: it must not become a dependency.
+                        let _ = path.get();
+                        path.set(Vec::new());
+                        clears.set(clears.get() + 1);
+                    },
+                )
+            });
+            scope
+        };
+        let scope = mount();
+        assert!(path.peek().is_empty());
+        assert_eq!(clears.get(), 1);
+        path.set(vec![2]);
+        key.set(0);
+        assert_eq!(path.peek(), vec![2]);
+        assert_eq!(clears.get(), 1);
+        key.set(1);
+        assert!(path.peek().is_empty());
+        assert_eq!(clears.get(), 2);
+        path.set(vec![3]);
+        key.set(0);
+        assert!(path.peek().is_empty());
+        assert_eq!(clears.get(), 3);
+        scope.dispose();
+        path.set(vec![4]);
+        key.set(1);
+        assert_eq!(path.peek(), vec![4]);
+        assert_eq!(clears.get(), 3);
+        let remounted = mount();
+        assert!(path.peek().is_empty());
+        assert_eq!(clears.get(), 4);
+        remounted.dispose();
     }
 }

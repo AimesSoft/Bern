@@ -765,14 +765,93 @@ fn text_ruby_is_bound_metadata_for_plain_and_marked_text() {
     let app = app();
     for marked in [false, true] {
         let mut text = element("Text");
-        text.props.insert("content".into(), dynamic_text(literal_expr(Value::Text("字𠮷文".into()), Type::Text)));
-        text.props.insert("ruby".into(), Prop::Expr { expr: literal_expr(Value::Text("[[1,2,\"よし\"]]".into()), Type::Text) });
-        if marked { text.props.insert("mark".into(), keyword("accent")); }
+        text.props.insert(
+            "content".into(),
+            dynamic_text(literal_expr(Value::Text("字𠮷文".into()), Type::Text)),
+        );
+        text.props.insert(
+            "ruby".into(),
+            Prop::Expr {
+                expr: literal_expr(Value::Text("[[1,2,\"よし\"]]".into()), Type::Text),
+            },
+        );
+        if marked {
+            text.props.insert("mark".into(), keyword("accent"));
+        }
         let mut out = Out::default();
         Generator::new(&app).element(&mut out, &text);
         let generated = out.finish();
         assert!(generated.contains("ruby:"), "{generated}");
         assert!(generated.contains("よし"), "{generated}");
-        assert!(generated.contains(if marked { "F.MarkedText" } else { "B.Text" }), "{generated}");
+        assert!(
+            generated.contains(if marked { "F.MarkedText" } else { "B.Text" }),
+            "{generated}"
+        );
     }
+}
+
+#[test]
+fn navigation_reset_is_an_optional_live_key_getter() {
+    let mut app = app();
+    app.sessions.push(SessionDef {
+        name: "draft".into(),
+        fields: vec![SessionFieldDef {
+            name: "routes".into(),
+            ty: Type::list(Type::Text),
+            initial: Value::List(vec![]),
+        }],
+    });
+    let mut navigation = element("Navigation");
+    navigation.props.insert(
+        "path".into(),
+        Prop::Field {
+            field: FieldRef {
+                session: "draft".into(),
+                field: 0,
+                ty: Type::list(Type::Text),
+            },
+        },
+    );
+    let generate = |navigation: &Element| {
+        let mut out = Out::default();
+        Generator::new(&app).navigation(&mut out, navigation);
+        out.finish()
+    };
+    let original = generate(&navigation);
+    assert!(
+        original.contains("path: ctx.s.draft.routes },"),
+        "{original}"
+    );
+    assert!(!original.contains("reset:"));
+    for ty in [
+        Type::Int,
+        Type::Text,
+        Type::Enum {
+            name: "Page".into(),
+        },
+    ] {
+        navigation.props.insert(
+            "reset".into(),
+            Prop::Expr {
+                expr: Expr {
+                    ty: ty.clone(),
+                    kind: ExprKind::Binding {
+                        binding: Binding::Local {
+                            name: "root_key".into(),
+                            path: vec![],
+                            root: ty,
+                        },
+                    },
+                },
+            },
+        );
+        let generated = generate(&navigation);
+        assert!(
+            generated.contains("path: ctx.s.draft.routes, reset: () => l_root_key() },"),
+            "{generated}"
+        );
+        assert_eq!(generated.matches("reset:").count(), 1, "{generated}");
+    }
+    navigation.props.remove("reset");
+    assert_eq!(generate(&navigation), original);
 }

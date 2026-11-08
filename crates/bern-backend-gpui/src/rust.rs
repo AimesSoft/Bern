@@ -451,7 +451,7 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
     ("ScaleBox", &["width", "height"]),
     ("Positioned", &["x", "y", "width", "height", "bleed"]),
     ("Rail", &["axis", "anchor"]),
-    ("Navigation", &["path", "id"]),
+    ("Navigation", &["path", "reset", "id"]),
     ("NavLink", &["id", "route"]),
     ("Destination", &[]),
     ("SplitView", &[]),
@@ -2504,7 +2504,10 @@ pub fn app() -> b::AppDef {{
                     Some(bold) => self.condition(bold),
                     None => "false".into(),
                 },
-                element.expr("ruby").map(|expr| format!("Some(rt::plain(&{}))", self.expr(expr, at))).unwrap_or_else(|| "None".into()),
+                element
+                    .expr("ruby")
+                    .map(|expr| format!("Some(rt::plain(&{}))", self.expr(expr, at)))
+                    .unwrap_or_else(|| "None".into()),
             ),
             "Label" => format!(
                 "b::label(c, {}, {}, b::TextStyle::{}, {}, {})",
@@ -2981,12 +2984,20 @@ pub fn app() -> b::AppDef {{
                 let pushed = destination
                     .map(|destination| column(&destination.children))
                     .unwrap_or_else(|| "Vec::new()".into());
-                format!(
+                let body = format!(
                     "{{ let c = &c.in_navigation({field}); let path = rt::as_list(c.session({session}, {})); match path.last().cloned() {{ Some(route) => {{ let c = &c.with_local({}, route); b::navigation(c, {field}, path.len(), None, {pushed}) }} None => b::navigation(c, {field}, 0, None, {}) }} }}",
                     path.field,
                     string(&var),
                     column(&root)
-                )
+                );
+                match element.expr("reset") {
+                    Some(reset) => format!(
+                        "b::navigation_reset(c, {}, {field}, {}, |c| {body})",
+                        id(),
+                        self.expr(reset, at),
+                    ),
+                    None => body,
+                }
             }
             "NavLink" => format!(
                 "b::nav_link(c, {}, {}, {}, {})",
@@ -4085,7 +4096,10 @@ mod tests {
 
     #[test]
     fn text_supports_the_ruby_metadata_property() {
-        let (_, props) = super::COMPONENTS.iter().find(|(name, _)| *name == "Text").unwrap();
+        let (_, props) = super::COMPONENTS
+            .iter()
+            .find(|(name, _)| *name == "Text")
+            .unwrap();
         assert!(props.contains(&"ruby"));
     }
 

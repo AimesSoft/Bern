@@ -1393,8 +1393,10 @@ fn a_canvas_with_nothing_to_draw_is_a_spacer() {
 #[test]
 fn a_bleeding_canvas_passes_the_safe_area() {
     let root = workspace();
-    let (config, compiled) =
-        stage_project(&root.join("target/bern-test/compose-bleed-project"), BLEED_UI);
+    let (config, compiled) = stage_project(
+        &root.join("target/bern-test/compose-bleed-project"),
+        BLEED_UI,
+    );
     let problems = ComposeAndroid.check(&compiled.app, &android(&config));
     assert!(problems.is_empty(), "{problems:?}");
     let files = ComposeAndroid
@@ -1407,7 +1409,11 @@ fn a_bleeding_canvas_passes_the_safe_area() {
         "Canvas(Modifier.matchParentSize().bernBleed(bernBleed).clearAndSetSemantics {}) {",
         "bernBleed.draw(this) {",
     ] {
-        assert_eq!(window.matches(expected).count(), 1, "`{expected}`:\n{window}");
+        assert_eq!(
+            window.matches(expected).count(),
+            1,
+            "`{expected}`:\n{window}"
+        );
     }
     assert!(window.contains("BernScrollColumn("), "{window}");
     assert_eq!(window.matches("Canvas(").count(), 2, "{window}");
@@ -1525,53 +1531,180 @@ fn an_idle_area_watches_where_the_mouse_rests() {
 #[test]
 fn ruby_text_keeps_source_indices_styles_and_timing_in_compose() {
     let metadata = |value: &str| {
-        let bern_ir::Prop::Text { text: bern_ir::Text::Dynamic { expr } } = words(value) else { unreachable!() };
+        let bern_ir::Prop::Text {
+            text: bern_ir::Text::Dynamic { expr },
+        } = words(value)
+        else {
+            unreachable!()
+        };
         bern_ir::Prop::Expr { expr }
     };
     let (config, mut compiled) = compile("showcase");
     let component = compiled.app.components.iter_mut().find(|component| {
         matches!(&component.body, bern_ir::Node::Element(body) if body.kind == "Form")
     }).unwrap();
-    let bern_ir::Node::Element(body) = &mut component.body else { unreachable!() };
-    body.children.push(node("Text", vec![
-        ("content", words("𠮷野\n漢字")),
-        ("ruby", metadata("[[0,2,\"よしの\"],[3,5,\"かんじ\"]]")),
-        ("font_size", number(24.0)),
-        ("lines", number(2.0)),
-        ("lit", number(1.5)),
-        ("lit_path", words("[[0,0],[1,2]]")),
-        ("lit_clock", number(0.25)),
-        ("lit_since", number(42.0)),
-    ], vec![]));
-    body.children.push(node("Text", vec![
-        ("content", words("plain")), ("ruby", metadata("[]")),
-    ], vec![]));
-    body.children.push(node("Text", vec![
-        ("content", words("unchanged")),
-    ], vec![]));
-    let kotlin = bern_backend_compose::Generator::new(&compiled.app)
-        .generate("dev.bern.showcase", 0);
+    let bern_ir::Node::Element(body) = &mut component.body else {
+        unreachable!()
+    };
+    body.children.push(node(
+        "Text",
+        vec![
+            ("content", words("𠮷野\n漢字")),
+            ("ruby", metadata("[[0,2,\"よしの\"],[3,5,\"かんじ\"]]")),
+            ("font_size", number(24.0)),
+            ("lines", number(2.0)),
+            ("lit", number(1.5)),
+            ("lit_path", words("[[0,0],[1,2]]")),
+            ("lit_clock", number(0.25)),
+            ("lit_since", number(42.0)),
+        ],
+        vec![],
+    ));
+    body.children.push(node(
+        "Text",
+        vec![("content", words("plain")), ("ruby", metadata("[]"))],
+        vec![],
+    ));
+    body.children
+        .push(node("Text", vec![("content", words("unchanged"))], vec![]));
+    let kotlin =
+        bern_backend_compose::Generator::new(&compiled.app).generate("dev.bern.showcase", 0);
     assert!(kotlin.contains("BernRubyText(BernText.text("));
     assert!(kotlin.contains("ruby = \"[[0,2,"));
     assert!(kotlin.contains("lines = 2, lit = { 1.5 }"));
     assert!(kotlin.contains("litClock = { 0.25 }, litSince = { 42.0 }"));
     assert!(kotlin.contains("BernText(BernText.text(\"unchanged\")"));
-    let files = ComposeAndroid.generate(&compiled.app, &context(&config, &compiled)).unwrap();
+    let files = ComposeAndroid
+        .generate(&compiled.app, &context(&config, &compiled))
+        .unwrap();
     let views = file(&files, "BernViews.kt");
     for expected in [
-        "rememberTextMeasurer()", "if (spans.isEmpty())", "BernText(text, style, color, lines, lit, litPath, litClock, litSince)",
-        "this.text = androidx.compose.ui.text.AnnotatedString(text)", "body.getLineEnd(line, visibleEnd = true)",
-        "body.size.height + reserve * body.lineCount", "bernRubySlot(centers, index", "text.offsetByCodePoints(offset, 1)",
-    ] { assert!(views.contains(expected), "missing {expected}"); }
+        "rememberTextMeasurer()",
+        "if (spans.isEmpty())",
+        "BernText(text, style, color, lines, lit, litPath, litClock, litSince)",
+        "this.text = androidx.compose.ui.text.AnnotatedString(text)",
+        "body.getLineEnd(line, visibleEnd = true)",
+        "body.size.height + reserve * body.lineCount",
+        "bernRubySlot(centers, index",
+        "text.offsetByCodePoints(offset, 1)",
+    ] {
+        assert!(views.contains(expected), "missing {expected}");
+    }
     let style = file(&files, "BernStyle.kt");
     for expected in [
-        "text.offsetByCodePoints(0, start)", "end > count", "row.opt(2) !is String", "if (it.start < end) false",
-        "span.reading.offsetByCodePoints(0, a)", "(centers[index - 1] + centers[index]) / 2",
-    ] { assert!(style.contains(expected), "missing {expected}"); }
+        "text.offsetByCodePoints(0, start)",
+        "end > count",
+        "row.opt(2) !is String",
+        "if (it.start < end) false",
+        "span.reading.offsetByCodePoints(0, a)",
+        "(centers[index - 1] + centers[index]) / 2",
+    ] {
+        assert!(style.contains(expected), "missing {expected}");
+    }
     let runtime = file(&files, "BernRuntime.kt");
     for expected in [
-        "line.optString(\"ruby\")", "rubySpans = bernRuby(text.toString(), ruby)",
-        "setLineSpacing(height.toFloat(), 1f)", "drawRuby(canvas, shown, lines, lit)",
-        "annotation.textScaleX = minOf(1f", "shown.codePointCount(0, fragment.first.first)",
-    ] { assert!(runtime.contains(expected), "missing {expected}"); }
+        "line.optString(\"ruby\")",
+        "rubySpans = bernRuby(text.toString(), ruby)",
+        "setLineSpacing(height.toFloat(), 1f)",
+        "drawRuby(canvas, shown, lines, lit)",
+        "annotation.textScaleX = minOf(1f",
+        "shown.codePointCount(0, fragment.first.first)",
+    ] {
+        assert!(runtime.contains(expected), "missing {expected}");
+    }
+}
+
+#[test]
+fn navigation_reset_is_remembered_only_by_its_key_before_reading_the_path() {
+    use bern_ir::{Binding, Expr, ExprKind, FieldRef, Prop, SessionDef, SessionFieldDef};
+    use bern_protocol::{EnumDef, Type, Value, VariantDef};
+
+    let (_, mut compiled) = compile("hello");
+    let app = &mut compiled.app;
+    app.types.enums.push(EnumDef {
+        name: "RootPage".into(),
+        variants: vec![VariantDef {
+            name: "Home".into(),
+            fields: vec![],
+            label: None,
+        }],
+    });
+    app.sessions.push(SessionDef {
+        name: "NavigationDraft".into(),
+        fields: vec![
+            SessionFieldDef {
+                name: "routes".into(),
+                ty: Type::list(Type::Text),
+                initial: Value::List(vec![]),
+            },
+            SessionFieldDef {
+                name: "root_key".into(),
+                ty: Type::Int,
+                initial: Value::Int(0),
+            },
+        ],
+    });
+    let path = Prop::Field {
+        field: FieldRef {
+            session: "NavigationDraft".into(),
+            field: 0,
+            ty: Type::list(Type::Text),
+        },
+    };
+    let navigation = |reset: Option<Expr>| {
+        let mut props = vec![("path", path.clone())];
+        if let Some(expr) = reset {
+            props.push(("reset", Prop::Expr { expr }));
+        }
+        node("Navigation", props, vec![])
+    };
+    app.windows.windows[0].content = navigation(None);
+    let original = bern_backend_compose::Generator::new(app).generate("test.navigation", 0);
+    assert!(!original.contains("routes = emptyList()"));
+    for (ty, initial) in [
+        (Type::Int, Value::Int(0)),
+        (Type::Text, Value::Text(String::new())),
+        (
+            Type::Enum {
+                name: "RootPage".into(),
+            },
+            Value::unit_variant(0),
+        ),
+    ] {
+        let session = app.sessions.last_mut().unwrap();
+        session.fields[1].ty = ty.clone();
+        session.fields[1].initial = initial;
+        app.windows.windows[0].content = navigation(Some(Expr {
+            ty,
+            kind: ExprKind::Binding {
+                binding: Binding::Session {
+                    session: "NavigationDraft".into(),
+                    field: 1,
+                    path: vec![],
+                },
+            },
+        }));
+        let generated = bern_backend_compose::Generator::new(app).generate("test.navigation", 0);
+        let reset = generated
+            .find("remember(session_NavigationDraft.rootKey) {")
+            .unwrap();
+        let clear = generated
+            .find("session_NavigationDraft.routes = emptyList()")
+            .unwrap();
+        let select = generated
+            .find("if (session_NavigationDraft.routes.isEmpty())")
+            .unwrap();
+        assert!(reset < clear && clear < select, "{generated}");
+        assert_eq!(generated.matches("routes = emptyList()").count(), 1);
+        assert!(!generated.contains("remember(session_NavigationDraft.routes"));
+        assert!(!generated.contains("LaunchedEffect(session_NavigationDraft"));
+    }
+    app.windows.windows[0].content = navigation(None);
+    // The session's declaration changed, but Navigation without reset still
+    // has precisely the original root/destination selection and no clearing.
+    let generated = bern_backend_compose::Generator::new(app).generate("test.navigation", 0);
+    let selection = "if (session_NavigationDraft.routes.isEmpty())";
+    let body = |source: &str| source[source.find(selection).unwrap()..].to_string();
+    assert_eq!(body(&generated), body(&original));
+    assert!(!generated.contains("routes = emptyList()"));
 }

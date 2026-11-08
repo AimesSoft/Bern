@@ -905,9 +905,13 @@ pub const COMPONENTS: &[ComponentSpec] = &[
     ),
     spec(
         "Navigation",
-        &[req("path", PropKind::PathField), opt("id", PropKind::Id)],
+        &[
+            req("path", PropKind::PathField),
+            opt("id", PropKind::Id),
+            opt("reset", PropKind::KeyValue),
+        ],
         Children::Any,
-        "Push navigation bound to a typed route path",
+        "Push navigation bound to a typed route path; optional `reset` identifies its root: mounting or changing that key clears the path, while ordinary updates preserve it",
     ),
     ComponentSpec {
         template: true,

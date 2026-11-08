@@ -3612,7 +3612,10 @@ export function SplitView(p, ctx, spec, detail) {
 
 /// Push navigation over a typed route path; the top route's destination
 /// replaces the content and the page header offers back.
-export function Navigation(p, ctx, { id, path }, content, destination) {
+export function Navigation(p, ctx, { id, path, reset }, content, destination) {
+  // Watch owns this subscription, compares keys structurally and keeps the
+  // path write untracked. Clear before mounting any root or destination.
+  if (reset !== undefined) Watch(p, ctx, { value: reset }, () => path.set([]));
   const depth = () => path.get().length;
   const back = () => {
     const routes = path.peek();
