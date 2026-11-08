@@ -1330,7 +1330,7 @@ fn content_in_a_window_starts_at_its_top_leading_corner() {
     let runtime = file(&files, "BernRuntime.kt");
     assert!(
         runtime.contains(
-            "Box(Modifier.padding(padding).consumeWindowInsets(padding).imePadding().fillMaxSize(), contentAlignment = Alignment.TopStart) {"
+            ".consumeWindowInsets(padding).imePadding().fillMaxSize(),\n                contentAlignment = Alignment.TopStart,\n"
         ),
         "the window places its content at its top leading corner"
     );
@@ -1385,6 +1385,81 @@ fn a_canvas_with_nothing_to_draw_is_a_spacer() {
     assert_eq!(window.matches("Canvas(").count(), 1, "{window}");
     assert!(window.contains("BernDraw.shape("), "{window}");
 }
+
+/// A backdrop that bleeds keeps its place and draws past the safe area it
+/// reaches; in a vertical scroll view the view keeps room around what it
+/// scrolls for it, the status bar's above. A canvas that does not bleed
+/// draws in its own bounds.
+#[test]
+fn a_bleeding_canvas_passes_the_safe_area() {
+    let root = workspace();
+    let (config, compiled) =
+        stage_project(&root.join("target/bern-test/compose-bleed-project"), BLEED_UI);
+    let problems = ComposeAndroid.check(&compiled.app, &android(&config));
+    assert!(problems.is_empty(), "{problems:?}");
+    let files = ComposeAndroid
+        .generate(&compiled.app, &context(&config, &compiled))
+        .unwrap();
+    let kotlin = file(&files, "BernGenerated.kt");
+    let window = &kotlin[kotlin.find("fun BernWindow0()").unwrap()..];
+    for expected in [
+        "val bernBleed = remember { BernCanvasBleed() }",
+        "Canvas(Modifier.matchParentSize().bernBleed(bernBleed).clearAndSetSemantics {}) {",
+        "bernBleed.draw(this) {",
+    ] {
+        assert_eq!(window.matches(expected).count(), 1, "`{expected}`:\n{window}");
+    }
+    assert!(window.contains("BernScrollColumn("), "{window}");
+    assert_eq!(window.matches("Canvas(").count(), 2, "{window}");
+    // The window gives its safe area; scroll views keep their room, and a
+    // scene has none.
+    let runtime = file(&files, "BernRuntime.kt");
+    assert!(
+        runtime.contains("LocalBernSafeArea provides safeArea"),
+        "{runtime}"
+    );
+    let features = file(&files, "BernFeatures.kt");
+    for expected in [
+        ".bernScrollRoom(room, state)\n                .bernVerticalScroll(state)\n                .bernScrollRoomContent(room),",
+        ".bernScrollRoom(room, state.scroll)",
+        "LocalBernScrollRoom provides if (horizontal) LocalBernScrollRoom.current else room,",
+    ] {
+        assert!(features.contains(expected), "`{expected}`");
+    }
+    let scene = file(&files, "BernScene.kt");
+    assert!(
+        scene.contains("LocalBernSceneRoom provides room, LocalBernSafeArea provides null"),
+        "a scene has no safe area"
+    );
+}
+
+/// A page whose header has a backdrop that bleeds, over a bar that does
+/// not, in a scroll view.
+const BLEED_UI: &str = r#"
+use bern::prelude::*;
+
+#[component]
+pub fn app(app: stage::Client, windows: AppWindows) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Stage" }, initial: open) {
+                ScrollView {
+                    Stack {
+                        Canvas(bleed: true) {
+                            Shape(kind: rect, fill: accent)
+                        }
+                        Text(content: tr! { "en" => "Header" })
+                    }
+                    Canvas(height: 4) {
+                        Shape(kind: rect, fill: accent)
+                    }
+                    Button(id: add, label: tr! { "en" => "Add" }) => app.add()
+                }
+            }
+        }
+    }
+}
+"#;
 
 /// The Gradle project carries a baseline profile naming the Bern runtime
 /// and the generated interface, so that they are compiled ahead of time.

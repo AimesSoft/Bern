@@ -68,8 +68,12 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.inset
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -693,6 +697,89 @@ fun Modifier.bernUnderBars(): Modifier {
         val placeable = measurable.measure(constraints.copy(minWidth = width, maxWidth = width, minHeight = height, maxHeight = height))
         layout(constraints.maxWidth, constraints.maxHeight) { placeable.place(-left, -top) }
     }.pointerInput(Unit) {}
+}
+
+/// How far a drawing reaches past its own bounds at each edge, in pixels.
+data class BernReach(val left: Float, val top: Float, val right: Float, val bottom: Float) {
+    val none: Boolean get() = left <= 0f && top <= 0f && right <= 0f && bottom <= 0f
+
+    companion object {
+        val None = BernReach(0f, 0f, 0f, 0f)
+    }
+}
+
+/// A window's content to its edges and the safe area inside the room the
+/// app bar and the system bars take, for what reaches past it.
+class BernSafeArea {
+    internal var window: LayoutCoordinates? = null
+    internal var safe: LayoutCoordinates? = null
+
+    /// How far `coordinates` would reach to the window's edges past each
+    /// edge of the safe area it reaches; nothing at the others. A layout
+    /// within `slack` of an edge reaches it.
+    fun reach(coordinates: LayoutCoordinates, slack: Float): BernReach {
+        val window = window?.takeIf { it.isAttached } ?: return BernReach.None
+        val safe = safe?.takeIf { it.isAttached } ?: return BernReach.None
+        if (!coordinates.isAttached) return BernReach.None
+        val area = window.localBoundingBoxOf(safe, clipBounds = false)
+        val bounds = window.localBoundingBoxOf(coordinates, clipBounds = false)
+        return BernReach(
+            left = if (bounds.left <= area.left + slack) bounds.left.coerceAtLeast(0f) else 0f,
+            top = if (bounds.top <= area.top + slack) bounds.top.coerceAtLeast(0f) else 0f,
+            right = if (bounds.right >= area.right - slack) (window.size.width - bounds.right).coerceAtLeast(0f) else 0f,
+            bottom = if (bounds.bottom >= area.bottom - slack) (window.size.height - bounds.bottom).coerceAtLeast(0f) else 0f,
+        )
+    }
+}
+
+/// The safe area of the window around; none in a scene, whose layers
+/// bleed by their own rule.
+val LocalBernSafeArea = staticCompositionLocalOf<BernSafeArea?> { null }
+
+/// `Canvas(bleed: true)`: the canvas keeps its place in the layout and its
+/// drawing reaches past each edge of the safe area it reaches, to the
+/// window's edge, under the system bars and the app bar. In a vertical
+/// scroll view only its sides do: at the very top of what the view scrolls
+/// it also fills the room the view keeps above that, under the status bar,
+/// and scrolls away with it; lower down it keeps its place.
+class BernCanvasBleed {
+    internal var sides by mutableStateOf(BernReach.None)
+    internal var room: BernScrollRoom? = null
+    /// The canvas starts where what its scroll view scrolls starts.
+    internal var opens by mutableStateOf(false)
+
+    /// `drawing` over the canvas and the room it reaches.
+    fun draw(scope: DrawScope, drawing: DrawScope.() -> Unit) {
+        val room = room
+        val reach = if (room == null) sides else BernReach(sides.left, if (opens) room.top else 0f, sides.right, 0f)
+        if (reach.none) {
+            scope.drawing()
+        } else {
+            scope.inset(-reach.left, -reach.top, -reach.right, -reach.bottom) { drawing() }
+        }
+    }
+}
+
+/// Follows where a canvas that bleeds is (`BernCanvasBleed`); in a vertical
+/// scroll view it has the view keep its room.
+@Composable
+fun Modifier.bernBleed(bleed: BernCanvasBleed): Modifier {
+    val safe = LocalBernSafeArea.current ?: return this
+    val room = LocalBernScrollRoom.current
+    bleed.room = room
+    if (room != null) {
+        DisposableEffect(room) {
+            room.bleeding += 1
+            onDispose { room.bleeding -= 1 }
+        }
+    }
+    // Half a dp of slack: what is laid out to an edge reaches it.
+    val slack = with(LocalDensity.current) { 0.5.dp.toPx() }
+    return onGloballyPositioned { coordinates ->
+        bleed.sides = safe.reach(coordinates, slack)
+        val content = room?.content?.takeIf { it.isAttached && coordinates.isAttached }
+        bleed.opens = content != null && content.localPositionOf(coordinates, Offset.Zero).y <= slack
+    }
 }
 
 // MARK: - Controls
@@ -2062,6 +2149,7 @@ fun BernWindowRoot(
     context.estimatedHeight = LocalConfiguration.current.screenHeightDp.toDouble()
     val editingRegions = remember(context) { BernEditingRegions() }
     val pointer = remember(context) { BernPointer() }
+    val safeArea = remember(context) { BernSafeArea() }
     CompositionLocalProvider(LocalBernWindow provides context, LocalBernSettled provides settled,
         LocalBernEditingRegions provides editingRegions, LocalBernPointer provides pointer) {
         val chrome = context.chrome
@@ -2129,9 +2217,14 @@ fun BernWindowRoot(
             },
         ) { padding ->
             // What is smaller than the window starts at its top leading
-            // corner, as on the other targets.
-            Box(Modifier.padding(padding).consumeWindowInsets(padding).imePadding().fillMaxSize(), contentAlignment = Alignment.TopStart) {
-              CompositionLocalProvider(LocalBernBarsPadding provides padding) {
+            // corner, as on the other targets. The content to the window's
+            // edges and inside the bars is the safe area what bleeds passes.
+            Box(
+                Modifier.onPlaced { safeArea.window = it }.padding(padding).onPlaced { safeArea.safe = it }
+                    .consumeWindowInsets(padding).imePadding().fillMaxSize(),
+                contentAlignment = Alignment.TopStart,
+            ) {
+              CompositionLocalProvider(LocalBernBarsPadding provides padding, LocalBernSafeArea provides safeArea) {
                 val error = BernHost.startupError
                 if (error != null) {
                     Column(Modifier.padding(24.dp)) {

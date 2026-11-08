@@ -238,7 +238,7 @@ impl Generator<'_> {
                 if let Some(style) = &style {
                     if let Some(size) = style.size() {
                         out.line(format!(
-                            ".controlSize({})",
+                            ".bernControlSize({})",
                             crate::style::control_size(size)
                         ));
                     }

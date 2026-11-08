@@ -272,6 +272,7 @@ pub fn declaration(app: &Application, style: &Resolved) -> String {
     format!("static let {} = BernStyle({})", style.name, args.join(", "))
 }
 
+/// A style's size as a case of `BernControlSize`.
 pub fn control_size(size: ControlSize) -> &'static str {
     match size {
         ControlSize::Small => ".small",

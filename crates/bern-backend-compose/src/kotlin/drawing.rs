@@ -55,8 +55,14 @@ impl Generator<'_> {
             out.line(format!("Spacer({frame}{semantics})"));
             return;
         }
+        // What bleeds keeps its place and draws past the safe area it
+        // reaches, to the window's edge.
+        let bleed = element.keyword("bleed") == Some("true");
         out.open("run {");
         out.line("val bernPalette = bernPalette()");
+        if bleed {
+            out.line("val bernBleed = remember { BernCanvasBleed() }");
+        }
         // The average colors of the pictures shapes are filled from, read
         // while composing so the drawing follows them once known.
         for (index, node) in element.children.iter().enumerate() {
@@ -95,7 +101,12 @@ impl Generator<'_> {
                 values.push(index);
             }
         }
-        out.open(format!("Canvas({frame}{semantics}) {{"));
+        if bleed {
+            out.open(format!("Canvas({frame}.bernBleed(bernBleed){semantics}) {{"));
+            out.open("bernBleed.draw(this) {");
+        } else {
+            out.open(format!("Canvas({frame}{semantics}) {{"));
+        }
         let mut series = 0;
         for (index, node) in element.children.iter().enumerate() {
             // A canvas holds its drawing elements directly.
@@ -160,6 +171,9 @@ impl Generator<'_> {
                 )),
                 _ => {}
             }
+        }
+        if bleed {
+            out.close("}");
         }
         out.close("}");
         out.close("}");

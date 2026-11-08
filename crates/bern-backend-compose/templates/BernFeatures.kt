@@ -42,6 +42,12 @@ import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.unit.toSize
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.unit.offset
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.progressBarRangeInfo
@@ -1621,10 +1627,12 @@ fun BernScroll(
         if (horizontal || barTop == null) 0.dp else (state.viewport.bottom - barTop.value).coerceAtLeast(0f).toDp()
     }
     val seen = remember { BernViewport() }
+    val room = remember { BernScrollRoom() }
     CompositionLocalProvider(
         LocalBernScroll provides state,
         LocalBernArrival provides arrival,
         LocalBernViewport provides if (horizontal) LocalBernViewport.current else seen,
+        LocalBernScrollRoom provides if (horizontal) LocalBernScrollRoom.current else room,
     ) {
         Box(modifier.onGloballyPositioned { state.viewport = it.boundsInRoot(); seen.bounds = state.viewport }) {
             val flinging = if (snap != null) fling else null
@@ -1638,10 +1646,13 @@ fun BernScroll(
                     verticalAlignment = Alignment.CenterVertically,
                 ) { CompositionLocalProvider(LocalBernFlex provides this) { content() } }
             } else {
+                // The items are measured inside the room it keeps.
                 Column(
                     Modifier
                         .fillMaxWidth()
+                        .bernScrollRoom(room, state.scroll)
                         .then(if (flinging != null) Modifier.verticalScroll(state.scroll, flingBehavior = flinging) else Modifier.verticalScroll(state.scroll))
+                        .bernScrollRoomContent(room)
                         .onGloballyPositioned { state.content = it }
                         .padding(PaddingValues(top = margin, bottom = margin + under)),
                     verticalArrangement = Arrangement.spacedBy(gap),
@@ -1666,10 +1677,98 @@ val LocalBernViewport = compositionLocalOf<BernViewport?> { null }
 @Composable
 fun BernScrollColumn(modifier: Modifier, state: ScrollState, content: @Composable ColumnScope.() -> Unit) {
     val viewport = remember { BernViewport() }
-    CompositionLocalProvider(LocalBernViewport provides viewport) {
-        Column(modifier.onGloballyPositioned { viewport.bounds = it.boundsInRoot() }.bernVerticalScroll(state), content = content)
+    val room = remember { BernScrollRoom() }
+    CompositionLocalProvider(LocalBernViewport provides viewport, LocalBernScrollRoom provides room) {
+        Column(
+            modifier.onGloballyPositioned { viewport.bounds = it.boundsInRoot() }
+                .bernScrollRoom(room, state)
+                .bernVerticalScroll(state)
+                .bernScrollRoomContent(room),
+            content = content,
+        )
     }
 }
+
+/// The room a vertical scroll view keeps around what it scrolls. While a
+/// canvas that bleeds is in it, the view reaches past each edge of the
+/// safe area its place reaches at the top and the sides, to the window's
+/// edge, under the status bar, and keeps that much room around what it
+/// scrolls, which stays where it was. A canvas at the very top of the
+/// content fills the room above it.
+class BernScrollRoom {
+    internal var bleeding by mutableIntStateOf(0)
+    internal var place by mutableStateOf(BernReach.None)
+    /// What the view scrolls, inside the room.
+    internal var content: LayoutCoordinates? = null
+    internal val reach: BernReach get() = if (bleeding > 0) place.copy(bottom = 0f) else BernReach.None
+    /// The room kept above what the view scrolls, in pixels.
+    val top: Float get() = reach.top
+}
+
+/// The vertical scroll view around, for the canvases that bleed in it.
+val LocalBernScrollRoom = compositionLocalOf<BernScrollRoom?> { null }
+
+/// A vertical scroll view takes the room `room` keeps. What scrolls up
+/// under the status bar fades there once the content has scrolled, so the
+/// time and the icons stay legible: Android's status bar protection, the
+/// window's background fading out just below the bar. An unscrolled page
+/// keeps its header there, and the room what bleeds fills.
+@Composable
+fun Modifier.bernScrollRoom(room: BernScrollRoom, state: ScrollState): Modifier {
+    val safe = LocalBernSafeArea.current ?: return this
+    val density = LocalDensity.current
+    val slack = with(density) { 0.5.dp.toPx() }
+    val statusBar = WindowInsets.statusBars.getTop(density)
+    val background = MaterialTheme.colorScheme.background
+    val scrolled by remember(state) { derivedStateOf { state.value > 0 } }
+    val shown by animateFloatAsState(if (scrolled) 1f else 0f, tween(200), label = "protection")
+    return onGloballyPositioned { room.place = safe.reach(it, slack) }
+        .layout { measurable, constraints ->
+            val reach = room.reach
+            val left = reach.left.roundToInt()
+            val top = reach.top.roundToInt()
+            val across = left + reach.right.roundToInt()
+            val placeable = measurable.measure(
+                Constraints(
+                    minWidth = constraints.minWidth + across,
+                    maxWidth = if (constraints.hasBoundedWidth) constraints.maxWidth + across else Constraints.Infinity,
+                    minHeight = constraints.minHeight + top,
+                    maxHeight = if (constraints.hasBoundedHeight) constraints.maxHeight + top else Constraints.Infinity,
+                ),
+            )
+            layout((placeable.width - across).coerceAtLeast(0), (placeable.height - top).coerceAtLeast(0)) {
+                placeable.place(-left, -top)
+            }
+        }
+        .drawWithContent {
+            drawContent()
+            if (room.top > 0f && statusBar > 0 && shown > 0f) {
+                val end = statusBar * 1.2f
+                drawRect(
+                    androidx.compose.ui.graphics.Brush.verticalGradient(
+                        listOf(background, background.copy(alpha = 0.8f), Color.Transparent),
+                        startY = 0f,
+                        endY = end,
+                    ),
+                    size = androidx.compose.ui.geometry.Size(size.width, end),
+                    alpha = shown,
+                )
+            }
+        }
+}
+
+/// What a vertical scroll view scrolls, inside the room it keeps.
+fun Modifier.bernScrollRoomContent(room: BernScrollRoom): Modifier =
+    layout { measurable, constraints ->
+        val reach = room.reach
+        val left = reach.left.roundToInt()
+        val top = reach.top.roundToInt()
+        val across = left + reach.right.roundToInt()
+        val placeable = measurable.measure(constraints.offset(horizontal = -across, vertical = -top))
+        layout(constraints.constrainWidth(placeable.width + across), constraints.constrainHeight(placeable.height + top)) {
+            placeable.place(left, top)
+        }
+    }.onPlaced { room.content = it }
 
 /// Where a lazy grid's rows are, kept from its last layout for the
 /// estimates a scroll view's position asks for.

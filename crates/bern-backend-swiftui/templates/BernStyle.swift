@@ -539,12 +539,27 @@ struct BernShadow: Sendable {
     let opacity: Double
 }
 
+/// The size of a control in `style!`. A control the style draws takes its
+/// padding from it, the platform's own control the nearest size it has.
+enum BernControlSize: Sendable {
+    case small, regular, large, extraLarge
+
+    var system: ControlSize {
+        switch self {
+        case .small: return .small
+        case .regular: return .regular
+        case .large: return .large
+        case .extraLarge: return .extraLarge
+        }
+    }
+}
+
 /// A control's style overrides from `style!`.
 struct BernStyle: Sendable {
     var base = BernLook()
     var corner: Double?
     var padding: Double?
-    var size: ControlSize?
+    var size: BernControlSize?
     var hover: BernLook?
     var pressed: BernLook?
     var selected: BernLook?
@@ -629,6 +644,11 @@ extension View {
     /// platform look.
     func bernFeedback(_ style: BernStyle) -> some View {
         modifier(BernFeedback(style: style))
+    }
+
+    /// The platform's own control at the size of a style.
+    func bernControlSize(_ size: BernControlSize) -> some View {
+        controlSize(size.system)
     }
 }
 

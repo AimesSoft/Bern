@@ -133,6 +133,11 @@ const CALLS: &[(&str, &str)] = &[
         "_query = StateObject(wrappedValue: query)",
     ),
     (".inspector(isPresented:", ".bernInspector(isPresented:"),
+    // The largest size of control iOS 16 has.
+    (
+        "case .extraLarge: return .extraLarge",
+        "case .extraLarge: return .large",
+    ),
     // A view that glows reads where the pointer is.
     (
         "@Environment(\\.bernPointer) private var pointer\n",
@@ -150,6 +155,13 @@ const DROPPED: &[&str] = &[
     ".windowResizability(",
     ".inspectorColumnWidth(",
 ];
+
+/// The modifier of iOS 17 that opens a scroll view at a point of what it
+/// scrolls, as the generator writes it.
+const SCROLL_ANCHOR: &str = ".defaultScrollAnchor(";
+
+/// The scroll view such a modifier applies to, as the generator opens it.
+const SCROLL_VIEW: &str = "SwiftUI.ScrollView(";
 
 /// The generated application without its entry point, which an app of both
 /// front ends has elsewhere.
@@ -207,7 +219,7 @@ pub fn rewrite(source: &str) -> String {
         })
         .map(environment)
         .collect();
-    let mut out = views(&classes(lines)).join("\n");
+    let mut out = views(&classes(scroll_anchors(lines))).join("\n");
     out.push('\n');
     out
 }
@@ -228,6 +240,60 @@ fn named_spaces(text: &str) -> String {
     }
     out.push_str(rest);
     out
+}
+
+/// A scroll view that opens at a point of what it scrolls: here what it
+/// scrolls opens it there, wrapped in `BernOpenAt16`, which finds the
+/// platform scroll view around it. The modifier has no form outside.
+fn scroll_anchors(mut lines: Vec<String>) -> Vec<String> {
+    let mut index = 0;
+    while index < lines.len() {
+        let anchor = lines[index]
+            .trim()
+            .strip_prefix(SCROLL_ANCHOR)
+            .and_then(|rest| rest.strip_suffix(')'))
+            .map(str::to_string);
+        if let Some(anchor) = anchor
+            && let Some((open, close)) = scroll_view_of(&lines, index)
+        {
+            lines[open].push_str(&format!(" BernOpenAt16(anchor: {anchor}) {{"));
+            lines[close] = lines[close].replacen('}', "} }", 1);
+            lines.remove(index);
+            continue;
+        }
+        index += 1;
+    }
+    lines
+}
+
+/// The lines that open and close the scroll view a modifier at line `at`
+/// applies to, past the other modifiers in between.
+fn scroll_view_of(lines: &[String], at: usize) -> Option<(usize, usize)> {
+    let mut depth = 0;
+    let mut close = None;
+    for index in (0..at).rev() {
+        let change = braces(&lines[index]);
+        if close.is_none() && change < 0 {
+            close = Some(index);
+        }
+        depth -= change;
+        if depth < 0 {
+            return None;
+        }
+        if let Some(end) = close
+            && depth == 0
+        {
+            if lines[index].contains(SCROLL_VIEW) {
+                return Some((index, end));
+            }
+            // A modifier of several lines; the scroll view comes before.
+            if !lines[index].trim_start().starts_with('.') {
+                return None;
+            }
+            close = None;
+        }
+    }
+    None
 }
 
 /// Objects of a view's environment and state, as iOS 16 follows them.
@@ -558,6 +624,34 @@ mod tests {
     }
 
     #[test]
+    fn what_a_scroll_view_scrolls_opens_it_at_its_anchor() {
+        let source = "        SwiftUI.ScrollView(.vertical) {\n            SwiftUI.Group {\n                Text(\"a\")\n            }\n            .coordinateSpace(.named(bernScrollContentSpace))\n        }\n        .bernScrollTopRoom()\n        .bernScrollPosition($at, anchor: .top, motion: .init { x })\n        .defaultScrollAnchor(UnitPoint(x: 0, y: 0.3))\n        .toolbar {\n        }\n";
+        let out = rewrite(source);
+        assert!(!out.contains("defaultScrollAnchor"), "{out}");
+        assert!(
+            out.contains("        SwiftUI.ScrollView(.vertical) { BernOpenAt16(anchor: UnitPoint(x: 0, y: 0.3)) {\n            SwiftUI.Group {"),
+            "{out}"
+        );
+        assert!(
+            out.contains("        } }\n        .bernScrollTopRoom()\n"),
+            "{out}"
+        );
+        assert!(out.contains("motion: .init { x })\n        .toolbar {"), "{out}");
+    }
+
+    #[test]
+    fn a_scroll_anchor_finds_its_scroll_view_past_a_modifier_of_several_lines() {
+        let source = "SwiftUI.ScrollView(.horizontal) {\n    BernOpenCenter(at: 0.5, horizontal: true) {\n        Text(\"a\")\n    }\n}\n.modifier(Wrap {\n    Text(\"b\")\n})\n.defaultScrollAnchor(UnitPoint(x: 0.5, y: 0))\n";
+        let out = rewrite(source);
+        assert!(
+            out.starts_with("SwiftUI.ScrollView(.horizontal) { BernOpenAt16(anchor: UnitPoint(x: 0.5, y: 0)) {\n    BernOpenCenter("),
+            "{out}"
+        );
+        assert!(out.contains("    }\n} }\n.modifier(Wrap {\n"), "{out}");
+        assert!(!out.contains("defaultScrollAnchor"), "{out}");
+    }
+
+    #[test]
     fn the_entry_point_moves_out_of_the_application() {
         let out = without_entry("@main\nstruct BernApplication: App {\n}\n");
         assert_eq!(out, "struct BernApplication: App {\n}\n");
@@ -589,7 +683,7 @@ mod tests {
                 "`{call}` is in neither the templates nor the generator"
             );
         }
-        for call in DROPPED {
+        for call in DROPPED.iter().chain([&SCROLL_ANCHOR, &SCROLL_VIEW]) {
             assert!(known.contains(call), "`{call}` is gone");
         }
     }
