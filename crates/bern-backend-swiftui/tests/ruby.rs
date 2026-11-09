@@ -176,6 +176,7 @@ fn assert_generated(output: &Path, sources: &str) {
     for expected in [
         "import CoreText",
         "CTRubyAnnotationCreateWithAttributes",
+        "return font as CTFont",
         "CTTypesetterSuggestLineBreak",
         "CTLineGetOffsetForStringIndex",
         ".accessibilityLabel(Text(verbatim: text))",
@@ -229,6 +230,10 @@ fn native_ruby_preserves_indices_wraps_and_reserves_annotation_height() {
     let route = &style[style.find("struct BernLitRoute:").unwrap()
         ..style.find("/// A `Text` lit along").unwrap()];
     let tests = r##"
+private extension BernRubyText {
+    var testNativeFont: CTFont { nativeFont }
+}
+
 @main struct RubyTest {
     @MainActor static func main() {
         let text = "😀東京へ行く。東京へ行く。東京へ行く。";
@@ -325,6 +330,10 @@ fn native_ruby_preserves_indices_wraps_and_reserves_annotation_height() {
         animated.animatableData = AnimatablePair(28, NSFont.Weight.medium.rawValue)
         precondition(animated.size == 28)
         precondition(animated.animatableData.second == NSFont.Weight.medium.rawValue)
+        let systemFont = NSFont.systemFont(ofSize: 28, weight: .medium) as CTFont
+        precondition(CFEqual(CTFontCopyFontDescriptor(animated.testNativeFont),
+                             CTFontCopyFontDescriptor(systemFont)),
+                     "ruby must retain the actual system font descriptor and fallback cascade")
         let route = BernLitRoute("0 0 2 4")
         precondition(route.place(at: 1) == 2)
         print("native ruby passed")

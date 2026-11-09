@@ -2587,7 +2587,9 @@ struct BernRubyText<Plain: View>: View, Animatable {
         let w = UIFont.Weight(rawValue: resolvedWeight)
         let font = style == "code" ? UIFont.monospacedSystemFont(ofSize: pointSize, weight: w) : UIFont.systemFont(ofSize: pointSize, weight: w)
         #endif
-        return CTFontCreateWithName(font.fontName as CFString, pointSize, nil)
+        // Bridge the actual system font. Recreating it from its private name
+        // loses its descriptor, including the weight and CJK fallback cascade.
+        return font as CTFont
     }
 
     private func nativeColor(_ color: Color) -> CGColor {
