@@ -557,7 +557,7 @@ fn typecheck(root: &Path, output: &Path, system: Apple) {
         .arg("-target")
         .arg(target)
         .arg("-module-cache-path")
-        .arg(cache::module_cache(&root))
+        .arg(cache::module_cache(root))
         .arg("-import-objc-header")
         .arg(sources.join("bern.h"))
         .arg(sources.join("BernRuntime.swift"))
