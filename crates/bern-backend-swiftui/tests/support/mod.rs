@@ -73,7 +73,9 @@ pub fn check_front_end(
         ])
         .args(["-swift-version", "6", "-parse-as-library"])
         .arg("-target")
-        .arg(format!("{architecture}-apple-{platform}{minimum}-simulator"))
+        .arg(format!(
+            "{architecture}-apple-{platform}{minimum}-simulator"
+        ))
         .arg("-module-cache-path")
         .arg(
             std::env::var_os("CARGO_TARGET_DIR")
