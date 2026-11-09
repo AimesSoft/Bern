@@ -19,6 +19,7 @@ mod js;
 mod strings;
 mod style;
 mod theme;
+pub mod wasm;
 
 use bern_ir::spec::COMPONENTS;
 use bern_ir::{Application, IR_VERSION, Node};
@@ -696,9 +697,9 @@ impl Target for WebBrowser {
                 cwd: output.join("glue/page"),
                 env: vec![],
             },
-            BuildStep::Copy {
+            BuildStep::WebAssembly {
                 from: module,
-                to: output.join(WASM),
+                dir: output.clone(),
             },
             // Declared resources are served below `resources/`.
             BuildStep::Mirror {
@@ -904,6 +905,17 @@ impl Target for WebBrowser {
                     .map_err(|error| vec![Diagnostic::error(error.to_string())])?
                     .into_iter()
                     .map(|(source, path)| (source, Path::new("extension").join(path))),
+            );
+        }
+        // Optional JavaScript glue and local snippets are part of the static
+        // page in both modes, never a native host or a global runtime install.
+        let bindings = output.join("bindgen");
+        if bindings.is_dir() {
+            files.extend(
+                files_below(&bindings)
+                    .map_err(|error| vec![Diagnostic::error(error.to_string())])?
+                    .into_iter()
+                    .map(|(source, path)| (source, Path::new("bindgen").join(path))),
             );
         }
         // The agent skill, which each build writes afresh.

@@ -207,10 +207,14 @@ async function storageHarness(storage, app = "media", key = "settings") {
     console, TextDecoder, TextEncoder, Uint8Array, DataView, setTimeout, clearTimeout,
     localStorage: storage,
     fetch: async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) }),
-    WebAssembly: { instantiate: async (_, provided) => {
-      imports = provided.bern;
-      return { instance: { exports: { memory, bern_bytes_alloc: () => 0 } } };
-    } },
+    WebAssembly: {
+      compile: async () => ({}),
+      Module: { imports: () => [], exports: () => [] },
+      instantiate: async (_, provided) => {
+        imports = provided.bern;
+        return { exports: { memory, bern_bytes_alloc: () => 0 } };
+      },
+    },
   });
   vm.runInContext(source.replace(/^export /gm, "") + "\nglobalThis.testHost = host;", context);
   await context.testHost.load("test.wasm");

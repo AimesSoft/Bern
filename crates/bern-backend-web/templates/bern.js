@@ -748,8 +748,29 @@ class Host {
     }
     const response = await fetch(url);
     if (!response.ok) throw new Error(`${url}: ${response.status} ${response.statusText}`);
-    const { instance } = await WebAssembly.instantiate(await response.arrayBuffer(), imports);
+    const module = await WebAssembly.compile(await response.arrayBuffer());
+    const bindingModule = "./bern_bindgen_bg.js";
+    const hasBindings = WebAssembly.Module.imports(module).some(item => item.module === bindingModule)
+      || WebAssembly.Module.exports(module).some(item => item.name === "__wbindgen_start");
+    let bindings;
+    if (hasBindings) {
+      if (imports[bindingModule]) throw new Error(`Reserved WASM import module: ${bindingModule}`);
+      const sections = WebAssembly.Module.customSections(module, "bern.bindgen");
+      const path = sections.length === 1 ? new TextDecoder().decode(sections[0]) : "";
+      if (!/^bindgen\/[0-9a-f]{16}\/bern_bindgen_bg\.js$/.test(path))
+        throw new Error("Missing or invalid wasm-bindgen artifact location; rebuild the page with Bern");
+      const wasmURL = new URL(url, document.baseURI);
+      const bindingURL = new URL(path, wasmURL);
+      bindingURL.search = wasmURL.search;
+      bindings = await import(bindingURL.href);
+      imports[bindingModule] = bindings;
+    }
+    const instance = await WebAssembly.instantiate(module, imports);
     this.exports = instance.exports;
+    if (bindings) {
+      bindings.__wbg_set_wasm(this.exports);
+      this.exports.__wbindgen_start?.();
+    }
     this.slot = this.exports.bern_bytes_alloc(16);
   }
 
