@@ -1,4 +1,4 @@
-//! What the tests of iOS targets share.
+//! What the tests of UIKit-based Apple targets share.
 
 use bern_backend_swiftui::MINIMUM_IOS;
 use std::path::Path;
@@ -16,31 +16,43 @@ pub fn check_ios(root: &Path, output: &Path) {
             root,
             &sources,
             &header,
-            "16.0",
+            ("iphonesimulator", "ios", "16.0"),
             &["BernCompat16.swift", "BernLaunch16.swift"],
         );
         check_front_end(
             root,
             &output.join("Sources17"),
             &header,
-            MINIMUM_IOS,
+            ("iphonesimulator", "ios", MINIMUM_IOS),
             &["BernEntry17.swift"],
         );
     } else {
-        check_front_end(root, &sources, &header, MINIMUM_IOS, &[]);
+        check_front_end(
+            root,
+            &sources,
+            &header,
+            ("iphonesimulator", "ios", MINIMUM_IOS),
+            &[],
+        );
     }
 }
 
 /// Compile a front end as far as the compiler's own checks go, which is
 /// further than type-checking: it decides, for example, whether a stored
 /// property is initialized.
-fn check_front_end(root: &Path, sources: &Path, header: &Path, minimum: &str, extra: &[&str]) {
+pub fn check_front_end(
+    root: &Path,
+    sources: &Path,
+    header: &Path,
+    (sdk, platform, minimum): (&str, &str, &str),
+    extra: &[&str],
+) {
     if !Command::new("xcrun")
-        .args(["--sdk", "iphonesimulator", "--show-sdk-path"])
+        .args(["--sdk", sdk, "--show-sdk-path"])
         .output()
         .is_ok_and(|o| o.status.success())
     {
-        eprintln!("no iOS simulator SDK; skipping the check");
+        eprintln!("no {sdk} SDK; skipping the check");
         return;
     }
     let architecture = if std::env::consts::ARCH == "x86_64" {
@@ -52,7 +64,7 @@ fn check_front_end(root: &Path, sources: &Path, header: &Path, minimum: &str, ex
     command
         .args([
             "--sdk",
-            "iphonesimulator",
+            sdk,
             "swiftc",
             "-wmo",
             "-emit-sil",
@@ -61,7 +73,7 @@ fn check_front_end(root: &Path, sources: &Path, header: &Path, minimum: &str, ex
         ])
         .args(["-swift-version", "6", "-parse-as-library"])
         .arg("-target")
-        .arg(format!("{architecture}-apple-ios{minimum}-simulator"))
+        .arg(format!("{architecture}-apple-{platform}{minimum}-simulator"))
         .arg("-module-cache-path")
         .arg(
             std::env::var_os("CARGO_TARGET_DIR")
@@ -86,7 +98,7 @@ fn check_front_end(root: &Path, sources: &Path, header: &Path, minimum: &str, ex
     let result = command.output().unwrap();
     assert!(
         result.status.success(),
-        "swiftc rejected the front end for iOS {minimum}:\n{}",
+        "swiftc rejected the front end for {platform} {minimum}:\n{}",
         String::from_utf8_lossy(&result.stderr)
     );
 }

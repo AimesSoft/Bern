@@ -2572,8 +2572,15 @@ struct BernRubyText<Plain: View>: View, Animatable {
         let w = NSFont.Weight(rawValue: resolvedWeight)
         let font = style == "code" ? NSFont.monospacedSystemFont(ofSize: pointSize, weight: w) : NSFont.systemFont(ofSize: pointSize, weight: w)
         #else
+        // UIKit on tvOS starts its semantic title scale at title1; unlike
+        // SwiftUI.Font.largeTitle, UIFont.TextStyle.largeTitle is unavailable.
+        #if os(tvOS)
+        let largeTitle = UIFont.TextStyle.title1
+        #else
+        let largeTitle = UIFont.TextStyle.largeTitle
+        #endif
         let styles: [String: UIFont.TextStyle] = [
-            "large_title": .largeTitle, "title": .title1, "title2": .title2, "title3": .title3,
+            "large_title": largeTitle, "title": .title1, "title2": .title2, "title3": .title3,
             "headline": .headline, "subheadline": .subheadline, "callout": .callout,
             "footnote": .footnote, "caption": .caption1, "caption2": .caption2, "code": .callout]
         let pointSize = size ?? UIFont.preferredFont(forTextStyle: styles[style] ?? .body).pointSize
