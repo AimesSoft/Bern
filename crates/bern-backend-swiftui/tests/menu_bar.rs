@@ -9,6 +9,9 @@ use bern_target_api::{BuildContext, Framework, Target};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[path = "support/cache.rs"]
+mod cache;
+
 mod support;
 
 fn workspace() -> PathBuf {
@@ -383,7 +386,7 @@ fn typecheck(name: &str) {
         .arg("-target")
         .arg(target)
         .arg("-module-cache-path")
-        .arg(root.join("target/bern-swift-module-cache"))
+        .arg(cache::module_cache(&root))
         .arg("-import-objc-header")
         .arg(sources.join("bern.h"))
         .arg(sources.join("BernRuntime.swift"))
