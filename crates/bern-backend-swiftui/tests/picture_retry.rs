@@ -28,7 +28,13 @@ fn pictures_come_after_failures_and_refusals_are_not_repeated() {
     assert!(pictures.contains(silence), "{pictures}");
     let network = "private func networkChanged";
     assert!(pictures.contains(network), "{pictures}");
+    // This fixture drives network changes itself. Real path callbacks would
+    // invalidate refusals between assertions even when only loopback is used.
+    let monitor =
+        r#"network.start(queue: DispatchQueue(label: "dev.bern.pictures.network", qos: .utility))"#;
+    assert!(pictures.contains(monitor), "{pictures}");
     let pictures = pictures
+        .replace(monitor, "")
         .replace(waits, "[0.02, 0.02]")
         .replace(silence, "silence: TimeInterval = 1")
         .replace(network, "func networkChanged");
@@ -88,8 +94,8 @@ enum BernImage {
             Task { await pictures.load(BernPictures.Request(url: base + path)) }
         }
         func toFront() { NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: nil) }
-        // The system's first word on the network, which changes nothing.
-        await settle()
+        // The initial network event is explicit, just like the later changes.
+        pictures.networkChanged(online: true)
 
         // A failure on the way, and the picture still comes.
         expect(await load("/breaks/1").value != nil, "a broken connection is tried again")
@@ -140,12 +146,14 @@ enum BernImage {
         // same view, a new one or the app coming to the front.
         for path in ["/gone/1", "/page/1"] {
             let first = load(path)
-            expect(await settled(path) == 1, path)
+            let observed = await settled(path)
+            expect(observed == 1, "\(path): count=\(observed)")
             first.cancel()
             expect(await first.value == nil, path)
             let second = load(path)
             toFront()
-            expect(await settled(path) == 1, path)
+            let resumed = await settled(path)
+            expect(resumed == 1, "\(path): foreground count=\(resumed)")
             // On another network it may have one after all.
             _ = await text("/heal" + path)
             pictures.networkChanged(online: true)
