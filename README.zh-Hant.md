@@ -74,15 +74,20 @@
 
 <table>
 <tr>
-<td width="50%" valign="top">
+<td width="33%" valign="top">
 <a href="https://github.com/AimesSoft/RustSend"><img src="Docs/Assets/projects/rustsend.png" width="56" height="56" alt="RustSend"></a>
 <h3><a href="https://github.com/AimesSoft/RustSend">RustSend</a></h3>
 <p>相容 LocalSend 的區域網路檔案傳輸工具，支援檔案、資料夾與文字互傳。</p>
 </td>
-<td width="50%" valign="top">
+<td width="33%" valign="top">
 <a href="https://github.com/zhaohuaxs/lambda"><img src="Docs/Assets/projects/lambda.png" width="56" height="56" alt="Lambda"></a>
 <h3><a href="https://github.com/zhaohuaxs/lambda">Lambda</a></h3>
 <p>內建 7-Zip 的 Windows / Android 壓縮檔管理器，支援加密壓縮、解壓縮與內容預覽。</p>
+</td>
+<td width="33%" valign="top">
+<a href="https://github.com/MCDFsteve/Enji"><img src="Docs/Assets/projects/enji.png" width="56" height="56" alt="Enji Music"></a>
+<h3><a href="https://github.com/MCDFsteve/Enji">Enji Music</a></h3>
+<p>網易雲音樂第三方用戶端，支援線上與本機音樂、同步歌詞及歌單管理。</p>
 </td>
 </tr>
 </table>

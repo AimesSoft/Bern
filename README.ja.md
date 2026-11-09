@@ -74,15 +74,20 @@
 
 <table>
 <tr>
-<td width="50%" valign="top">
+<td width="33%" valign="top">
 <a href="https://github.com/AimesSoft/RustSend"><img src="Docs/Assets/projects/rustsend.png" width="56" height="56" alt="RustSend"></a>
 <h3><a href="https://github.com/AimesSoft/RustSend">RustSend</a></h3>
 <p>LocalSend と互換性のある LAN ファイル転送ツール。ファイル、フォルダー、テキストをデバイス間で送受信できます。</p>
 </td>
-<td width="50%" valign="top">
+<td width="33%" valign="top">
 <a href="https://github.com/zhaohuaxs/lambda"><img src="Docs/Assets/projects/lambda.png" width="56" height="56" alt="Lambda"></a>
 <h3><a href="https://github.com/zhaohuaxs/lambda">Lambda</a></h3>
 <p>7-Zip を内蔵した Windows / Android 向けアーカイブマネージャー。暗号化圧縮、展開、内容のプレビューに対応。</p>
+</td>
+<td width="33%" valign="top">
+<a href="https://github.com/MCDFsteve/Enji"><img src="Docs/Assets/projects/enji.png" width="56" height="56" alt="Enji Music"></a>
+<h3><a href="https://github.com/MCDFsteve/Enji">Enji Music</a></h3>
+<p>NetEase Cloud Music の非公式クライアント。オンライン・ローカル再生、同期歌詞、プレイリスト管理に対応。</p>
 </td>
 </tr>
 </table>
