@@ -9,8 +9,7 @@ use bern_target_api::{BuildContext, Framework, Target};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-#[path = "support/cache.rs"]
-mod cache;
+use support::cache;
 
 mod support;
 

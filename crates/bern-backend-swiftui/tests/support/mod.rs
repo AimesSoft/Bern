@@ -4,7 +4,7 @@ use bern_backend_swiftui::MINIMUM_IOS;
 use std::path::Path;
 use std::process::Command;
 
-mod cache;
+pub mod cache;
 
 /// Compile the iOS Swift generated into `output`, when the simulator SDK is
 /// installed. An app of both front ends has one in `Sources` for iOS 16 and
