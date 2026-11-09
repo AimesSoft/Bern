@@ -7,6 +7,8 @@ use bern_target_api::{BuildContext, BuildPlan, BuildStep, Framework, Target};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use support::cache;
+
 mod support;
 
 fn workspace() -> PathBuf {
@@ -404,7 +406,7 @@ fn pictures_with_a_dark_one_follow_the_appearance() {
         .arg("-target")
         .arg(format!("arm64-apple-macos{MINIMUM_MACOS}"))
         .arg("-module-cache-path")
-        .arg(workspace().join("target/bern-swift-module-cache"))
+        .arg(cache::module_cache(&workspace()))
         .arg("-import-objc-header")
         .arg(sources.join("bern.h"))
         .arg(sources.join("BernRuntime.swift"))
@@ -664,7 +666,7 @@ fn showcase_generates_swift_that_type_checks() {
         .arg("-target")
         .arg(format!("arm64-apple-macos{MINIMUM_MACOS}"))
         .arg("-module-cache-path")
-        .arg(root.join("target/bern-swift-module-cache"))
+        .arg(cache::module_cache(&root))
         .arg("-import-objc-header")
         .arg(sources.join("bern.h"))
         .arg(sources.join("BernRuntime.swift"))
@@ -1265,7 +1267,7 @@ platform = "ios"
         .arg("-target")
         .arg(format!("arm64-apple-macos{MINIMUM_MACOS}"))
         .arg("-module-cache-path")
-        .arg(root.join("target/bern-swift-module-cache"))
+        .arg(cache::module_cache(&root))
         .arg("-import-objc-header")
         .arg(sources.join("bern.h"))
         .arg(sources.join("BernRuntime.swift"))
@@ -1462,7 +1464,7 @@ platform = "ios"
         .arg("-target")
         .arg(format!("arm64-apple-macos{MINIMUM_MACOS}"))
         .arg("-module-cache-path")
-        .arg(root.join("target/bern-swift-module-cache"))
+        .arg(cache::module_cache(&root))
         .arg("-import-objc-header")
         .arg(sources.join("bern.h"))
         .arg(sources.join("BernRuntime.swift"))
@@ -2227,7 +2229,7 @@ fn a_style_variant_in_a_window_is_defined() {
         .arg("-target")
         .arg(format!("arm64-apple-macos{MINIMUM_MACOS}"))
         .arg("-module-cache-path")
-        .arg(root.join("target/bern-swift-module-cache"))
+        .arg(cache::module_cache(&root))
         .arg("-import-objc-header")
         .arg(sources.join("bern.h"))
         .arg(sources.join("BernRuntime.swift"))
@@ -2385,7 +2387,7 @@ fn content_in_a_window_starts_at_its_top_leading_corner() {
         .arg("-target")
         .arg(format!("arm64-apple-macos{MINIMUM_MACOS}"))
         .arg("-module-cache-path")
-        .arg(root.join("target/bern-swift-module-cache"))
+        .arg(cache::module_cache(&root))
         .arg("-import-objc-header")
         .arg(sources.join("bern.h"))
         .arg(sources.join("BernRuntime.swift"))

@@ -4,6 +4,8 @@ use bern_backend_swiftui::MINIMUM_IOS;
 use std::path::Path;
 use std::process::Command;
 
+pub mod cache;
+
 /// Compile the iOS Swift generated into `output`, when the simulator SDK is
 /// installed. An app of both front ends has one in `Sources` for iOS 16 and
 /// one in `Sources17` for iOS 17 and later, and each is compiled for its own
@@ -77,12 +79,7 @@ pub fn check_front_end(
             "{architecture}-apple-{platform}{minimum}-simulator"
         ))
         .arg("-module-cache-path")
-        .arg(
-            std::env::var_os("CARGO_TARGET_DIR")
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|| root.join("target"))
-                .join("bern-swift-module-cache"),
-        )
+        .arg(cache::module_cache(root))
         .arg("-import-objc-header")
         .arg(header);
     for file in [

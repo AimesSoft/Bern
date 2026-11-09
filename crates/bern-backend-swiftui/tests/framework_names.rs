@@ -16,6 +16,9 @@ use bern_target_api::{BuildContext, Framework, Target};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[path = "support/cache.rs"]
+mod cache;
+
 fn workspace() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
@@ -192,7 +195,7 @@ fn typecheck(output: &Path, system: Apple) {
         .arg("-target")
         .arg(target)
         .arg("-module-cache-path")
-        .arg(workspace().join("target/bern-swift-module-cache"))
+        .arg(cache::module_cache(&workspace()))
         .arg("-import-objc-header")
         .arg(sources.join("bern.h"))
         .arg(sources.join("BernRuntime.swift"))
