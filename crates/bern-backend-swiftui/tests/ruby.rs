@@ -201,7 +201,7 @@ fn ruby_is_generated_for_tvos() {
     let sources = output.join("Sources");
     let runtime = std::fs::read_to_string(sources.join("BernStyle.swift")).unwrap();
     assert!(runtime.contains(
-        "#if os(tvOS)\n        let largeTitle = UIFont.TextStyle.title1\n        #else\n        let largeTitle = UIFont.TextStyle.largeTitle\n        #endif"
+        "#if os(tvOS)\n        let largeTitleSize: CGFloat = 68\n        #else\n        let largeTitleSize = UIFont.preferredFont(forTextStyle: .largeTitle).pointSize\n        #endif"
     ));
     support::check_front_end(
         &workspace(),
