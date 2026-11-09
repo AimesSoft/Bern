@@ -1,7 +1,7 @@
 //! Ruby keeps source scalar indices and uses the same Core Text layout on
-//! both iOS front ends and macOS. These tests are only run on explicit request.
+//! both iOS front ends, tvOS and macOS. These tests are only run on explicit request.
 
-use bern_backend_swiftui::{SwiftUiIos, SwiftUiMacos};
+use bern_backend_swiftui::{MINIMUM_TVOS, SwiftUiIos, SwiftUiMacos, SwiftUiTvos};
 use bern_target_api::{BuildContext, Framework, Target};
 use std::path::{Path, PathBuf};
 
@@ -68,6 +68,7 @@ pub fn app(app: ruby::Client, windows: AppWindows) -> impl View {
             Window(id: main, title: tr! { "en" => "Ruby" }, initial: open) {
                 Column {
                     Text(content: app.text)
+                    Text(content: app.text, ruby: app.annotations, style: large_title)
                     Text(content: app.text, ruby: "")
                     Text(content: app.text, ruby: "[]")
                     Text(content: app.text, ruby: if app.shown { app.annotations } else { "" })
@@ -190,6 +191,24 @@ fn ruby_is_generated_for_both_ios_front_ends() {
     assert_generated(&output, "Sources");
     assert_generated(&output, "Sources17");
     support::check_ios(&workspace(), &output);
+}
+
+#[test]
+fn ruby_is_generated_for_tvos() {
+    let output = generate("tvos", &SwiftUiTvos);
+    assert_generated(&output, "Sources");
+    let sources = output.join("Sources");
+    let runtime = std::fs::read_to_string(sources.join("BernStyle.swift")).unwrap();
+    assert!(runtime.contains(
+        "#if os(tvOS)\n        let largeTitle = UIFont.TextStyle.title1\n        #else\n        let largeTitle = UIFont.TextStyle.largeTitle\n        #endif"
+    ));
+    support::check_front_end(
+        &workspace(),
+        &sources,
+        &sources.join("bern.h"),
+        ("appletvsimulator", "tvos", MINIMUM_TVOS),
+        &[],
+    );
 }
 
 #[test]
