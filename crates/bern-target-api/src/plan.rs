@@ -22,6 +22,13 @@ pub enum BuildStep {
         from: PathBuf,
         to: PathBuf,
     },
+    /// Prepare a browser module and its optional wasm-bindgen JavaScript.
+    /// Plain C-ABI modules remain dependency-free; bindgen modules require the
+    /// matching wasm-bindgen CLI (BERN_WASM_BINDGEN or PATH).
+    WebAssembly {
+        from: PathBuf,
+        dir: PathBuf,
+    },
     RemoveIfExists {
         path: PathBuf,
     },

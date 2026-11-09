@@ -358,6 +358,7 @@ fn run_step(step: &BuildStep) -> Result<(), String> {
                 to.display()
             )
         }),
+        BuildStep::WebAssembly { from, dir } => bern_backend_web::wasm::prepare(from, dir),
         BuildStep::Mirror { dir, files, keep } => mirror(dir, files, keep),
         BuildStep::RemoveIfExists { path } => {
             if path.is_dir() {
@@ -1180,6 +1181,10 @@ mod tests {
         for step in steps {
             match step {
                 BuildStep::Run { .. } => continue,
+                BuildStep::WebAssembly { from, .. } if !from.exists() => {
+                    std::fs::create_dir_all(from.parent().unwrap()).unwrap();
+                    std::fs::write(from, b"\0asm\x01\0\0\0").unwrap();
+                }
                 BuildStep::Copy { from, .. } if !from.exists() => {
                     std::fs::create_dir_all(from.parent().unwrap()).unwrap();
                     std::fs::write(from, b"built").unwrap();
@@ -1227,6 +1232,12 @@ mod tests {
             .map(|name| format!("{name}{}", std::env::consts::EXE_SUFFIX))
             .collect();
         assert_eq!(files_below(&context.output_dir.join("bin")), programs);
+        for path in [
+            "bindgen/bern_bindgen_bg.js",
+            "bindgen/snippets/local/inline0.js",
+        ] {
+            write_if_changed(&context.output_dir.join(path), b"export {};").unwrap();
+        }
 
         let package = web
             .package(
@@ -1241,6 +1252,8 @@ mod tests {
             "index.html",
             "app.js",
             "app.wasm",
+            "bindgen/bern_bindgen_bg.js",
+            "bindgen/snippets/local/inline0.js",
             "bern.css",
             "favicon.svg",
         ] {
@@ -1313,6 +1326,11 @@ mod tests {
                 .join(format!("bin/planner-mcp{}", std::env::consts::EXE_SUFFIX))
                 .is_file()
         );
+        write_if_changed(
+            &context.output_dir.join("bindgen/snippets/local/inline0.js"),
+            b"export {};",
+        )
+        .unwrap();
         place_files(
             &web.package(
                 &compiled.app,
@@ -1324,6 +1342,11 @@ mod tests {
         );
         let packaged = files_below(&context.output_dir.join("package/planner"));
         assert!(packaged.iter().any(|p| p == "control.js"));
+        assert!(
+            packaged
+                .iter()
+                .any(|p| p == "bindgen/snippets/local/inline0.js")
+        );
         assert!(!packaged.iter().any(|p| p.starts_with("bin/")
             || p.starts_with("skills/")
             || p.starts_with("glue/")
