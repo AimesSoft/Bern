@@ -445,6 +445,11 @@ inline void PlayLit(std::shared_ptr<LitPlay> const& play) {
     size_t first = whole, last = whole + 1;
     while (first > 0 && sameLine(first - 1)) --first;
     while (last < characters.size() && sameLine(last)) ++last;
+    // Caret coordinates may be negative (a leading glyph bearing). They
+    // are positions, not clip widths: keep that origin in the clip offset.
+    float left = 0;
+    for (size_t index = first; index < last; ++index) left = (std::min)(left, characters[index].X);
+    auto clipWidth = [left](float x) { return (std::max)(0.0f, x - left); };
     auto edge = [&](double at) {
         auto index = static_cast<size_t>(at);
         if (index >= last) return characters[last - 1].X + characters[last - 1].Width;
@@ -462,8 +467,8 @@ inline void PlayLit(std::shared_ptr<LitPlay> const& play) {
     }
     auto top = characters[whole].Y, height = characters[whole].Height;
     play->clip.StopAnimation(L"Size");
-    play->clip.Offset(float2{0, top});
-    play->clip.Size(float2{edge(place), height});
+    play->clip.Offset(float2{left, top});
+    play->clip.Size(float2{clipWidth(edge(place)), height});
     over.Opacity(block.Opacity());
     over.Visibility(xaml::Visibility::Visible);
     if (play->since <= 0) return;
@@ -495,7 +500,7 @@ inline void PlayLit(std::shared_ptr<LitPlay> const& play) {
         double length = ends - second;
         for (auto const& [at, x] : stops) {
             float progress = static_cast<float>((std::min)(1.0, (at - second) / length));
-            motion.InsertKeyFrame(progress, float2{x, height}, even);
+            motion.InsertKeyFrame(progress, float2{clipWidth(x), height}, even);
         }
         motion.Duration(std::chrono::duration_cast<winrt::Windows::Foundation::TimeSpan>(std::chrono::duration<double>(length)));
         play->clip.StartAnimation(L"Size", motion);
@@ -754,18 +759,32 @@ inline xaml::FrameworkElement WithRuby(xaml::FrameworkElement const& shown, cont
         auto text = weak.get();
         if (!text) return;
         if (stamp->text != text.Text()) { *ranges = RubySourceRanges(original ? original() : winrt::hstring(), text.Text(), source(), markdown); ++*revision; }
-        text.LineStackingStrategy(ranges->empty() ? originalStrategy : xaml::LineStackingStrategy::BlockLineHeight);
+        auto strategy = ranges->empty() ? originalStrategy : xaml::LineStackingStrategy::BlockLineHeight;
         auto size = text.FontSize();
         auto height = ranges->empty() ? *minimum : (std::max)(*minimum, size * 1.65);
         auto margin = originalMargin;
         if (!ranges->empty()) margin.Top += size * 0.55;
-        if (auto element = target.get()) {
-            if (element.Margin().Top != margin.Top || text.LineHeight() != height) {
-                element.Margin(margin);
-                text.LineHeight(height);
-                stamp->width = -1;
-                return;
-            }
+        // XAML's text setters invalidate layout even when the value is
+        // unchanged. A LayoutUpdated handler must reach a fixed point
+        // before drawing, rather than scheduling another layout forever.
+        bool changed = false;
+        if (text.LineStackingStrategy() != strategy) {
+            text.LineStackingStrategy(strategy);
+            changed = true;
+        }
+        // XAML stores these dimensions as floats behind its double API.
+        // Compare at that precision so a round trip cannot restart layout.
+        if (static_cast<float>(text.LineHeight()) != static_cast<float>(height)) {
+            text.LineHeight(height);
+            changed = true;
+        }
+        if (auto element = target.get(); element && static_cast<float>(element.Margin().Top) != static_cast<float>(margin.Top)) {
+            element.Margin(margin);
+            changed = true;
+        }
+        if (changed) {
+            stamp->width = -1;
+            return;
         }
         if (stamp->text == text.Text() && stamp->width == text.ActualWidth() && stamp->height == text.ActualHeight()
             && stamp->size == size && stamp->line == height && stamp->weight == text.FontWeight().Weight && stamp->revision == *revision) return;
