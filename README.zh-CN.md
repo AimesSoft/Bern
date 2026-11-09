@@ -74,15 +74,20 @@
 
 <table>
 <tr>
-<td width="50%" valign="top">
+<td width="33%" valign="top">
 <a href="https://github.com/AimesSoft/RustSend"><img src="Docs/Assets/projects/rustsend.png" width="56" height="56" alt="RustSend"></a>
 <h3><a href="https://github.com/AimesSoft/RustSend">RustSend</a></h3>
 <p>兼容 LocalSend 的局域网文件传输工具，支持文件、文件夹与文字互传。</p>
 </td>
-<td width="50%" valign="top">
+<td width="33%" valign="top">
 <a href="https://github.com/zhaohuaxs/lambda"><img src="Docs/Assets/projects/lambda.png" width="56" height="56" alt="Lambda"></a>
 <h3><a href="https://github.com/zhaohuaxs/lambda">Lambda</a></h3>
 <p>内置 7-Zip 的 Windows / Android 压缩包管理器，支持加密压缩、解压与内容预览。</p>
+</td>
+<td width="33%" valign="top">
+<a href="https://github.com/MCDFsteve/Enji"><img src="Docs/Assets/projects/enji.png" width="56" height="56" alt="Enji Music"></a>
+<h3><a href="https://github.com/MCDFsteve/Enji">Enji Music</a></h3>
+<p>网易云音乐第三方客户端，支持在线与本地音乐、同步歌词和歌单管理。</p>
 </td>
 </tr>
 </table>

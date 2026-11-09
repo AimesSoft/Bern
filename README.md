@@ -74,15 +74,20 @@ No JS engine and no embedded browser on the desktop or the phone; every button i
 
 <table>
 <tr>
-<td width="50%" valign="top">
+<td width="33%" valign="top">
 <a href="https://github.com/AimesSoft/RustSend"><img src="Docs/Assets/projects/rustsend.png" width="56" height="56" alt="RustSend"></a>
 <h3><a href="https://github.com/AimesSoft/RustSend">RustSend</a></h3>
 <p>Local file sharing compatible with LocalSend. Send files, folders and text across devices.</p>
 </td>
-<td width="50%" valign="top">
+<td width="33%" valign="top">
 <a href="https://github.com/zhaohuaxs/lambda"><img src="Docs/Assets/projects/lambda.png" width="56" height="56" alt="Lambda"></a>
 <h3><a href="https://github.com/zhaohuaxs/lambda">Lambda</a></h3>
 <p>A Windows and Android archive manager powered by 7-Zip. Create encrypted archives, extract files and preview their contents.</p>
+</td>
+<td width="33%" valign="top">
+<a href="https://github.com/MCDFsteve/Enji"><img src="Docs/Assets/projects/enji.png" width="56" height="56" alt="Enji Music"></a>
+<h3><a href="https://github.com/MCDFsteve/Enji">Enji Music</a></h3>
+<p>A third-party NetEase Cloud Music client with online and local playback, synced lyrics and playlist management.</p>
 </td>
 </tr>
 </table>

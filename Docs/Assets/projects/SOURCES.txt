@@ -12,3 +12,8 @@ https://github.com/zhaohuaxs/lambda
 https://raw.githubusercontent.com/zhaohuaxs/lambda/main/assets/icon/lambda-logo.png
 
 Retrieved / 获取日期: 2026-11-08
+
+Enji Music
+https://github.com/MCDFsteve/Enji
+https://raw.githubusercontent.com/MCDFsteve/Enji/main/assets/icon/enji.png
+Retrieved / 获取日期: 2026-11-09
