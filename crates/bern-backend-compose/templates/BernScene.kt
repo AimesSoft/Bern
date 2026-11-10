@@ -22,6 +22,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
@@ -721,11 +725,8 @@ fun BernModal(
                     tonalElevation = AlertDialogDefaults.TonalElevation,
                     shadowElevation = if (covering) 0.dp else 8.dp,
                 ) {
-                    // The dialog is a window of its own: its elements cannot
-                    // pair with the shared elements of the window below,
-                    // whose layout is another hierarchy.
-                    Box(if (covering) Modifier.statusBarsPadding().navigationBarsPadding() else Modifier, contentAlignment = Alignment.TopCenter) {
-                        CompositionLocalProvider(LocalBernShared provides null) { content() }
+                    BernPopupContent(if (covering) WindowInsets.systemBars.asPaddingValues() else PaddingValues()) {
+                        content()
                     }
                 }
             }
@@ -1038,8 +1039,9 @@ fun BernSearchPalette(
                 tonalElevation = AlertDialogDefaults.TonalElevation,
                 shadowElevation = if (compact) 0.dp else 8.dp,
             ) {
-                CompositionLocalProvider(LocalBernSearchPalette provides state) {
-                    Column(Modifier.fillMaxSize().then(if (compact) Modifier.statusBarsPadding().navigationBarsPadding() else Modifier)) {
+                BernPopupContent(if (compact) WindowInsets.systemBars.asPaddingValues() else PaddingValues()) {
+                  CompositionLocalProvider(LocalBernSearchPalette provides state) {
+                    Column(Modifier.fillMaxSize()) {
                         Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                             TextField(
                                 value = text,
@@ -1063,6 +1065,7 @@ fun BernSearchPalette(
                         HorizontalDivider()
                         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(vertical = 4.dp), content = results)
                     }
+                  }
                 }
             }
         }

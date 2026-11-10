@@ -136,13 +136,38 @@ impl Generator<'_> {
             let placed = body
                 .iter()
                 .any(|node| matches!(node, Node::Element(element) if element.kind == "Positioned"));
-            if body.len() > 1 && placed {
+            if ctx.layer {
+                // AnimatedContent owns a new layout scope. Keep a stack's
+                // branch layered, including a single backdrop, and bind
+                // matchParentSize to this Box rather than an outer receiver.
+                let sized_layers = body.iter().any(|node| {
+                    !matches!(node, Node::Element(element) if element.kind == "Rail"
+                        || (element.kind == "Canvas"
+                            && element.prop("width").is_none()
+                            && element.prop("height").is_none()))
+                });
+                out.open(format!("Box(contentAlignment = {}) {{", ctx.layer_align));
+                self.nodes(
+                    out,
+                    body,
+                    &Ctx {
+                        sized_layers,
+                        ..inner.within(Scope::Other)
+                    },
+                );
+                out.close("}");
+            } else if body.len() > 1 && placed {
                 out.open("Box {");
                 self.nodes(out, body, &inner.within(Scope::Other));
                 out.close("}");
             } else if body.len() > 1 {
-                out.open("Column {");
-                self.nodes(out, body, &inner.within(Scope::Column));
+                let row = ctx.scope == Scope::Row;
+                out.open(if row { "Row {" } else { "Column {" });
+                self.nodes(
+                    out,
+                    body,
+                    &inner.within(if row { Scope::Row } else { Scope::Column }),
+                );
                 out.close("}");
             } else {
                 self.nodes(out, body, &inner);

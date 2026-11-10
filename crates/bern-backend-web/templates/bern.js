@@ -2682,9 +2682,9 @@ function controlShape(node, shape, height) {
 }
 
 /// A layer that takes the size the other layers of its stack give: a rail,
-/// or a canvas without a size, the stack's backdrop.
+/// or a canvas or cover image without a size, the stack's backdrop.
 function backdropLayer(child) {
-  return child.classList.contains("bern-rail") ||
+  return child.classList.contains("bern-rail") || child.classList.contains("bern-image-cover") ||
     (child.classList.contains("bern-canvas") && child.classList.contains("bern-fill-width") && child.classList.contains("bern-fill-height"));
 }
 
@@ -2696,7 +2696,7 @@ function backdropLayer(child) {
 /// a split button's or popover button's panel leaves the button its size.
 export function layoutIntent(node, dimension) {
   if (node.nodeType !== 1 || node.tagName === "DIALOG" || node.hasAttribute("popover") || node.classList.contains(`bern-sized-${dimension}`)) return false;
-  if (node.classList.contains(`bern-fill-${dimension}`)) return true;
+  if (node.classList.contains(`bern-fill-${dimension}`) || node.classList.contains("bern-image-cover")) return true;
   // `Button(width: fill)` takes the row's or column's width.
   if (dimension === "width" && node.classList.contains("bern-button-fill")) return true;
   const children = layoutChildren(node);

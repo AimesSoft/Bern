@@ -741,6 +741,7 @@ fun BernToolbarSearch(
         Dialog(onDismissRequest = { open = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
             val focus = remember { FocusRequester() }
             Surface(Modifier.fillMaxSize()) {
+              BernPopupContent() {
                 Column(Modifier.fillMaxSize().statusBarsPadding()) {
                     Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         TextField(
@@ -771,6 +772,7 @@ fun BernToolbarSearch(
                         }
                     }
                 }
+              }
             }
             LaunchedEffect(Unit) { focus.requestFocus() }
         }
@@ -786,11 +788,13 @@ fun BernToolbarSearch(
 fun BernInspector(presented: Boolean, onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     if (!presented) return
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(
-            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            content = content,
-        )
+        BernPopupContent {
+            Column(
+                Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                content = content,
+            )
+        }
     }
 }
 
@@ -858,11 +862,13 @@ fun BernSplitButton(
                 Icon(Icons.Filled.ArrowDropDown, contentDescription = more)
             }
             DropdownMenu(expanded = showing, onDismissRequest = { showing = false }) {
-                Column(
-                    Modifier.padding(16.dp).widthIn(min = 240.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    content = content,
-                )
+                BernPopupContent {
+                    Column(
+                        Modifier.padding(16.dp).widthIn(min = 240.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        content = content,
+                    )
+                }
             }
         }
     }
@@ -2407,12 +2413,14 @@ fun BernPopoverButton(
                 containerColor = style?.base?.background?.let(palette::color) ?: MaterialTheme.colorScheme.surfaceContainer,
                 tonalElevation = if (style?.base?.background != null) 0.dp else 3.dp,
             ) {
-                CompositionLocalProvider(LocalContentColor provides (style?.base?.foreground?.let(palette::color) ?: MaterialTheme.colorScheme.onSurface)) {
-                    Column(
-                        Modifier.padding(16.dp).widthIn(min = 240.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                        content = content,
-                    )
+                BernPopupContent {
+                    CompositionLocalProvider(LocalContentColor provides (style?.base?.foreground?.let(palette::color) ?: MaterialTheme.colorScheme.onSurface)) {
+                        Column(
+                            Modifier.padding(16.dp).widthIn(min = 240.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            content = content,
+                        )
+                    }
                 }
             }
         }
