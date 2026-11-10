@@ -19,6 +19,7 @@ import androidx.activity.compose.BackHandler
 import androidx.annotation.Keep
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -71,6 +72,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.inset
 import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.findRootCoordinates
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onPlaced
@@ -720,7 +722,7 @@ class BernSafeArea {
     fun reach(coordinates: LayoutCoordinates, slack: Float): BernReach {
         val window = window?.takeIf { it.isAttached } ?: return BernReach.None
         val safe = safe?.takeIf { it.isAttached } ?: return BernReach.None
-        if (!coordinates.isAttached) return BernReach.None
+        if (!window.bernSharesLayout(safe) || !window.bernSharesLayout(coordinates)) return BernReach.None
         val area = window.localBoundingBoxOf(safe, clipBounds = false)
         val bounds = window.localBoundingBoxOf(coordinates, clipBounds = false)
         return BernReach(
@@ -735,6 +737,43 @@ class BernSafeArea {
 /// The safe area of the window around; none in a scene, whose layers
 /// bleed by their own rule.
 val LocalBernSafeArea = staticCompositionLocalOf<BernSafeArea?> { null }
+
+/// Coordinates may be compared only while attached to the same layout root.
+/// Composition locals cross Dialog/Popup boundaries; layout coordinates do not.
+internal fun LayoutCoordinates.bernSharesLayout(other: LayoutCoordinates): Boolean =
+    isAttached && other.isAttached && findRootCoordinates() === other.findRootCoordinates()
+
+/// Content in a separate popup window owns its layout scope. Its safe area is
+/// measured inside that surface, never against the activity behind it. A card
+/// has no bar insets; an edge-to-edge dialog supplies its own system bar room.
+@OptIn(androidx.compose.animation.ExperimentalSharedTransitionApi::class)
+@Composable
+fun BernPopupContent(padding: PaddingValues = PaddingValues(), content: @Composable () -> Unit) {
+    val safeArea = remember { BernSafeArea() }
+    val pointer = remember { BernPointer() }
+    val editing = remember { BernEditingRegions() }
+    CompositionLocalProvider(
+        LocalBernSafeArea provides safeArea,
+        LocalBernBarsPadding provides padding,
+        LocalBernScrollRoom provides null,
+        LocalBernViewport provides null,
+        LocalBernSceneRoom provides null,
+        LocalBernShared provides null,
+        LocalBernVisibility provides null,
+        LocalBernFlex provides null,
+        LocalBernPointer provides pointer,
+        LocalBernEditingRegions provides editing,
+        LocalBernEditingAncestors provides emptyList(),
+    ) {
+        Box(
+            Modifier.onPlaced { safeArea.window = it }.padding(padding)
+                .onPlaced { safeArea.safe = it }.consumeWindowInsets(padding)
+                .bernPointerWatch(pointer).bernEditingPresses(editing),
+            contentAlignment = Alignment.TopCenter,
+            propagateMinConstraints = true,
+        ) { content() }
+    }
+}
 
 /// `Canvas(bleed: true)`: the canvas keeps its place in the layout and its
 /// drawing reaches past each edge of the safe area it reaches, to the
@@ -777,7 +816,7 @@ fun Modifier.bernBleed(bleed: BernCanvasBleed): Modifier {
     val slack = with(LocalDensity.current) { 0.5.dp.toPx() }
     return onGloballyPositioned { coordinates ->
         bleed.sides = safe.reach(coordinates, slack)
-        val content = room?.content?.takeIf { it.isAttached && coordinates.isAttached }
+        val content = room?.content?.takeIf { it.bernSharesLayout(coordinates) }
         bleed.opens = content != null && content.localPositionOf(coordinates, Offset.Zero).y <= slack
     }
 }

@@ -717,7 +717,7 @@ class BernEditingRegions {
 }
 
 val LocalBernEditingRegions = staticCompositionLocalOf<BernEditingRegions?> { null }
-private val LocalBernEditingAncestors = staticCompositionLocalOf<List<BernEditingRegion>> { emptyList() }
+internal val LocalBernEditingAncestors = staticCompositionLocalOf<List<BernEditingRegion>> { emptyList() }
 
 @Composable
 fun BernFocusRegion(content: @Composable () -> Unit) {
@@ -916,7 +916,9 @@ fun BernTableRow(
             if (chosen != null) Checkbox(checked = chosen, onCheckedChange = toggle)
             cells()
         }
-        if (menu != null) DropdownMenu(expanded = open, onDismissRequest = { open = false }) { menu { open = false } }
+        if (menu != null) DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            BernPopupContent { Column { menu { open = false } } }
+        }
     }
 }
 
@@ -1453,7 +1455,7 @@ fun BernMenu(
             }
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            items { expanded = false }
+            BernPopupContent { Column { items { expanded = false } } }
         }
     }
 }
@@ -1478,7 +1480,9 @@ fun BernContextMenu(menu: @Composable (dismiss: () -> Unit) -> Unit, content: @C
     var open by remember { mutableStateOf(false) }
     Box(Modifier.bernMenuPress { open = true }) {
         content()
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) { menu { open = false } }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            BernPopupContent { Column { menu { open = false } } }
+        }
     }
 }
 
