@@ -129,6 +129,25 @@ test("a canvas without a size is the backdrop of its stack's other layers", () =
   assert.equal(layoutIntent(plain, "height"), true, "a stack with only a backdrop still fills");
 });
 
+test("cover images fill backdrop-only layers without changing content sizing", () => {
+  const image = layoutNode("bern-image bern-image-cover", [], null, "IMG");
+  const canvas = layoutNode("bern-canvas bern-fill-width bern-fill-height");
+  const rail = layoutNode("bern-rail bern-fill-width bern-fill-height");
+  const wash = layoutNode("bern-layers", [canvas, image, canvas, rail], "layers");
+  const imageOnly = layoutNode("bern-layers", [image], "layers");
+  const fixed = layoutNode("bern-image bern-sized-width bern-sized-height", [], null, "IMG");
+  const thumbnail = layoutNode("bern-layers", [image, fixed, rail], "layers");
+  const label = layoutNode("bern-layers", [image, layoutNode("bern-text")], "layers");
+  for (const dimension of ["width", "height"]) {
+    assert.equal(layoutIntent(wash, dimension), true, "artwork must not collapse a flexible canvas backdrop");
+    assert.equal(layoutIntent(imageOnly, dimension), true, "a lone cover takes its parent's offered size");
+    assert.equal(layoutIntent(thumbnail, dimension), false, "fixed content still determines a thumbnail's size");
+    assert.equal(fixedSize(thumbnail, dimension), true);
+    assert.equal(layoutIntent(label, dimension), false, "a background must not stretch a text label");
+    assert.equal(fixedSize(wash, dimension), false);
+  }
+});
+
 test("buttons that fill make their row fill the column", () => {
   const button = layoutNode("bern-button bern-button-fill", [], null, "BUTTON");
   const row = layoutNode("bern-stack bern-hstack", [button, button], "row");
