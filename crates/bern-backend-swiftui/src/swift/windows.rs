@@ -39,7 +39,11 @@ impl Generator<'_> {
             "/// Generated from the `{}` component.",
             component.name
         ));
-        out.open(format!("struct {name}: View {{"));
+        // A toolbar is not an independent view. Its modifier attaches both
+        // native items and searchable/palette behavior to the owning view.
+        let toolbar = self.is_toolbar(&component.body);
+        let kind = if toolbar { "ViewModifier" } else { "View" };
+        out.open(format!("struct {name}: {kind} {{"));
         let mut sessions = Vec::new();
         let mut client = false;
         for param in &component.params {
@@ -68,12 +72,21 @@ impl Generator<'_> {
         }
         out.line("@Environment(BernWindowContext.self) private var bernWindow");
         out.line("");
-        out.open("var body: some View {");
+        out.open(if toolbar {
+            "func body(content bernContent: Content) -> some View {"
+        } else {
+            "var body: some View {"
+        });
         let ctx = Ctx {
             component: component.name.clone(),
             ..Ctx::default()
         };
-        self.node(out, &component.body, &ctx);
+        if toolbar {
+            out.line("bernContent");
+            self.toolbar(out, std::slice::from_ref(&component.body), &ctx);
+        } else {
+            self.node(out, &component.body, &ctx);
+        }
         out.close("}");
         out.close("}");
         out.line("");

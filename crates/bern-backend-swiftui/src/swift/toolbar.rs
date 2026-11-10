@@ -5,7 +5,34 @@ use crate::names::{double, string};
 use bern_ir::{Element, Node};
 
 impl Generator<'_> {
+    /// A toolbar remains a container attachment across component aliases. Do
+    /// not descend into view containers: their toolbars belong to them.
+    pub(super) fn is_toolbar(&self, node: &Node) -> bool {
+        let mut node = node;
+        // Cycles are rejected by the compiler; keep malformed IR bounded too.
+        for _ in 0..=self.app.components.len() {
+            match node {
+                Node::Element(element) => return element.kind == "Toolbar",
+                Node::Component(reference) => {
+                    let Some(component) = self.app.component(&reference.component) else {
+                        return false;
+                    };
+                    node = &component.body;
+                }
+                _ => return false,
+            }
+        }
+        false
+    }
+
     pub(super) fn toolbar(&self, out: &mut Out, children: &[Node], ctx: &Ctx) {
+        for child in children {
+            if let Node::Component(reference) = child
+                && self.is_toolbar(child)
+            {
+                out.line(format!(".modifier({})", self.component_call(reference)));
+            }
+        }
         if children.iter().any(|n| matches!(n, Node::Element(e) if e.kind == "Toolbar" && e.children.iter().any(|n| matches!(n, Node::Element(e) if e.kind == "Search" && e.keyword("style") == Some("palette"))))) {
             out.line(".modifier(BernPaletteDetail())");
         }

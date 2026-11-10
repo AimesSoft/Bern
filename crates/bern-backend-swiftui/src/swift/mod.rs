@@ -20,7 +20,8 @@ mod windows;
 
 use crate::names::{self, case, double, label, member};
 use bern_ir::{
-    Application, ComponentArg, Element, IfLetNode, IfNode, MatchArm, MatchNode, Node, ParamKind,
+    Application, ComponentArg, ComponentRef, Element, IfLetNode, IfNode, MatchArm, MatchNode, Node,
+    ParamKind,
 };
 use bern_protocol::{EnumDef, TypeTable};
 use layout::window_frame;
@@ -173,7 +174,8 @@ impl<'a> Generator<'a> {
                 continue;
             }
             // Toolbars and side panels attach to their container.
-            if matches!(node, Node::Element(element) if element.kind == "Toolbar" || element.kind == "Inspector")
+            if self.is_toolbar(node)
+                || matches!(node, Node::Element(element) if element.kind == "Inspector")
             {
                 continue;
             }
@@ -303,28 +305,7 @@ impl<'a> Generator<'a> {
             }
             Node::Component(reference) => {
                 let component = self.app.component(&reference.component).expect("component");
-                let args: Vec<_> = component
-                    .params
-                    .iter()
-                    .filter_map(|param| match &param.kind {
-                        ParamKind::Value { .. } => reference
-                            .args
-                            .iter()
-                            .find(|(name, _)| *name == param.name)
-                            .and_then(|(_, arg)| match arg {
-                                ComponentArg::Value { expr } => {
-                                    Some(format!("{}: {}", label(&param.name), self.expr(expr)))
-                                }
-                                _ => None,
-                            }),
-                        _ => None,
-                    })
-                    .collect();
-                out.line(format!(
-                    "{}({})",
-                    names::component(&component.name),
-                    args.join(", ")
-                ));
+                out.line(self.component_call(reference));
                 // A component written in the window takes the window's room
                 // as its body would.
                 if ctx.window
@@ -337,6 +318,30 @@ impl<'a> Generator<'a> {
             Node::IfLet(node) => self.if_let(out, node, ctx),
             Node::Match(node) => self.match_node(out, node, ctx),
         }
+    }
+
+    /// Values are passed explicitly; engines, sessions and windows come from
+    /// the environment for views and container modifiers alike.
+    fn component_call(&self, reference: &ComponentRef) -> String {
+        let component = self.app.component(&reference.component).expect("component");
+        let args: Vec<_> = component
+            .params
+            .iter()
+            .filter_map(|param| match &param.kind {
+                ParamKind::Value { .. } => reference
+                    .args
+                    .iter()
+                    .find(|(name, _)| *name == param.name)
+                    .and_then(|(_, arg)| match arg {
+                        ComponentArg::Value { expr } => {
+                            Some(format!("{}: {}", label(&param.name), self.expr(expr)))
+                        }
+                        _ => None,
+                    }),
+                _ => None,
+            })
+            .collect();
+        format!("{}({})", names::component(&component.name), args.join(", "))
     }
 
     fn if_node(&self, out: &mut Out, node: &IfNode, ctx: &Ctx) {
