@@ -322,7 +322,8 @@ fn browser_extension_is_loaded_built_and_packaged_with_the_page() {
             output.join("extension").display().to_string()
         ]
     );
-    assert_eq!(cwd, &project.join("web"));
+    // Config resolves the project path; a worktree may share target through a symlink.
+    assert_eq!(cwd, &project.join("web").canonicalize().unwrap());
     std::fs::create_dir_all(output.join("extension/lib")).unwrap();
     std::fs::write(output.join("extension/lib/worker.wasm"), [0, 97, 115, 109]).unwrap();
     let package = WebBrowser
