@@ -628,6 +628,8 @@ open target/bern/macos/Showcase.app
 macOS 上 `NavigationSplitView` 的工具栏安全区受以下做法影响，出问题时侧栏和详情栏的内容会压到标题栏和红绿灯下面，之后也不会恢复：
 
 - **关闭命中测试**：给分栏视图（或包着它的容器）加 `.allowsHitTesting(false)`，安全区当场消失。`Stack(enabled: false)` 因此只生成 `.disabled` 和 `.accessibilityHidden`；`.disabled` 已经让其中的控件和手势失效，全窗口的 `Modal` 遮罩也挡住了指针。
+
+**被盖住的分栏视图**（2026-11-11）：一页详情盖住整个窗口，下面的分栏视图放在 `Stack(enabled: false)` 里保持挂载。在 macOS 27 上，`.disabled` 和 `.accessibilityHidden` 到不了分栏的各列：AppKit 单独承载每一列，侧栏的 `AXOutline`、各行和设置按钮仍在无障碍树里，并且是可用状态；工具栏上显示/隐藏侧栏的按钮也还在。现在这个 `Stack` 同时通过环境值 `bernInert` 向下传递，侧栏列表（包括头尾）和详情列各自在最外层再加一遍 `.disabled` 与 `.accessibilityHidden`，侧栏按 `bernInert` 移除切换按钮，和盖住窗口的层一样。控件登记也读取环境里的 `isEnabled`，所以 `ui inspect` 把被盖住的控件报告为不可用。在一个实际应用上验证：打开详情后，无障碍树里分栏只剩一条不可用的分隔线，工具栏只有这一页自己的按钮，被盖住的控件登记为 `enabled: false`；返回后侧栏、切换按钮和原来展开的日期都恢复，控件重新可用。
 - **共享元素改动布局**：原先非图片的 `hero` 用 `matchedGeometryEffect` 配对整个 frame，分栏视图在动画中按中间尺寸布局；只配对位置、或只在绘制上缩放，替换接连很快时仍会复现。macOS 上非图片的 `hero` 现在和图片一样在窗口上层飞快照（`BernViewHero`）：对旧、新元素所在区域各截一张图，从旧位置飞到新位置并交叉淡化，过渡期间真实元素只是透明，布局和变换都不动。iOS 改为只影响绘制的 `offset` 和 `scaleEffect`；两边都不再使用 `matchedGeometryEffect`。只有前一个同名元素还在、或刚离开不到半秒，新元素才算替换它；列表里滚回来的条目不会飞。
 - **分支切换带动画**：分支里有共享元素时，生成器原先给整个分支加 `.animation(_:value:)`，好让 `matchedGeometryEffect` 有动画可用；新插入的分栏视图因此在动画里布局，同样会让侧栏压到标题栏下。共享元素现在自己驱动动画，这个分支动画只为 `appear` / `disappear` 生成。
 - **弹窗**：`Modal` 的图层通过偏好值挂在窗口根部的覆盖层，原来出现和消失都没有过渡。现在覆盖层自己给弹窗图层做淡入淡出，面板按 `appear` 在出现时动画，不会连带窗口其余部分。浮动面板由 `BernModalStage`（一个 `Layout`）放置：不写高度时按面板宽度以不限高的提议量内容的理想高度（`ScrollView` 的理想高度就是所滚内容的高度），再以窗口为限；iOS 与 tvOS 共用（2026-10-25，`tests/modal_fit.rs` 在屏幕外窗口里量）。

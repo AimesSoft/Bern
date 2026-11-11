@@ -727,6 +727,8 @@ private struct BernControl: ViewModifier {
     let actions: BernControlActions
     @Environment(BernWindowContext.self) private var window
     @Environment(\.bernItemKeys) private var keys
+    // Disabled from around it as well, as under a page that covers it.
+    @Environment(\.isEnabled) private var reachable
     @State private var mount = BernControlMount()
 
     init(target: String, role: String, label: String, enabled: Bool, actions: BernControlActions) {
@@ -743,8 +745,8 @@ private struct BernControl: ViewModifier {
         BernHost.shared.controls.register(
             mount.token,
             BernControlEntry(
-                target: target, window: window.id, role: role, label: label, enabled: enabled,
-                actions: actions))
+                target: target, window: window.id, role: role, label: label,
+                enabled: enabled && reachable, actions: actions))
     }
 
     func body(content: Content) -> some View {
@@ -759,7 +761,7 @@ private struct BernControl: ViewModifier {
                 mount.mounted = true
                 register()
             }
-            .onChange(of: "\(window.id)|\(target)|\(label)|\(enabled)") {
+            .onChange(of: "\(window.id)|\(target)|\(label)|\(enabled)|\(reachable)") {
                 if mount.mounted { register() }
             }
             .onDisappear {
