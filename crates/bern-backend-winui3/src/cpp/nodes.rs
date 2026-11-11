@@ -364,13 +364,18 @@ impl Generator<'_> {
             "Toast" => self.toast(out, element),
             "Drop" => self.drop_area(out, element),
             "Pinch" | "Swipe" => self.gesture(out, element),
+            "ScreenBrightness" => {
+                if let Some(available) = self.field(element, "available") {
+                    out.line(format!("B::ScreenBrightness(c, {available});"));
+                }
+            }
             "Detail" | "Destination" | "Tab" | "Sidebar" | "SidebarHeader" | "SidebarFooter"
             | "WindowSet" | "Window" | "Layout" | "MenuItem" | "Inspector" | "TabAccessory"
             // Windows applications of this kind keep no menu bar.
             | "MenuBar" | "CommandMenu" | "CommandItem"
             // The application builds the status item's menu when it opens.
             | "StatusItem"
-            | "PickerOption" | "TableColumn" | "TableMenu" | "ContextMenu" => {
+            | "PickerOption" | "TableColumn" | "TableMenu" | "ContextMenu" | "DoubleTap" | "OnCommit" => {
                 // Realized by their parents.
             }
             other => out.line(format!("/* unsupported {other} */")),

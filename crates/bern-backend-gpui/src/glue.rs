@@ -3,12 +3,12 @@
 //! and the MCP server beside it.
 
 use bern_ir::Application;
-use bern_target_api::BuildContext;
 use bern_target_api::glue::{
     WindowPresentation, engine_expr, module_dependencies, path, players_expr, resources_expr,
     session_spec,
 };
 pub use bern_target_api::glue::{cli_rs, mcp_rs};
+use bern_target_api::{BuildContext, Framework};
 
 fn listens(context: &BuildContext) -> bool {
     context
@@ -54,7 +54,10 @@ bern-adapter-mcp = {{ {mcp_adapter} }}
 {modules}
 [workspace]
 
-{profiles}"#,
+{profiles}
+
+{gpui_patches}"#,
+        gpui_patches = gpui_patches(context),
         version = app.app.version,
         gpui = bern("bern-gpui"),
         ffi = bern("bern-ffi"),
@@ -78,6 +81,26 @@ bern-adapter-mcp = {{ {mcp_adapter} }}
             ""
         },
     )
+}
+
+/// Cargo ignores patches in dependency manifests. Keep the renderer and its
+/// platform crates on the exact same patched GPUI in the generated root.
+fn gpui_patches(context: &BuildContext) -> String {
+    let mut patches = String::from("[patch.crates-io]\n");
+    for name in ["gpui-pre", "gpui-pre-linux", "gpui-pre-windows"] {
+        let dependency = match &context.framework {
+            Framework::Path(crates) => format!(
+                "path = {}",
+                bern_target_api::toml_string(&path(&crates.join("bern-gpui/vendor").join(name)))
+            ),
+            Framework::Git { .. } => context.framework.dependency(name),
+            // Generation rejects this before calling cargo_toml: bern-gpui
+            // and its patched platform crates are not registry releases.
+            Framework::Registry(_) => continue,
+        };
+        patches.push_str(&format!("{name} = {{ {dependency} }}\n"));
+    }
+    patches
 }
 
 /// The build script of the application crate on Windows: it compiles the

@@ -1682,6 +1682,14 @@ inline void OpenFilesInEngine() {
     });
 }
 
+// Desktop XAML has no reversible per-host brightness override. This only
+// describes the scoped API: it does not claim Windows cannot adjust monitors.
+// Do not change global gamma/WMI settings or write the requested value.
+inline void ScreenBrightness(Ctx const& ctx, Field available) {
+    SetDraft(ctx, available, Value::Bool(false));
+    Reactive::OnCleanup([ctx, available] { SetDraft(ctx, available, Value::Bool(false)); });
+}
+
 struct GestureProps {
     char const* id = "";
     Str label;
@@ -1690,6 +1698,9 @@ struct GestureProps {
     char const* axis = nullptr;
     std::optional<double> distance;
     Act action;
+    bool continuous = false;
+    std::optional<Field> active;
+    Act onCommit;
 };
 
 /// Pinching the content — two fingers, or a touchpad pinch, which arrives
@@ -1740,6 +1751,22 @@ inline void Pinch(Parent const& p, Ctx const& ctx, GestureProps props, Build con
 /// Dragging over the content along `axis` moves `field` through its range
 /// over `distance` units (up and right increase it); the action runs when
 /// the pointer lifts.
+// Revoke only native button captures when a drag wins. This handles both
+// Button { Swipe { ... } } and Swipe { Button { ... } } without intercepting
+// ordinary clicks or altering buttons that have no DoubleTap.
+inline void CancelButtonCaptures(xaml::UIElement const& area) {
+    auto revoke = [](xaml::DependencyObject const& node) {
+        if (auto button = node.try_as<controls::Button>()) button.ReleasePointerCaptures();
+    };
+    std::function<void(xaml::DependencyObject const&)> descendants = [&](auto const& node) {
+        revoke(node);
+        for (int i = 0, n = xaml::Media::VisualTreeHelper::GetChildrenCount(node); i < n; ++i)
+            descendants(xaml::Media::VisualTreeHelper::GetChild(node, i));
+    };
+    descendants(area);
+    for (auto node = xaml::Media::VisualTreeHelper::GetParent(area); node; node = xaml::Media::VisualTreeHelper::GetParent(node)) revoke(node);
+}
+
 inline void Swipe(Parent const& p, Ctx const& ctx, GestureProps props, Build const& content) {
     if (!props.field) return;
     auto field = *props.field;
@@ -1748,47 +1775,114 @@ inline void Swipe(Parent const& p, Ctx const& ctx, GestureProps props, Build con
     bool vertical = !props.axis || std::string_view(props.axis) == "vertical";
     double reach = props.distance.value_or(300);
     auto run = Run(ctx, props.action);
+    auto commit = Run(ctx, props.onCommit);
     auto set = [ctx, field, low, high](double value) { SetDraft(ctx, field, Value::Float((std::clamp)(value, low, high))); };
-    struct Drag {
-        bool down = false, moving = false;
-        double x = 0, y = 0, from = 0;
-        uint32_t pointer = 0;
+    auto active = [ctx, field = props.active](bool value) { if (field) SetDraft(ctx, *field, Value::Bool(value)); };
+    active(false);
+    auto drag = std::make_shared<SwipeDrag>();
+    auto live = std::make_shared<bool>(true);
+    auto weak = winrt::make_weak(area);
+    auto cancel = [drag, active, weak] {
+        bool captured = drag->moving;
+        drag->Cancel();
+        active(false);
+        if (captured) if (auto element = weak.get()) element.ReleasePointerCaptures();
     };
-    auto drag = std::make_shared<Drag>();
     using PointerHandler = xaml::Input::PointerEventHandler;
-    area.AddHandler(xaml::UIElement::PointerPressedEvent(), winrt::box_value(PointerHandler([drag, ctx, field](IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args) {
+    auto move = [drag, live, weak, vertical, reach, set, low, high, active, run, continuous = props.continuous, cancel](xaml::Input::PointerRoutedEventArgs const& args) {
+        if (!*live || !drag->down || args.Pointer().PointerId() != drag->pointer) return;
+        auto element = weak.get();
+        if (!element) { cancel(); return; }
+        auto at = args.GetCurrentPoint(element).Position();
+        bool wasMoving = drag->moving;
+        auto value = drag->Move(at.X, at.Y, vertical, GestureMetric(element, vertical ? SM_CYDRAG : SM_CXDRAG), reach, low, high);
+        if (drag->moving && !wasMoving) {
+            CancelButtonCaptures(element);
+            if (!element.CapturePointer(args.Pointer())) { cancel(); return; }
+            active(true);
+        }
+        if (!drag->moving) return;
+        args.Handled(true);
+        if (value && *live) {
+            set(*value);
+            if (continuous && *live && run) run();
+        }
+    };
+    auto end = [drag, live, weak, move, active, run, commit, continuous = props.continuous](xaml::Input::PointerRoutedEventArgs const& args) {
+        if (!*live || !drag->down || args.Pointer().PointerId() != drag->pointer) return;
+        FinishSwipe(continuous,
+            [&] {
+                move(args); // final value and continuous action, still active
+                bool moved = drag->End();
+                if (moved) args.Handled(true);
+                return moved;
+            },
+            [&] { if (run) run(); },
+            [&] { if (commit) commit(); },
+            [&] {
+                drag->Cancel();
+                active(false);
+                if (auto element = weak.get()) element.ReleasePointerCapture(args.Pointer());
+            });
+    };
+    area.AddHandler(xaml::UIElement::PointerPressedEvent(), winrt::box_value(PointerHandler([drag, live, ctx, field, active](IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args) {
+        if (!*live || drag->down) return;
         auto point = args.GetCurrentPoint(sender.as<xaml::UIElement>());
         if (!point.Properties().IsLeftButtonPressed()) return;
-        *drag = Drag{true, false, point.Position().X, point.Position().Y, R::AsDouble(ctx.Peek(field)), args.Pointer().PointerId()};
+        drag->Begin(args.Pointer().PointerId(), point.Position().X, point.Position().Y, R::AsDouble(ctx.Peek(field)));
+        active(false);
     })), true);
-    area.AddHandler(xaml::UIElement::PointerMovedEvent(), winrt::box_value(PointerHandler([drag, vertical, reach, set, low, high](IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args) {
-        if (!drag->down || args.Pointer().PointerId() != drag->pointer) return;
-        auto element = sender.as<xaml::UIElement>();
-        auto at = args.GetCurrentPoint(element).Position();
-        double moved = vertical ? drag->y - at.Y : at.X - drag->x;
-        if (!drag->moving && std::abs(moved) < 10) return;
-        if (!drag->moving) {
-            drag->moving = true;
-            element.CapturePointer(args.Pointer());
+    area.AddHandler(xaml::UIElement::PointerReleasedEvent(), winrt::box_value(PointerHandler([end](auto&&, auto const& args) { end(args); })), true);
+    area.AddHandler(xaml::UIElement::PointerCanceledEvent(), winrt::box_value(PointerHandler([drag, cancel](auto&&, xaml::Input::PointerRoutedEventArgs const& args) {
+        if (drag->down && args.Pointer().PointerId() == drag->pointer) cancel();
+    })), true);
+    area.PointerCaptureLost([drag, cancel, weak](auto&&, xaml::Input::PointerRoutedEventArgs const& args) {
+        // A descendant button losing its old capture is expected on claim.
+        auto element = weak.get();
+        if (element && args.OriginalSource() == element && drag->down && args.Pointer().PointerId() == drag->pointer) cancel();
+    });
+    // A containing native Button initially owns pointer capture. Observe the
+    // root's handled moves until the axis wins; then capture on the Swipe so
+    // it keeps receiving events outside its bounds. Per-control move handlers
+    // alone never see a pointer captured by an ancestor Button.
+    struct RootEvents {
+        winrt::weak_ref<xaml::UIElement> root;
+        PointerHandler moved{nullptr}, released{nullptr}, canceled{nullptr};
+        void Detach() {
+            if (auto element = root.get()) {
+                element.RemoveHandler(xaml::UIElement::PointerMovedEvent(), winrt::box_value(moved));
+                element.RemoveHandler(xaml::UIElement::PointerReleasedEvent(), winrt::box_value(released));
+                element.RemoveHandler(xaml::UIElement::PointerCanceledEvent(), winrt::box_value(canceled));
+            }
+            root = {};
         }
-        set(drag->from + moved / reach * (high - low));
-        args.Handled(true);
-    })), true);
-    auto end = [drag, run](IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args) {
-        if (!drag->down) return;
-        bool moved = drag->moving;
-        drag->down = drag->moving = false;
-        sender.as<xaml::UIElement>().ReleasePointerCapture(args.Pointer());
-        if (moved && run) run();
     };
-    area.AddHandler(xaml::UIElement::PointerReleasedEvent(), winrt::box_value(PointerHandler(end)), true);
-    area.AddHandler(xaml::UIElement::PointerCanceledEvent(), winrt::box_value(PointerHandler(end)), true);
+    auto events = std::make_shared<RootEvents>();
+    events->moved = PointerHandler([move](auto&&, auto const& args) { move(args); });
+    events->released = PointerHandler([end](auto&&, auto const& args) { end(args); });
+    events->canceled = PointerHandler([drag, cancel](auto&&, xaml::Input::PointerRoutedEventArgs const& args) {
+        if (drag->down && args.Pointer().PointerId() == drag->pointer) cancel();
+    });
+    area.Loaded([events, weak, live](auto&&, auto&&) {
+        if (!*live) return;
+        events->Detach();
+        auto element = weak.get();
+        if (!element || !element.XamlRoot()) return;
+        auto root = element.XamlRoot().Content();
+        events->root = winrt::make_weak(root);
+        root.AddHandler(xaml::UIElement::PointerMovedEvent(), winrt::box_value(events->moved), true);
+        root.AddHandler(xaml::UIElement::PointerReleasedEvent(), winrt::box_value(events->released), true);
+        root.AddHandler(xaml::UIElement::PointerCanceledEvent(), winrt::box_value(events->canceled), true);
+    });
+    area.Unloaded([events, cancel](auto&&, auto&&) { events->Detach(); cancel(); });
+    Reactive::OnCleanup([events, cancel, live] { *live = false; events->Detach(); cancel(); });
     auto text = Bound(ctx, props.label);
     BindName(area, text);
     Controls::Register(ctx, props.id, "swipe", text, nullptr,
-        Actions{.setNumber = [set, run](double value) {
+        Actions{.setNumber = [set, run, commit](double value) {
                     set(value);
                     if (run) run();
+                    if (commit) commit();
                 },
             .value = [ctx, field] { return std::optional<std::string>(R::Number(R::AsDouble(ctx.Peek(field)))); }});
     p.Add(area);

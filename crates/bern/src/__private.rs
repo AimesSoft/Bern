@@ -133,6 +133,8 @@ pub struct WindowState {
     pub menu_bar: <bool as BernValue>::Ref,
     /// Whether a hardware keyboard is connected; always on a computer.
     pub keyboard: <bool as BernValue>::Ref,
+    /// The host has a direct touch screen, not merely a trackpad.
+    pub touch: <bool as BernValue>::Ref,
     /// `version` of `[app]` in `Bern.toml`.
     pub app_version: <String as BernValue>::Ref,
 }
@@ -154,6 +156,7 @@ pub fn window() -> WindowState {
         webview: bool::reference(),
         menu_bar: bool::reference(),
         keyboard: bool::reference(),
+        touch: bool::reference(),
         app_version: String::reference(),
     }
 }

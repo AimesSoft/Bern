@@ -15,6 +15,8 @@ mod canvas;
 mod controls;
 pub mod ctx;
 mod features;
+mod gesture_state;
+mod gestures;
 mod hdr;
 mod host;
 mod icons;
@@ -58,9 +60,10 @@ pub use ctx::{Ctx, Field, session_pop, session_push_str, session_set, session_to
 pub use features::{
     ContentButton, ContentButtonProps, Drop, DropProps, GestureProps, Inspector, InspectorProps,
     KeyShortcut, KeyShortcutProps, Pick, Pinch, Place, PlaceProps, PopoverButton,
-    PopoverButtonProps, Rail, RailProps, RuntimeImage, RuntimeImageProps, ScrollProps, ScrollView,
-    ShortcutInput, ShortcutInputProps, SplitButton, SplitButtonProps, Swipe, Toast, ToastProps,
-    activate_target, bound_shortcut, default_focus, focus_target, shortcut,
+    PopoverButtonProps, Rail, RailProps, RuntimeImage, RuntimeImageProps, ScreenBrightness,
+    ScrollProps, ScrollView, ShortcutInput, ShortcutInputProps, SplitButton, SplitButtonProps,
+    Swipe, Toast, ToastProps, activate_target, bound_shortcut, default_focus, focus_target,
+    shortcut,
 };
 pub use glib;
 pub use host::{dispatch, run};

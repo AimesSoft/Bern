@@ -1734,7 +1734,7 @@ export function startFocus(node) {
   });
 }
 
-export function Button(p, ctx, { id, label, icon: name, role, prominence, enabled, style, setFile, fileKinds, shape, height, fill, defaultFocus, menu }, action) {
+export function Button(p, ctx, { id, label, icon: name, role, prominence, enabled, style, setFile, fileKinds, shape, height, fill, defaultFocus, menu, doubleTap }, action) {
   const kind = prominence ?? "standard";
   const text = el("span");
   bindText(text, label);
@@ -1749,7 +1749,7 @@ export function Button(p, ctx, { id, label, icon: name, role, prominence, enable
     node.disabled = !isEnabled();
   });
   mark(node, ctx, id);
-  node.addEventListener("click", () => action());
+  buttonActivation(node, action, doubleTap, isEnabled);
   control(ctx, {
     target: () => target(ctx, id), role: "button", label, enabled: isEnabled,
     actions: { activate: action, ...(setFile ? { setFile, fileKinds } : {}) },
@@ -1759,6 +1759,86 @@ export function Button(p, ctx, { id, label, icon: name, role, prominence, enable
   contextMenu(node, ctx, label, menu);
   p.append(ctx.inGroup && !ctx.inToolbar ? el("div", { class: "bern-row bern-row-button" }, node) : node);
   if (defaultFocus) startFocus(node);
+}
+
+/// Keep native keyboard/assistive activation immediate, while pointer taps
+/// wait for a possible double. The DOM cannot read the OS timeout, so the
+/// browser backend owns a fixed gesture window, independent of dblclick.
+export const DOUBLE_TAP_WINDOW_MS = 500;
+export function buttonActivation(node, action, doubleTap, enabled = () => !node.disabled) {
+  let pointer = null;
+  let cancelled = false;
+  let pending = null;
+  let firstPosition = null;
+  const clear = () => { clearTimeout(pending); pending = null; firstPosition = null; };
+  const detach = () => {
+    document.removeEventListener("pointermove", move, true);
+    document.removeEventListener("pointerup", up, true);
+    document.removeEventListener("pointercancel", cancel, true);
+    pointer = null;
+  };
+  const move = (event) => {
+    if (!pointer || event.pointerId !== pointer.id) return;
+    if (Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) > 10) {
+      cancelled = true;
+      clear();
+    }
+  };
+  const up = (event) => {
+    if (event.pointerId !== pointer?.id) return;
+    move(event);
+    detach();
+  };
+  const cancel = (event) => {
+    if (event.pointerId !== pointer?.id) return;
+    cancelled = true;
+    clear();
+    detach();
+  };
+  node.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || node.disabled) return;
+    if (pointer || event.isPrimary === false) {
+      cancelled = true;
+      clear();
+      detach();
+      return;
+    }
+    detach();
+    cancelled = false;
+    pointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
+    document.addEventListener("pointermove", move, true);
+    document.addEventListener("pointerup", up, true);
+    document.addEventListener("pointercancel", cancel, true);
+  }, true);
+  node.addEventListener("click", (event) => {
+    if (!enabled() || event.defaultPrevented) { clear(); return; }
+    if (event.detail === 0) { clear(); action?.(); return; }
+    if (cancelled) { event.preventDefault(); event.stopImmediatePropagation(); return; }
+    if (!doubleTap) { action?.(); return; }
+    if (pending !== null && Math.hypot(event.clientX - firstPosition.x, event.clientY - firstPosition.y) <= 20) {
+      clear();
+      doubleTap();
+    } else {
+      if (pending !== null) { clear(); action?.(); if (!node.isConnected) return; }
+      firstPosition = { x: event.clientX, y: event.clientY };
+      pending = setTimeout(() => {
+        pending = null;
+        firstPosition = null;
+        if (enabled() && node.isConnected) action?.();
+      }, DOUBLE_TAP_WINDOW_MS);
+    }
+  });
+  const abort = () => { cancelled = true; clear(); detach(); };
+  node.addEventListener("contextmenu", abort);
+  globalThis.addEventListener("blur", abort);
+  const hidden = () => { if (document.hidden) abort(); };
+  document.addEventListener("visibilitychange", hidden);
+  effect(() => { if (!enabled()) abort(); });
+  onCleanup(() => {
+    abort();
+    globalThis.removeEventListener("blur", abort);
+    document.removeEventListener("visibilitychange", hidden);
+  });
 }
 
 /// A button's `ContextMenu`: a secondary click, a long touch, or the menu
@@ -4985,6 +5065,17 @@ function videoControls(ctx, id, playerID, state) {
   return el("div", { class: "bern-video-controls" }, play, positionText, position.node, durationText, mute, volume.node);
 }
 
+/// Direct touchscreen support is a device capability, not a breakpoint or
+/// a coarse-pointer heuristic (hybrid laptops can also have a mouse).
+export function touchCapability(field) {
+  const update = () => field.set(navigator.maxTouchPoints > 0);
+  update();
+  for (const name of ["focus", "pointerdown"]) globalThis.addEventListener(name, update);
+  onCleanup(() => {
+    for (const name of ["focus", "pointerdown"]) globalThis.removeEventListener(name, update);
+  });
+}
+
 // MARK: - Windows
 
 const VISIBLE = 0;
@@ -5029,6 +5120,7 @@ class Win {
     this.fold = cell(0);
     /// `window.tv`: the page is on a television.
     this.tv = cell(television);
+    this.touch = cell(navigator.maxTouchPoints > 0);
     /// `window.keyboard`: a hardware keyboard is attached. A browser does
     /// not say so: a page with a fine pointer has one, and a key a
     /// keyboard presses shows one; an on-screen keyboard's keys name no
@@ -5303,6 +5395,7 @@ class WindowManager {
     const body = el("div", { class: "bern-window-body" });
     const content = el("div", { class: "bern-window-content" });
     within(win.scope, () => {
+      touchCapability(win.touch);
       if (win.dialog) this.mountDialog(win, ctx, body);
       else if (win.floating) this.mountFloating(win, body);
       else {

@@ -140,6 +140,8 @@ pub(crate) struct Win {
     /// `window.idle`: no input for `idle_after` seconds.
     idle: Cell<bool>,
     fullscreen: Cell<bool>,
+    /// Direct touchscreen capability, not a touchpad or a layout breakpoint.
+    touch: Cell<bool>,
     /// Whether rest counts toward `window.idle` (`idle_enabled`).
     idle_enabled: StdCell<bool>,
     /// The `idle_area`s of the window, each with its seconds.
@@ -482,6 +484,7 @@ impl Win {
     pub(crate) fn state(&self, field: &str) -> Value {
         match field {
             "fullscreen" => Value::Bool(self.fullscreen.get()),
+            "touch" => Value::Bool(self.touch.get()),
             "idle" => Value::Bool(self.idle.get()),
             "short" => Value::Bool(self.short.get()),
             "tv" => Value::Bool(false),
@@ -1043,6 +1046,7 @@ pub(crate) fn open(kind_id: &str) -> Result<String, Failure> {
         ghosts,
         idle: Cell::new(false),
         fullscreen: Cell::new(window.is_fullscreen()),
+        touch: Cell::new(has_touch(&gtk::prelude::WidgetExt::display(&window))),
         idle_enabled: StdCell::new(true),
         idle_areas: RefCell::new(Vec::new()),
         mouse: StdCell::new(Mouse::Unknown),
@@ -1058,6 +1062,7 @@ pub(crate) fn open(kind_id: &str) -> Result<String, Failure> {
         next_shortcut: StdCell::new(1),
         recorder: RefCell::new(None),
     });
+    watch_touch(&win);
     MANAGER.with(|manager| manager.windows.borrow_mut().push(Rc::clone(&win)));
 
     let page = Page::new();
@@ -1252,6 +1257,58 @@ pub(crate) fn open(kind_id: &str) -> Result<String, Failure> {
     win.schedule_report();
     snapshot::watch(&win);
     Ok(id)
+}
+
+/// GDK distinguishes TOUCH (direct touch) from pointer/touchpad devices.
+fn has_touch(display: &gtk::gdk::Display) -> bool {
+    display.list_seats().iter().any(|seat| {
+        seat.capabilities()
+            .contains(gtk::gdk::SeatCapabilities::TOUCH)
+    })
+}
+
+fn watch_touch_seat(win: &Rc<Win>, seat: &gtk::gdk::Seat) {
+    let weak = Rc::downgrade(win);
+    let added = seat.connect_device_added(move |seat, _| {
+        if let Some(win) = weak.upgrade() {
+            win.touch.set(has_touch(&seat.display()));
+        }
+    });
+    let weak = Rc::downgrade(win);
+    let removed = seat.connect_device_removed(move |seat, _| {
+        if let Some(win) = weak.upgrade() {
+            win.touch.set(has_touch(&seat.display()));
+        }
+    });
+    let seat = seat.clone();
+    win.scope.on_dispose(move || {
+        seat.disconnect(added);
+        seat.disconnect(removed);
+    });
+}
+
+fn watch_touch(win: &Rc<Win>) {
+    let display = gtk::prelude::WidgetExt::display(&win.window);
+    for seat in display.list_seats() {
+        watch_touch_seat(win, &seat);
+    }
+    let weak = Rc::downgrade(win);
+    let added = display.connect_seat_added(move |display, seat| {
+        if let Some(win) = weak.upgrade() {
+            watch_touch_seat(&win, seat);
+            win.touch.set(has_touch(display));
+        }
+    });
+    let weak = Rc::downgrade(win);
+    let removed = display.connect_seat_removed(move |display, _| {
+        if let Some(win) = weak.upgrade() {
+            win.touch.set(has_touch(display));
+        }
+    });
+    win.scope.on_dispose(move || {
+        display.disconnect(added);
+        display.disconnect(removed);
+    });
 }
 
 /// `window.idle`: pointer, touch, wheel and key input in the window start

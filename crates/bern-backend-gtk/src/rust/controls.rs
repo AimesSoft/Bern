@@ -5,12 +5,24 @@ use bern_ir::{Element, Node};
 use bern_protocol::Type;
 
 impl Generator<'_> {
+    /// Non-rendering action children belong to the immediate control only.
+    pub(super) fn child_action(&self, element: &Element, kind: &str) -> String {
+        element
+            .children
+            .iter()
+            .find_map(|node| match node {
+                Node::Element(child) if child.kind == kind => Some(self.action(child)),
+                _ => None,
+            })
+            .unwrap_or_else(|| "None".into())
+    }
+
     /// A `Button` with children, which it shows as its content.
     pub(super) fn content_button(&self, out: &mut Out, element: &Element) {
         self.children(
             out,
             &format!(
-                "b::ContentButton(p, c, b::ContentButtonProps {{ id: {}, label: {}, enabled: {}, style: {}, pick: {}, paste: {}, shape: {}, menu: {} }}, {}, ",
+                "b::ContentButton(p, c, b::ContentButtonProps {{ id: {}, label: {}, enabled: {}, style: {}, pick: {}, paste: {}, shape: {}, menu: {}, double_tap: {} }}, {}, ",
                 self.id(element),
                 some(self.text_prop(element, "label")),
                 self.enabled(element),
@@ -19,6 +31,7 @@ impl Generator<'_> {
                 some(self.field(element, "paste")),
                 self.shape(element),
                 self.context_menu(element),
+                self.child_action(element, "DoubleTap"),
                 self.action(element),
             ),
             &element.children,
@@ -34,7 +47,7 @@ impl Generator<'_> {
 
     pub(super) fn button(&self, out: &mut Out, element: &Element) {
         out.line(format!(
-            "b::Button(p, c, b::ButtonProps {{ id: {}, label: {}, icon: {}, role: {}, prominence: {}, enabled: {}, style: {}, pick: {}, paste: {}, shape: {}, fill: {}, menu: {} }}, {});",
+            "b::Button(p, c, b::ButtonProps {{ id: {}, label: {}, icon: {}, role: {}, prominence: {}, enabled: {}, style: {}, pick: {}, paste: {}, shape: {}, fill: {}, menu: {}, double_tap: {} }}, {});",
             self.id(element),
             some(self.text_prop(element, "label")),
             Self::icon(element, "icon"),
@@ -47,6 +60,7 @@ impl Generator<'_> {
             self.shape(element),
             element.keyword("width") == Some("fill"),
             self.context_menu(element),
+            self.child_action(element, "DoubleTap"),
             self.action(element),
         ));
         self.shortcut(
@@ -284,7 +298,7 @@ impl Generator<'_> {
         self.children(
             out,
             &format!(
-                "b::{}(p, c, b::GestureProps {{ id: {}, label: {}, field: {}, min: {}, max: {}, vertical: {}, distance: {} }}, {}, ",
+                "b::{}(p, c, b::GestureProps {{ id: {}, label: {}, field: {}, min: {}, max: {}, vertical: {}, distance: {}, continuous: {}, active: {}, on_commit: {} }}, {}, ",
                 element.kind,
                 self.id(element),
                 some(self.text_prop(element, "label")),
@@ -294,6 +308,9 @@ impl Generator<'_> {
                 float(element.number("max").unwrap_or(1.0)),
                 element.keyword("axis") != Some("horizontal"),
                 Self::number(element, "distance"),
+                element.keyword("continuous") == Some("true"),
+                some(self.field(element, "active")),
+                self.child_action(element, "OnCommit"),
                 self.action(element),
             ),
             &element.children,

@@ -772,6 +772,11 @@ impl Target for Gpui {
         app: &Application,
         context: &BuildContext,
     ) -> Result<Vec<GeneratedFile>, Vec<Diagnostic>> {
+        if matches!(context.framework, bern_target_api::Framework::Registry(_)) {
+            return Err(vec![Diagnostic::error(
+                "the GPUI runtime requires a Bern path or Git checkout with its patched desktop GPUI dependencies",
+            )]);
+        }
         let app = &prepared(app, &context.target);
         bern_target_api::svg::validate(app, context)?;
         let generator = Generator::new(app, self.platform);

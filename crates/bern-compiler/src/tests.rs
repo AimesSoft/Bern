@@ -5426,3 +5426,52 @@ fn navigation_reset_accepts_stable_keys_but_not_flags() {
         "{errors:?}"
     );
 }
+
+#[test]
+fn gesture_actions_are_metadata_and_stand_directly_in_their_owner() {
+    compile_ui(&wrap(
+        r#"Column {
+        ScreenBrightness(value: draft.size, available: draft.on)
+        if window.touch {
+            Swipe(id: level, label: app.title, value: draft.size, min: 0, max: 1,
+                  continuous: true, active: draft.on) {
+                Button(id: surface, label: app.title) {
+                    DoubleTap => app.add(2)
+                } => app.add(1)
+                OnCommit => app.add(3)
+            } => app.add(4)
+        }
+    }"#,
+    ))
+    .unwrap_or_else(|errors| panic!("{errors:?}"));
+    for (body, expected) in [
+        (
+            r#"Button(id: b, label: app.title) { DoubleTap => app.add(1) DoubleTap => app.add(2) } => app.add(3)"#,
+            "at most one `DoubleTap`",
+        ),
+        (
+            r#"Button(id: b, label: app.title) { if draft.on { DoubleTap => app.add(1) } } => app.add(2)"#,
+            "direct child",
+        ),
+        (r#"DoubleTap => app.add(1)"#, "Button"),
+        (
+            r#"Button(id: b, label: app.title) { DoubleTap } => app.add(1)"#,
+            "B301",
+        ),
+        (
+            r#"Swipe(id: s, label: app.title, value: draft.size, min: 0, max: 1) { OnCommit => app.add(1) }"#,
+            "exactly one child",
+        ),
+        (
+            r#"Swipe(id: s, label: app.title, value: draft.size, min: 0, max: 1) { Spacer OnCommit => app.add(1) OnCommit => app.add(2) }"#,
+            "at most one `OnCommit`",
+        ),
+        (
+            r#"ScreenBrightness(value: draft.on, available: draft.on)"#,
+            "f64",
+        ),
+    ] {
+        let message = errors(body);
+        assert!(message.contains(expected), "{body}: {message}");
+    }
+}

@@ -6,6 +6,76 @@
 
 use std::cell::RefCell;
 
+/// Direct touch input, not a trackpad. GPUI has no capability query, so
+/// inspect the host's device inventory without opening or seizing devices.
+/// Recheck on later renders so a cached answer does not survive hot-plugging.
+pub(crate) fn touchscreen() -> bool {
+    use std::time::{Duration, Instant};
+    thread_local! {
+        static TOUCH: RefCell<Option<(Instant, bool)>> = const { RefCell::new(None) };
+    }
+    TOUCH.with(|cached| {
+        if let Some((at, value)) = *cached.borrow()
+            && at.elapsed() < Duration::from_secs(1) { return value; }
+        let found = touchscreen_query();
+        if found.is_none() {
+            static REPORTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+            if !REPORTED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                eprintln!("bern: direct touchscreen inventory is unavailable; window.touch defaults to false (not a device capability determination)");
+            }
+        }
+        let value = found.unwrap_or(false);
+        *cached.borrow_mut() = Some((Instant::now(), value));
+        value
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn touchscreen_query() -> Option<bool> {
+    mac::touchscreen()
+}
+
+#[cfg(target_os = "windows")]
+fn touchscreen_query() -> Option<bool> {
+    use win32::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_DIGITIZER};
+    // NID_READY and NID_INTEGRATED_TOUCH | NID_EXTERNAL_TOUCH. Pen-only
+    // digitizers and indirect precision touchpads do not satisfy this mask.
+    let capabilities = unsafe { GetSystemMetrics(SM_DIGITIZER) };
+    Some(capabilities & 0x80 != 0 && capabilities & 0x03 != 0)
+}
+
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+fn touchscreen_query() -> Option<bool> {
+    let devices = std::fs::read_dir("/sys/class/input").ok()?;
+    let mut unknown = false;
+    for device in devices.flatten() {
+        if !device.file_name().to_string_lossy().starts_with("event") {
+            continue;
+        }
+        let properties = std::fs::read_to_string(device.path().join("dev"))
+            .ok()
+            .and_then(|dev| {
+                std::fs::read_to_string(format!("/run/udev/data/c{}", dev.trim())).ok()
+            });
+        match properties {
+            Some(properties) if direct_touch_properties(&properties) => return Some(true),
+            Some(_) => {}
+            None => unknown = true,
+        }
+    }
+    (!unknown).then_some(false)
+}
+
+#[cfg(any(target_os = "linux", target_os = "freebsd", test))]
+fn direct_touch_properties(properties: &str) -> bool {
+    properties
+        .lines()
+        .any(|line| line == "E:ID_INPUT_TOUCHSCREEN=1")
+        && !properties
+            .lines()
+            .any(|line| line == "E:ID_INPUT_TOUCHPAD=1")
+}
+
 thread_local! {
     /// The picture the application shows as its icon.
     static ICON: RefCell<Option<&'static str>> = const { RefCell::new(None) };
@@ -184,6 +254,49 @@ mod mac {
     };
     use objc2_foundation::{NSDictionary, NSString};
 
+    pub(super) fn touchscreen() -> Option<bool> {
+        use objc2_foundation::NSNumber;
+        use std::ffi::c_void;
+        #[link(name = "IOKit", kind = "framework")]
+        unsafe extern "C" {
+            fn IOHIDManagerCreate(allocator: *const c_void, options: u32) -> *const c_void;
+            fn IOHIDManagerSetDeviceMatching(manager: *const c_void, matching: *const c_void);
+            fn IOHIDManagerCopyDevices(manager: *const c_void) -> *const c_void;
+        }
+        #[link(name = "CoreFoundation", kind = "framework")]
+        unsafe extern "C" {
+            fn CFSetGetCount(set: *const c_void) -> isize;
+            fn CFRelease(value: *const c_void);
+        }
+        let page = NSString::from_str("DeviceUsagePage");
+        let usage = NSString::from_str("DeviceUsage");
+        // HID Digitizer (0x0d), Touch Screen (0x04), NOT Touch Pad (0x05).
+        let matching = NSDictionary::from_retained_objects(
+            &[&*page, &*usage],
+            &[NSNumber::numberWithInt(0x0d), NSNumber::numberWithInt(0x04)],
+        );
+        // SAFETY: NSDictionary/CFDictionary are toll-free bridged. Matching
+        // enumerates devices synchronously; no open, event tap or capture is
+        // needed. Both Create/Copy results are released exactly once.
+        unsafe {
+            let manager = IOHIDManagerCreate(std::ptr::null(), 0);
+            if manager.is_null() {
+                return None;
+            }
+            IOHIDManagerSetDeviceMatching(
+                manager,
+                (&*matching as *const NSDictionary<NSString, NSNumber>).cast(),
+            );
+            let devices = IOHIDManagerCopyDevices(manager);
+            let found = !devices.is_null() && CFSetGetCount(devices) > 0;
+            if !devices.is_null() {
+                CFRelease(devices);
+            }
+            CFRelease(manager);
+            Some(found)
+        }
+    }
+
     /// The icon by its asset name in the bundle, else from its picture.
     pub(super) fn set_icon(icon: Option<(Option<String>, std::path::PathBuf)>) {
         let Some(main) = MainThreadMarker::new() else {
@@ -347,5 +460,23 @@ mod linux {
                 });
         });
         REDUCED.load(Ordering::Relaxed)
+    }
+}
+
+#[cfg(test)]
+mod touch_tests {
+    #[test]
+    fn direct_touch_inventory_excludes_trackpads_and_pens() {
+        use super::direct_touch_properties as direct;
+        assert!(direct("E:ID_INPUT=1\nE:ID_INPUT_TOUCHSCREEN=1\n"));
+        assert!(!direct("E:ID_INPUT_TOUCHPAD=1\n"));
+        assert!(!direct("E:ID_INPUT_TABLET=1\n"));
+        assert!(!direct("E:ID_INPUT_TOUCHSCREEN=1\nE:ID_INPUT_TOUCHPAD=1\n"));
+        assert!(!direct("E:ID_INPUT_TOUCHSCREEN=0\n"));
+    }
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_can_enumerate_direct_touch_without_opening_a_window() {
+        assert!(super::touchscreen_query().is_some());
     }
 }

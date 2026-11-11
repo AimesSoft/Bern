@@ -1023,11 +1023,11 @@ impl Element {
         })
     }
 
-    /// Whether it has children to show besides a `ContextMenu`.
+    /// Whether it has visual content besides menus and event declarations.
     pub fn has_content(&self) -> bool {
         self.children
             .iter()
-            .any(|node| !matches!(node, Node::Element(menu) if menu.kind == "ContextMenu"))
+            .any(|node| !matches!(node, Node::Element(menu) if matches!(menu.kind.as_str(), "ContextMenu" | "DoubleTap" | "OnCommit")))
     }
 
     pub fn keyword(&self, name: &str) -> Option<&str> {

@@ -1,0 +1,45 @@
+--- a/src/interactive.rs
++++ b/src/interactive.rs
+@@ -136,6 +136,10 @@
+     pub force: Option<f32>,
+ }
+ 
++// Raw touches are dispatched to capture listeners before the portable
++// recognizer. PlatformInput::mouse_event deliberately still excludes Touch:
++// Window::dispatch_touch_event owns default recognition and cancellation.
++impl MouseEvent for TouchEvent {}
+ impl Sealed for TouchEvent {}
+ impl InputEvent for TouchEvent {
+     fn to_platform_input(self) -> PlatformInput {
+--- a/src/window.rs
++++ b/src/window.rs
+@@ -5856,6 +5856,29 @@
+         if !self.touch_prediction_enabled {
+             event.predicted_position = None;
+         }
++        // Give controls the original contact before converting it to a tap,
++        // axis-locked/predicted scroll or momentum. A listener may observe
++        // Started and claim on a later Moved event with prevent_default().
++        // Claiming cancels the old recognizer stream, so releasing a claimed
++        // or subsequently unmounted control cannot synthesize a stray click.
++        self.mouse_position = event.position;
++        self.dispatch_mouse_event(&event, cx);
++        if self.default_prevented {
++            let propagate = cx.propagate_event;
++            let cancelled = TouchEvent {
++                phase: crate::TouchPhase::Cancelled,
++                ..event.clone()
++            };
++            let gestures = self.touch_gestures.handle_event(&cancelled);
++            for gesture in gestures {
++                self.dispatch_recognized_touch_gesture(gesture, cx);
++            }
++            self.long_press_timer.take();
++            self.long_press_capture = None;
++            self.default_prevented = true;
++            cx.propagate_event = propagate;
++            return;
++        }
+         let recognized_gestures = self.touch_gestures.handle_event(&event);
+         if event.phase == crate::TouchPhase::Started
+             && let Some(touch_drag) = self.touch_gestures.offer_touch_drag(event.id)

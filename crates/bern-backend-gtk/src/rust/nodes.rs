@@ -268,6 +268,11 @@ impl Generator<'_> {
             "Toast" => self.toast(out, element),
             "Drop" => self.drop_zone(out, element),
             "Pinch" | "Swipe" => self.gesture(out, element),
+            "ScreenBrightness" => {
+                if let Some(available) = self.field(element, "available") {
+                    out.line(format!("b::ScreenBrightness(c, {available});"));
+                }
+            }
             // Items before a `Spacer` stand at the leading end of the header.
             "Toolbar" => match element
                 .children
@@ -307,7 +312,7 @@ impl Generator<'_> {
             | "MenuBar" | "CommandMenu" | "CommandItem"
             // The application builds the status item's menu.
             | "StatusItem"
-            | "Pattern" | "TabAccessory" | "PickerOption" | "TableColumn" | "TableMenu" | "ContextMenu" => {
+            | "Pattern" | "TabAccessory" | "PickerOption" | "TableColumn" | "TableMenu" | "ContextMenu" | "DoubleTap" | "OnCommit" => {
                 // Realized by their parents.
             }
             other => out.line(format!("/* unsupported {other} */")),

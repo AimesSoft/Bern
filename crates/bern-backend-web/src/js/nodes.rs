@@ -267,6 +267,7 @@ impl Generator<'_> {
             "SplitButton" => self.split_button(out, element),
             "Drop" => self.drop_zone(out, element),
             "Pinch" | "Swipe" => self.gesture(out, element),
+            "ScreenBrightness" => self.screen_brightness(out, element),
             "Toolbar" => self.toolbar(out, element),
             "SplitView" => self.split_view(out, element),
             "Navigation" => self.navigation(out, element),

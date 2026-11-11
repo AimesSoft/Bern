@@ -6,6 +6,14 @@ use bern_ir::{Element, ExprKind, Node};
 use bern_protocol::{EnumDef, Type};
 
 impl Generator<'_> {
+    /// Non-rendering action children belong to the immediate control only.
+    fn child_action(&self, element: &Element, kind: &str) -> Option<String> {
+        element.children.iter().find_map(|node| match node {
+            Node::Element(child) if child.kind == kind => self.action(child),
+            _ => None,
+        })
+    }
+
     /// `B::Shortcut(…)` for an element with `shortcut:`, running the
     /// control's `activate` (or `focus` for search fields) while mounted.
     pub(super) fn shortcut(&self, out: &mut Out, element: &Element, action: &str) {
@@ -79,6 +87,7 @@ impl Generator<'_> {
             ),
             ("iconSize", Self::number(element, "font_size")),
             ("menu", self.context_menu_def(element)),
+            ("doubleTap", self.child_action(element, "DoubleTap")),
         ]);
         if kind == "Button" && element.has_content() {
             self.call(
@@ -523,6 +532,12 @@ impl Generator<'_> {
                     ("axis", Self::keyword(element, "axis")),
                     ("distance", Self::number(element, "distance")),
                     ("action", self.action(element)),
+                    (
+                        "continuous",
+                        (element.keyword("continuous") == Some("true")).then(|| "true".into())
+                    ),
+                    ("active", self.field(element, "active")),
+                    ("onCommit", self.child_action(element, "OnCommit")),
                 ])
             ),
             &element.children,

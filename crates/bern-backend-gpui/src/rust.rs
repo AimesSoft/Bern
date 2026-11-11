@@ -297,6 +297,23 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
     ("FocusRegion", &[]),
     ("Pinch", &["id", "label", "value", "min", "max"]),
     (
+        "Swipe",
+        &[
+            "id",
+            "label",
+            "value",
+            "min",
+            "max",
+            "axis",
+            "distance",
+            "continuous",
+            "active",
+        ],
+    ),
+    ("ScreenBrightness", &["value", "available"]),
+    ("DoubleTap", &[]),
+    ("OnCommit", &[]),
+    (
         "SplitButton",
         &[
             "id",
@@ -505,6 +522,10 @@ pub const COMPONENT_NAMES: &[&str] = &[
     "SearchItem",
     "FocusRegion",
     "Pinch",
+    "Swipe",
+    "ScreenBrightness",
+    "DoubleTap",
+    "OnCommit",
     "SplitButton",
     "PreviewList",
     "Accordion",
@@ -1546,7 +1567,7 @@ pub fn app() -> b::AppDef {{
                 height: true,
             },
             "Column" | "Drop" | "Adaptive" | "Layout" | "ForEach" | "Query" | "FocusRegion"
-            | "Pinch" => self.children_greed(&element.children, Axis::Column),
+            | "Pinch" | "Swipe" => self.children_greed(&element.children, Axis::Column),
             "Row" | "Flow" => self.children_greed(&element.children, Axis::Row),
             // Along its axis it fills; across, as much as what stands on it.
             "Rail" => {
@@ -2327,6 +2348,69 @@ pub fn app() -> b::AppDef {{
                 string(&element.path),
                 column(&element.children)
             ),
+            "ScreenBrightness" => {
+                let Some(available) = element.field("available") else {
+                    self.unsupported(
+                        "a `ScreenBrightness` without an availability draft".into(),
+                        at,
+                    );
+                    return None;
+                };
+                format!(
+                    "b::screen_brightness(c, {}, {})",
+                    string(&element.path),
+                    field_ref(self.session_index(&available.session), available.field)
+                )
+            }
+            "DoubleTap" | "OnCommit" => return None,
+            "Swipe" => {
+                let Some(field) = element.field("value") else {
+                    self.unsupported("a `Swipe` without a draft".into(), at);
+                    return None;
+                };
+                let content: Vec<_> = element
+                    .children
+                    .iter()
+                    .filter(
+                        |node| !matches!(node, Node::Element(child) if child.kind == "OnCommit"),
+                    )
+                    .cloned()
+                    .collect();
+                let commit = element
+                    .children
+                    .iter()
+                    .find_map(|node| match node {
+                        Node::Element(child) if child.kind == "OnCommit" => {
+                            Some(self.action(child))
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| "None".into());
+                let active = element
+                    .field("active")
+                    .map(|field| {
+                        format!(
+                            "Some({})",
+                            field_ref(self.session_index(&field.session), field.field)
+                        )
+                    })
+                    .unwrap_or_else(|| "None".into());
+                format!(
+                    "b::swipe(c, {}, {}, {}, b::SwipeProps {{ min: {}, max: {}, horizontal: {}, distance: {}, continuous: {}, active: {} }}, {}, {}, {})",
+                    id(),
+                    text("label"),
+                    field_ref(self.session_index(&field.session), field.field),
+                    self.number(element, "min", 0.0),
+                    self.number(element, "max", 1.0),
+                    element.keyword("axis") == Some("horizontal"),
+                    self.number(element, "distance", 300.0),
+                    element.prop("continuous").is_some(),
+                    active,
+                    self.action(element),
+                    commit,
+                    column(&content)
+                )
+            }
             "Pinch" => {
                 let Some(field) = element.field("value") else {
                     self.unsupported("a `Pinch` without a draft".into(), at);
@@ -2608,8 +2692,18 @@ pub fn app() -> b::AppDef {{
                     "cancel" => "Cancel",
                     _ => "Normal",
                 };
+                let double_tap = element
+                    .children
+                    .iter()
+                    .find_map(|node| match node {
+                        Node::Element(child) if child.kind == "DoubleTap" => {
+                            Some(self.action(child))
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| "None".into());
                 let props = format!(
-                    "b::ButtonProps {{ label: {}, icon: {}, prominence: b::Prominence::{prominence}, role: b::Role::{role}, enabled: {}, shape: {}, height: {}, style: {}, pick: {}, shortcut: {} }}",
+                    "b::ButtonProps {{ double_tap: {double_tap}, label: {}, icon: {}, prominence: b::Prominence::{prominence}, role: b::Role::{role}, enabled: {}, shape: {}, height: {}, style: {}, pick: {}, shortcut: {} }}",
                     text("label"),
                     self.icon(element.icon("icon")),
                     self.enabled(element),
@@ -2620,8 +2714,14 @@ pub fn app() -> b::AppDef {{
                     self.shortcut(element),
                 );
                 // A `ContextMenu` is not part of what the button shows.
-                let (menus, content): (Vec<Node>, Vec<Node>) =
-                    element.children.iter().cloned().partition(
+                let (menus, content): (Vec<Node>, Vec<Node>) = element
+                    .children
+                    .iter()
+                    .filter(
+                        |node| !matches!(node, Node::Element(child) if child.kind == "DoubleTap"),
+                    )
+                    .cloned()
+                    .partition(
                         |node| matches!(node, Node::Element(child) if child.kind == "ContextMenu"),
                     );
                 let button = if content.is_empty() {
@@ -3819,6 +3919,7 @@ pub fn app() -> b::AppDef {{
                         | "unfolded"
                         | "tabletop"
                         | "keyboard"
+                        | "touch"
                         | "tv"
                         | "idle"
                         | "fullscreen"

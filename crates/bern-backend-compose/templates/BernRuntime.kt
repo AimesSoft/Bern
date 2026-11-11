@@ -611,6 +611,8 @@ class BernWindowContext(
     val large: Boolean get() = size == "large"
     /// `window.tv`: the window is on a television.
     val tv: Boolean get() = BernHost.television
+    /// Direct touchscreen hardware, independent of window size or a touchpad.
+    val touch: Boolean get() = BernHost.touch
     /// `window.rail`: a split view shows its sidebar as a navigation rail.
     val rail: Boolean get() = !tv && !compact
     /// `window.unfolded`, `window.tabletop` and `window.fold`: a foldable's
@@ -1384,6 +1386,7 @@ object BernHost {
     /// Whether the app runs on a television (Android TV, Google TV), which
     /// shows an `Adaptive`'s `tv` layout whatever its width.
     var television = false
+    var touch = false
         private set
     /// Whether a hardware keyboard is attached, from the configuration the
     /// activity has; it changes as one connects.
@@ -1423,6 +1426,7 @@ object BernHost {
     ) {
         BernMotionState.readSystem(context)
         if (handle != 0L) return
+        touch = context.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_TOUCHSCREEN)
         television = (context.resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK) ==
             Configuration.UI_MODE_TYPE_TELEVISION ||
             context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)

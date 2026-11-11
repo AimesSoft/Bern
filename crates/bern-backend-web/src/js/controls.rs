@@ -8,6 +8,13 @@ impl Generator<'_> {
     /// A `Button` or an `IconButton`; a `Button` with children shows them
     /// as its content.
     pub(super) fn button(&self, out: &mut Out, element: &Element) {
+        let double_tap = element.children.iter().find_map(|node| match node {
+            Node::Element(child) if child.kind == "DoubleTap" => Some(self.action_fn(child)),
+            _ => None,
+        });
+        let content: Vec<_> = element.children.iter().filter(|node| {
+            !matches!(node, Node::Element(child) if matches!(child.kind.as_str(), "DoubleTap" | "ContextMenu"))
+        }).cloned().collect();
         let enabled = element
             .expr("enabled")
             .map(|expr| format!("() => {}", self.expr(expr)));
@@ -15,7 +22,7 @@ impl Generator<'_> {
         let style = crate::style::reference(self.app, &element.kind, element.keyword("variant"));
         let default_focus =
             (element.keyword("default_focus") == Some("true")).then(|| "true".to_string());
-        if element.kind == "Button" && element.has_content() {
+        if element.kind == "Button" && !content.is_empty() {
             let props = Self::props(vec![
                 ("id", Some(self.id(element))),
                 ("label", self.text_prop(element, "label")),
@@ -27,11 +34,12 @@ impl Generator<'_> {
                 ("fileKinds", kinds),
                 ("defaultFocus", default_focus.clone()),
                 ("menu", self.context_menu(element)),
+                ("doubleTap", double_tap.clone()),
             ]);
             self.children(
                 out,
                 &format!("F.ContentButton(p, ctx, {props}, {action}, "),
-                &element.children,
+                &content,
                 ");",
             );
         } else {
@@ -63,6 +71,7 @@ impl Generator<'_> {
                     ("fileKinds", kinds),
                     ("defaultFocus", default_focus),
                     ("menu", self.context_menu(element)),
+                    ("doubleTap", double_tap.clone()),
                 ]),
             ));
         }
@@ -343,8 +352,26 @@ impl Generator<'_> {
         );
     }
 
+    /// A nonvisual platform brightness binding.
+    pub(super) fn screen_brightness(&self, out: &mut Out, element: &Element) {
+        let available = self.field(element, "available").expect("bool field");
+        out.line(format!(
+            "F.ScreenBrightness(p, ctx, {{ available: {available} }});"
+        ));
+    }
+
     /// A `Pinch` or a `Swipe`.
     pub(super) fn gesture(&self, out: &mut Out, element: &Element) {
+        let on_commit = element.children.iter().find_map(|node| match node {
+            Node::Element(child) if child.kind == "OnCommit" => Some(self.action_fn(child)),
+            _ => None,
+        });
+        let content: Vec<_> = element
+            .children
+            .iter()
+            .filter(|node| !matches!(node, Node::Element(child) if child.kind == "OnCommit"))
+            .cloned()
+            .collect();
         let props = Self::props(vec![
             ("id", Some(self.id(element))),
             ("label", self.text_prop(element, "label")),
@@ -353,6 +380,12 @@ impl Generator<'_> {
             ("max", element.number("max").map(number)),
             ("axis", Self::keyword(element, "axis")),
             ("distance", element.number("distance").map(number)),
+            (
+                "continuous",
+                (element.keyword("continuous") == Some("true")).then(|| "true".into()),
+            ),
+            ("active", self.field(element, "active")),
+            ("onCommit", on_commit),
         ]);
         self.children(
             out,
@@ -361,7 +394,7 @@ impl Generator<'_> {
                 element.kind,
                 self.action_fn(element)
             ),
-            &element.children,
+            &content,
             ");",
         );
     }

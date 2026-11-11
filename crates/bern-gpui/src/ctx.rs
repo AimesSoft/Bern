@@ -427,6 +427,7 @@ impl Ctx {
             "compact" | "medium" | "expanded" | "large" => field == size,
             "short" => height < compact,
             "keyboard" => true,
+            "touch" => crate::native::touchscreen(),
             "idle" => self.0.win.idle(),
             "fullscreen" => self.0.win.fullscreen.get(),
             _ => false,

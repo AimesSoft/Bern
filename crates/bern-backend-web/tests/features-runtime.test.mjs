@@ -80,12 +80,16 @@ function runtime(search = "") {
     }
     matches() { return false; }
     setPointerCapture(id) { this.captured = id; }
+    hasPointerCapture(id) { return this.captured === id; }
+    releasePointerCapture(id) { if (this.captured === id) this.captured = null; }
+    get isConnected() { return this.connected ?? !!this.parentNode; }
+    set isConnected(value) { this.connected = value; }
     focus() { this.focused = true; }
     /// Runs this element's listeners for `name`; returns whether one
     /// prevented the default.
     dispatch(name, init = {}) {
       let prevented = false;
-      for (const callback of [...(this.events[name] ?? [])]) callback({ ...init, preventDefault() { prevented = true; } });
+      for (const callback of [...(this.events[name] ?? [])]) callback({ target: this, ...init, get defaultPrevented() { return prevented; }, preventDefault() { prevented = true; }, stopImmediatePropagation() {} });
       return prevented;
     }
   }
@@ -122,6 +126,7 @@ function runtime(search = "") {
     AbortController,
     fetch: (url, options) => new Promise((resolve, reject) => fetches.push({ url, options, resolve, reject })),
     addEventListener(name, callback) { (listeners[name] ??= []).push(callback); },
+    removeEventListener(name, callback) { listeners[name] = (listeners[name] ?? []).filter(one => one !== callback); },
     TextEncoder, TextDecoder, URLSearchParams, performance, innerWidth: 1280, innerHeight: 800, HTMLElement: Element,
     URL: { createObjectURL: () => `blob:page/${++blobs}`, revokeObjectURL() {} }, Blob: class {},
     navigator: { platform: "MacIntel" }, location: { search }, Image: Probe, screen: {},
@@ -130,6 +135,7 @@ function runtime(search = "") {
       documentElement: new Element("html"),
       listeners: {},
       addEventListener(name, callback) { (this.listeners[name] ??= []).push(callback); },
+      removeEventListener(name, callback) { this.listeners[name] = (this.listeners[name] ?? []).filter(one => one !== callback); },
       querySelector: () => null,
       createElement: (tag) => new Element(tag),
       createElementNS: (_, tag) => new Element(tag),
@@ -2071,4 +2077,280 @@ test("Navigation without reset preserves its path and other Navigation resets ar
   routes.set(["restored", "next"]);
   assert.deepEqual(shown, ["restored", "next"]);
   owner.dispose();
+});
+
+
+function gestureFixture(props = {}, action = null) {
+  const env = runtime();
+  const { B, F, Element } = env;
+  const field = B.cell(0.5), active = B.cell(false), calls = [];
+  const scope = new B.Scope(), root = new Element("root");
+  B.within(scope, () => F.Swipe(root, {}, {
+    field, active, axis: "horizontal", onCommit: () => calls.push("commit"), ...props,
+  }, action ?? (() => calls.push(field.peek())), () => {}));
+  const node = root.children[0];
+  const event = (type, x, y = 0, id = 1) => {
+    const init = { button: 0, pointerId: id, pointerType: "touch", clientX: x, clientY: y };
+    if (type === "pointerdown" || type === "lostpointercapture") return node.dispatch(type, init);
+    let prevented = false;
+    for (const callback of [...(env.document.listeners[type] ?? [])]) callback({ ...init,
+      get defaultPrevented() { return prevented; }, preventDefault() { prevented = true; },
+    });
+    return prevented;
+  };
+  return { ...env, scope, root, node, field, active, calls, event };
+}
+
+test("Swipe locks intent, uses the down value and default distance 300, and commits once", () => {
+  const f = gestureFixture();
+  f.event("pointerdown", 0);
+  f.event("pointermove", 9);
+  assert.equal(f.active.peek(), false);
+  f.field.set(0.2);
+  assert.equal(f.event("pointermove", 60), true);
+  assert.equal(f.active.peek(), true);
+  assert.equal(f.field.peek(), 0.7);
+  assert.deepEqual(f.calls, []);
+  f.event("pointerup", 90);
+  assert.equal(f.field.peek(), 0.8);
+  assert.equal(f.active.peek(), false);
+  assert.deepEqual(f.calls, [0.8, "commit"]);
+  assert.equal(f.node.captured, null);
+});
+
+test("Swipe continuous actions observe each new value and clear active after OnCommit", () => {
+  const f = gestureFixture({ continuous: true });
+  f.event("pointerdown", 0);
+  f.event("pointermove", 30);
+  f.event("pointermove", 30);
+  f.event("pointermove", 60);
+  f.event("pointerup", 90);
+  assert.deepEqual(f.calls, [0.6, 0.7, 0.8, "commit"]);
+  assert.equal(f.active.peek(), false);
+});
+
+test("Swipe releases cross-axis and diagonal intent, ignores other pointers, retains capture outside", () => {
+  for (const [x, y] of [[12, 30], [20, 20]]) {
+    const f = gestureFixture();
+    f.event("pointerdown", 0);
+    assert.equal(f.event("pointermove", x, y), false);
+    f.event("pointermove", 90);
+    f.event("pointerup", 90);
+    assert.equal(f.field.peek(), 0.5);
+    assert.deepEqual(f.calls, []);
+  }
+  const f = gestureFixture({ axis: "vertical" });
+  f.event("pointerdown", 0);
+  f.event("pointermove", 0, -90, 2);
+  assert.equal(f.active.peek(), false);
+  f.event("pointermove", 0, -60);
+  assert.equal(f.node.captured, 1);
+  f.event("pointermove", 1000, -1000);
+  f.event("pointerup", 1000, -1000);
+  assert.deepEqual(f.calls, [1, "commit"]);
+});
+
+test("Swipe cancellation, capture loss, blur and disposal clear active without ending actions", () => {
+  for (const how of ["pointercancel", "lostpointercapture", "blur", "dispose"]) {
+    const f = gestureFixture();
+    f.event("pointerdown", 0);
+    f.event("pointermove", 30);
+    assert.equal(f.active.peek(), true);
+    if (how === "dispose") f.scope.dispose();
+    else if (how === "blur") for (const callback of [...f.listeners.blur]) callback();
+    else f.event(how, 30);
+    f.event("pointerup", 30);
+    assert.equal(f.active.peek(), false, how);
+    assert.deepEqual(f.calls, [], how);
+    assert.equal(f.node.captured, null, how);
+  }
+});
+
+function buttonFixture(content = false) {
+  const env = runtime();
+  const { B, F, Element } = env;
+  const root = new Element("root"), scope = new B.Scope(), calls = [], enabled = B.cell(true);
+  B.within(scope, () => (content ? F.ContentButton : B.Button)(root, {}, {
+    label: () => "Playback", enabled: () => enabled.get(), doubleTap: () => calls.push("double"),
+  }, () => calls.push("single"), () => {}));
+  const node = root.children[0];
+  const tap = (detail = 1) => node.dispatch("click", { detail, clientX: 1, clientY: 1 });
+  const tick = () => { for (const timer of env.timers) if (!timer.cancelled && !timer.done) { timer.done = true; timer.callback(); } };
+  return { ...env, node, root, scope, calls, enabled, tap, tick };
+}
+
+test("Button and ContentButton dispatch single/double exclusively; keyboard is immediate", () => {
+  for (const content of [false, true]) {
+    const f = buttonFixture(content);
+    f.tap();
+    assert.deepEqual(f.calls, []);
+    assert.equal(f.timers.at(-1).delay, 500);
+    f.tap(2);
+    f.tick();
+    assert.deepEqual(f.calls, ["double"]);
+    f.tap();
+    f.tick();
+    f.tap(2); // native dblclick classification after Bern's window expired
+    f.tick();
+    assert.deepEqual(f.calls, ["double", "single", "single"]);
+    f.tap();
+    f.tap(0);
+    f.tick();
+    assert.deepEqual(f.calls, ["double", "single", "single", "single"]);
+  }
+});
+
+test("Button pending tap is cancelled by drag, pointer cancellation, disable, blur and unmount", () => {
+  for (const how of ["pointermove", "pointercancel", "disabled", "blur", "dispose"]) {
+    const f = buttonFixture();
+    f.tap();
+    f.node.dispatch("pointerdown", { button: 0, pointerId: 1, clientX: 0, clientY: 0 });
+    if (how === "disabled") { f.enabled.set(false); f.flushMicrotasks(); }
+    else if (how === "dispose") f.scope.dispose();
+    else if (how === "blur") for (const callback of [...f.listeners.blur]) callback();
+    else for (const callback of [...f.document.listeners[how]]) callback({ pointerId: 1, clientX: 40, clientY: 0 });
+    f.tick();
+    assert.deepEqual(f.calls, [], how);
+    if (how === "pointermove" || how === "pointercancel") {
+      assert.equal(f.tap(), true);
+      f.tick();
+      assert.deepEqual(f.calls, [], how);
+    }
+  }
+});
+
+test("A Button within Swipe cancels its click when the parent accepts the drag", () => {
+  const f = gestureFixture();
+  const { B, node, scope, document } = f;
+  const calls = [];
+  B.within(scope, () => B.Button(node, {}, { label: () => "Play", doubleTap: () => calls.push("double") }, () => calls.push("single")));
+  const button = node.children[0];
+  button.dispatch("pointerdown", { button: 0, pointerId: 1, clientX: 0, clientY: 0 });
+  f.event("pointerdown", 0);
+  f.event("pointermove", 30);
+  f.event("pointerup", 30);
+  button.dispatch("click", { detail: 1, clientX: 30, clientY: 0 });
+  for (const timer of f.timers) if (!timer.cancelled) timer.callback();
+  assert.deepEqual(calls, []);
+  assert.deepEqual(f.calls, [0.6, "commit"]);
+  scope.dispose();
+  assert.equal(document.listeners.pointermove.length, 0);
+});
+
+
+test("window.touch is direct device capability, not window width or touchpad precision", () => {
+  const f = runtime();
+  const owner = new f.B.Scope(), touch = f.B.cell(true);
+  const before = { focus: f.listeners.focus?.length ?? 0, pointerdown: f.listeners.pointerdown?.length ?? 0 };
+  f.navigator.maxTouchPoints = 0;
+  f.B.within(owner, () => f.B.touchCapability(touch));
+  assert.equal(touch.peek(), false);
+  f.navigator.maxTouchPoints = 5;
+  for (const callback of f.listeners.focus) callback();
+  assert.equal(touch.peek(), true);
+  f.navigator.maxTouchPoints = 0;
+  for (const callback of f.listeners.pointerdown) callback();
+  assert.equal(touch.peek(), false);
+  owner.dispose();
+  assert.equal(f.listeners.focus.length, before.focus);
+  assert.equal(f.listeners.pointerdown.length, before.pointerdown);
+});
+
+test("ScreenBrightness reports unavailable on Web without changing the value or DOM", () => {
+  const f = runtime();
+  const owner = new f.B.Scope(), root = new f.Element("root"), available = f.B.cell(true), value = f.B.cell(0.75);
+  f.B.within(owner, () => f.F.ScreenBrightness(root, {}, { value, available }));
+  assert.equal(available.peek(), false);
+  assert.equal(value.peek(), 0.75);
+  assert.equal(root.children.length, 0);
+  value.set(Number.NaN);
+  owner.dispose();
+  assert.equal(Number.isNaN(value.peek()), true);
+});
+
+
+test("Swipe ignores bubbled capture loss when taking ownership from a button", () => {
+  const f = gestureFixture();
+  const child = new f.Element("button");
+  f.node.append(child);
+  f.event("pointerdown", 0);
+  f.event("pointermove", 30);
+  f.node.dispatch("lostpointercapture", { pointerId: 1, target: child });
+  assert.equal(f.active.peek(), true);
+  f.event("pointermove", 60);
+  f.event("pointerup", 60);
+  assert.deepEqual(f.calls, [0.7, "commit"]);
+});
+
+test("Swipe initializes stale active state false and Button rejects multi-touch", () => {
+  const env = runtime(), active = env.B.cell(true), owner = new env.B.Scope();
+  env.B.within(owner, () => env.F.Swipe(new env.Element("root"), {}, { field: env.B.cell(0.5), active }, () => {}, () => {}));
+  assert.equal(active.peek(), false);
+  owner.dispose();
+  const f = buttonFixture();
+  f.node.dispatch("pointerdown", { button: 0, pointerId: 1, clientX: 0, clientY: 0 });
+  f.node.dispatch("pointerdown", { button: 0, pointerId: 2, isPrimary: false, clientX: 0, clientY: 0 });
+  f.tap();
+  f.tick();
+  assert.deepEqual(f.calls, []);
+});
+
+
+test("Swipe commits its final value before active=false lets a Watch restore old engine state", () => {
+  for (const continuous of [false, true]) {
+    const committed = [];
+    const f = gestureFixture({ continuous, onCommit: () => {
+      committed.push([f.field.peek(), f.active.peek()]);
+      f.event("pointerup", 90); // cannot reenter an already-ending drag
+    } });
+    f.B.within(f.scope, () => f.B.effect(() => {
+      if (!f.active.get()) f.field.set(0.1);
+    }));
+    f.field.set(0.5);
+    f.event("pointerdown", 0);
+    f.event("pointermove", 60);
+    f.event("pointerup", 90);
+    assert.deepEqual(committed, [[0.8, true]]);
+    assert.deepEqual(f.calls, continuous ? [0.7, 0.8] : [0.8]);
+    assert.equal(f.field.peek(), 0.1);
+    assert.equal(f.active.peek(), false);
+    assert.equal(f.node.captured, null);
+  }
+});
+
+test("Swipe external setNumber batches both actions ahead of an inactive Watch", () => {
+  const committed = [];
+  const f = gestureFixture({ onCommit: () => committed.push(f.field.peek()) });
+  f.B.within(f.scope, () => f.B.effect(() => {
+    const value = f.field.get();
+    if (!f.active.get() && value !== 0.1) f.field.set(0.1);
+  }));
+  f.B.controlEntries().find(entry => entry.role === "swipe").actions.setNumber(0.9);
+  assert.deepEqual(f.calls, [0.9]);
+  assert.deepEqual(committed, [0.9]);
+  assert.equal(f.field.peek(), 0.1);
+  assert.equal(f.active.peek(), false);
+});
+
+test("Swipe defers unmount cleanup until OnCommit and always cleans up on action failure", () => {
+  for (const fails of [false, true]) {
+    const seen = [];
+    const f = gestureFixture({ onCommit: () => seen.push(["commit", f.field.peek()]) }, () => {
+      seen.push(["action", f.field.peek()]);
+      f.scope.dispose();
+      if (fails) throw new Error("failed action");
+    });
+    const setActive = f.active.set.bind(f.active);
+    f.active.set = value => {
+      setActive(value);
+      if (!value) f.field.set(0.1);
+    };
+    f.event("pointerdown", 0);
+    f.event("pointermove", 60);
+    if (fails) assert.throws(() => f.event("pointerup", 90), /failed action/);
+    else f.event("pointerup", 90);
+    assert.deepEqual(seen, fails ? [["action", 0.8]] : [["action", 0.8], ["commit", 0.8]]);
+    assert.equal(f.active.peek(), false);
+    assert.equal(f.node.captured, null);
+  }
 });

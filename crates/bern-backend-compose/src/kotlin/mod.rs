@@ -585,6 +585,7 @@ impl<'a> Generator<'a> {
                 self.tracked_scroll_view(out, element, ctx)
             }
             "Pinch" | "Swipe" => self.gesture(out, element, ctx),
+            "ScreenBrightness" => self.screen_brightness(out, element),
             "ScrollView" => self.scroll_view(out, element, ctx),
             "List" | "ForEach" => self.list(out, element, ctx),
             "PreviewList" => self.preview_list(out, element, ctx),

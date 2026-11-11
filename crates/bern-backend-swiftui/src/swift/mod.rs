@@ -503,6 +503,15 @@ impl<'a> Generator<'a> {
             "Divider" => out.line("SwiftUI.Divider()"),
             "ScrollView" => self.scroll_view(out, element, ctx),
             "Pinch" | "Swipe" => self.gesture(out, element, ctx),
+            "ScreenBrightness" => out.line(format!(
+                "BernScreenBrightness(value: {}, available: {})",
+                self.binding_of(&self.field(element, "value").expect("brightness field")),
+                self.binding_of(
+                    &self
+                        .field(element, "available")
+                        .expect("availability field")
+                ),
+            )),
             "SplitView" => self.split_view(out, element, ctx),
             "Navigation" => self.navigation(out, element, ctx),
             "NavLink" => self.nav_link(out, element, ctx),
@@ -515,7 +524,7 @@ impl<'a> Generator<'a> {
             "LanguagePicker" => self.language_picker(out, element, ctx),
             "Detail" | "Destination" | "Tab" | "Sidebar" | "SidebarItem" | "Toolbar"
             | "WindowSet" | "Window" | "Layout" | "MenuItem" | "MenuBar" | "StatusItem"
-            | "TableColumn" | "TableMenu" | "ContextMenu" => {
+            | "TableColumn" | "TableMenu" | "ContextMenu" | "DoubleTap" | "OnCommit" => {
                 // Realized by their parents.
             }
             other => out.line(format!("SwiftUI.EmptyView() // unsupported {other}")),
