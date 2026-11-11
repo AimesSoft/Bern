@@ -1,7 +1,9 @@
 //! Execute the actual LayoutUpdated body with XAML-like property carriers.
 //! Setters invalidate layout and may store double-valued API dimensions as
 //! floats. Both exact and native-precision round trips must converge without
-//! further property writes or drawing.
+//! further property writes or drawing. A drawing that finds no character
+//! rectangles yet is drawn again after frames, until a layout change makes
+//! that drawing out of date.
 
 #[cfg(not(windows))]
 #[test]
@@ -47,7 +49,7 @@ struct State {
     double size = 26, height = 0, width = 400, actualHeight = 32;
     xaml::Thickness margin{1, 2, 3, 4};
     xaml::LineStackingStrategy strategy = xaml::LineStackingStrategy::MaxHeight;
-    int writes = 0, draws = 0;
+    int writes = 0, draws = 0, unready = 0;
     bool mounted = true, nativeFloats = false;
     double stored(double value) const { return nativeFloats ? static_cast<float>(value) : value; }
 };
@@ -72,7 +74,14 @@ struct Weak { State* state; Block get() const { return {state}; } };
 std::vector<int> RubySourceRanges(std::string, std::string, std::string ruby, bool) {
     return ruby.empty() || ruby == "[]" ? std::vector<int>{} : std::vector<int>{1};
 }
-void DrawRuby(Block block, int, std::vector<int> const&, int) { ++block.state->draws; }
+bool DrawRuby(Block block, int, std::vector<int> const&, int) {
+    ++block.state->draws;
+    if (block.state->unready == 0) return true;
+    --block.state->unready;
+    return false;
+}
+struct RubyRetry { std::function<bool()> draw; };
+void DrawRubyAfterFrames(std::shared_ptr<RubyRetry> const& retry, std::function<bool()> draw) { retry->draw = std::move(draw); }
 void check(bool nativeFloats) {
     State state;
     state.nativeFloats = nativeFloats;
@@ -85,6 +94,7 @@ void check(bool nativeFloats) {
     auto originalMargin = state.margin;
     auto minimum = std::make_shared<double>(0);
     auto revision = std::make_shared<std::uint64_t>(0);
+    auto retry = std::make_shared<RubyRetry>();
     int layer = 0, play = 0;
     struct Stamp STAMP
     auto stamp = std::make_shared<Stamp>();
@@ -122,6 +132,23 @@ void check(bool nativeFloats) {
             settle();
         }
     }
+    // Not laid out yet: no layout pass comes, the frames after draw again.
+    state.text = "late";
+    state.unready = 2;
+    settle();
+    assert(retry->draw);
+    int draws = state.draws;
+    assert(!retry->draw() && retry->draw() && state.draws == draws + 2);
+    // A layout change after a failed drawing: the old retry is done, the
+    // pass draws for itself.
+    state.unready = 1;
+    state.text = "later";
+    settle();
+    draws = state.draws;
+    state.width = 240;
+    settle();
+    assert(state.draws == draws + 1);
+    retry->draw = nullptr;
     *minimum = 80;
     state.annotations = "reading";
     *ranges = {1};

@@ -628,24 +628,48 @@ inline std::vector<RubyRange> RubySourceRanges(winrt::hstring const& raw, winrt:
     return mapped;
 }
 
+/// `BERN_RUBY_LOG`: each drawing of annotations on stderr, what it found
+/// to place and where the characters stood.
+inline bool RubyLogging() {
+    static bool const on = [] {
+        char* value = nullptr;
+        size_t size = 0;
+        bool set = _dupenv_s(&value, &size, "BERN_RUBY_LOG") == 0 && value && *value;
+        std::free(value);
+        return set;
+    }();
+    return on;
+}
+
 /// The annotations use native TextPointer character rectangles, splitting
 /// across the same wrapped rows and shrinking into each base advance.
-inline void DrawRuby(controls::TextBlock const& block, controls::Canvas const& layer, std::vector<RubyRange> const& ranges, std::shared_ptr<LitPlay> const& play) {
-    layer.Children().Clear();
+/// False when a character had no rectangle yet: a TextBlock has them only
+/// once its text has been laid out for rendering, which can come after the
+/// layout pass that asked, so the drawing is not done.
+inline bool DrawRuby(controls::TextBlock const& block, controls::Canvas const& layer, std::vector<RubyRange> const& ranges, std::shared_ptr<LitPlay> const& play) {
+    if (layer.Children().Size()) layer.Children().Clear();
     if (play) play->rubyInk.clear();
+    if (ranges.empty()) return true;
     auto text = block.Text();
     auto offsets = RubyOffsets(text);
     using Direction = xaml::Documents::LogicalDirection;
+    bool ready = block.ActualWidth() > 0 && block.ActualHeight() > 0;
+    size_t placed = 0;
+    winrt::Windows::Foundation::Rect seen{};
     auto first = block.Inlines().Size() ? block.Inlines().GetAt(0).ContentStart() : block.ContentStart();
-    if (!first) return;
+    if (!first) ready = false;
     for (auto const& range : ranges) {
+        if (!ready) break;
         if (range.end >= offsets.size()) continue;
         auto readingOffsets = RubyOffsets(range.reading);
         for (size_t at = range.start; at < range.end;) {
             auto pointer = first.GetPositionAtOffset(static_cast<int32_t>(offsets[at]), Direction::Forward);
-            if (!pointer) break;
+            if (!pointer) { ready = false; break; }
             auto rect = pointer.GetCharacterRect(Direction::Forward);
-            if (rect.Height <= 0 || rect.Y >= block.ActualHeight()) break;
+            seen = rect;
+            if (rect.Height <= 0) { ready = false; break; }
+            // Rows cut off by `lines` keep no annotations.
+            if (rect.Y >= block.ActualHeight()) break;
             float left = rect.X, right = rect.X;
             size_t end = at;
             while (end < range.end) {
@@ -658,7 +682,7 @@ inline void DrawRuby(controls::TextBlock const& block, controls::Canvas const& l
                 right = (std::max)(right, std::abs(to.Y - from.Y) < 1 ? to.X : from.X + static_cast<float>(block.FontSize()));
                 ++end;
             }
-            if (end == at) break;
+            if (end == at) { ready = false; break; }
             auto count = readingOffsets.size() - 1;
             size_t a = count * (at - range.start) / (range.end - range.start);
             size_t b = count * (end - range.start) / (range.end - range.start);
@@ -710,14 +734,50 @@ inline void DrawRuby(controls::TextBlock const& block, controls::Canvas const& l
                     controls::Canvas::SetTop(ink, origin.Y + rect.Y - ink.DesiredSize().Height);
                     layer.Children().Append(ink);
                 }
+                ++placed;
             }
             at = end;
         }
+    }
+    if (RubyLogging()) {
+        char line[256];
+        std::snprintf(line, sizeof line, "ruby: %zu ranges, %zu placed%s; text %.1f x %.1f, last character at %.1f, %.1f, %.1f high",
+            ranges.size(), placed, ready ? "" : ", characters not laid out yet", block.ActualWidth(), block.ActualHeight(), seen.X, seen.Y, seen.Height);
+        Report(line);
     }
     if (play) {
         UpdateRubyLit(play, play->rubyPlace);
         if (play->on && !play->route.points.empty()) PlayLit(play);
     }
+    return ready;
+}
+
+/// A drawing that found no character rectangles comes back once frames
+/// have been rendered, as many as a second of them, while nothing else
+/// draws it again: the layout stays as it is, so no layout pass would.
+struct RubyRetry {
+    winrt::event_token token{};
+    bool waiting = false;
+    int frames = 0;
+    /// The latest drawing asked for: an earlier one is out of date.
+    std::function<bool()> draw;
+};
+
+inline void DrawRubyAfterFrames(std::shared_ptr<RubyRetry> const& retry, std::function<bool()> draw) {
+    retry->frames = 0;
+    retry->draw = std::move(draw);
+    if (retry->waiting) return;
+    retry->waiting = true;
+    // Held only while it waits: a block that is gone counts as drawn.
+    retry->token = media::CompositionTarget::Rendering([retry](auto&&, auto&&) {
+        if (!retry->waiting) return;
+        bool done = retry->draw();
+        if (!done && ++retry->frames < 60) return;
+        if (!done) Report("ruby: characters still not laid out after 60 frames");
+        media::CompositionTarget::Rendering(retry->token);
+        retry->waiting = false;
+        retry->draw = nullptr;
+    });
 }
 
 /// Attach after native content, marks and the fractional lit layer have
@@ -755,7 +815,8 @@ inline xaml::FrameworkElement WithRuby(xaml::FrameworkElement const& shown, cont
     });
     struct Stamp { winrt::hstring text; double width = -1, height = -1, size = -1, line = -1; uint16_t weight = 0; std::uint64_t revision = 0; };
     auto stamp = std::make_shared<Stamp>();
-    block.LayoutUpdated([weak = winrt::make_weak(block), layer, source, original, markdown, ranges, stamp, minimum, originalMargin, originalStrategy, revision, target, play](auto&&, auto&&) {
+    auto retry = std::make_shared<RubyRetry>();
+    block.LayoutUpdated([weak = winrt::make_weak(block), layer, source, original, markdown, ranges, stamp, minimum, originalMargin, originalStrategy, revision, target, play, retry](auto&&, auto&&) {
         auto text = weak.get();
         if (!text) return;
         if (stamp->text != text.Text()) { *ranges = RubySourceRanges(original ? original() : winrt::hstring(), text.Text(), source(), markdown); ++*revision; }
@@ -789,7 +850,15 @@ inline xaml::FrameworkElement WithRuby(xaml::FrameworkElement const& shown, cont
         if (stamp->text == text.Text() && stamp->width == text.ActualWidth() && stamp->height == text.ActualHeight()
             && stamp->size == size && stamp->line == height && stamp->weight == text.FontWeight().Weight && stamp->revision == *revision) return;
         *stamp = {text.Text(), text.ActualWidth(), text.ActualHeight(), size, height, text.FontWeight().Weight, *revision};
-        DrawRuby(text, layer, *ranges, play);
+        if (DrawRuby(text, layer, *ranges, play)) return;
+        // Drawn again from the same stamp: a later layout pass that changes
+        // it draws for itself.
+        DrawRubyAfterFrames(retry, [weak, layer, ranges, stamp, play, drawn = *stamp] {
+            auto text = weak.get();
+            if (!text || stamp->text != drawn.text || stamp->width != drawn.width || stamp->height != drawn.height
+                || stamp->size != drawn.size || stamp->line != drawn.line || stamp->revision != drawn.revision) return true;
+            return DrawRuby(text, layer, *ranges, play);
+        });
     });
     return holder;
 }
