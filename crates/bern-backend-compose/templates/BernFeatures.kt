@@ -1483,9 +1483,17 @@ class BernScrollState(val horizontal: Boolean, val center: Boolean, val anchor: 
         val content = content?.takeIf { it.isAttached } ?: return
         if (!item.isAttached) return
         val bounds = Rect(content.localPositionOf(item, androidx.compose.ui.geometry.Offset.Zero), item.size.toSize())
-        if (items[key] != bounds) items[key] = bounds
-        val extent = size(bounds)
-        if (extent > largest) largest = extent
+        if (items[key] != bounds) {
+            items[key] = bounds
+            largest = items.values.maxOfOrNull(::size) ?: 0f
+        }
+    }
+
+    /// A composed item no longer participates after it leaves the view.
+    fun remove(key: Any) {
+        if (items.remove(key) != null) {
+            largest = items.values.maxOfOrNull(::size) ?: 0f
+        }
     }
 
     /// Where an item lies in the content, along the axis.
@@ -1535,10 +1543,11 @@ private class BernSnapFling(val state: BernScrollState, val decay: DecayAnimatio
         val start = state.scroll.value.toFloat()
         val projected = decay.calculateTargetValue(start, initialVelocity)
         val target = state.nearest(projected)?.let(state::offset) ?: projected.coerceIn(0f, state.scroll.maxValue.toFloat())
-        var last = start
+        // A snap positions this content, not the surrounding gesture chain:
+        // edge stretch can consume ScrollScope deltas without moving it.
+        // This runs inside the fling's existing scroll mutation.
         animate(start, target, initialVelocity) { value, _ ->
-            scrollBy(value - last)
-            last = value
+            state.scroll.dispatchRawDelta(value - state.scroll.value)
         }
         return 0f
     }
@@ -1957,6 +1966,9 @@ fun Modifier.bernVerticalScroll(state: ScrollState): Modifier {
 @Composable
 fun Modifier.bernScrollItem(key: Any): Modifier {
     val state = LocalBernScroll.current ?: return this
+    DisposableEffect(state, key) {
+        onDispose { state.remove(key) }
+    }
     val arrival = LocalBernArrival.current
     val scale = remember { Animatable(1f) }
     val reduce = bernReduceMotion()
