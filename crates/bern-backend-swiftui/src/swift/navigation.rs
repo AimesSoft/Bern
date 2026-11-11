@@ -132,11 +132,14 @@ impl Generator<'_> {
         if self.platform.uikit() {
             out.line(".navigationTitle(bernWindow.title)");
         }
+        // Outermost, so the header and footer follow too.
+        out.line(".bernColumnFollowsInert()");
         out.close("} detail: {");
         out.indent += 1;
         out.open("SwiftUI.Group {");
         self.nodes(out, &detail.children, ctx);
         out.close("}");
+        out.line(".bernColumnFollowsInert()");
         if let Some(style) = self.style_of(detail) {
             out.line(format!(".bernDetailStyle(BernStyles.{})", style.name));
         }

@@ -1298,6 +1298,13 @@ extension View {
         modifier(BernSidebarToggleFollowsCover())
     }
 
+    /// A split view column, which macOS hosts apart from the views around
+    /// the split view: what disables and hides the split view for
+    /// accessibility has to be applied again inside it.
+    func bernColumnFollowsInert() -> some View {
+        modifier(BernColumnFollowsInert())
+    }
+
     /// Where a window learns whether a layer covers it.
     func bernCoverRoot() -> some View {
         modifier(BernCoverRoot())
@@ -3848,8 +3855,32 @@ private struct BernCoverRoot: ViewModifier {
     }
 }
 
+private struct BernInertKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// Inside a `Stack` that is not enabled: covered by another page,
+    /// mounted but out of reach.
+    var bernInert: Bool {
+        get { self[BernInertKey.self] }
+        set { self[BernInertKey.self] = newValue }
+    }
+}
+
+private struct BernColumnFollowsInert: ViewModifier {
+    @Environment(\.bernInert) private var inert
+
+    func body(content: Content) -> some View {
+        content.disabled(inert).accessibilityHidden(inert)
+    }
+}
+
 private struct BernSidebarToggleFollowsCover: ViewModifier {
-    @Environment(\.bernWindowCovered) private var covered
+    @Environment(\.bernWindowCovered) private var windowCovered
+    @Environment(\.bernInert) private var inert
+    // A split view out of reach has no button to show its sidebar either.
+    private var covered: Bool { windowCovered || inert }
 
     func body(content: Content) -> some View {
         #if os(tvOS)

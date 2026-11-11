@@ -216,8 +216,11 @@ impl Generator<'_> {
             // Turning hit testing off as well takes a split view's
             // toolbar safe area away on macOS: its columns then
             // slide under the title bar.
+            // A split view's columns are hosted apart on macOS: neither
+            // modifier reaches them from here, so they learn it from
+            // `bernInert` and hide themselves.
             out.line(format!(
-                ".disabled(!({enabled})).accessibilityHidden(!({enabled}))"
+                ".disabled(!({enabled})).accessibilityHidden(!({enabled})).environment(\\.bernInert, !({enabled}))"
             ));
         }
         if let Some(style) = self.style_of(element) {
