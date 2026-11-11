@@ -38,10 +38,28 @@ fn idle_ignores_fullscreen_helpers_but_keeps_popovers_awake() {
         context.idleAreasHovered = [id: 0.02]
         let monitor = BernEventMonitor()
         monitor.start(context: context, after: 0.02)
-        RunLoop.current.run(until: Date().addingTimeInterval(0.10))
-        precondition(context.idle, "native helper window must not prevent idle")
-        context.popoverOwner = UUID()
+        // Updates while awake must not keep extending the input deadline.
+        for _ in 0..<8 {
+            context.idleAreasChanged?()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.005))
+        }
+        precondition(context.idle, "redraws and native helper windows must not prevent idle")
+        // Repainting a label may rebuild its native tracking area. Neither
+        // leaving, re-entering nor re-registering it is user activity.
+        context.idleAreasHovered = [:]
         context.idleAreasChanged?()
+        precondition(context.idle, "hover loss on redraw must not wake an idle window")
+        context.idleAreas.remove(id)
+        context.idleAreasChanged?()
+        context.idleAreas.insert(id)
+        context.idleAreasHovered = [id: 0.02]
+        context.idleAreasChanged?()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.06))
+        precondition(context.idle, "redraw must not create a hide/show cycle")
+        // Actual input still wakes the window. Popovers keep it awake.
+        context.popoverOwner = UUID()
+        monitor.activity(after: 0.02)
+        precondition(!context.idle, "actual input must wake an idle window")
         RunLoop.current.run(until: Date().addingTimeInterval(0.10))
         precondition(!context.idle, "a real popover keeps controls awake")
         context.popoverOwner = nil
@@ -50,8 +68,9 @@ fn idle_ignores_fullscreen_helpers_but_keeps_popovers_awake() {
         precondition(context.idle, "dismissing a popover restores idle")
         context.idleAreasHovered = [:]
         context.idleAreasChanged?()
+        monitor.activity(after: 0.02)
         RunLoop.current.run(until: Date().addingTimeInterval(0.06))
-        precondition(!context.idle, "pointer over controls keeps them awake")
+        precondition(!context.idle, "real input over controls keeps them awake")
         monitor.stop()
         helper.orderOut(nil)
         window.orderOut(nil)

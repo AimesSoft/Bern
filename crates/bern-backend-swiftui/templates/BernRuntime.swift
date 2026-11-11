@@ -536,7 +536,8 @@ final class BernWindowContext {
     /// The `idle_area` elements on screen, and the seconds of those the
     /// pointer is over: while there are any, the window goes idle only
     /// while the pointer rests over one, after its seconds.
-    /// `idleAreasChanged` restarts the count.
+    /// `idleAreasChanged` updates eligibility while awake; only input wakes
+    /// an idle window, not hover changes caused by layout or drawing.
     @ObservationIgnored var idleAreas: Set<UUID> = []
     @ObservationIgnored var idleAreasHovered: [UUID: Double] = [:]
     @ObservationIgnored var idleAreasChanged: (() -> Void)?

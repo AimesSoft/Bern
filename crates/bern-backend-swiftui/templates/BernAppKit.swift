@@ -1257,6 +1257,7 @@ final class BernEventMonitor {
     private var monitor: Any?
     private var timer: Timer?
     private weak var context: BernWindowContext?
+    private var lastActivity = ProcessInfo.processInfo.systemUptime
 
     func start(context: BernWindowContext, after seconds: Double) {
         stop()
@@ -1268,13 +1269,15 @@ final class BernEventMonitor {
         ]
         monitor = NSEvent.addLocalMonitorForEvents(matching: events) { [weak self, weak context] event in
             if let context, event.window === context.platform.nsWindow {
-                MainActor.assumeIsolated { self?.reset(context, after: seconds) }
+                MainActor.assumeIsolated { self?.activity(after: seconds) }
             }
             return event
         }
         context.idleAreasChanged = { [weak self, weak context] in
             guard let context else { return }
-            self?.reset(context, after: seconds)
+            // Hover registration changes with layout and drawing updates too;
+            // it is not input and must not wake an already idle window.
+            self?.reset(context, after: seconds, activity: false)
         }
         reset(context, after: seconds)
     }
@@ -1291,7 +1294,17 @@ final class BernEventMonitor {
         timer = nil
     }
 
-    private func reset(_ context: BernWindowContext, after seconds: Double) {
+    /// The input monitor calls this only for an event in this window.
+    func activity(after seconds: Double) {
+        guard let context else { return }
+        reset(context, after: seconds)
+    }
+
+    private func reset(_ context: BernWindowContext, after seconds: Double, activity: Bool = true) {
+        // A redraw can make the native hover tracker leave and re-enter even
+        // without a pointer event. Only actual input may wake the window.
+        if !activity && context.idle { return }
+        if activity { lastActivity = ProcessInfo.processInfo.systemUptime }
         context.platform.nsWindow?.acceptsMouseMovedEvents = true
         if context.idle {
             withAnimation(.easeOut(duration: 0.22)) { context.idle = false }
@@ -1306,7 +1319,10 @@ final class BernEventMonitor {
             guard let area = context.idleAreasHovered.values.min() else { return }
             wait = area
         }
-        timer = Timer.scheduledTimer(withTimeInterval: wait, repeats: false) { [weak context] _ in
+        // Eligibility changes do not postpone the input deadline either:
+        // frequent redraws must still let an awake window become idle.
+        let remaining = max(0, wait - (ProcessInfo.processInfo.systemUptime - lastActivity))
+        timer = Timer.scheduledTimer(withTimeInterval: remaining, repeats: false) { [weak context] _ in
             MainActor.assumeIsolated {
                 guard let context else { return }
                 if context.platform.nsWindow?.attachedSheet != nil || context.popoverOwner != nil || context.platform.nsWindow?.firstResponder is NSTextView || NSApp.mainMenu?.highlightedItem != nil {
