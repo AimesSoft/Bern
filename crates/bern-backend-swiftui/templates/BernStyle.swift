@@ -3318,12 +3318,26 @@ final class BernSnapItems: @unchecked Sendable {
         largest = BernSnapLargest()
     }
 
+    @MainActor
     func report(_ id: UUID, _ frame: CGRect) {
         lock.withLock { frames[id] = frame }
+        refreshSizes()
     }
 
+    @MainActor
     func remove(_ id: UUID) {
         lock.withLock { frames[id] = nil }
+        refreshSizes()
+    }
+
+    @MainActor
+    private func refreshSizes() {
+        let current = lock.withLock { Array(frames.values) }
+        let ends = CGSize(
+            width: current.max(by: { $0.minX < $1.minX })?.width ?? 0,
+            height: current.max(by: { $0.minY < $1.minY })?.height ?? 0
+        )
+        if largest.ends != ends { largest.ends = ends }
     }
 
     /// Where along `axis` a scroll stopping at `start` comes to rest: with
@@ -3351,6 +3365,7 @@ final class BernSnapItems: @unchecked Sendable {
 @Observable
 final class BernSnapLargest {
     private(set) var size: CGSize = .zero
+    var ends: CGSize = .zero
 
     func grow(_ next: CGSize) {
         let grown = CGSize(width: max(size.width, next.width), height: max(size.height, next.height))
@@ -3400,19 +3415,23 @@ private struct BernSnap: ViewModifier {
         let horizontal = axis == .horizontal
         let item = horizontal ? items.largest.size.width : items.largest.size.height
         let margin = center ? max(0, (viewport - item) / 2) : 0
+        let last = horizontal ? items.largest.ends.width : items.largest.ends.height
+        let tail = center ? margin : (last > 0 ? max(0, viewport - last) : 0)
         content
             .environment(\.bernSnapItems, items)
             .scrollTargetBehavior(BernSnapBehavior(items: items, center: center, axis: axis))
-            .contentMargins(horizontal ? .horizontal : .vertical, margin, for: .scrollContent)
+            .contentMargins(horizontal ? .leading : .top, margin, for: .scrollContent)
+            .contentMargins(horizontal ? .trailing : .bottom, tail, for: .scrollContent)
             .onGeometryChange(for: CGFloat.self) { horizontal ? $0.size.width : $0.size.height } action: { length in
                 // A scroll view as long as its content grows with its own
                 // margins: growth that only echoes a change of the margin
                 // is not more room, and following it would grow the scroll
                 // view forever.
                 let grown = length - viewport
-                if grown > 0, abs(grown - 2 * (margin - measuredWith)) < 1 { return }
+                let total = margin + tail
+                if grown > 0, abs(grown - (total - measuredWith)) < 1 { return }
                 viewport = length
-                measuredWith = margin
+                measuredWith = total
             }
     }
 }

@@ -669,21 +669,27 @@ inline void ScrollView(Parent const& p, Ctx const& ctx, ScrollProps props, Build
     // targets.
     bool center = props.snap && std::string_view(props.snap) == "center";
     double fraction = center ? 0.5 : props.anchor.value_or(0);
-    auto padding = [scroll, panel, center, horizontal] {
-        // Room before the first and after the last item, so they can come
-        // to the center too.
-        if (!center) return;
+    bool startSnap = props.snap && std::string_view(props.snap) == "start";
+    auto padding = [scroll, panel, center, startSnap, horizontal] {
+        if (!center && !startSnap) return;
         double largest = 0;
+        double lastOffset = -INFINITY;
+        double lastSize = 0;
         for (auto const& [key, item] : ItemsOf(*scroll)) {
             auto framework = item.as<xaml::FrameworkElement>();
-            largest = (std::max)(largest, horizontal ? framework.ActualWidth() : framework.ActualHeight());
+            double size = horizontal ? framework.ActualWidth() : framework.ActualHeight();
+            largest = (std::max)(largest, size);
+            auto offset = OffsetOf(*scroll, item, 0);
+            if (offset && *offset > lastOffset) { lastOffset = *offset; lastSize = size; }
         }
         double port = horizontal ? scroll->viewer.ViewportWidth() : scroll->viewer.ViewportHeight();
-        double room = (std::max)(0.0, (port - largest) / 2);
+        double room = center ? (std::max)(0.0, (port - largest) / 2) : 0;
+        double tail = startSnap && lastSize > 0 ? (std::max)(0.0, port - lastSize) : room;
         auto flex = panel.as<xaml::FrameworkElement>();
-        auto margin = horizontal ? xaml::Thickness{room, 0, room, 0} : xaml::Thickness{0, room, 0, room};
+        auto margin = horizontal ? xaml::Thickness{room, 0, tail, 0} : xaml::Thickness{0, room, 0, tail};
         auto now = flex.Margin();
-        if (std::abs(now.Left - margin.Left) > 0.5 || std::abs(now.Top - margin.Top) > 0.5) flex.Margin(margin);
+        if (std::abs(now.Left - margin.Left) > 0.5 || std::abs(now.Top - margin.Top) > 0.5 ||
+            std::abs(now.Right - margin.Right) > 0.5 || std::abs(now.Bottom - margin.Bottom) > 0.5) flex.Margin(margin);
     };
     scroller.SizeChanged([padding](auto&&, auto&&) { padding(); });
     panel.as<xaml::FrameworkElement>().SizeChanged([padding](auto&&, auto&&) { padding(); });

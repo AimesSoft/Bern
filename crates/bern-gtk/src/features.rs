@@ -1716,9 +1716,10 @@ fn snapping(
     let offset_of = Rc::new(offset_of);
     // Room before the first and after the last item, so they can come to
     // the center too.
-    let margins: Option<Rc<dyn Fn() -> bool>> = center.then(|| {
+    let margins: Option<Rc<dyn Fn() -> bool>> = snap.then(|| {
         let content = content.clone();
         let held = Rc::clone(scope);
+        let offset_of = Rc::clone(&offset_of);
         Rc::new(move || {
             let page = if horizontal {
                 held.view.width()
@@ -1740,21 +1741,44 @@ fn snapping(
                 })
                 .max()
                 .unwrap_or(0);
-            let room = ((page - largest) / 2).max(0);
-            let current = if horizontal {
-                content.margin_start()
+            let room = if center {
+                ((page - largest) / 2).max(0)
             } else {
-                content.margin_top()
+                0
             };
-            if current == room {
+            let tail = if center {
+                room
+            } else {
+                held.items()
+                    .into_iter()
+                    .filter_map(|(_, item)| {
+                        Some((
+                            offset_of(&item)?,
+                            if horizontal {
+                                item.width()
+                            } else {
+                                item.height()
+                            },
+                        ))
+                    })
+                    .max_by(|a, b| a.0.total_cmp(&b.0))
+                    .map(|(_, size)| (page - size).max(0))
+                    .unwrap_or(0)
+            };
+            let current = if horizontal {
+                (content.margin_start(), content.margin_end())
+            } else {
+                (content.margin_top(), content.margin_bottom())
+            };
+            if current == (room, tail) {
                 return false;
             }
             if horizontal {
                 content.set_margin_start(room);
-                content.set_margin_end(room);
+                content.set_margin_end(tail);
             } else {
                 content.set_margin_top(room);
-                content.set_margin_bottom(room);
+                content.set_margin_bottom(tail);
             }
             true
         }) as Rc<dyn Fn() -> bool>

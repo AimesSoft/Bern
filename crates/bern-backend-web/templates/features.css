@@ -95,6 +95,14 @@
   width: auto;
 }
 
+/* A vertical scroll view is a block, not a flex parent. Its flexible
+   inline-grid content needs an explicit width: otherwise short lists
+   shrink the page and their snap padding becomes part of its sizing. */
+.bern-scroll-vertical > :is(.bern-fill-width, .bern-layout-width):not(.bern-sized-width) {
+  width: 100%;
+  max-width: none;
+}
+
 /* The rows of a list in a column, built as they come into sight, fill it
    as the column's own children would. */
 .bern-column-list > :is(.bern-fill-width, .bern-layout-width):not(.bern-sized-width) {
