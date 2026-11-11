@@ -725,7 +725,7 @@ pub fn focus_region(c: &Ctx, id: &str, content: Vec<El>) -> El {
 }
 
 /// `number` as the kind of number `current` is.
-fn like(current: &Value, number: f64) -> Value {
+pub(crate) fn like(current: &Value, number: f64) -> Value {
     match current {
         Value::Int(_) => Value::Int(number.round() as i64),
         _ => Value::Float(number),
@@ -785,4 +785,21 @@ pub fn pinch(
         })
         .children(content);
     c.grow().apply(element).into_any_element()
+}
+
+/// The desktop renderer does not offer a reversible per-window display
+/// brightness override. Keep the requested value intact, and publish only
+/// this API's availability; do not change global display gamma/brightness.
+pub fn screen_brightness(c: &Ctx, id: &str, available: crate::ctx::Field) -> El {
+    let c = c.clone();
+    Watcher {
+        key: c.element_id(id),
+        value: c.read(available),
+        run: Rc::new(move || {
+            if c.read(available) != Value::Bool(false) {
+                c.write(available, Value::Bool(false));
+            }
+        }),
+    }
+    .into_any_element()
 }

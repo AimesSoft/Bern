@@ -19,10 +19,14 @@ import androidx.compose.foundation.gestures.ScrollScope
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateZoom
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalViewConfiguration
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.drop
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.lifecycle.compose.currentStateAsState
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.geometry.Offset
@@ -639,14 +643,16 @@ fun BernContentButton(
     modifier: Modifier = Modifier,
     shape: BernShape? = null,
     prominent: Boolean = false,
+    onDoubleTap: (() -> Unit)? = null,
     onClick: () -> Unit,
     content: @Composable () -> Unit,
 ) {
+    val tapping = modifier.bernDoubleTap(enabled, onClick, onDoubleTap)
     if (shape?.capsule == true) {
         // A capsule is the platform's button around the content, as it is
         // around a label.
         val height = shape.height
-        val sized = (if (height != null) modifier.height(height) else modifier)
+        val sized = (if (height != null) tapping.height(height) else tapping)
             .bernTelevisionFocus(CircleShape)
             .semantics(mergeDescendants = true) { contentDescription = label }
         val padding = if (height != null) PaddingValues(horizontal = 16.dp, vertical = 0.dp) else ButtonDefaults.ContentPadding
@@ -664,7 +670,7 @@ fun BernContentButton(
     val palette = bernPalette()
     // A capsule's ends are half its height; a height of its own sizes it.
     val outline = if (shape?.capsule == true) CircleShape else RoundedCornerShape((style?.corner ?: 0.0).dp)
-    val sized = shape?.height?.let { modifier.height(it) } ?: modifier
+    val sized = shape?.height?.let { tapping.height(it) } ?: tapping
     Box(
         sized
             .bernTransform(look, motion)
@@ -2228,9 +2234,49 @@ fun BernPinch(
     ) { content() }
 }
 
-/// Dragging across the content moves `value` within `min` and `max`: up or
-/// right raises it, and `distance` dp cross the whole range; `commit` runs
-/// when the finger lifts.
+/// State of one pointer, based on its down value rather than subsequent
+/// recompositions or external writes. Wrong-axis movement is never reclaimed.
+internal class BernSwipeTrack(
+    private val from: Double,
+    private val horizontal: Boolean,
+    private val distance: Double,
+    private val min: Double,
+    private val max: Double,
+    private val slop: Float,
+) {
+    var accepted = false
+        private set
+    var rejected = false
+        private set
+    fun move(x: Float, y: Float): Double? {
+        if (rejected) return null
+        val primary = kotlin.math.abs(if (horizontal) x else y)
+        val cross = kotlin.math.abs(if (horizontal) y else x)
+        if (!accepted) {
+            if (maxOf(primary, cross) <= slop) return null
+            if (primary <= cross) { rejected = true; return null }
+            accepted = true
+        }
+        return (from + (if (horizontal) x else -y) / distance * (max - min)).coerceIn(min, max)
+    }
+}
+
+/// Completion is one phase: callbacks read the final draft before clearing
+/// active can wake a Watch that synchronizes it from external state.
+internal fun bernCommitSwipe(update: () -> Unit, action: () -> Unit, onCommit: () -> Unit, clear: () -> Unit) {
+    try { update(); action(); onCommit() } finally { clear() }
+}
+
+@Composable
+private fun bernGestureActive(): Boolean {
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    val state by lifecycle.currentStateAsState()
+    return state.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED) &&
+        androidx.compose.ui.platform.LocalWindowInfo.current.isWindowFocused
+}
+
+/// Drag intent is decided before child clickables/scrollables receive the
+/// event. Only the winning axis consumes; cancellation never commits.
 @Composable
 fun BernSwipe(
     label: String,
@@ -2241,32 +2287,60 @@ fun BernSwipe(
     horizontal: Boolean,
     distance: Double,
     commit: () -> Unit,
+    continuous: Boolean = false,
+    onActive: (Boolean) -> Unit = {},
+    onCommit: () -> Unit = {},
     content: @Composable () -> Unit,
 ) {
+    val accepting = bernGestureActive()
     val current by rememberUpdatedState(value)
-    var start by remember { mutableStateOf(0.0) }
-    var moved by remember { mutableStateOf(0f) }
-    val gestures = Modifier.pointerInput(min, max, horizontal, distance) {
-        val full = distance.dp.toPx()
-        val span = max - min
-        val move = { amount: Float ->
-            moved += amount
-            val raised = if (horizontal) moved else -moved
-            onValue((start + raised / full * span).coerceIn(min, max))
-        }
-        if (horizontal) {
-            detectHorizontalDragGestures(
-                onDragStart = { start = current; moved = 0f },
-                onDragEnd = commit,
-                onDragCancel = commit,
-            ) { change, amount -> change.consume(); move(amount) }
-        } else {
-            detectVerticalDragGestures(
-                onDragStart = { start = current; moved = 0f },
-                onDragEnd = commit,
-                onDragCancel = commit,
-            ) { change, amount -> change.consume(); move(amount) }
-        }
+    val change by rememberUpdatedState(onValue)
+    val action by rememberUpdatedState(commit)
+    val active by rememberUpdatedState(onActive)
+    val finished by rememberUpdatedState(onCommit)
+    DisposableEffect(Unit) { active(false); onDispose { active(false) } }
+    val gestures = Modifier.pointerInput(min, max, horizontal, distance, continuous, accepting) {
+        if (!accepting) { active(false); return@pointerInput }
+        try {
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                val track = BernSwipeTrack(current, horizontal, distance.dp.toPx().toDouble(), min, max, viewConfiguration.touchSlop)
+                var last = current
+                try {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val pointer = event.changes.firstOrNull { it.id == down.id } ?: break
+                        if (pointer.isConsumed || event.changes.count { it.pressed } > 1) break
+                        if (!pointer.pressed) {
+                            if (track.accepted) {
+                                val delta = pointer.position - down.position
+                                val next = track.move(delta.x, delta.y)
+                                pointer.consume()
+                                bernCommitSwipe(
+                                    update = { if (next != null && next != last) { change(next); if (continuous) action() } },
+                                    action = { if (!continuous) action() },
+                                    onCommit = { finished() },
+                                    clear = { active(false) },
+                                )
+                            }
+                            break
+                        }
+                        val delta = pointer.position - down.position
+                        val wasAccepted = track.accepted
+                        val next = track.move(delta.x, delta.y)
+                        if (track.rejected) break
+                        if (next != null) {
+                            if (!wasAccepted) active(true)
+                            pointer.consume()
+                            if (next != last) { last = next; change(next); if (continuous) action() }
+                        } else {
+                            // A descendant or ancestor may have taken the gesture on Main.
+                            if (awaitPointerEvent(PointerEventPass.Final).changes.any { it.isConsumed }) break
+                        }
+                    }
+                } finally { active(false) }
+            }
+        } finally { active(false) }
     }
     Box(
         Modifier
@@ -2274,13 +2348,202 @@ fun BernSwipe(
                 contentDescription = label
                 progressBarRangeInfo = ProgressBarRangeInfo(value.toFloat(), min.toFloat()..max.toFloat())
                 setProgress { target ->
-                    onValue(target.toDouble().coerceIn(min, max))
-                    commit()
+                    bernCommitSwipe(
+                        update = { change(target.toDouble().coerceIn(min, max)) },
+                        action = { action() },
+                        onCommit = { finished() },
+                        clear = { active(false) },
+                    )
                     true
                 }
             }
             .then(gestures),
     ) { content() }
+}
+
+/// Native clickables still own keyboard, semantics and pressed indication.
+/// For pointer input only, intercept a valid up before their Main pass, and
+/// use the platform's double-tap time/slop. Watch Final too: a child Swipe
+/// may consume a move after this modifier saw its Initial pass.
+@Composable
+fun Modifier.bernDoubleTap(enabled: Boolean, onClick: () -> Unit, onDoubleTap: (() -> Unit)?): Modifier {
+    if (onDoubleTap == null) return this
+    val click by rememberUpdatedState(onClick)
+    val double by rememberUpdatedState(onDoubleTap)
+    val scope = rememberCoroutineScope()
+    var pending by remember { mutableStateOf<Job?>(null) }
+    var firstUp by remember { mutableStateOf(0L) }
+    var firstPosition by remember { mutableStateOf(Offset.Zero) }
+    val config = LocalViewConfiguration.current
+    val accepting = enabled && bernGestureActive()
+    DisposableEffect(accepting) { onDispose { pending?.cancel(); pending = null } }
+    return pointerInput(accepting, config) {
+        if (!accepting) return@pointerInput
+        try {
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                val since = down.uptimeMillis - firstUp
+                val second = pending != null && since in config.doubleTapMinTimeMillis..config.doubleTapTimeoutMillis &&
+                    (down.position - firstPosition).getDistance() <= config.touchSlop * 2
+                if (second) { pending?.cancel(); pending = null }
+                var cancelled = down.isConsumed
+                while (true) {
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                    val pointer = event.changes.firstOrNull { it.id == down.id } ?: break
+                    if (pointer.isConsumed || event.changes.count { it.pressed } > 1 ||
+                        (pointer.position - down.position).getDistance() > config.touchSlop) cancelled = true
+                    if (cancelled) { pending?.cancel(); pending = null }
+                    if (!pointer.pressed) {
+                        if (!cancelled) {
+                            pointer.consume()
+                            if (second) double?.invoke()
+                            else {
+                                firstUp = pointer.uptimeMillis
+                                firstPosition = pointer.position
+                                pending?.cancel()
+                                pending = scope.launch {
+                                    delay(config.doubleTapTimeoutMillis)
+                                    pending = null
+                                    click()
+                                }
+                            }
+                        }
+                        break
+                    }
+                    if (awaitPointerEvent(PointerEventPass.Final).changes.any { it.isConsumed }) {
+                        cancelled = true
+                        pending?.cancel(); pending = null
+                    }
+                }
+            }
+        } finally { pending?.cancel(); pending = null }
+    }
+}
+
+/// One override stack per Android Window, not per composable. A newly
+/// resumed owner inherits the current override without writing it. Only
+/// the top owner writes; removing an older owner leaves that override alone.
+internal class BernBrightnessOverrides(
+    private val readOverride: () -> Float,
+    private val readEffective: () -> Double?,
+    private val write: (Float) -> Unit,
+) {
+    private val owners = linkedMapOf<Any, Float>()
+    private var original: Float? = null
+    fun acquire(owner: Any): Double? {
+        val saved = readOverride()
+        val effective = if (saved.isFinite() && saved in 0f..1f) saved.toDouble() else readEffective()
+        if (!saved.isFinite() || effective == null || !effective.isFinite()) return null
+        if (owners.isEmpty()) original = saved
+        owners[owner] = saved
+        return effective.coerceIn(0.0, 1.0)
+    }
+    fun update(owner: Any, value: Float) {
+        if (owner !in owners || !value.isFinite()) return
+        owners[owner] = value
+        if (owners.keys.last() === owner) write(value)
+    }
+    fun release(owner: Any) {
+        if (owner !in owners) return
+        val wasTop = owners.keys.last() === owner
+        owners.remove(owner)
+        if (!wasTop) return
+        val restore = owners.values.lastOrNull() ?: original
+        if (owners.isEmpty()) original = null
+        if (restore != null) write(restore)
+    }
+}
+
+/// A component's membership of its window's shared override stack. -1 is
+/// inherited brightness, so the stack restores it verbatim, not an estimate.
+internal class BernBrightnessLease(
+    private val overrides: BernBrightnessOverrides,
+    private val publish: (Double) -> Unit,
+    private val available: (Boolean) -> Unit,
+) {
+    private var active = false
+    private var last = Double.NaN
+    fun resume() {
+        if (active) return
+        val effective = overrides.acquire(this)
+        if (effective == null) { available(false); return }
+        active = true
+        last = effective
+        publish(last)
+        available(true)
+    }
+    fun update(value: Double) {
+        if (!active || !value.isFinite()) return
+        val next = value.coerceIn(0.0, 1.0)
+        if (next == last) return
+        last = next
+        overrides.update(this, next.toFloat())
+    }
+    fun pause() {
+        if (active) {
+            active = false
+            overrides.release(this)
+        }
+        available(false)
+    }
+}
+
+internal object BernWindowBrightness {
+    private val windows = java.util.WeakHashMap<android.view.Window, BernBrightnessOverrides>()
+    fun overrides(window: android.view.Window): BernBrightnessOverrides = windows.getOrPut(window) {
+        // The value must not strongly retain its weak map key through its
+        // read/write callbacks after every composable has left the window.
+        val reference = java.lang.ref.WeakReference(window)
+        BernBrightnessOverrides(
+            readOverride = { reference.get()?.attributes?.screenBrightness ?: Float.NaN },
+            readEffective = {
+                reference.get()?.let { target ->
+                    try {
+                        val setting = android.provider.Settings.System.getInt(target.context.contentResolver, android.provider.Settings.System.SCREEN_BRIGHTNESS, -1)
+                        if (setting >= 0) setting / 255.0 else null
+                    } catch (_: SecurityException) { null }
+                }
+            },
+            write = { value -> reference.get()?.let { target ->
+                target.attributes = target.attributes.apply { screenBrightness = value }
+            } },
+        )
+    }
+}
+
+/// Window-local brightness: mount/resume read first, never overwrite on
+/// mount; only subsequent draft changes write. Pause/blur/unmount restore
+/// the exact previous override without changing the global system setting.
+@Composable
+fun BernScreenBrightness(value: Double, onValue: (Double) -> Unit, onAvailable: (Boolean) -> Unit) {
+    val context = LocalContext.current
+    val view = androidx.compose.ui.platform.LocalView.current
+    val activity = context as? android.app.Activity
+    val window = (view.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window ?: activity?.window
+    val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    val focused = androidx.compose.ui.platform.LocalWindowInfo.current.isWindowFocused
+    val host = LocalBernWindow.current
+    val onTop = (BernHost.sheets.lastOrNull() ?: BernHost.primary) == host.kindID
+    val current by rememberUpdatedState(value)
+    val publish by rememberUpdatedState(onValue)
+    val available by rememberUpdatedState(onAvailable)
+    val lease = remember(window) {
+        window?.let { target ->
+            BernBrightnessLease(BernWindowBrightness.overrides(target), { publish(it) }, { available(it) })
+        }
+    }
+    DisposableEffect(lease) { onDispose { lease?.pause() } }
+    LaunchedEffect(owner, lease, focused, onTop) {
+        if (lease == null || !focused || !onTop) { lease?.pause(); available(false); return@LaunchedEffect }
+        owner.lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
+            try {
+                lease.resume()
+                // The initial collection belongs to the previous composition;
+                // resume publishes the effective value, whose echo is equal.
+                snapshotFlow { current }.drop(1).collect { lease.update(it) }
+            } finally { lease.pause() }
+        }
+    }
 }
 
 // MARK: - Rails

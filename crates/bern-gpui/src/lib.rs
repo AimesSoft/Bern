@@ -22,6 +22,7 @@ mod controls;
 mod ctx;
 mod filters;
 mod form;
+mod gestures;
 mod host;
 mod icons;
 mod layout;
@@ -47,10 +48,11 @@ mod theme;
 mod units;
 pub mod value;
 mod windows;
+pub use gestures::{SwipeProps, swipe};
 
 pub use behaviors::{
-    ShortcutInputProps, SliderProps, focus_on_appear, focus_region, pinch, shortcut,
-    shortcut_input, slider, timer, toast, watch,
+    ShortcutInputProps, SliderProps, focus_on_appear, focus_region, pinch, screen_brightness,
+    shortcut, shortcut_input, slider, timer, toast, watch,
 };
 pub use bern_ffi;
 pub use bern_ffi::protocol;

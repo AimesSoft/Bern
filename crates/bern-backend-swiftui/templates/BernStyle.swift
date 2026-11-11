@@ -3245,9 +3245,11 @@ extension View {
     /// raises it, and `distance` points cross the whole range.
     func bernSwipe(
         _ value: Binding<Double>, in range: ClosedRange<Double>, axis: Axis, distance: Double,
-        commit: @escaping @MainActor () -> Void
+        continuous: Bool = false, active: Binding<Bool>? = nil,
+        change: @escaping @MainActor () -> Void, commit: @escaping @MainActor () -> Void = {}
     ) -> some View {
-        modifier(BernSwipe(value: value, range: range, axis: axis, distance: distance, commit: commit))
+        modifier(BernSwipe(value: value, range: range, axis: axis, distance: distance,
+                           continuous: continuous, active: active, change: change, commit: commit))
     }
 }
 
@@ -4117,39 +4119,137 @@ private struct BernPinch: ViewModifier {
     }
 }
 
+extension View {
+    /// Native tap recognizers arbitrate before the Button's ordinary pointer
+    /// activation. Keyboard shortcuts and accessibility keep the primary action.
+    func bernDoubleTap(single: @escaping @MainActor () -> Void,
+                       double: @escaping @MainActor () -> Void) -> some View {
+        modifier(BernDoubleTap(single: single, double: double))
+    }
+}
+
+private struct BernDoubleTap: ViewModifier {
+    let single: @MainActor () -> Void
+    let double: @MainActor () -> Void
+    @Environment(\.isEnabled) private var enabled
+
+    func body(content: Content) -> some View {
+        content.highPriorityGesture(
+            TapGesture(count: 2).exclusively(before: TapGesture(count: 1))
+                .onEnded { result in
+                    guard enabled else { return }
+                    switch result {
+                    case .first: double()
+                    case .second: single()
+                    }
+                }, including: enabled ? .all : .none
+        )
+        .accessibilityAction { if enabled { single() } }
+    }
+}
+
 private struct BernSwipe: ViewModifier {
     let value: Binding<Double>
     let range: ClosedRange<Double>
     let axis: Axis
     let distance: Double
+    let continuous: Bool
+    let active: Binding<Bool>?
+    let change: @MainActor () -> Void
     let commit: @MainActor () -> Void
     @State private var start: Double?
+    @State private var rejected = false
+    @State private var finishing = false
+    @GestureState private var tracking = false
+    @Environment(\.scenePhase) private var phase
 
     func body(content: Content) -> some View {
         #if os(tvOS)
-        // A television has no touch screen to swipe; the remote's swipes
-        // move the focus. Only the adjustment of assistive technologies.
-        content
-            .accessibilityAdjustableAction { direction in bernAdjust(value, range, direction, commit) }
+        content.accessibilityAdjustableAction { direction in adjust(direction) }
         #else
         content
             .contentShape(Rectangle())
             .gesture(
                 DragGesture(minimumDistance: 10)
+                    .updating($tracking) { _, state, _ in state = true }
                     .onChanged { drag in
-                        let from = start ?? value.wrappedValue
-                        start = from
-                        let moved = axis == .vertical ? -drag.translation.height : drag.translation.width
-                        let span = range.upperBound - range.lowerBound
-                        value.wrappedValue = min(max(from + moved / distance * span, range.lowerBound), range.upperBound)
+                        guard !finishing, !rejected, distance.isFinite, distance > 0 else { return }
+                        let dx = drag.translation.width, dy = drag.translation.height
+                        if start == nil {
+                            guard axis == .vertical ? abs(dy) > abs(dx) : abs(dx) > abs(dy) else {
+                                rejected = true
+                                return
+                            }
+                            start = value.wrappedValue
+                            active?.wrappedValue = true
+                        }
+                        guard let from = start else { return }
+                        update(from: from, translation: drag.translation)
                     }
-                    .onEnded { _ in
+                    .onEnded { drag in
+                        guard !finishing else { return }
+                        guard let from = start else { cancel(); return }
+                        // Detach the drag before invoking observers, but retain
+                        // its active binding until both actions have read it.
+                        finishing = true
                         start = nil
-                        commit()
+                        bernCommitSwipe(update: {
+                            update(from: from, translation: drag.translation)
+                        }, change: {
+                            if !continuous { change() }
+                        }, commit: commit, clear: {
+                            finishing = false
+                            cancel()
+                        })
                     })
-            .accessibilityAdjustableAction { direction in bernAdjust(value, range, direction, commit) }
+            // GestureState resets for interruptions as well as normal endings.
+            .onChange(of: tracking) { _, tracking in if !tracking { cancel() } }
+            .onChange(of: phase) { _, phase in if phase != .active { cancel() } }
+            .onDisappear { cancel() }
+            .accessibilityAdjustableAction { direction in adjust(direction) }
         #endif
     }
+
+    private func update(from: Double, translation: CGSize) {
+        let moved = axis == .vertical ? -translation.height : translation.width
+        let next = min(max(from + moved / distance * (range.upperBound - range.lowerBound),
+                           range.lowerBound), range.upperBound)
+        guard next.isFinite, next != value.wrappedValue else { return }
+        value.wrappedValue = next
+        if continuous { change() }
+    }
+
+    private func cancel() {
+        guard !finishing else { return }
+        start = nil
+        rejected = false
+        if active?.wrappedValue == true { active?.wrappedValue = false }
+    }
+
+    private func adjust(_ direction: AccessibilityAdjustmentDirection) {
+        guard !finishing else { return }
+        finishing = true
+        active?.wrappedValue = true
+        bernCommitSwipe(update: {
+            bernAdjust(value, range, direction) {}
+        }, change: change, commit: commit, clear: {
+            finishing = false
+            cancel()
+        })
+    }
+}
+
+/// Publish the idle state only after actions have consumed the final value.
+/// An idle observer may synchronously restore the last committed model value.
+@MainActor
+func bernCommitSwipe(
+    update: () throws -> Void, change: () throws -> Void,
+    commit: () throws -> Void, clear: () -> Void
+) rethrows {
+    defer { clear() }
+    try update()
+    try change()
+    try commit()
 }
 
 /// One step of an adjustable value for assistive technologies: a tenth of
@@ -6618,5 +6718,144 @@ struct BernFormRows: ViewModifier {
         } else {
             filled
         }
+    }
+}
+
+/// A mounted, reversible host brightness override. Unsupported hosts report
+/// absence rather than drawing a dimming layer or changing monitor gamma.
+struct BernScreenBrightness: View {
+    let value: Binding<Double>
+    let available: Binding<Bool>
+    @Environment(BernWindowContext.self) private var window
+    @Environment(\.scenePhase) private var phase
+    @State private var mounted = false
+    #if os(iOS)
+    @State private var screen: UIScreen?
+    @State private var hostScreen: UIScreen?
+    @State private var owner = UUID()
+    @State private var applied: Double?
+    #endif
+
+    var body: some View {
+        Color.clear.frame(width: 0, height: 0).accessibilityHidden(true)
+            #if os(iOS)
+            .background(BernBrightnessScreenProbe { found in hostScreen = found })
+            .onChange(of: hostScreen) { _, _ in restore(); activate() }
+            #endif
+            .onAppear { mounted = true; activate() }
+            .onDisappear { mounted = false; restore() }
+            .onChange(of: phase) { _, phase in
+                if phase == .active { activate() } else { restore() }
+            }
+            .onChange(of: value.wrappedValue) { _, value in
+                #if os(iOS)
+                guard let screen, mounted, phase == .active,
+                      value.isFinite, value != applied else { return }
+                let next = min(max(value, 0), 1)
+                BernBrightnessOverrides.shared.update(screen: ObjectIdentifier(screen), owner: owner, value: next)
+                applied = next
+                #endif
+            }
+    }
+
+    private func activate() {
+        #if os(iOS)
+        guard mounted, phase == .active, screen == nil, window.touch,
+              let current = hostScreen else {
+            if screen == nil { available.wrappedValue = false }
+            return
+        }
+        screen = current
+        let initial = BernBrightnessOverrides.shared.acquire(
+            screen: ObjectIdentifier(current), owner: owner,
+            read: { Double(current.brightness) }, write: { current.brightness = $0 }
+        )
+        applied = initial
+        value.wrappedValue = initial
+        available.wrappedValue = true
+        #else
+        available.wrappedValue = false
+        #endif
+    }
+
+    private func restore() {
+        #if os(iOS)
+        if let screen {
+            BernBrightnessOverrides.shared.release(screen: ObjectIdentifier(screen), owner: owner)
+        }
+        applied = nil
+        screen = nil
+        #endif
+        available.wrappedValue = false
+    }
+}
+
+#if os(iOS)
+private struct BernBrightnessScreenProbe: UIViewRepresentable {
+    let changed: @MainActor (UIScreen?) -> Void
+    func makeUIView(context: Context) -> Probe { Probe(changed: changed) }
+    func updateUIView(_ view: Probe, context: Context) { view.changed = changed }
+    final class Probe: UIView {
+        var changed: @MainActor (UIScreen?) -> Void
+        init(changed: @escaping @MainActor (UIScreen?) -> Void) {
+            self.changed = changed
+            super.init(frame: .zero)
+            isUserInteractionEnabled = false
+        }
+        required init?(coder: NSCoder) { nil }
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            let screen = window?.windowScene?.screen
+            // SwiftUI is mounting this representable; deliver outside its update.
+            Task { @MainActor [weak self] in self?.changed(screen) }
+        }
+    }
+}
+#endif
+
+/// A screen can be shared by several scenes. Removing an older override
+/// must not restore through a newer one; the last release restores the host.
+@MainActor
+final class BernBrightnessOverrides {
+    static let shared = BernBrightnessOverrides()
+    private struct Entry {
+        let original: Double
+        let write: (Double) -> Void
+        var owners: [(id: UUID, value: Double)]
+    }
+    private var screens: [ObjectIdentifier: Entry] = [:]
+
+    func acquire(screen: ObjectIdentifier, owner: UUID,
+                 read: () -> Double, write: @escaping (Double) -> Void) -> Double {
+        if let previous = screens[screen]?.owners.first(where: { $0.id == owner }) {
+            return previous.value
+        }
+        let initial = read()
+        var entry = screens[screen] ?? Entry(original: initial, write: write, owners: [])
+        entry.owners.append((owner, initial))
+        screens[screen] = entry
+        return initial
+    }
+
+    func update(screen: ObjectIdentifier, owner: UUID, value: Double) {
+        guard value.isFinite, var entry = screens[screen],
+              let index = entry.owners.firstIndex(where: { $0.id == owner }) else { return }
+        let next = min(max(value, 0), 1)
+        entry.owners[index].value = next
+        screens[screen] = entry
+        if index == entry.owners.count - 1 { entry.write(next) }
+    }
+
+    func release(screen: ObjectIdentifier, owner: UUID) {
+        guard var entry = screens[screen],
+              let index = entry.owners.firstIndex(where: { $0.id == owner }) else { return }
+        let controlled = index == entry.owners.count - 1
+        entry.owners.remove(at: index)
+        if entry.owners.isEmpty {
+            screens.removeValue(forKey: screen)
+        } else {
+            screens[screen] = entry
+        }
+        if controlled { entry.write(entry.owners.last?.value ?? entry.original) }
     }
 }

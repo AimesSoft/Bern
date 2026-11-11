@@ -602,6 +602,7 @@ fun BernButton(
     shape: BernShape? = null,
     fill: Boolean = false,
     modifier: Modifier = Modifier,
+    onDoubleTap: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     val textStyle = when (style?.size) {
@@ -622,7 +623,7 @@ fun BernButton(
     val height = shape?.height
     if (height != null) padding = PaddingValues(horizontal = 16.dp, vertical = 0.dp)
     val form = if (shape?.capsule == true) CircleShape else ButtonDefaults.shape
-    var sized = modifier.bernTelevisionFocus(form)
+    var sized = modifier.bernDoubleTap(enabled, onClick, onDoubleTap).bernTelevisionFocus(form)
     if (fill) sized = sized.fillMaxWidth()
     if (height != null) sized = sized.height(height)
     val material: @Composable (Modifier, MutableInteractionSource?) -> Unit = { modifier, interaction ->

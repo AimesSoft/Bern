@@ -101,6 +101,43 @@ fn hello_generates_a_gpui_application() {
     };
     let cargo = file("app/Cargo.toml");
     assert!(cargo.contains("bern-gpui = { path = "), "{cargo}");
+    assert!(cargo.contains("[patch.crates-io]"));
+    for name in ["gpui-pre", "gpui-pre-linux", "gpui-pre-windows"] {
+        let expected = format!(
+            "{name} = {{ path = {} }}",
+            bern_target_api::toml_string(
+                &root
+                    .join("crates/bern-gpui/vendor")
+                    .join(name)
+                    .display()
+                    .to_string()
+            )
+        );
+        assert!(cargo.contains(&expected), "{cargo}");
+    }
+    let mut git_context = context.clone();
+    git_context.framework = Framework::Git {
+        url: "https://example.invalid/bern.git".into(),
+        reference: Some(("rev".into(), "0123456789abcdef".into())),
+    };
+    let git_files = Gpui::MACOS.generate(&compiled.app, &git_context).unwrap();
+    let git_manifest = String::from_utf8(
+        git_files
+            .iter()
+            .find(|f| f.path == Path::new("app/Cargo.toml"))
+            .unwrap()
+            .contents
+            .clone(),
+    )
+    .unwrap();
+    for name in ["gpui-pre", "gpui-pre-linux", "gpui-pre-windows"] {
+        assert!(git_manifest.contains(&format!(
+            "{name} = {{ git = \"https://example.invalid/bern.git\", rev = \"0123456789abcdef\" }}"
+        )), "{git_manifest}");
+    }
+    git_context.framework = Framework::Registry("0.1.10".into());
+    assert!(Gpui::MACOS.generate(&compiled.app, &git_context).is_err());
+
     let main = file("app/src/main.rs");
     assert!(main.contains("bern_gpui::run("), "{main}");
     assert!(main.contains("ipc: true"), "{main}");
@@ -613,4 +650,162 @@ fn navigation_reset_is_generated_only_when_requested() {
         );
         assert!(code[watch..navigation].contains("b::navigation_reset(c,"));
     }
+}
+
+#[test]
+fn button_double_tap_is_an_action_not_visible_content() {
+    use bern_ir::Node;
+    let mut app = compile("showcase").1.app;
+    let mut button = None;
+    app.walk(&mut |node, _| {
+        if let Node::Element(element) = node
+            && element.kind == "Button"
+            && element.action.is_some()
+        {
+            button = Some(element.clone());
+        }
+    });
+    let mut button = button.expect("showcase has an actionable button");
+    button.children.clear();
+    let mut double = button.clone();
+    double.kind = "DoubleTap".into();
+    double.props.clear();
+    double.id = None;
+    button.children.push(Node::Element(double));
+    app.components[0].body = Node::Element(button);
+    let generator = bern_backend_gpui::Generator::new(&app, "macos");
+    let code = generator.generate(0, "{}");
+    assert!(code.contains("double_tap: Some(b::act("));
+    assert!(code.contains("b::button(c,"));
+    // The marker-only button uses its normal label, not an empty custom row.
+    let component = code.split("double_tap: Some(b::act(").next().unwrap();
+    assert!(component.ends_with("b::ButtonProps { "));
+    assert!(!code.contains("b::double_tap("));
+}
+
+#[test]
+fn swipe_generates_session_binding_and_separate_commit() {
+    use bern_ir::{Node, Prop};
+    let mut app = compile("showcase").1.app;
+    let mut slider = None;
+    let mut button = None;
+    let mut active = None;
+    app.walk(&mut |node, _| {
+        if let Node::Element(element) = node {
+            if element.kind == "Switch" {
+                active = element.field("value").cloned();
+            }
+            if element.kind == "Slider" && element.field("value").is_some() {
+                slider = Some(element.clone());
+            }
+            if element.kind == "Button" && element.action.is_some() {
+                button = Some(element.clone());
+            }
+        }
+    });
+    let button = button.expect("an actionable child");
+    let mut swipe = slider.expect("a session-backed slider");
+    swipe.kind = "Swipe".into();
+    swipe
+        .props
+        .retain(|name, _| ["id", "label", "value", "min", "max"].contains(&name.as_str()));
+    swipe.action = button.action.clone();
+    let mut commit = button.clone();
+    commit.kind = "OnCommit".into();
+    commit.props.clear();
+    commit.children.clear();
+    commit.id = None;
+    swipe.children = vec![Node::Element(button), Node::Element(commit)];
+    for horizontal in [false, true] {
+        if horizontal {
+            swipe.props.insert(
+                "axis".into(),
+                Prop::Keyword {
+                    value: "horizontal".into(),
+                },
+            );
+        }
+        app.components[0].body = Node::Element(swipe.clone());
+        let code = bern_backend_gpui::Generator::new(&app, "macos").generate(0, "{}");
+        assert!(code.contains("b::swipe(c,"));
+        assert!(code.contains(&format!(
+            "horizontal: {horizontal}, distance: 300.0, continuous: false, active: None"
+        )));
+        assert!(code.contains("}, Some(b::act("));
+        assert!(!code.contains("b::on_commit("));
+    }
+    swipe.props.insert(
+        "continuous".into(),
+        Prop::Keyword {
+            value: "true".into(),
+        },
+    );
+    swipe.props.insert(
+        "active".into(),
+        Prop::Field {
+            field: active.unwrap(),
+        },
+    );
+    app.components[0].body = Node::Element(swipe);
+    let code = bern_backend_gpui::Generator::new(&app, "macos").generate(0, "{}");
+    assert!(
+        code.contains("continuous: true, active: Some(b::Field"),
+        "{code}"
+    );
+}
+
+#[test]
+fn brightness_reports_availability_without_setting_the_requested_value() {
+    use bern_ir::{Binding, Expr, ExprKind, IfNode, Node, Prop};
+    use bern_protocol::Type;
+    let mut app = compile("showcase").1.app;
+    let mut slider = None;
+    let mut available = None;
+    app.walk(&mut |node, _| {
+        if let Node::Element(element) = node {
+            if element.kind == "Slider" && element.field("value").is_some() {
+                slider = Some(element.clone());
+            }
+            if element.kind == "Switch" {
+                available = element.field("value").cloned();
+            }
+        }
+    });
+    let mut brightness = slider.unwrap();
+    brightness.kind = "ScreenBrightness".into();
+    brightness.props.retain(|name, _| name == "value");
+    brightness.props.insert(
+        "available".into(),
+        Prop::Field {
+            field: available.unwrap(),
+        },
+    );
+    brightness.action = None;
+    brightness.children.clear();
+    app.components[0].body = Node::If(IfNode {
+        branches: vec![(
+            Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Binding {
+                    binding: Binding::Window {
+                        field: "touch".into(),
+                    },
+                },
+            },
+            vec![Node::Element(brightness)],
+        )],
+        otherwise: vec![],
+    });
+    let generator = bern_backend_gpui::Generator::new(&app, "macos");
+    let code = generator.generate(0, "{}");
+    assert!(code.contains("c.window(\"touch\")"), "{code}");
+    let call = code
+        .lines()
+        .find(|line| line.contains("b::screen_brightness(c,"))
+        .unwrap();
+    assert_eq!(
+        call.matches("b::Field").count(),
+        1,
+        "only availability may be written: {call}"
+    );
 }

@@ -1043,6 +1043,165 @@ struct MenuItemDef {
 /// Sets a context menu of `items` on `element`, defined after the menus.
 inline void ContextMenuOn(Ctx const& ctx, xaml::UIElement const& element, std::vector<std::optional<MenuItemDef>> const& items);
 
+// BEGIN portable gesture state
+// These state machines are also compiled on hosts without XAML. All platform
+// event adapters below use them; the tests do not substitute a second model.
+enum class TapResult { None, Single, Pending, Double };
+struct ButtonTaps {
+    uint64_t generation = 0, at = 0;
+    bool down = false, second = false, pending = false;
+    double x = 0, y = 0;
+    bool Press(uint64_t now, double px, double py, uint64_t interval, double distanceX, double distanceY) {
+        bool twice = pending && now - at <= interval && std::abs(px - x) <= distanceX && std::abs(py - y) <= distanceY;
+        bool flush = pending && !twice;
+        ++generation;
+        pending = false; down = true; second = twice; at = now; x = px; y = py;
+        return flush;
+    }
+    bool Move(double px, double py, double thresholdX, double thresholdY) {
+        if (down && (std::abs(px - x) > thresholdX || std::abs(py - y) > thresholdY)) { Cancel(); return true; }
+        return false;
+    }
+    TapResult Click() {
+        if (!down) return TapResult::None;
+        down = false;
+        if (second) { second = false; return TapResult::Double; }
+        pending = true;
+        return TapResult::Pending;
+    }
+    TapResult Expire(uint64_t mine) {
+        if (mine == generation && pending) { pending = false; return TapResult::Single; }
+        return TapResult::None;
+    }
+    void Cancel() { ++generation; down = second = pending = false; }
+};
+struct SwipeDrag {
+    bool down = false, moving = false, denied = false;
+    uint32_t pointer = 0;
+    double x = 0, y = 0, from = 0, last = 0;
+    void Begin(uint32_t id, double px, double py, double value) {
+        down = true; moving = denied = false; pointer = id; x = px; y = py; from = last = value;
+    }
+    std::optional<double> Move(double px, double py, bool vertical, double threshold, double reach, double low, double high) {
+        if (!down || denied) return std::nullopt;
+        double along = vertical ? y - py : px - x;
+        double across = vertical ? px - x : py - y;
+        if (!moving) {
+            if (std::abs(across) > threshold && std::abs(across) > std::abs(along)) { denied = true; return std::nullopt; }
+            if (std::abs(along) <= threshold || std::abs(along) <= std::abs(across)) return std::nullopt;
+            moving = true;
+        }
+        double value = (std::clamp)(from + along / (std::max)(1.0, reach) * (high - low), low, high);
+        if (value == last) return std::nullopt;
+        last = value;
+        return value;
+    }
+    bool End() { bool moved = moving; down = moving = false; return moved; }
+    void Cancel() { down = moving = false; }
+};
+// `active = false` can synchronously rebuild a Watch and overwrite the
+// draft. Final value, action and commit must all precede cleanup, including
+// when any callback throws.
+template<class Prepare, class Action, class Commit, class Cleanup>
+inline void FinishSwipe(bool continuous, Prepare prepare, Action action, Commit commit, Cleanup cleanup) {
+    struct Finally {
+        Cleanup& cleanup;
+        ~Finally() noexcept(false) { cleanup(); }
+    } finally{cleanup};
+    if (prepare()) {
+        if (!continuous) action();
+        commit();
+    }
+}
+// END portable gesture state
+
+// System metrics are physical pixels; XAML pointer positions are logical DIPs.
+inline double GestureMetric(xaml::UIElement const& element, int metric) {
+    double scale = element.XamlRoot() ? element.XamlRoot().RasterizationScale() : 1.0;
+    return (std::max)(1.0, GetSystemMetricsForDpi(metric, static_cast<UINT>(96 * scale)) / scale);
+}
+
+inline void ButtonClicks(controls::Button const& button, std::function<void()> const& single, std::function<void()> const& twice) {
+    if (!twice) {
+        if (single) button.Click([single](auto&&, auto&&) { single(); });
+        return;
+    }
+    struct State {
+        ButtonTaps taps;
+        bool pointer = false, contact = false, live = true;
+        uint32_t id = 0;
+    };
+    auto state = std::make_shared<State>();
+    auto weak = winrt::make_weak(button);
+    using Handler = xaml::Input::PointerEventHandler;
+    button.AddHandler(xaml::UIElement::PointerPressedEvent(), winrt::box_value(Handler([state, single](IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args) {
+        auto element = sender.as<xaml::UIElement>();
+        auto point = args.GetCurrentPoint(element);
+        if (state->contact || !point.Properties().IsLeftButtonPressed()) return;
+        state->pointer = state->contact = true;
+        state->id = args.Pointer().PointerId();
+        bool flush = state->taps.Press(GetTickCount64(), point.Position().X, point.Position().Y, GetDoubleClickTime(),
+            GestureMetric(element, SM_CXDOUBLECLK) / 2, GestureMetric(element, SM_CYDOUBLECLK) / 2);
+        if (flush && single) single();
+    })), true);
+    button.AddHandler(xaml::UIElement::PointerMovedEvent(), winrt::box_value(Handler([state](IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args) {
+        if (!state->pointer || state->id != args.Pointer().PointerId()) return;
+        auto element = sender.as<xaml::UIElement>();
+        auto point = args.GetCurrentPoint(element);
+        state->taps.Move(point.Position().X, point.Position().Y, GestureMetric(element, SM_CXDRAG), GestureMetric(element, SM_CYDRAG));
+    })), true);
+    button.AddHandler(xaml::UIElement::PointerReleasedEvent(), winrt::box_value(Handler([state](auto&&, xaml::Input::PointerRoutedEventArgs const& args) {
+        if (state->id != args.Pointer().PointerId()) return;
+        state->contact = false;
+        auto generation = state->taps.generation;
+        // The native Button class handler emits Click on this same event.
+        Host::After(std::chrono::milliseconds(0), [state, generation] {
+            if (state->taps.generation != generation) return;
+            state->pointer = false;
+            if (state->taps.down) state->taps.Cancel();
+        });
+    })), true);
+    button.PointerCanceled([state](auto&&, xaml::Input::PointerRoutedEventArgs const& args) {
+        if (state->id != args.Pointer().PointerId()) return;
+        state->taps.Cancel(); state->pointer = state->contact = false;
+    });
+    button.PointerCaptureLost([state](auto&&, xaml::Input::PointerRoutedEventArgs const& args) {
+        if (state->id != args.Pointer().PointerId()) return;
+        state->contact = false;
+        auto generation = state->taps.generation;
+        // ReleasePointerCapture may precede Click in the native release
+        // handler. Only a press that did not become a click is canceled.
+        Host::After(std::chrono::milliseconds(0), [state, generation] {
+            if (state->taps.generation != generation) return;
+            state->pointer = false;
+            if (state->taps.down) state->taps.Cancel();
+        });
+    });
+    button.AddHandler(xaml::UIElement::PreviewKeyDownEvent(), winrt::box_value(xaml::Input::KeyEventHandler([state](auto&&, auto&&) {
+        state->taps.Cancel(); state->pointer = state->contact = false;
+    })), true);
+    button.Click([state, single, twice, weak](auto&&, auto&&) {
+        if (!state->live) return;
+        if (!state->pointer) {
+            state->taps.Cancel();
+            if (single) single();
+            return;
+        }
+        state->pointer = false;
+        auto outcome = state->taps.Click();
+        if (outcome == TapResult::Double) twice();
+        else if (outcome == TapResult::Pending) {
+            auto generation = state->taps.generation;
+            Host::After(std::chrono::milliseconds(GetDoubleClickTime()), [state, single, generation, weak] {
+                auto button = weak.get();
+                if (state->taps.Expire(generation) == TapResult::Single && state->live && button && button.IsLoaded() && button.IsEnabled() && single) single();
+            });
+        }
+    });
+    button.Unloaded([state](auto&&, auto&&) { state->taps.Cancel(); state->pointer = state->contact = false; });
+    Reactive::OnCleanup([state] { state->live = false; state->taps.Cancel(); state->pointer = state->contact = false; });
+}
+
 struct ButtonProps {
     char const* id = "";
     Str label;
@@ -1065,6 +1224,7 @@ struct ButtonProps {
     std::optional<double> iconSize;
     /// `ContextMenu`: what a secondary click or pressing and holding opens.
     std::vector<std::optional<MenuItemDef>> menu;
+    Act doubleTap;
 };
 
 /// What a button does: its action, after asking for a file with `pick` or
@@ -1227,7 +1387,7 @@ inline void Button(Parent const& p, Ctx const& ctx, ButtonProps props) {
     auto isEnabled = Enabled(ctx, props.enabled);
     if (isEnabled) Reactive::Run([button, isEnabled] { button.IsEnabled(isEnabled()); });
     auto run = RunOf(ctx, props.pick, props.files, props.action, props.paste);
-    if (run.activate) button.Click([activate = run.activate](auto&&, auto&&) { activate(); });
+    ButtonClicks(button, run.activate, Run(ctx, props.doubleTap));
     Controls::Register(ctx, props.id, "button", text, isEnabled, Actions{.activate = run.activate, .focus = FocusOf(button), .setFile = run.give, .files = props.files});
     if (!props.menu.empty()) ContextMenuOn(ctx, button, props.menu);
     xaml::UIElement shown = button;
@@ -1292,7 +1452,7 @@ inline void ContentButton(Parent const& p, Ctx const& ctx, ButtonProps props, Bu
     auto isEnabled = Enabled(ctx, props.enabled);
     if (isEnabled) Reactive::Run([button, isEnabled] { button.IsEnabled(isEnabled()); });
     auto run = RunOf(ctx, props.pick, props.files, props.action, props.paste);
-    if (run.activate) button.Click([activate = run.activate](auto&&, auto&&) { activate(); });
+    ButtonClicks(button, run.activate, Run(ctx, props.doubleTap));
     Controls::Register(ctx, props.id, "button", text, isEnabled, Actions{.activate = run.activate, .focus = FocusOf(button), .setFile = run.give, .files = props.files});
     if (!props.menu.empty()) ContextMenuOn(ctx, button, props.menu);
     xaml::UIElement shown = button;

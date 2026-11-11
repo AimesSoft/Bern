@@ -225,6 +225,14 @@ inline bool Handle(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam, LRESUL
     auto win = OfHwnd(hwnd);
     if (!win) return false;
     switch (message) {
+    case WM_DEVICECHANGE:
+    case WM_SETTINGCHANGE: {
+        // Refresh all hosts, including dialogs which share their parent's HWND.
+        bool touch = winrt::Windows::Devices::Input::TouchCapabilities().TouchPresent() != 0;
+        auto windows = all;
+        for (auto const& window : windows) window->touch.Set(touch);
+        return false;
+    }
     case WM_CLOSE:
         if (win->allowClose) return false;
         RequestCloseSafely(win);

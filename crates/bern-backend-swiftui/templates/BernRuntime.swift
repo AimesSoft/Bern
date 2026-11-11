@@ -580,6 +580,15 @@ final class BernWindowContext {
     var tv: Bool { bernTelevision }
     /// A hardware keyboard is attached: `window.keyboard`.
     var keyboard: Bool { BernKeyboard.shared.attached }
+    /// UIKit on a phone/tablet supplies direct touch; a TV remote and a
+    /// Mac trackpad are not a touch screen.
+    var touch: Bool {
+        #if os(iOS)
+        !ProcessInfo.processInfo.isiOSAppOnMac
+        #else
+        false
+        #endif
+    }
     private(set) var generation: UInt64 = 0
     private(set) var id: String = ""
 

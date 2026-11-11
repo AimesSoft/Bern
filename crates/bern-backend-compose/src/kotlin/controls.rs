@@ -61,6 +61,20 @@ impl Generator<'_> {
     }
 
     pub(super) fn button(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let double_tap = element
+            .children
+            .iter()
+            .find_map(|node| match node {
+                Node::Element(child) if child.kind == "DoubleTap" => child
+                    .action
+                    .as_ref()
+                    .map(|action| format!(", onDoubleTap = {{ {} }}", self.action(action))),
+                _ => None,
+            })
+            .unwrap_or_default();
+        let content: Vec<_> = element.children.iter().filter(|node| {
+            !matches!(node, Node::Element(child) if matches!(child.kind.as_str(), "DoubleTap" | "ContextMenu"))
+        }).cloned().collect();
         let label = self.text_prop(element, "label").unwrap_or_default();
         let (action, file) = self.pressed(element);
         let enabled = self.enabled(element);
@@ -80,10 +94,10 @@ impl Generator<'_> {
         // such as a row with a spacer, takes the room its neighbours in a
         // row leave, as it does in a SwiftUI stack.
         let fills = element.keyword("width") == Some("fill");
-        let widens = element.kind == "Button" && widens(&element.children);
+        let widens = element.kind == "Button" && widens(&content);
         let in_row = (fills || widens) && ctx.scope == Scope::Row;
         let weight = if in_row { ".weight(1f)" } else { "" };
-        if element.kind == "Button" && element.has_content() {
+        if element.kind == "Button" && !content.is_empty() {
             // The content is what the button shows; the label names it.
             let style = self
                 .style_of(element)
@@ -100,10 +114,10 @@ impl Generator<'_> {
                 _ => "",
             };
             out.open(format!(
-                "BernContentButton({label}, {enabled}, {style}, Modifier{start}{width}.testTag({target}){}{prominent}, onClick = {{ {action} }}) {{",
+                "BernContentButton({label}, {enabled}, {style}, Modifier{start}{width}.testTag({target}){}{prominent}{double_tap}, onClick = {{ {action} }}) {{",
                 self.shape_arg(element)
             ));
-            self.nodes(out, &element.children, &ctx.within(Scope::Other));
+            self.nodes(out, &content, &ctx.within(Scope::Other));
             out.close("}");
             return;
         }
@@ -138,7 +152,7 @@ impl Generator<'_> {
             ""
         };
         out.line(format!(
-            "BernButton({label}, {}, {prominence}, destructive = {}, enabled = {enabled}{style}{}{fill}, modifier = Modifier{start}{weight}.testTag({target})) {{ {action} }}",
+            "BernButton({label}, {}, {prominence}, destructive = {}, enabled = {enabled}{style}{}{fill}, modifier = Modifier{start}{weight}.testTag({target}){double_tap}) {{ {action} }}",
             Self::icon(element.icon("icon")),
             element.keyword("role") == Some("destructive"),
             self.shape_arg(element)
@@ -507,6 +521,14 @@ impl Generator<'_> {
         out.close("}");
     }
 
+    pub(super) fn screen_brightness(&self, out: &mut Out, element: &Element) {
+        let value = self.field(element, "value").expect("number field");
+        let available = self.field(element, "available").expect("bool field");
+        out.line(format!(
+            "BernScreenBrightness({value}, {{ {value} = it }}, {{ {available} = it }})"
+        ));
+    }
+
     pub(super) fn gesture(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         let field = self.field(element, "value").expect("number field");
         let label = self.text_prop(element, "label").unwrap_or_default();
@@ -517,23 +539,55 @@ impl Generator<'_> {
             .unwrap_or_else(|| "Unit".into());
         let min = double(element.number("min").unwrap_or(0.0));
         let max = double(element.number("max").unwrap_or(1.0));
+        let on_commit = element
+            .children
+            .iter()
+            .find_map(|node| match node {
+                Node::Element(child) if child.kind == "OnCommit" => {
+                    child.action.as_ref().map(|action| self.action(action))
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| "Unit".into());
+        let clear_active = self
+            .field(element, "active")
+            .map(|field| format!("{field} = false"))
+            .unwrap_or_else(|| "Unit".into());
+        let set_number = if element.kind == "Swipe" {
+            format!(
+                "val next = it.coerceIn({min}, {max}); bernCommitSwipe({{ {field} = next }}, {{ {action} }}, {{ {on_commit} }}, {{ {clear_active} }})"
+            )
+        } else {
+            format!("{field} = it.coerceIn({min}, {max}); {action}")
+        };
         out.line(format!(
-            "BernControl({}, {}, {label}, actions = BernControlActions(setNumber = {{ {field} = it.coerceIn({min}, {max}); {action} }}, value = {{ {field}.toString() }}))",
+            "BernControl({}, {}, {label}, actions = BernControlActions(setNumber = {{ {set_number} }}, value = {{ {field}.toString() }}))",
             self.target(element, ctx),
             string(&element.kind.to_lowercase())
         ));
+        let active = self
+            .field(element, "active")
+            .map(|field| format!("{{ {field} = it }}"))
+            .unwrap_or_else(|| "{}".into());
         if element.kind == "Pinch" {
             out.open(format!(
                 "BernPinch({label}, {field}, {{ {field} = it }}, {min}, {max}, {{ {action} }}) {{"
             ));
         } else {
             out.open(format!(
-                "BernSwipe({label}, {field}, {{ {field} = it }}, {min}, {max}, {}, {}, {{ {action} }}) {{",
+                "BernSwipe({label}, {field}, {{ {field} = it }}, {min}, {max}, {}, {}, {{ {action} }}, continuous = {}, onActive = {active}, onCommit = {{ {on_commit} }}) {{",
                 element.keyword("axis") == Some("horizontal"),
-                double(element.number("distance").unwrap_or(300.0))
+                double(element.number("distance").unwrap_or(300.0)),
+                element.keyword("continuous") == Some("true")
             ));
         }
-        self.nodes(out, &element.children, &ctx.within(Scope::Other));
+        let content: Vec<_> = element
+            .children
+            .iter()
+            .filter(|node| !matches!(node, Node::Element(child) if child.kind == "OnCommit"))
+            .cloned()
+            .collect();
+        self.nodes(out, &content, &ctx.within(Scope::Other));
         out.close("}");
     }
 }

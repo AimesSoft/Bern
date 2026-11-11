@@ -25,6 +25,7 @@ pub(crate) struct Actions {
     pub(crate) activate: Option<crate::ctx::Press>,
     pub(crate) edit: Option<Rc<dyn Fn(String)>>,
     pub(crate) submit: Option<Rc<dyn Fn()>>,
+    pub(crate) set_number: Option<Rc<dyn Fn(f64)>>,
     pub(crate) set_bool: Option<Rc<dyn Fn(bool)>>,
     /// Choose an option by its label or the name of its value.
     pub(crate) select: Option<Select>,
@@ -175,6 +176,21 @@ fn run(index: u32, reader: &mut Reader<'_>, cx: &mut App) -> Result<Value, Failu
                 .set_bool
                 .clone()
                 .ok_or_else(|| unsupported(&control, "set_bool"))?;
+            set(value);
+            Ok(Value::Unit)
+        }
+        Some(SessionCommand::SetNumber) => {
+            let target = reader.text().map_err(malformed)?;
+            let value = reader.f64().map_err(malformed)?;
+            if !value.is_finite() {
+                return Err(Failure::new("invalid_value", "expected a finite number"));
+            }
+            let control = find(windows::controls(cx), &target)?;
+            let set = control
+                .actions
+                .set_number
+                .clone()
+                .ok_or_else(|| unsupported(&control, "set_number"))?;
             set(value);
             Ok(Value::Unit)
         }

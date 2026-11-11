@@ -201,6 +201,9 @@ impl ComponentSpec {
                 | "TableColumn"
                 | "TableMenu"
                 | "ContextMenu"
+                | "DoubleTap"
+                | "OnCommit"
+                | "ScreenBrightness"
         )
     }
 }
@@ -715,6 +718,15 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             "Invoke a command at an interval in seconds while mounted and enabled; automatically cancels on removal",
         )
     },
+    spec(
+        "ScreenBrightness",
+        &[
+            req("value", PropKind::NumberField),
+            req("available", PropKind::BoolField),
+        ],
+        Children::None,
+        "A scoped host brightness override: reads the effective brightness into value on activation, applies later changes in 0..1, and restores the prior setting on deactivation or removal; available reports whether the host provides this override, never a simulated dimming layer",
+    ),
     ComponentSpec {
         action: ActionRule::Required,
         ..spec(
@@ -1068,10 +1080,12 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 req("max", PropKind::Number),
                 opt("axis", PropKind::Keyword(&["vertical", "horizontal"])),
                 opt("distance", PropKind::Number),
+                opt("continuous", PropKind::Flag),
+                opt("active", PropKind::BoolField),
                 FEATURE,
             ],
             Children::One,
-            "Dragging across its content moves `value` within `min` and `max`: up or right raises it, and `distance` points (300 unless given) cross the whole range; the action runs when the finger lifts",
+            "Dragging across its content moves `value` within `min` and `max`: up or right raises it, and `distance` points (300 unless given) cross the whole range; the action runs when the finger lifts, or on value changes with `continuous: true`; optional `OnCommit` runs on release, and `active` tracks a recognized drag",
         )
     },
     ComponentSpec {
@@ -1219,6 +1233,26 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             ],
             Children::One,
             "A column of a `Table`: `title` heads it and its child is the cell of each row, written with the table's row variable; the action runs when the user clicks the heading to sort by it, and `sorted` and `descending` show the order the rows are in",
+        )
+    },
+    ComponentSpec {
+        action: ActionRule::Required,
+        placement: Placement::Within(&["Button"]),
+        ..spec(
+            "DoubleTap",
+            &[],
+            Children::None,
+            "An exclusive double-click or double-tap action of its Button; it is not visual content",
+        )
+    },
+    ComponentSpec {
+        action: ActionRule::Required,
+        placement: Placement::Within(&["Swipe"]),
+        ..spec(
+            "OnCommit",
+            &[],
+            Children::None,
+            "An action run once after its Swipe completes, never when the gesture is cancelled",
         )
     },
     ComponentSpec {
@@ -1797,11 +1831,11 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
             message: "`Image` needs `width:`, `height:` or `aspect:`, with one the other following the picture's aspect ratio; or `fit: cover` to cover the room its container gives".into(),
         });
     }
-    // A `ContextMenu` is not part of what a button shows.
+    // Event declarations and a `ContextMenu` are not visual content.
     let content = shape.children.as_deref().map(|children| {
         children
             .iter()
-            .filter(|child| !matches!(child, ChildShape::Element("ContextMenu")))
+            .filter(|child| !matches!(child, ChildShape::Element("ContextMenu" | "DoubleTap")))
             .count()
     });
     if spec.name == "Button" && content.is_some_and(|count| count > 0) {
@@ -2080,10 +2114,20 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
             prop: None,
             message: format!("`{}` does not take children", spec.name),
         }),
-        Children::One if children.len() != 1 => errors.push(ShapeError {
-            prop: None,
-            message: format!("`{}` takes exactly one child", spec.name),
-        }),
+        Children::One
+            if children
+                .iter()
+                .filter(|child| {
+                    !(spec.name == "Swipe" && matches!(child, ChildShape::Element("OnCommit")))
+                })
+                .count()
+                != 1 =>
+        {
+            errors.push(ShapeError {
+                prop: None,
+                message: format!("`{}` takes exactly one child", spec.name),
+            })
+        }
         Children::Only(allowed) => {
             for child in children {
                 match child {
@@ -2115,6 +2159,14 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
             .filter(|child| matches!(child, ChildShape::Element(name) if *name == kind))
             .count()
     };
+    for (parent, event) in [("Button", "DoubleTap"), ("Swipe", "OnCommit")] {
+        if spec.name == parent && count(event) > 1 {
+            errors.push(ShapeError {
+                prop: None,
+                message: format!("a `{parent}` has at most one `{event}`"),
+            });
+        }
+    }
     if spec.name == "Sidebar" && count("SidebarFooter") > 1 {
         errors.push(ShapeError {
             prop: None,

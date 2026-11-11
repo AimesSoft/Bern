@@ -416,6 +416,7 @@ pub struct ContentButtonProps {
     pub shape: crate::widgets::Shape,
     /// `ContextMenu`: what a secondary click or a long touch opens.
     pub menu: Vec<Option<crate::widgets::MenuItem>>,
+    pub double_tap: Option<Act>,
 }
 
 /// A button showing its content instead of a label: no frame of its own,
@@ -459,9 +460,7 @@ pub fn ContentButton(
     }
     let (run, set_file) = picking(ctx, props.pick, bound_action(ctx, &action));
     let run = pasting(ctx, props.paste, run);
-    if let Some(run) = run.clone() {
-        button.connect_clicked(move |_| run());
-    }
+    crate::gestures::button_clicks(&button, run.clone(), bound_action(ctx, &props.double_tap));
     controls::register(
         ctx,
         props.id,
@@ -1139,6 +1138,16 @@ pub fn Drop(p: &Parent, ctx: &Ctx, props: DropProps, action: Option<Act>, conten
     place(p, &area);
 }
 
+/// Desktop GTK has no reversible per-host brightness override. Advertise
+/// this API's availability, never change the user's global monitor settings
+/// or overwrite the requested value, and never simulate brightness with paint.
+#[allow(non_snake_case)]
+pub fn ScreenBrightness(ctx: &Ctx, available: Field) {
+    let available = Bound::new(ctx, available);
+    available.set(Value::Bool(false));
+    on_cleanup(move || available.set(Value::Bool(false)));
+}
+
 // MARK: - Gestures bound to values
 
 pub struct GestureProps {
@@ -1149,6 +1158,9 @@ pub struct GestureProps {
     pub max: f64,
     pub vertical: bool,
     pub distance: Option<f64>,
+    pub continuous: bool,
+    pub active: Option<Field>,
+    pub on_commit: Option<Act>,
 }
 
 fn clamp(value: f64, min: f64, max: f64) -> f64 {
@@ -1261,56 +1273,19 @@ pub fn Pinch(p: &Parent, ctx: &Ctx, props: GestureProps, commit: Option<Act>, co
 pub fn Swipe(p: &Parent, ctx: &Ctx, props: GestureProps, commit: Option<Act>, content: Build) {
     let area = gtk::Box::new(gtk::Orientation::Vertical, 0);
     content(&Parent::of_box(&area), ctx);
-    let bound = Bound::new(ctx, props.field);
-    let commit = bound_action(ctx, &commit);
-    let (min, max) = (props.min, props.max);
-    let span = max - min;
-    let reach = props.distance.unwrap_or(300.0).max(1.0);
-    let vertical = props.vertical;
-    let drag = gtk::GestureDrag::new();
-    let from = Rc::new(Cell::new(0.0));
-    let moving = Rc::new(Cell::new(false));
-    {
-        let from = Rc::clone(&from);
-        let moving = Rc::clone(&moving);
-        let bound = bound.clone();
-        drag.connect_drag_begin(move |_, _, _| {
-            from.set(crate::value::as_f64(&bound.peek()));
-            moving.set(false);
-        });
-    }
-    {
-        let from = Rc::clone(&from);
-        let moving = Rc::clone(&moving);
-        let bound = bound.clone();
-        drag.connect_drag_update(move |gesture, x, y| {
-            let moved = if vertical { -y } else { x };
-            if !moving.get() {
-                if moved.abs() < 10.0 {
-                    return;
-                }
-                moving.set(true);
-                gesture.set_state(gtk::EventSequenceState::Claimed);
-            }
-            bound.set(Value::Float(clamp(
-                from.get() + moved / reach * span,
-                min,
-                max,
-            )));
-        });
-    }
-    {
-        let commit = commit.clone();
-        drag.connect_drag_end(move |_, _, _| {
-            if moving.replace(false)
-                && let Some(commit) = &commit
-            {
-                commit();
-            }
-        });
-    }
-    area.add_controller(drag);
-    register_gesture(ctx, &props, "swipe", commit);
+    let run = bound_action(ctx, &commit);
+    let on_commit = bound_action(ctx, &props.on_commit);
+    crate::gestures::swipe(&area, ctx, &props, run.clone(), on_commit.clone());
+    // External/accessible value changes are immediate, complete edits.
+    let complete: Rc<dyn Fn()> = Rc::new(move || {
+        if let Some(run) = &run {
+            run();
+        }
+        if let Some(commit) = &on_commit {
+            commit();
+        }
+    });
+    register_gesture(ctx, &props, "swipe", Some(complete));
     place(p, &area);
 }
 

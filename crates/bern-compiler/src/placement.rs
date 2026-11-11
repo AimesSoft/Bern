@@ -22,10 +22,45 @@ pub fn check(
     let root = root.cloned().map(ir::Node::Element);
     let trees: Vec<&ir::Node> = bodies.values().copied().chain(root.as_ref()).collect();
     check_buttons(&trees, &bodies, diagnostics);
+    check_gesture_actions(&trees, diagnostics);
     check_toolbar_searches(&trees, diagnostics);
     check_toolbar_dividers(&trees, diagnostics);
     check_rails(&trees, diagnostics);
     check_inspectors(&trees, diagnostics);
+}
+
+/// Event declarations must be direct, unconditional children of their owner.
+fn check_gesture_actions(trees: &[&ir::Node], diagnostics: &mut Vec<Diagnostic>) {
+    for body in trees {
+        let mut direct = BTreeSet::new();
+        body.walk(&mut |node| {
+            if let ir::Node::Element(owner) = node {
+                let event = match owner.kind.as_str() {
+                    "Button" => "DoubleTap",
+                    "Swipe" => "OnCommit",
+                    _ => return,
+                };
+                for child in &owner.children {
+                    if let ir::Node::Element(child) = child
+                        && child.kind == event
+                    {
+                        direct.insert(child.path.clone());
+                    }
+                }
+            }
+        });
+        body.walk(&mut |node| {
+            if let ir::Node::Element(event) = node
+                && matches!(event.kind.as_str(), "DoubleTap" | "OnCommit")
+                && !direct.contains(&event.path)
+            {
+                diagnostics.push(Diagnostic::error(format!(
+                    "`{}` must be a direct child of its owner, not inside a condition, repetition or component",
+                    event.kind
+                )).at(event.source.clone()));
+            }
+        });
+    }
 }
 
 /// A button's content is what it shows: no other control inside it,
@@ -47,7 +82,7 @@ fn check_buttons(
             let content: Vec<ir::Node> = button
                 .children
                 .iter()
-                .filter(|child| !matches!(child, ir::Node::Element(menu) if menu.kind == "ContextMenu"))
+                .filter(|child| !matches!(child, ir::Node::Element(menu) if matches!(menu.kind.as_str(), "ContextMenu" | "DoubleTap")))
                 .cloned()
                 .collect();
             if let Some(control) = control_inside(&content, bodies) {

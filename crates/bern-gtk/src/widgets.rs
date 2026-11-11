@@ -747,6 +747,7 @@ pub struct ButtonProps {
     pub fill: bool,
     /// `ContextMenu`: what a secondary click or a long touch opens.
     pub menu: Vec<Option<MenuItem>>,
+    pub double_tap: Option<Act>,
 }
 
 fn register_button(
@@ -823,9 +824,7 @@ pub fn Button(p: &Parent, ctx: &Ctx, props: ButtonProps, action: Option<Act>) {
     }
     let (run, set_file) = crate::features::picking(ctx, props.pick, bound_action(ctx, &action));
     let run = crate::features::pasting(ctx, props.paste, run);
-    if let Some(run) = run.clone() {
-        button.connect_clicked(move |_| run());
-    }
+    crate::gestures::button_clicks(&button, run.clone(), bound_action(ctx, &props.double_tap));
     register_button(
         ctx,
         &button,

@@ -1708,3 +1708,126 @@ fn navigation_reset_is_remembered_only_by_its_key_before_reading_the_path() {
     assert_eq!(body(&generated), body(&original));
     assert!(!generated.contains("routes = emptyList()"));
 }
+
+#[test]
+fn touch_gestures_extract_actions_instead_of_rendering_them() {
+    use bern_ir::{Action, FieldRef, Node, Prop, SessionDef, SessionFieldDef, SessionOp};
+    use bern_protocol::{Type, Value};
+    let (_, mut compiled) = compile("hello");
+    let app = &mut compiled.app;
+    app.sessions.push(SessionDef {
+        name: "Touch".into(),
+        fields: vec![
+            SessionFieldDef {
+                name: "value".into(),
+                ty: Type::Float,
+                initial: Value::Float(0.5),
+            },
+            SessionFieldDef {
+                name: "active".into(),
+                ty: Type::Bool,
+                initial: Value::Bool(false),
+            },
+        ],
+    });
+    let field = |index, ty| FieldRef {
+        session: "Touch".into(),
+        field: index,
+        ty,
+    };
+    let action = Action::Session {
+        field: field(1, Type::Bool),
+        op: SessionOp::Toggle,
+    };
+    let mut double = node("DoubleTap", vec![], vec![]);
+    if let Node::Element(element) = &mut double {
+        element.action = Some(action.clone());
+    }
+    app.windows.windows[0].content = node("Button", vec![], vec![double.clone()]);
+    let code = bern_backend_compose::Generator::new(app).generate("test.touch", 0);
+    assert!(code.contains("BernButton("), "{code}");
+    assert!(
+        code.contains("onDoubleTap = { session_Touch.active = !session_Touch.active }"),
+        "{code}"
+    );
+    assert!(!code.contains("BernContentButton("));
+    let button = node(
+        "Button",
+        vec![],
+        vec![double, node("Spacer", vec![], vec![])],
+    );
+    let mut commit = node("OnCommit", vec![], vec![]);
+    if let Node::Element(element) = &mut commit {
+        element.action = Some(action);
+    }
+    app.windows.windows[0].content = node(
+        "Swipe",
+        vec![
+            (
+                "value",
+                Prop::Field {
+                    field: field(0, Type::Float),
+                },
+            ),
+            (
+                "active",
+                Prop::Field {
+                    field: field(1, Type::Bool),
+                },
+            ),
+            (
+                "continuous",
+                Prop::Keyword {
+                    value: "true".into(),
+                },
+            ),
+        ],
+        vec![button, commit],
+    );
+    let code = bern_backend_compose::Generator::new(app).generate("test.touch", 0);
+    assert!(code.contains("BernSwipe("), "{code}");
+    assert!(code.contains("300.0"), "{code}");
+    assert!(code.contains("continuous = true"), "{code}");
+    assert!(
+        code.contains("onActive = { session_Touch.active = it }"),
+        "{code}"
+    );
+    assert!(
+        code.contains("onCommit = { session_Touch.active = !session_Touch.active }"),
+        "{code}"
+    );
+    assert!(code.contains("BernContentButton("), "{code}");
+    assert!(!code.contains("BernDoubleTap("));
+    assert!(!code.contains("BernOnCommit("));
+    assert!(
+        code.contains(
+            "val next = it.coerceIn(0.0, 1.0); bernCommitSwipe({ session_Touch.value = next }"
+        ),
+        "{code}"
+    );
+    app.windows.windows[0].content = node(
+        "ScreenBrightness",
+        vec![
+            (
+                "value",
+                Prop::Field {
+                    field: field(0, Type::Float),
+                },
+            ),
+            (
+                "available",
+                Prop::Field {
+                    field: field(1, Type::Bool),
+                },
+            ),
+        ],
+        vec![],
+    );
+    let code = bern_backend_compose::Generator::new(app).generate("test.touch", 0);
+    assert!(code.contains("BernScreenBrightness(session_Touch.value, { session_Touch.value = it }, { session_Touch.active = it })"), "{code}");
+    let runtime = include_str!("../templates/BernRuntime.kt");
+    assert!(runtime.contains("val touch: Boolean get() = BernHost.touch"));
+    assert!(
+        runtime.contains("hasSystemFeature(android.content.pm.PackageManager.FEATURE_TOUCHSCREEN)")
+    );
+}

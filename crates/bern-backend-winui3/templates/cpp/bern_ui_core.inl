@@ -1489,6 +1489,7 @@ struct Win {
 
     /// `window.idle`: no input for the window's `idle_after` seconds.
     Cell<bool> fullscreen{false};
+    Cell<bool> touch{winrt::Windows::Devices::Input::TouchCapabilities().TouchPresent() != 0};
     Cell<bool> idle{false};
     /// The `idle_area`s of the window, each with its seconds.
     std::vector<std::pair<winrt::weak_ref<xaml::UIElement>, double>> idleAreas;
@@ -1553,6 +1554,7 @@ inline Value Ctx::Session(int session, int field) const { return win->CellOf(Fie
 inline Value Ctx::WindowFlag(std::string_view name) const {
     if (!win) return Value::Bool(false);
     if (name == "fullscreen") return Value::Bool(win->fullscreen.Get());
+    if (name == "touch") return Value::Bool(win->touch.Get());
     if (name == "idle") return Value::Bool(win->idle.Get());
     if (name == "short") return Value::Bool(win->isShort.Get());
     // A Windows desktop app never runs on a television.

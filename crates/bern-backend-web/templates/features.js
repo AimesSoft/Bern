@@ -1982,7 +1982,7 @@ function listenForLaunches() {
 
 /// A button showing its content instead of a label: no frame of its own,
 /// the content as it is; a style's corner clips it.
-export function ContentButton(p, ctx, { id, label, enabled, style, shape, height, setFile, fileKinds: kinds, defaultFocus, menu }, action, content) {
+export function ContentButton(p, ctx, { id, label, enabled, style, shape, height, setFile, fileKinds: kinds, defaultFocus, menu, doubleTap }, action, content) {
   // A capsule is the platform's button around the content, as it is around
   // a label; otherwise the content is all there is.
   const framed = shape === "capsule";
@@ -1994,7 +1994,7 @@ export function ContentButton(p, ctx, { id, label, enabled, style, shape, height
     node.disabled = !isEnabled();
   });
   B.mark(node, ctx, id);
-  node.addEventListener("click", () => action?.());
+  B.buttonActivation(node, action, doubleTap, isEnabled);
   B.control(ctx, {
     target: () => B.target(ctx, id), role: "button", label, enabled: isEnabled,
     actions: { activate: () => action?.(), ...(setFile ? { setFile, fileKinds: kinds } : {}) },
@@ -2336,44 +2336,123 @@ export function Pinch(p, ctx, { id, label, field, min, max }, commit, content) {
 /// Dragging over the content along `axis` moves `field` through its range
 /// over `distance` pixels (up and right increase it); `commit` runs when
 /// the pointer lifts.
-export function Swipe(p, ctx, { id, label, field, min, max, axis, distance }, commit, content) {
+export function Swipe(p, ctx, { id, label, field, min = 0, max = 1, axis, distance = 300, continuous = false, active, onCommit }, action, content) {
   const vertical = (axis ?? "vertical") === "vertical";
   const node = el("div", { class: `bern-gesture bern-swipe bern-swipe-${vertical ? "vertical" : "horizontal"}` });
+  active?.set(false);
   content(node, ctx);
-  const span = max - min;
-  const reach = distance ?? 200;
   let drag = null;
-  node.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0) return;
-    drag = { x: event.clientX, y: event.clientY, from: field.peek(), moving: false, pointer: event.pointerId };
-  });
-  node.addEventListener("pointermove", (event) => {
+  let ending = false;
+  const detach = () => {
+    document.removeEventListener("pointermove", move, true);
+    document.removeEventListener("pointerup", end, true);
+    document.removeEventListener("pointercancel", cancel, true);
+  };
+  const take = () => {
+    const old = drag;
+    drag = null;
+    detach();
+    return old;
+  };
+  const clear = (old) => {
+    try { active?.set(false); }
+    finally {
+      if (old && node.hasPointerCapture?.(old.pointer)) node.releasePointerCapture(old.pointer);
+    }
+  };
+  const reset = () => {
+    // An action can synchronously unmount its own view. Its in-flight
+    // completion owns cleanup until both actions have read the final value.
+    if (!ending) clear(take());
+  };
+  const finish = (old, change, invokeAction) => {
+    ending = true;
+    try {
+      // Keep a Watch from resetting the draft between the two actions,
+      // including external setNumber while active was already false.
+      B.batch(() => {
+        change();
+        if (invokeAction) action?.();
+        onCommit?.();
+      });
+    } finally {
+      ending = false;
+      clear(old);
+    }
+  };
+  const update = (event, state = drag) => {
+    const moved = vertical ? state.y - event.clientY : event.clientX - state.x;
+    const value = clamp(state.from + moved / distance * (max - min), min, max);
+    if (value !== field.peek()) {
+      field.set(value);
+      if (continuous) action?.();
+    }
+  };
+  const move = (event) => {
     if (!drag || event.pointerId !== drag.pointer) return;
-    const moved = vertical ? drag.y - event.clientY : event.clientX - drag.x;
-    if (!drag.moving && Math.abs(moved) < 10) return;
+    if (event.defaultPrevented) { reset(); return; }
+    const primary = Math.abs(vertical ? event.clientY - drag.y : event.clientX - drag.x);
+    const cross = Math.abs(vertical ? event.clientX - drag.x : event.clientY - drag.y);
     if (!drag.moving) {
+      if (Math.max(primary, cross) <= 10) return;
+      // Decide once. A cross-axis intent belongs to the surrounding scroll.
+      if (primary <= cross) { reset(); return; }
       drag.moving = true;
       node.setPointerCapture(event.pointerId);
+      active?.set(true);
     }
-    field.set(clamp(drag.from + (moved / reach) * span, min, max));
-  });
-  const end = () => {
-    if (drag?.moving) commit?.();
-    drag = null;
+    event.preventDefault();
+    update(event);
   };
-  for (const name of ["pointerup", "pointercancel"]) node.addEventListener(name, end);
+  const end = (event) => {
+    if (!drag || event.pointerId !== drag.pointer) return;
+    const old = take();
+    if (old.moving) finish(old, () => update(event, old), !continuous);
+    else clear(old);
+  };
+  const cancel = (event) => {
+    if (event.pointerId === drag?.pointer) reset();
+  };
+  node.addEventListener("pointerdown", (event) => {
+    if (ending || event.button !== 0 || event.defaultPrevented) return;
+    if (drag) { reset(); return; }
+    drag = { x: event.clientX, y: event.clientY, from: field.peek(), moving: false, pointer: event.pointerId };
+    document.addEventListener("pointermove", move, true);
+    document.addEventListener("pointerup", end, true);
+    document.addEventListener("pointercancel", cancel, true);
+  });
+  node.addEventListener("lostpointercapture", (event) => {
+    // Taking capture from a child emits a bubbling loss for that child;
+    // only loss of our own capture cancels the accepted drag.
+    if (event.target === node) cancel(event);
+  });
+  globalThis.addEventListener("blur", reset);
+  const hidden = () => { if (document.hidden) reset(); };
+  document.addEventListener("visibilitychange", hidden);
+  onCleanup(() => {
+    reset();
+    globalThis.removeEventListener("blur", reset);
+    document.removeEventListener("visibilitychange", hidden);
+  });
   B.mark(node, ctx, id);
   B.control(ctx, {
     target: () => B.target(ctx, id), role: "swipe", label,
     actions: {
       setNumber: (value) => {
-        field.set(clamp(value, min, max));
-        commit?.();
+        if (ending) return;
+        const next = clamp(value, min, max);
+        finish(take(), () => field.set(next), true);
       },
       value: () => B.num(field.peek()),
     },
   });
   p.append(node);
+}
+
+/// Standard browsers cannot control physical screen brightness. Do not
+/// change the draft or simulate brightness by drawing over the content.
+export function ScreenBrightness(p, ctx, { available }) {
+  available.set(false);
 }
 
 // MARK: - Scrolling to items

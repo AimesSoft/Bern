@@ -39,6 +39,8 @@ pub enum Role {
 /// How a `Button` shows and what it picks.
 #[derive(Clone, Default)]
 pub struct ButtonProps {
+    /// Pointer-only double click; keyboard and accessibility always activate the main action.
+    pub double_tap: Option<Act>,
     pub label: String,
     pub icon: Option<&'static str>,
     pub prominence: Prominence,
@@ -194,6 +196,27 @@ fn pressable(
     enabled: bool,
     press: crate::ctx::Press,
 ) -> gpui::Stateful<gpui::Div> {
+    let element = pressable_face(c, id, build, recipe, bordered, style, enabled);
+    if enabled {
+        element.on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            press(cx);
+        })
+    } else {
+        element
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn pressable_face(
+    c: &Ctx,
+    id: &str,
+    build: impl Fn() -> gpui::Div,
+    recipe: &'static str,
+    bordered: bool,
+    style: Option<&'static ControlStyle>,
+    enabled: bool,
+) -> gpui::Stateful<gpui::Div> {
     let state = if enabled { "rest" } else { "disabled" };
     let rest = Colors::recipe(c, recipe, state, bordered).with(c, style.map(|style| &style.base));
     if !enabled {
@@ -212,7 +235,7 @@ fn pressable(
     };
     let hover = state_look("hover", style.and_then(|style| style.hover.as_ref()));
     let pressed = state_look("pressed", style.and_then(|style| style.pressed.as_ref()));
-    painted(
+    painted_face(
         c,
         id,
         build,
@@ -222,7 +245,6 @@ fn pressable(
             pressed,
         },
         style,
-        press,
     )
 }
 
@@ -245,6 +267,19 @@ pub(crate) fn painted(
     states: States,
     style: Option<&'static ControlStyle>,
     press: crate::ctx::Press,
+) -> gpui::Stateful<gpui::Div> {
+    painted_face(c, id, build, states, style).on_click(move |_, _, cx| {
+        cx.stop_propagation();
+        press(cx);
+    })
+}
+
+fn painted_face(
+    c: &Ctx,
+    id: &str,
+    build: impl Fn() -> gpui::Div,
+    states: States,
+    style: Option<&'static ControlStyle>,
 ) -> gpui::Stateful<gpui::Div> {
     let States {
         rest,
@@ -346,11 +381,7 @@ pub(crate) fn painted(
     } else {
         element
     };
-    // A control takes its click: what lies under it does not get it too.
-    element.on_click(move |_, _, cx| {
-        cx.stop_propagation();
-        press(cx)
-    })
+    element
 }
 
 /// `Button` with a text label and an optional icon: 36 points high, 14
@@ -379,6 +410,7 @@ fn button_of(
     action: Option<Act>,
     content: Option<crate::ctx::Content<'_>>,
 ) -> El {
+    let double_tap = props.double_tap.clone();
     let enabled = props.enabled && c.enabled();
     let recipe = match (props.role, props.prominence) {
         (Role::Destructive, _) => "button.destructive",
@@ -493,7 +525,7 @@ fn button_of(
                     ..rest
                 }),
             );
-            painted(
+            painted_face(
                 c,
                 id,
                 build,
@@ -503,11 +535,10 @@ fn button_of(
                     pressed,
                 },
                 style,
-                press,
             )
         }
     } else {
-        pressable(
+        pressable_face(
             c,
             id,
             build,
@@ -515,10 +546,30 @@ fn button_of(
             recipe == "button.standard",
             style,
             enabled,
-            press,
         )
     };
-    c.grow().apply(element).into_any_element()
+    let element = c.grow().apply(element);
+    if !enabled {
+        return element.into_any_element();
+    }
+    match double_tap {
+        Some(action) => {
+            let context = c.clone();
+            crate::gestures::ButtonGesture {
+                key: gpui::ElementId::Name(format!("{}#tap", c.key(id)).into()),
+                element,
+                press,
+                double: Rc::new(move |_| action(&context)),
+            }
+            .into_any_element()
+        }
+        None => element
+            .on_click(move |_, _, cx| {
+                cx.stop_propagation();
+                press(cx);
+            })
+            .into_any_element(),
+    }
 }
 
 /// How an `IconButton` shows and what it picks.

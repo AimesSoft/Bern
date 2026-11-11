@@ -145,6 +145,7 @@ impl Generator<'_> {
                 self.target(element, ctx),
                 enabled.unwrap_or_else(|| "true".into())
             ));
+            self.double_tap(out, element, &action);
             return;
         }
         let icon = element.icon("icon");
@@ -260,6 +261,19 @@ impl Generator<'_> {
             self.target(element, ctx),
             enabled.unwrap_or_else(|| "true".into())
         ));
+        self.double_tap(out, element, &action);
+    }
+
+    fn double_tap(&self, out: &mut Out, element: &Element, single: &str) {
+        if let Some(double) = element.children.iter().find_map(|node| match node {
+            bern_ir::Node::Element(event) if event.kind == "DoubleTap" => event.action.as_ref(),
+            _ => None,
+        }) {
+            out.line(format!(
+                ".bernDoubleTap(single: {{ {single} }}, double: {{ {} }})",
+                self.action(double)
+            ));
+        }
     }
 
     /// The platform's capsule button, `height` tall.
@@ -951,6 +965,15 @@ impl Generator<'_> {
             .as_ref()
             .map(|a| self.action(a))
             .unwrap_or_default();
+        let finish = element
+            .children
+            .iter()
+            .find_map(|node| match node {
+                bern_ir::Node::Element(event) if event.kind == "OnCommit" => event.action.as_ref(),
+                _ => None,
+            })
+            .map(|a| self.action(a))
+            .unwrap_or_default();
         out.open("SwiftUI.Group {");
         self.nodes(out, &element.children, ctx);
         out.close("}");
@@ -964,17 +987,33 @@ impl Generator<'_> {
                 Some("horizontal") => ".horizontal",
                 _ => ".vertical",
             };
+            let active = self
+                .field(element, "active")
+                .map(|field| self.binding_of(&field))
+                .unwrap_or_else(|| "nil".into());
             out.line(format!(
-                ".bernSwipe({}, in: {min}...{max}, axis: {axis}, distance: {}, commit: {{ {action} }})",
+                ".bernSwipe({}, in: {min}...{max}, axis: {axis}, distance: {}, continuous: {}, active: {active}, change: {{ {action} }}, commit: {{ {finish} }})",
                 self.binding_of(&field),
-                double(element.number("distance").unwrap_or(300.0))
+                double(element.number("distance").unwrap_or(300.0)),
+                element.keyword("continuous") == Some("true")
             ));
         }
         out.line(format!(
             ".accessibilityLabel(SwiftUI.Text(verbatim: {label}))"
         ));
+        let set_number = if element.kind == "Swipe" {
+            let active = self
+                .field(element, "active")
+                .map(|field| self.binding_of(&field))
+                .unwrap_or_else(|| "nil".into());
+            format!(
+                "let gestureActive: SwiftUI.Binding<Bool>? = {active}; gestureActive?.wrappedValue = true; bernCommitSwipe(update: {{ {field} = min(max(value, {min}), {max}) }}, change: {{ {action} }}, commit: {{ {finish} }}, clear: {{ gestureActive?.wrappedValue = false }})"
+            )
+        } else {
+            format!("{field} = min(max(value, {min}), {max}); {action}")
+        };
         out.line(format!(
-            ".bernControl({}, role: {}, label: {label}, actions: BernControlActions(setNumber: {{ value in {field} = min(max(value, {min}), {max}); {action} }}, value: {{ BernText.text({field}) }}))",
+            ".bernControl({}, role: {}, label: {label}, actions: BernControlActions(setNumber: {{ value in guard value.isFinite else {{ return }}; {set_number} }}, value: {{ BernText.text({field}) }}))",
             self.target(element, ctx),
             string(&element.kind.to_lowercase())
         ));

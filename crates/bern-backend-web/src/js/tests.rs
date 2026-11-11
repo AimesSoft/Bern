@@ -855,3 +855,102 @@ fn navigation_reset_is_an_optional_live_key_getter() {
     navigation.props.remove("reset");
     assert_eq!(generate(&navigation), original);
 }
+
+#[test]
+fn touch_gestures_extract_actions_instead_of_rendering_them() {
+    use bern_ir::SessionOp;
+    let mut app = app();
+    app.sessions.push(SessionDef {
+        name: "touch".into(),
+        fields: vec![
+            SessionFieldDef {
+                name: "value".into(),
+                ty: Type::Float,
+                initial: Value::Float(0.5),
+            },
+            SessionFieldDef {
+                name: "active".into(),
+                ty: Type::Bool,
+                initial: Value::Bool(false),
+            },
+        ],
+    });
+    let field = |index, ty| FieldRef {
+        session: "touch".into(),
+        field: index,
+        ty,
+    };
+    let action = Action::Session {
+        field: field(1, Type::Bool),
+        op: SessionOp::Toggle,
+    };
+    let mut double = element("DoubleTap");
+    double.action = Some(action.clone());
+    let mut button = element("Button");
+    button.children.push(Node::Element(double));
+    let mut out = Out::default();
+    Generator::new(&app).element(&mut out, &button);
+    let code = out.finish();
+    assert!(code.contains("B.Button("), "{code}");
+    assert!(code.contains("doubleTap: () =>"), "{code}");
+    assert!(!code.contains("ContentButton"), "{code}");
+    button.children.push(Node::Element(element("Spacer")));
+    let mut on_commit = element("OnCommit");
+    on_commit.action = Some(action);
+    let mut swipe = element("Swipe");
+    swipe.props.insert(
+        "value".into(),
+        Prop::Field {
+            field: field(0, Type::Float),
+        },
+    );
+    swipe.props.insert(
+        "active".into(),
+        Prop::Field {
+            field: field(1, Type::Bool),
+        },
+    );
+    swipe.props.insert("continuous".into(), keyword("true"));
+    swipe.children = vec![Node::Element(button), Node::Element(on_commit)];
+    let mut out = Out::default();
+    Generator::new(&app).element(&mut out, &swipe);
+    let code = out.finish();
+    assert!(code.contains("F.Swipe("), "{code}");
+    assert!(code.contains("continuous: true"), "{code}");
+    assert!(code.contains("active: "), "{code}");
+    assert!(code.contains("onCommit: () =>"), "{code}");
+    assert!(code.contains("F.ContentButton("), "{code}");
+    assert!(!code.contains("F.DoubleTap("));
+    assert!(!code.contains("F.OnCommit("));
+    let mut brightness = element("ScreenBrightness");
+    brightness.props.insert(
+        "value".into(),
+        Prop::Field {
+            field: field(0, Type::Float),
+        },
+    );
+    brightness.props.insert(
+        "available".into(),
+        Prop::Field {
+            field: field(1, Type::Bool),
+        },
+    );
+    let mut out = Out::default();
+    Generator::new(&app).element(&mut out, &brightness);
+    let code = out.finish();
+    assert!(
+        code.contains("F.ScreenBrightness(p, ctx, { available:"),
+        "{code}"
+    );
+    assert_eq!(
+        Generator::new(&app).expr(&Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Binding {
+                binding: Binding::Window {
+                    field: "touch".into()
+                }
+            }
+        }),
+        "ctx.win.touch.get()"
+    );
+}
