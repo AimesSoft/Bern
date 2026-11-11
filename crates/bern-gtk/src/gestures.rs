@@ -12,6 +12,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 type Run = Option<Rc<dyn Fn()>>;
+type DragUpdate = Rc<dyn Fn(&gtk::GestureDrag, f64, f64)>;
 
 fn run(action: &Run) {
     if let Some(action) = action {
@@ -263,7 +264,7 @@ pub(crate) fn swipe(area: &gtk::Box, ctx: &Ctx, props: &GestureProps, action: Ru
             set_active(false);
         });
     }
-    let update: Rc<dyn Fn(&gtk::GestureDrag, f64, f64)> = {
+    let update: DragUpdate = {
         let (state, live, set_active, cancel) = (
             state.clone(),
             live.clone(),
