@@ -1405,6 +1405,64 @@ test("disposing a fragment before mounting never starts reflow observers", () =>
   assert.equal(root.childNodes.length, 0);
 });
 
+test("flexible content of a vertical scroll view fills its width before snap spacing is measured", () => {
+  const css = readFileSync(new URL("../templates/features.css", import.meta.url), "utf8");
+  assert.match(css, /\.bern-scroll-vertical > :is\(\.bern-fill-width, \.bern-layout-width\):not\(\.bern-sized-width\)\s*\{\s*width: 100%;\s*max-width: none;/);
+});
+
+for (const horizontal of [false, true]) {
+  test(`start snapping reserves only trailing room and updates it with ${horizontal ? "horizontal" : "vertical"} items`, () => {
+    const { B, F, Element, frames, resizeObservers, mutationObservers } = runtime();
+    const root = new Element("root"), scope = new B.Scope(), position = B.cell(1);
+    const property = horizontal ? "paddingInline" : "paddingBlock";
+    let viewport = 600;
+    const sizes = [220, 300, 160];
+    B.within(scope, () => F.ScrollView(root, {}, {
+      axis: horizontal ? "horizontal" : "vertical", snap: "start", position,
+    }, node => {
+      node.scrollLeft = node.scrollTop = 0;
+      node.getBoundingClientRect = () => ({ left: 0, top: 0, width: horizontal ? viewport : 400, height: horizontal ? 400 : viewport });
+      Object.defineProperty(node, horizontal ? "clientWidth" : "clientHeight", { get: () => viewport });
+      sizes.forEach((_, index) => {
+        const row = new Element("row");
+        row.setAttribute("data-bern-item", index + 1);
+        row.bernKey = index + 1;
+        row.getBoundingClientRect = () => {
+          const offset = sizes.slice(0, index).reduce((sum, size) => sum + size + 30, 0) - (horizontal ? node.scrollLeft : node.scrollTop);
+          return { left: horizontal ? offset : 0, top: horizontal ? 0 : offset, width: horizontal ? sizes[index] : 400, height: horizontal ? 400 : sizes[index] };
+        };
+        node.append(row);
+      });
+    }));
+    const scroll = root.children[0];
+    const resize = () => resizeObservers[0].callback();
+    while (frames.length) frames.shift()(0);
+    assert.equal(scroll.style[property], "0px 440px", "use the last item, not the largest item");
+    assert.equal(horizontal ? scroll.lastScroll.left : scroll.lastScroll.top, 0, "the first item has no leading gap");
+    position.set(3);
+    assert.equal(horizontal ? scroll.lastScroll.left : scroll.lastScroll.top, 580);
+    // The real content end is 740. With 440 trailing space, max scroll
+    // is 580, exactly the last item's start rather than the old 140 cap.
+    assert.equal(740 + parseFloat(scroll.style[property].split(" ")[1]) - viewport, 580);
+    viewport = 800;
+    resize();
+    assert.equal(scroll.style[property], "0px 640px");
+    sizes[2] = 900;
+    resize();
+    assert.equal(scroll.style[property], "0px 0px", "an oversized last item needs no extra space");
+    scroll.children[2].remove();
+    mutationObservers[0].callback();
+    assert.equal(scroll.style[property], "0px 500px", "removal measures the new end");
+    scroll.children[1].remove();
+    mutationObservers[0].callback();
+    assert.equal(scroll.style[property], "0px 580px", "a single short item still starts at the leading edge");
+    scroll.children[0].remove();
+    mutationObservers[0].callback();
+    assert.equal(scroll.style[property], "0px 0px", "an empty list has no reserved space");
+    scope.dispose();
+  });
+}
+
 test("position-only scrolling aligns the leading item without carousel padding", () => {
   const { B, F, Element, frames, resizeObservers } = runtime();
   const root = new Element("root");

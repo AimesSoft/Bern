@@ -1627,6 +1627,12 @@ fun BernScroll(
     val margin = with(density) {
         if (state.center) ((if (horizontal) state.viewport.width else state.viewport.height) - state.largest).coerceAtLeast(0f).toDp() / 2 else 0.dp
     }
+    val tail = with(density) {
+        val last = state.items.values.maxByOrNull { if (horizontal) it.left else it.top }
+        if (snap == "start" && last != null) {
+            ((if (horizontal) state.viewport.width - last.width else state.viewport.height - last.height)).coerceAtLeast(0f).toDp()
+        } else margin
+    }
     // Room at the end for floating tabs over the bottom of the view.
     val barTop = LocalBernBarTop.current
     val under = with(density) {
@@ -1647,7 +1653,7 @@ fun BernScroll(
                     Modifier
                         .then(if (flinging != null) Modifier.horizontalScroll(state.scroll, flingBehavior = flinging) else Modifier.horizontalScroll(state.scroll))
                         .onGloballyPositioned { state.content = it }
-                        .padding(PaddingValues(horizontal = margin)),
+                        .padding(PaddingValues(start = margin, end = tail)),
                     horizontalArrangement = Arrangement.spacedBy(gap),
                     verticalAlignment = Alignment.CenterVertically,
                 ) { CompositionLocalProvider(LocalBernFlex provides this) { content() } }
@@ -1660,7 +1666,7 @@ fun BernScroll(
                         .then(if (flinging != null) Modifier.verticalScroll(state.scroll, flingBehavior = flinging) else Modifier.verticalScroll(state.scroll))
                         .bernScrollRoomContent(room)
                         .onGloballyPositioned { state.content = it }
-                        .padding(PaddingValues(top = margin, bottom = margin + under)),
+                        .padding(PaddingValues(top = margin, bottom = tail + under)),
                     verticalArrangement = Arrangement.spacedBy(gap),
                 ) { CompositionLocalProvider(LocalBernFlex provides this) { content() } }
             }

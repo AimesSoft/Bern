@@ -2427,10 +2427,9 @@ export function ScrollView(p, ctx, { axis, snap, position, arrival, nudgeMotion,
     }
     return best;
   };
-  // Room before the first and after the last item, so they can come to
-  // the center too.
+  // Edge targets need enough content beyond them to reach their anchor.
   const margins = () => {
-    if (anchor !== "center") return;
+    if (!snap) return;
     const property = horizontal ? "paddingInline" : "paddingBlock";
     // Measure without the centering space from the last pass. In an
     // intrinsically sized flex child that space increases the viewport's
@@ -2439,8 +2438,10 @@ export function ScrollView(p, ctx, { axis, snap, position, arrival, nudgeMotion,
     const viewport = horizontal ? node.clientWidth : node.clientHeight;
     const rows = items();
     const largest = Math.max(0, ...rows.map((item) => extent(layoutRect(item))));
+    const last = rows.reduce((last, item) => !last || along(layoutRect(item)) > along(layoutRect(last)) ? item : last, null);
     const room = rows.length ? Math.max(0, (viewport - largest) / 2) : 0;
-    node.style[property] = `${room}px`;
+    const tail = last ? Math.max(0, viewport - extent(layoutRect(last))) : 0;
+    node.style[property] = anchor === "center" ? `${room}px` : `0px ${tail}px`;
   };
   const resize = new ResizeObserver(margins);
   resize.observe(node);
