@@ -86,6 +86,19 @@ impl Generator<'_> {
                 (element.keyword("width") == Some("fill")).then(|| "true".to_string()),
             ),
             ("iconSize", Self::number(element, "font_size")),
+            (
+                "iconProgress",
+                element
+                    .expr("icon_progress")
+                    .map(|value| self.getter(value)),
+            ),
+            ("badgeIcon", Self::icon(element, "badge_icon")),
+            (
+                "badgeVisible",
+                element
+                    .expr("badge_visible")
+                    .map(|value| self.getter(value)),
+            ),
             ("menu", self.context_menu_def(element)),
             ("doubleTap", self.child_action(element, "DoubleTap")),
         ]);

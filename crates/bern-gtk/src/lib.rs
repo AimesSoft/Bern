@@ -19,6 +19,7 @@ mod gesture_state;
 mod gestures;
 mod hdr;
 mod host;
+mod icon_glyph;
 mod icons;
 mod kernel;
 mod layout;

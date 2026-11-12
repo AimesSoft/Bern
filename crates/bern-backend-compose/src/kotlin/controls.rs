@@ -131,6 +131,18 @@ impl Generator<'_> {
             // With `height`, a round button of that diameter; `font_size`
             // is the size of its icon.
             let mut extra = String::new();
+            if let Some(value) = element.expr("icon_progress") {
+                extra.push_str(&format!(
+                    ", iconProgress = ({}).toDouble()",
+                    self.expr(value)
+                ));
+            }
+            if let Some(icon) = element.icon("badge_icon") {
+                extra.push_str(&format!(", badgeIcon = {}", Self::icon(Some(icon))));
+            }
+            if let Some(value) = element.expr("badge_visible") {
+                extra.push_str(&format!(", badgeVisible = {}", self.expr(value)));
+            }
             if let Some(size) = element.number("font_size") {
                 extra.push_str(&format!(", iconSize = {}", float(size)));
             }

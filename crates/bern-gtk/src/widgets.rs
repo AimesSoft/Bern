@@ -874,6 +874,9 @@ pub struct IconButtonProps {
     pub diameter: Option<Num>,
     /// `prominent`: filled with the accent color.
     pub prominence: Option<&'static str>,
+    pub icon_progress: Option<Num>,
+    pub badge_icon: Option<&'static str>,
+    pub badge_visible: Option<Get>,
 }
 
 #[allow(non_snake_case)]
@@ -888,6 +891,21 @@ pub fn IconButton(p: &Parent, ctx: &Ctx, props: IconButtonProps, action: Option<
         && let Some(image) = button.child().and_downcast::<gtk::Image>()
     {
         image.set_pixel_size(size.round().max(1.0) as i32);
+    }
+    if props.icon_progress.is_some() || props.badge_icon.is_some() {
+        let glyph =
+            crate::icon_glyph::IconGlyph::new(props.icon, props.badge_icon, props.font_size);
+        button.set_child(Some(&glyph));
+        if let Some(progress) = &props.icon_progress {
+            let shown = glyph.clone();
+            bind_number(ctx, progress, None, &glyph, move |value| {
+                shown.set_progress(value)
+            });
+        }
+        if let Some(visible) = bound_enabled(ctx, &props.badge_visible) {
+            let shown = glyph.clone();
+            effect(move || shown.set_badge_visible(visible()));
+        }
     }
     if let Some(diameter) = &props.diameter {
         button.add_css_class("circular");

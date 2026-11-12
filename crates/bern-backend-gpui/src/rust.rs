@@ -201,6 +201,9 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "prominence",
             "height",
             "font_size",
+            "icon_progress",
+            "badge_icon",
+            "badge_visible",
             "variant",
             "shortcut",
             "default_focus",
@@ -2746,7 +2749,7 @@ pub fn app() -> b::AppDef {{
                 }
             }
             "IconButton" => format!(
-                "b::icon_button(c, {}, {}, b::IconButtonProps {{ label: {}, prominence: b::Prominence::{}, enabled: {}, height: {}, size: {}, style: {}, pick: {}, shortcut: {} }}, {})",
+                "b::icon_button(c, {}, {}, b::IconButtonProps {{ label: {}, prominence: b::Prominence::{}, enabled: {}, height: {}, size: {}, style: {}, pick: {}, shortcut: {}, icon_progress: {}, badge_icon: {}, badge_visible: {} }}, {})",
                 id(),
                 string(self.icon_name(element.icon("icon").unwrap_or("questionmark"))),
                 text("label"),
@@ -2761,6 +2764,12 @@ pub fn app() -> b::AppDef {{
                 self.control_style(element),
                 self.pick(element),
                 self.shortcut(element),
+                self.optional_length(element, "icon_progress"),
+                self.icon(element.icon("badge_icon")),
+                element
+                    .expr("badge_visible")
+                    .map(|value| self.condition(value))
+                    .unwrap_or_else(|| "true".into()),
                 self.action(element)
             ),
             "Switch" => {
