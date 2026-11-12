@@ -284,6 +284,102 @@ fn rows_give_items_their_widths_and_sized_stacks_start_them() {
     );
 }
 
+/// Both spacers of a centered label keep their share, even through a condition.
+#[test]
+fn centered_row_keeps_both_spacers() {
+    use bern_ir::{Element, Expr, ExprKind, IfNode, Node, Prop};
+    use bern_protocol::{Type, Value};
+    let element = |kind: &str, props, children| {
+        Node::Element(Element {
+            kind: kind.into(),
+            id: None,
+            path: format!("test.{kind}"),
+            props,
+            template: None,
+            children,
+            action: None,
+            source: SourceLocation {
+                file: "centered-row.rs".into(),
+                line: 1,
+                column: 1,
+            },
+        })
+    };
+    let (config, mut compiled) = showcase();
+    let spacer = || element("Spacer", Default::default(), vec![]);
+    let text = element(
+        "Text",
+        [(
+            "content".into(),
+            Prop::Text {
+                text: bern_ir::Text::Dynamic {
+                    expr: Expr {
+                        ty: Type::Text,
+                        kind: ExprKind::Literal {
+                            value: Value::Text("Centered".into()),
+                        },
+                    },
+                },
+            },
+        )]
+        .into(),
+        vec![],
+    );
+    for conditional in [false, true] {
+        let tail = if conditional {
+            Node::If(IfNode {
+                branches: vec![(
+                    Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Literal {
+                            value: Value::Bool(true),
+                        },
+                    },
+                    vec![text.clone(), spacer()],
+                )],
+                otherwise: vec![],
+            })
+        } else {
+            text.clone()
+        };
+        let mut children = vec![spacer(), tail];
+        if !conditional {
+            children.push(spacer());
+        }
+        compiled.app.components[0].body = element(
+            "Row",
+            [
+                ("gap".into(), Prop::Number { value: 7.0 }),
+                ("width".into(), Prop::Number { value: 224.0 }),
+            ]
+            .into(),
+            children,
+        );
+        let output = workspace().join("target/bern-test/centered-row");
+        let context = context(&config, &compiled, "macos", &output);
+        let files = SwiftUiMacos.generate(&compiled.app, &context).unwrap();
+        let generated = files
+            .iter()
+            .find(|file| file.path == Path::new("Sources/BernGenerated.swift"))
+            .unwrap();
+        let source = String::from_utf8_lossy(&generated.contents);
+        let start = source
+            .find("BernRow(alignment: .center, spacing: 7.0) {")
+            .unwrap();
+        let row = &source[start..start + source[start..].find(".frame(width: 224.0").unwrap()];
+        assert_eq!(
+            row.matches(".layoutValue(key: BernRowSpacer.self, value: true)")
+                .count(),
+            2,
+            "{row}"
+        );
+        assert!(
+            !row.contains(".frame(maxWidth: .infinity, alignment: .leading)"),
+            "{row}"
+        );
+    }
+}
+
 /// A menu picker on macOS is the system's own pop-up, in the words' color,
 /// not the accent the window gives everything else.
 #[test]
@@ -2402,4 +2498,36 @@ fn content_in_a_window_starts_at_its_top_leading_corner() {
         "swiftc rejected the generated code:\n{}",
         String::from_utf8_lossy(&result.stderr)
     );
+}
+
+/// Whole-window motion must not feed its painted coordinates into safe-area layout.
+#[test]
+fn whole_window_motion_is_ignored_by_layout() {
+    let style = include_str!("../templates/BernStyle.swift");
+    assert!(style.contains("private struct BernMoveIn: GeometryEffect"));
+    assert!(style.contains(
+        "content.modifier(BernMoveIn(edge: edge, progress: shown ? 1 : 0).ignoredByLayout())"
+    ));
+    assert!(style.contains("BernMoveOut(edge: edge, progress: 1).ignoredByLayout()"));
+    assert!(style.contains("BernMoveOut(edge: edge, progress: 0).ignoredByLayout()"));
+    let start = style.find("private struct BernMoveIn:").unwrap();
+    let end = start + style[start..].find("private struct BernMoveOut:").unwrap();
+    assert!(!style[start..end].contains("visualEffect"));
+    assert!(style[start..end].contains("1 - min(progress, 1)"));
+}
+
+/// Slider feedback is tied to the interaction binding, never observed values.
+#[test]
+fn slider_feedback_uses_native_ios_selection_only_during_interaction() {
+    let runtime = include_str!("../templates/BernRuntime.swift");
+    assert!(runtime.contains("BernSliderInteraction(value: previewBinding"));
+    assert!(runtime.contains("if feedbackEnabled && editing && next != value"));
+    assert!(runtime.contains("if feedbackEnabled && active && !editing"));
+    assert!(runtime.contains("if #available(iOS 26.0, *)"));
+    assert!(runtime.contains("content.sensoryFeedback(.selection, trigger: trigger)"));
+    let controls = include_str!("../src/swift/controls.rs");
+    assert!(controls.contains("BernSliderInteraction(value: {}"));
+    assert!(controls.contains("SwiftUI.Slider(value: binding"));
+    let media = include_str!("../templates/BernMedia.swift");
+    assert!(media.contains("BernSliderInteraction(value: $value"));
 }

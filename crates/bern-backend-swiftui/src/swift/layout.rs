@@ -105,6 +105,7 @@ impl Generator<'_> {
                 &element.children,
                 &Ctx {
                     row: true,
+                    fold_row_spacer: bern_ir::can_fold_row_spacer(&element.children),
                     ..ctx.clone()
                 },
             );

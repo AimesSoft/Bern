@@ -97,6 +97,8 @@ struct Ctx {
     /// The nodes are direct children of `Row(align: baseline)`: each
     /// lines up on its first baseline.
     baseline: bool,
+    /// Several spacers must keep their equal shares of the row.
+    fold_row_spacer: bool,
     /// The nodes are direct children of a row of a given height, aligned
     /// this way: text taller than the row keeps its height and overflows
     /// by that alignment, as on the other targets.
@@ -185,6 +187,7 @@ impl<'a> Generator<'a> {
             // in what is left instead of pushing them out.
             if ctx.scope == Scope::Row
                 && !ctx.baseline
+                && ctx.fold_row_spacer
                 && bern_ir::leads_row(node, nodes.get(index + 1))
             {
                 out.open("Box(Modifier.weight(1f)) {");

@@ -946,10 +946,12 @@ struct BernScrubber: View {
 
     #if !os(tvOS)
     private var slider: some View {
-        Slider(value: $value, in: range) {
-            Text(verbatim: label)
-        } onEditingChanged: { editing in
-            onEditingChanged(editing)
+        BernSliderInteraction(value: $value, minimum: range.lowerBound, maximum: range.upperBound, step: nil, onEditingChanged: onEditingChanged) { binding, editing in
+            Slider(value: binding, in: range) {
+                Text(verbatim: label)
+            } onEditingChanged: { active in
+                editing(active)
+            }
         }
         .labelsHidden()
         .tint(.primary)
