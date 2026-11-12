@@ -680,8 +680,18 @@ impl Generator<'_> {
             return;
         }
         out.open(format!(
-            "SwiftUI.Slider(value: {}, in: {min}...{max}{step}) {{",
-            self.binding_of(&field)
+            "BernSliderInteraction(value: {}, minimum: {min}, maximum: {max}, step: {}, onEditingChanged: {{ editing in",
+            self.binding_of(&field),
+            element.number("step").map(double).unwrap_or_else(|| "nil".into())
+        ));
+        match &action {
+            Some(action) => out.line(format!("if !editing {{ {action} }}")),
+            None => out.line("_ = editing"),
+        }
+        out.close("}) { binding, editing in");
+        out.indent += 1;
+        out.open(format!(
+            "SwiftUI.Slider(value: binding, in: {min}...{max}{step}) {{"
         ));
         out.line(format!("SwiftUI.Text(verbatim: {label})"));
         let (min_icon, max_icon) = (element.icon("min_icon"), element.icon("max_icon"));
@@ -699,12 +709,10 @@ impl Generator<'_> {
                 None => out.line("SwiftUI.EmptyView()"),
             }
         }
-        out.close("} onEditingChanged: { editing in");
+        out.close("} onEditingChanged: { editingValue in");
         out.indent += 1;
-        match &action {
-            Some(action) => out.line(format!("if !editing {{ {action} }}")),
-            None => out.line("_ = editing"),
-        }
+        out.line("editing(editingValue)");
+        out.close("}");
         out.close("}");
         if element.keyword("label_hidden") == Some("true") {
             out.line(".labelsHidden()");

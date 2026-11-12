@@ -1362,6 +1362,36 @@ pub struct ComponentLibrary {
     pub texts: Vec<LocalizedText>,
 }
 
+/// Only a row with one spacer can lend it to its leading words. With
+/// several spacers, each owns a share of the free room; folding one into
+/// a label would change that share and break symmetric alignment.
+/// Conditions are transparent, but repeated spacers cannot be folded.
+pub fn can_fold_row_spacer(nodes: &[Node]) -> bool {
+    fn count(node: &Node) -> usize {
+        match node {
+            Node::Element(element) if element.kind == "Spacer" => 1,
+            Node::Element(element) if element.kind == "ForEach" => {
+                if element.children.iter().any(|child| count(child) > 0) {
+                    2
+                } else {
+                    0
+                }
+            }
+            Node::If(node) => node
+                .branches
+                .iter()
+                .flat_map(|(_, body)| body)
+                .chain(&node.otherwise)
+                .map(count)
+                .sum(),
+            Node::IfLet(node) => node.then.iter().chain(&node.otherwise).map(count).sum(),
+            Node::Match(node) => node.arms.iter().flat_map(|arm| &arm.body).map(count).sum(),
+            _ => 0,
+        }
+    }
+    nodes.iter().map(count).sum::<usize>() == 1
+}
+
 /// Whether `node`, followed in a row by `next`, is the words that lead the
 /// row: a text, or a column standing at its leading edge, before a spacer.
 /// It takes the spacer's room itself, so the controls after it keep their
@@ -1717,6 +1747,36 @@ mod tests {
             element.props.insert(name.to_string(), prop.clone());
         }
         Node::Element(element)
+    }
+
+    #[test]
+    fn row_spacers_keep_their_shares() {
+        let text = || element("Text", vec![]);
+        let spacer = || element("Spacer", vec![]);
+        assert!(can_fold_row_spacer(&[text(), spacer(), text()]));
+        assert!(!can_fold_row_spacer(&[spacer(), text(), spacer()]));
+        let condition = Node::If(IfNode {
+            branches: vec![(
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Literal {
+                        value: Value::Bool(true),
+                    },
+                },
+                vec![text(), spacer()],
+            )],
+            otherwise: vec![],
+        });
+        assert!(!can_fold_row_spacer(&[spacer(), condition]));
+        assert!(!can_fold_row_spacer(&[element(
+            "ForEach",
+            vec![text(), spacer()]
+        )]));
+        // A nested column's spacer belongs to that column, not the row.
+        assert!(can_fold_row_spacer(&[
+            element("Column", vec![text(), spacer()]),
+            spacer()
+        ]));
     }
 
     fn keyed_rows() -> Node {

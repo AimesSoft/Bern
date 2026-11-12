@@ -2820,6 +2820,83 @@ struct BernScaleBox<Content: View>: View {
     }
 }
 
+/// A native slider's interaction binding is the only source of haptic events.
+/// Engine snapshots and programmatic changes bypass it. Feedback has its own
+/// detents, without rounding the value sent to the control or its action.
+struct BernSliderInteraction<Content: View>: View {
+    @Binding var value: Double
+    let minimum: Double
+    let maximum: Double
+    let step: Double?
+    let onEditingChanged: (Bool) -> Void
+    @ViewBuilder let content: (Binding<Double>, @escaping (Bool) -> Void) -> Content
+    @State private var editing = false
+    @State private var lastDetent: Double?
+    @State private var feedback = 0
+
+    private var feedbackEnabled: Bool {
+        #if os(iOS)
+        if #available(iOS 26.0, *) { return true }
+        #endif
+        return false
+    }
+
+    private func detent(_ value: Double) -> Double? {
+        let span = maximum - minimum
+        guard value.isFinite, span.isFinite, span > 0 else { return nil }
+        let fraction = min(max((value - minimum) / span, 0), 1)
+        if let step, step.isFinite, step > 0 {
+            return (fraction * span / step).rounded()
+        }
+        return (fraction * 100).rounded()
+    }
+
+    private var interactionBinding: Binding<Double> {
+        Binding(get: { value }, set: { next in
+            if feedbackEnabled && editing && next != value {
+                let detent = detent(next)
+                if let detent, detent != lastDetent {
+                    feedback &+= 1
+                }
+                lastDetent = detent
+            }
+            value = next
+        })
+    }
+
+    private func edit(_ active: Bool) {
+        if feedbackEnabled && active && !editing {
+            lastDetent = detent(value)
+            feedback &+= 1
+        }
+        editing = active
+        onEditingChanged(active)
+    }
+
+    var body: some View {
+        content(interactionBinding, edit)
+            .modifier(BernSliderFeedback(trigger: feedback))
+    }
+}
+
+/// SwiftUI asks the system for selection feedback, respecting its haptic
+/// settings and hardware. Older systems and other platforms stay unchanged.
+private struct BernSliderFeedback: ViewModifier {
+    let trigger: Int
+
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        if #available(iOS 26.0, *) {
+            content.sensoryFeedback(.selection, trigger: trigger)
+        } else {
+            content
+        }
+        #else
+        content
+        #endif
+    }
+}
+
 struct BernControlledSlider: View {
     let value: Double
     let minimum: Double
@@ -2847,10 +2924,12 @@ struct BernControlledSlider: View {
             #if os(tvOS)
             BernFocusSlider(value: previewBinding, minimum: minimum, maximum: maximum, step: step, label: label, labelHidden: labelHidden, onEditingChanged: edit)
             #else
-            if let step {
-                Slider(value: previewBinding, in: minimum...maximum, step: step, onEditingChanged: edit) { Text(label) }
-            } else {
-                Slider(value: previewBinding, in: minimum...maximum, onEditingChanged: edit) { Text(label) }
+            BernSliderInteraction(value: previewBinding, minimum: minimum, maximum: maximum, step: step, onEditingChanged: edit) { binding, editing in
+                if let step {
+                    Slider(value: binding, in: minimum...maximum, step: step, onEditingChanged: editing) { Text(label) }
+                } else {
+                    Slider(value: binding, in: minimum...maximum, onEditingChanged: editing) { Text(label) }
+                }
             }
             #endif
         }

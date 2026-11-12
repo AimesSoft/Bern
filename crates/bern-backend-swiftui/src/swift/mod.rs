@@ -83,6 +83,8 @@ struct Ctx {
     /// An item of a row, directly or through a condition or repetition: a
     /// spacer there grows only along the row, a divider stands upright.
     row: bool,
+    /// Only one spacer in the enclosing row may be lent to its words.
+    fold_row_spacer: bool,
     /// An item of a `Flow`, as `row` is: a chip picker's chips are items
     /// of the flow.
     flow: bool,
@@ -203,6 +205,7 @@ impl<'a> Generator<'a> {
             if ctx.row
                 && !ctx.flow
                 && ctx.snap_level == 0
+                && ctx.fold_row_spacer
                 && bern_ir::leads_row(node, nodes.get(index + 1))
             {
                 out.open("SwiftUI.Group {");

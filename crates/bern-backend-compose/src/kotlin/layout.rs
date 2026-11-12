@@ -156,6 +156,7 @@ impl Generator<'_> {
             ));
             let row = Ctx {
                 baseline: element.keyword("align") == Some("baseline"),
+                fold_row_spacer: bern_ir::can_fold_row_spacer(&element.children),
                 overflow: element.prop("height").map(|_| alignment),
                 ..ctx.within(Scope::Row)
             };
