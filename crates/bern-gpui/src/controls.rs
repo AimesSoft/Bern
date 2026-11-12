@@ -585,6 +585,9 @@ pub struct IconButtonProps {
     pub style: Option<&'static ControlStyle>,
     pub pick: Option<(Field, &'static str)>,
     pub shortcut: Option<String>,
+    pub icon_progress: Option<f32>,
+    pub badge_icon: Option<&'static str>,
+    pub badge_visible: bool,
 }
 
 /// `IconButton`: an icon without a container, 36 points square, its
@@ -631,6 +634,8 @@ pub fn icon_button(
         style.and_then(|style| style.corner).unwrap_or(8.0)
     };
     let size = props.size.unwrap_or(18.0);
+    let accent = c.color("accent");
+    let surface = c.color("surface.canvas");
     let build = move || {
         div()
             .flex()
@@ -639,7 +644,15 @@ pub fn icon_button(
             .justify_center()
             .size(px(side))
             .rounded(px(corner))
-            .child(icons::icon(icon, size, foreground))
+            .child(icons::decorated(
+                icon,
+                size,
+                foreground,
+                accent,
+                surface,
+                props.icon_progress,
+                props.badge_icon.filter(|_| props.badge_visible),
+            ))
     };
     let element = pressable(
         c,

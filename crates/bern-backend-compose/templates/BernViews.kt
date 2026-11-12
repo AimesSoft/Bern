@@ -6,6 +6,8 @@
 
 package dev.bern.runtime
 
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.graphics.drawscope.clipRect
@@ -674,15 +676,23 @@ fun BernIconButton(
     iconSize: Float? = null,
     diameter: Dp? = null,
     prominence: BernProminence = BernProminence.Standard,
+    iconProgress: Double? = null,
+    badgeIcon: ImageVector? = null,
+    badgeVisible: Boolean = true,
     onClick: () -> Unit,
 ) {
     val iconModifier = if (iconSize != null) Modifier.size(bernIconSize(iconSize)) else Modifier
-    val content: @Composable RowScope.() -> Unit = {
-        Icon(icon ?: BernIcons.get(""), contentDescription = label, modifier = iconModifier)
+    val glyph: @Composable () -> Unit = {
+        if (iconProgress == null && badgeIcon == null) {
+            Icon(icon ?: BernIcons.get(""), contentDescription = label, modifier = iconModifier)
+        } else {
+            BernIconGlyph(icon ?: BernIcons.get(""), label, iconSize?.let(::bernIconSize) ?: 24.dp,
+                iconProgress, badgeIcon, badgeVisible)
+        }
     }
+    val content: @Composable RowScope.() -> Unit = { glyph() }
     val material: @Composable (Modifier, MutableInteractionSource?) -> Unit = { modifier, interaction ->
         val sized = (if (diameter != null) modifier.size(diameter) else modifier).bernTelevisionFocus(CircleShape)
-        val glyph: @Composable () -> Unit = { Icon(icon ?: BernIcons.get(""), contentDescription = label, modifier = iconModifier) }
         when {
             prominence == BernProminence.Prominent ->
                 FilledIconButton(onClick = onClick, enabled = enabled, modifier = sized, interactionSource = interaction, content = glyph)
@@ -700,6 +710,26 @@ fun BernIconButton(
             BernStyledButton(style.copy(padding = 0.0), enabled, modifier.size(diameter), onClick, material, content)
         } else {
             BernStyledButton(style, enabled, modifier, onClick, material, content)
+        }
+    }
+}
+
+/// The native vector is redrawn at full size and clipped, never stretched.
+@Composable
+private fun BernIconGlyph(icon: ImageVector, label: String, side: Dp,
+    progress: Double?, badge: ImageVector?, badgeVisible: Boolean) {
+    val fraction = progress?.takeIf { it.isFinite() }?.coerceIn(0.0, 1.0)?.toFloat() ?: 0f
+    Box(Modifier.size(side)) {
+        Icon(icon, contentDescription = label, modifier = Modifier.fillMaxSize())
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.matchParentSize().drawWithContent {
+                clipRect(bottom = size.height * fraction) { this@drawWithContent.drawContent() }
+            })
+        if (badge != null && badgeVisible) {
+            Icon(badge, contentDescription = null, tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.align(Alignment.BottomEnd).offset(x = side * 0.06f, y = side * 0.06f)
+                    .size(side * 0.52f).background(MaterialTheme.colorScheme.surface, CircleShape)
+                    .padding(side * 0.06f))
         }
     }
 }

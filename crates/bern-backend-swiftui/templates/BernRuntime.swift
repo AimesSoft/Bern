@@ -3208,3 +3208,52 @@ enum BernTiming {
         CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
     }
 }
+
+/// Decorations share the symbol's own bounds; neither changes button layout.
+struct BernIconGlyph: View {
+    let name: String
+    let progress: Double?
+    let badge: String?
+    let badgeVisible: Bool
+    @Environment(\.bernAccent) private var accent
+
+    private var fraction: Double {
+        guard let progress, progress.isFinite else { return 0 }
+        return min(1, max(0, progress))
+    }
+
+    var body: some View {
+        Image(systemName: name)
+            .symbolRenderingMode(.monochrome)
+            .overlay {
+                GeometryReader { geometry in
+                    Image(systemName: name)
+                        .symbolRenderingMode(.monochrome)
+                        .foregroundStyle(accent ?? Color.accentColor)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .mask(alignment: .top) {
+                            Rectangle().frame(height: geometry.size.height * fraction)
+                        }
+                }
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if let badge, badgeVisible {
+                    GeometryReader { geometry in
+                        let side = min(geometry.size.width, geometry.size.height)
+                        Image(systemName: badge)
+                            .resizable()
+                            .scaledToFit()
+                            .foregroundStyle(accent ?? Color.accentColor)
+                            .frame(width: side * 0.4, height: side * 0.4)
+                            .padding(side * 0.06)
+                            .background(BernColor.role("surface.canvas").color, in: Circle())
+                            .position(x: geometry.size.width * 0.85, y: geometry.size.height * 0.85)
+                    }
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                }
+            }
+    }
+}

@@ -73,7 +73,7 @@ impl Generator<'_> {
 
     pub(super) fn icon_button(&self, out: &mut Out, element: &Element) {
         out.line(format!(
-            "b::IconButton(p, c, b::IconButtonProps {{ id: {}, icon: {}, label: {}, enabled: {}, style: {}, pick: {}, paste: {}, font_size: {}, diameter: {}, prominence: {} }}, {});",
+            "b::IconButton(p, c, b::IconButtonProps {{ id: {}, icon: {}, label: {}, enabled: {}, style: {}, pick: {}, paste: {}, font_size: {}, diameter: {}, prominence: {}, icon_progress: {}, badge_icon: {}, badge_visible: {} }}, {});",
             self.id(element),
             string(element.icon("icon").unwrap_or("circle")),
             some(self.text_prop(element, "label")),
@@ -84,6 +84,9 @@ impl Generator<'_> {
             Self::number(element, "font_size"),
             some(self.num(element, "height")),
             Self::keyword(element, "prominence"),
+            some(self.num(element, "icon_progress")),
+            some(element.icon("badge_icon").map(string)),
+            some(element.expr("badge_visible").map(|value| self.getter(value))),
             self.action(element),
         ));
         self.shortcut(

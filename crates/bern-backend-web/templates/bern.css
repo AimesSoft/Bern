@@ -3100,3 +3100,10 @@ button.bern-table-heading:hover {
   outline: 2px solid var(--bern-focus-indicator);
   outline-offset: -2px;
 }
+
+/* Icon decorations keep the glyph's box and the native button's hit area. */
+.bern-icon-glyph { display: block; position: relative; flex: none; pointer-events: none; }
+.bern-icon-button .bern-icon-glyph > .bern-icon { position: absolute; inset: 0; width: 100%; height: 100%; }
+.bern-icon-fill { color: var(--bern-accent); }
+.bern-icon-badge { position: absolute; right: -6%; bottom: -6%; width: 52%; height: 52%; padding: 6%; box-sizing: border-box; border-radius: 50%; color: var(--bern-accent); background: var(--bern-surface-canvas); }
+.bern-icon-button .bern-icon-badge > .bern-icon { display: block; width: 100%; height: 100%; }

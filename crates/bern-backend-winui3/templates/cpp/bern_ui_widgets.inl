@@ -1524,7 +1524,60 @@ struct IconButtonProps {
     bool fill = false;
     /// `font_size`: the size of the icon.
     std::optional<double> iconSize;
+    Get iconProgress;
+    char const* badgeIcon = nullptr;
+    Get badgeVisible;
 };
+
+/// Decorations share the native glyph's bounds without changing its measurement.
+inline xaml::UIElement IconGlyph(Ctx const& ctx, IconButtonProps const& props) {
+    double size = props.iconSize.value_or(16);
+    auto base = Icons::Icon(props.icon, size);
+    controls::Grid layers;
+    layers.IsHitTestVisible(false);
+    layers.Children().Append(base);
+    if (props.iconProgress) {
+        auto fill = Icons::Icon(props.icon, size);
+        if (auto style = Styles::Themed(L"FontIcon", {{L"Foreground", RoleKey("accent")}})) fill.Style(style);
+        media::RectangleGeometry clip;
+        fill.Clip(clip);
+        auto fraction = std::make_shared<double>(0);
+        fill.SizeChanged([clip, fraction](auto const& sender, auto const&) {
+            auto glyph = sender.template as<xaml::FrameworkElement>();
+            clip.Rect({0, 0, static_cast<float>(glyph.ActualWidth()), static_cast<float>(glyph.ActualHeight() * *fraction)});
+        });
+        Reactive::Run([ctx, value = props.iconProgress, fraction, fill, clip] {
+            double valueNow = R::AsDouble(value(ctx));
+            *fraction = std::isfinite(valueNow) ? (std::clamp)(valueNow, 0.0, 1.0) : 0;
+            clip.Rect({0, 0, static_cast<float>(fill.ActualWidth()), static_cast<float>(fill.ActualHeight() * *fraction)});
+        });
+        layers.Children().Append(fill);
+    }
+    if (props.badgeIcon) {
+        controls::Canvas overlay;
+        overlay.Width(0);
+        overlay.Height(0);
+        overlay.HorizontalAlignment(xaml::HorizontalAlignment::Right);
+        overlay.VerticalAlignment(xaml::VerticalAlignment::Bottom);
+        controls::Border badge;
+        badge.Width(size * 0.52);
+        badge.Height(size * 0.52);
+        badge.CornerRadius({size, size, size, size});
+        if (auto style = Styles::Themed(L"Border", {{L"Background", RoleKey("surface.canvas")}})) badge.Style(style);
+        auto glyph = Icons::Icon(props.badgeIcon, size * 0.4);
+        if (auto style = Styles::Themed(L"FontIcon", {{L"Foreground", RoleKey("accent")}})) glyph.Style(style);
+        badge.Child(glyph);
+        controls::Canvas::SetLeft(badge, -size * 0.46);
+        controls::Canvas::SetTop(badge, -size * 0.46);
+        overlay.Children().Append(badge);
+        if (props.badgeVisible) Reactive::Run([ctx, value = props.badgeVisible, overlay] {
+            overlay.Visibility(R::Truthy(value(ctx)) ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
+        });
+        layers.Children().Append(overlay);
+    }
+    xaml::Automation::AutomationProperties::SetAccessibilityView(layers, xaml::Automation::Peers::AccessibilityView::Raw);
+    return layers;
+}
 
 /// An icon button named by its label, as a Fluent app bar button: no
 /// background until pointed at, the control's own corners; with `height`
@@ -1532,7 +1585,8 @@ struct IconButtonProps {
 /// button of that diameter (the design's play button).
 inline void IconButton(Parent const& p, Ctx const& ctx, IconButtonProps props) {
     controls::Button button;
-    button.Content(Icons::Icon(props.icon, props.iconSize.value_or(16)));
+    if (props.iconProgress || props.badgeIcon) button.Content(IconGlyph(ctx, props));
+    else button.Content(Icons::Icon(props.icon, props.iconSize.value_or(16)));
     std::string_view prominence = props.prominence ? props.prominence : "";
     bool sized = props.shape && props.shape->height.Given();
     bool accent = prominence == "prominent";
