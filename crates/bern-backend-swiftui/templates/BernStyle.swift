@@ -3220,6 +3220,12 @@ extension View {
         modifier(BernScrollBrowsing(browsing: browsing))
     }
 
+    /// Placed inside the scroll content, never behind the scroll view itself.
+    /// Older systems find the nearest native scroll ancestor from here.
+    func bernScrollBrowsingContent() -> some View {
+        modifier(BernScrollBrowsingContent())
+    }
+
     /// Where the pointer is over this window, for the views in it that glow.
     func bernGlowRoot() -> some View {
         modifier(BernGlowRoot())
@@ -3917,10 +3923,13 @@ private struct BernToolbarSpace: View {
 }
 #endif
 
-/// macOS 14 and iOS 17 do not tell how a scroll view is scrolled; there
-/// `browsing` stays false.
+// MARK: - Scroll browsing
+
+/// Modern SwiftUI reports phases itself. Earlier systems observe the native
+/// scroll view from inside its content, without installing another gesture.
 private struct BernScrollBrowsing: ViewModifier {
     let browsing: Binding<Bool>
+    @StateObject private var activity = BernScrollBrowsingActivity()
 
     func body(content: Content) -> some View {
         if #available(macOS 15.0, iOS 18.0, tvOS 18.0, *) {
@@ -3929,10 +3938,408 @@ private struct BernScrollBrowsing: ViewModifier {
                 if browsing.wrappedValue != byHand { browsing.wrappedValue = byHand }
             }
         } else {
-            content
+            content.environment(\.bernScrollBrowsingContext,
+                BernScrollBrowsingContext(activity: activity, binding: browsing))
         }
     }
 }
+
+@MainActor
+private struct BernScrollBrowsingContext {
+    let activity: BernScrollBrowsingActivity
+    let binding: Binding<Bool>
+}
+
+private struct BernScrollBrowsingContextKey: EnvironmentKey {
+    static let defaultValue: BernScrollBrowsingContext? = nil
+}
+
+private extension EnvironmentValues {
+    var bernScrollBrowsingContext: BernScrollBrowsingContext? {
+        get { self[BernScrollBrowsingContextKey.self] }
+        set { self[BernScrollBrowsingContextKey.self] = newValue }
+    }
+}
+
+private struct BernScrollBrowsingContent: ViewModifier {
+    @Environment(\.bernScrollBrowsingContext) private var context
+
+    func body(content: Content) -> some View {
+        content.background {
+            if let context {
+                BernScrollBrowsingProbe(context: context)
+                    .frame(width: 0, height: 0)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+}
+
+#if os(macOS)
+private typealias BernBrowsingScrollView = NSScrollView
+#else
+private typealias BernBrowsingScrollView = UIScrollView
+#endif
+
+/// One session per SwiftUI scroll view. Group content may mount several
+/// probes; they share a native observer and only the last removal detaches it.
+/// Publications are coalesced on the main queue: layout and dismantle must
+/// never publish synchronously, nor may an old release clear a new owner.
+@MainActor
+private final class BernScrollBrowsingActivity: ObservableObject {
+    private var binding: Binding<Bool>?
+    private var sources: [UUID: Bool] = [:]
+    private var observers: [ObjectIdentifier: BernNativeScrollBrowsingObserver] = [:]
+    private var pending = false
+
+    func bind(_ binding: Binding<Bool>) {
+        self.binding = binding
+        publish()
+    }
+
+    func acquire() -> UUID {
+        let id = UUID()
+        sources[id] = false
+        publish()
+        return id
+    }
+
+    func report(_ id: UUID, _ active: Bool) {
+        guard let old = sources[id], old != active else { return }
+        sources[id] = active
+        publish()
+    }
+
+    func release(_ id: UUID) {
+        guard sources.removeValue(forKey: id) != nil else { return }
+        publish()
+    }
+
+    private func publish() {
+        guard !pending else { return }
+        pending = true
+        // Keep the final idle publication alive after the view is dismantled.
+        // Read the current sources and binding, not an obsolete snapshot.
+        DispatchQueue.main.async { [self] in
+            pending = false
+            let active = sources.values.contains(true)
+            if let binding, binding.wrappedValue != active { binding.wrappedValue = active }
+        }
+    }
+
+    func attach(to scroll: BernBrowsingScrollView, owner: UUID) {
+        let key = ObjectIdentifier(scroll)
+        if let observer = observers[key], observer.scrollView === scroll {
+            observer.owners.insert(owner)
+            return
+        }
+        // Object identifiers can be reused after a native scroll view dies.
+        if let old = observers.removeValue(forKey: key) {
+            old.stop()
+            release(old.source)
+        }
+        let observer = BernNativeScrollBrowsingObserver(scrollView: scroll, activity: self, source: acquire())
+        observer.owners.insert(owner)
+        observers[key] = observer
+        observer.start()
+    }
+
+    func detach(from key: ObjectIdentifier, owner: UUID) {
+        guard let observer = observers[key], observer.owners.remove(owner) != nil,
+              observer.owners.isEmpty else { return }
+        observer.stop()
+        observers.removeValue(forKey: key)
+        release(observer.source)
+    }
+}
+
+/// A mounted probe owns a lease, not the binding. Updating or moving it
+/// releases only that lease; callbacks queued by older observers are inert.
+@MainActor
+private final class BernScrollBrowsingAttachment {
+    private let owner = UUID()
+    private var context: BernScrollBrowsingContext?
+    private var scroll: ObjectIdentifier?
+    private var dismantled = false
+
+    func update(_ context: BernScrollBrowsingContext) {
+        guard !dismantled else { return }
+        if self.context?.activity !== context.activity { connect(to: nil) }
+        self.context = context
+        context.activity.bind(context.binding)
+    }
+
+    func connect(to view: BernBrowsingScrollView?) {
+        guard !dismantled else { return }
+        let key = view.map(ObjectIdentifier.init)
+        guard key != scroll else { return }
+        if let scroll { context?.activity.detach(from: scroll, owner: owner) }
+        scroll = key
+        if let view { context?.activity.attach(to: view, owner: owner) }
+    }
+
+    func dismantle() {
+        connect(to: nil)
+        context = nil
+        dismantled = true
+    }
+}
+
+#if os(macOS)
+private struct BernScrollBrowsingProbe: NSViewRepresentable {
+    let context: BernScrollBrowsingContext
+
+    func makeNSView(context: Context) -> BernScrollBrowsingProbeView { BernScrollBrowsingProbeView() }
+    func updateNSView(_ view: BernScrollBrowsingProbeView, context: Context) {
+        view.attachment.update(self.context)
+        view.connect()
+    }
+    static func dismantleNSView(_ view: BernScrollBrowsingProbeView, coordinator: ()) {
+        view.attachment.dismantle()
+    }
+}
+
+@MainActor
+private final class BernScrollBrowsingProbeView: NSView {
+    let attachment = BernScrollBrowsingAttachment()
+
+    override var intrinsicContentSize: NSSize { .zero }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow !== window { attachment.connect(to: nil) }
+        super.viewWillMove(toWindow: newWindow)
+    }
+    override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); connect() }
+    override func viewDidMoveToSuperview() { super.viewDidMoveToSuperview(); connect() }
+    override func layout() { super.layout(); connect() }
+
+    func connect() {
+        attachment.connect(to: window == nil ? nil : enclosingScrollView)
+    }
+}
+
+/// AppKit documents these notifications as main-thread, user-initiated
+/// live scrolling (gestures and scroller tracking), not clip-view movement.
+/// Legacy wheel devices need not send a start/end pair: an unbracketed
+/// didLiveScroll is a discrete action, not an indefinitely active gesture.
+@MainActor
+private final class BernNativeScrollBrowsingObserver: NSObject {
+    weak var scrollView: NSScrollView?
+    var owners: Set<UUID> = []
+    let source: UUID
+    private weak var activity: BernScrollBrowsingActivity?
+    private var observing = false
+    private var live = false
+    private var revision = 0
+
+    init(scrollView: NSScrollView, activity: BernScrollBrowsingActivity, source: UUID) {
+        self.scrollView = scrollView
+        self.activity = activity
+        self.source = source
+        super.init()
+    }
+
+    func start() {
+        guard !observing, let scrollView else { return }
+        observing = true
+        let center = NotificationCenter.default
+        center.addObserver(self, selector: #selector(began(_:)), name: NSScrollView.willStartLiveScrollNotification, object: scrollView)
+        center.addObserver(self, selector: #selector(changed(_:)), name: NSScrollView.didLiveScrollNotification, object: scrollView)
+        center.addObserver(self, selector: #selector(ended(_:)), name: NSScrollView.didEndLiveScrollNotification, object: scrollView)
+        center.addObserver(self, selector: #selector(inactive(_:)), name: NSApplication.didResignActiveNotification, object: nil)
+    }
+
+    func stop() {
+        observing = false
+        revision += 1
+        live = false
+        NotificationCenter.default.removeObserver(self)
+        activity?.report(source, false)
+    }
+
+    @objc private func began(_ note: Notification) {
+        guard observing, note.object as? NSScrollView === scrollView else { return }
+        revision += 1
+        live = true
+        activity?.report(source, true)
+    }
+
+    @objc private func changed(_ note: Notification) {
+        guard observing, note.object as? NSScrollView === scrollView else { return }
+        activity?.report(source, true)
+        guard !live else { return }
+        revision += 1
+        let current = revision
+        // No timeout guesses an end that AppKit never reports for a wheel
+        // tick. Publish the action, then finish it on the following turn.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.observing, !self.live, self.revision == current else { return }
+            self.activity?.report(self.source, false)
+        }
+    }
+
+    @objc private func ended(_ note: Notification) {
+        guard observing, note.object as? NSScrollView === scrollView else { return }
+        finish()
+    }
+
+    @objc private func inactive(_ note: Notification) { finish() }
+
+    private func finish() {
+        revision += 1
+        live = false
+        activity?.report(source, false)
+    }
+}
+#else
+private struct BernScrollBrowsingProbe: UIViewRepresentable {
+    let context: BernScrollBrowsingContext
+
+    func makeUIView(context: Context) -> BernScrollBrowsingProbeView { BernScrollBrowsingProbeView() }
+    func updateUIView(_ view: BernScrollBrowsingProbeView, context: Context) {
+        view.attachment.update(self.context)
+        view.connect()
+    }
+    static func dismantleUIView(_ view: BernScrollBrowsingProbeView, coordinator: ()) {
+        view.attachment.dismantle()
+    }
+}
+
+@MainActor
+private final class BernScrollBrowsingProbeView: UIView {
+    let attachment = BernScrollBrowsingAttachment()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        accessibilityElementsHidden = true
+    }
+    required init?(coder: NSCoder) { nil }
+    override var intrinsicContentSize: CGSize { .zero }
+    override func willMove(toWindow newWindow: UIWindow?) {
+        if newWindow !== window { attachment.connect(to: nil) }
+        super.willMove(toWindow: newWindow)
+    }
+    override func didMoveToWindow() { super.didMoveToWindow(); connect() }
+    override func didMoveToSuperview() { super.didMoveToSuperview(); connect() }
+    override func layoutSubviews() { super.layoutSubviews(); connect() }
+
+    func connect() {
+        let scroll = window == nil ? nil : sequence(first: superview, next: { $0?.superview })
+            .lazy.compactMap { $0 as? UIScrollView }.first
+        attachment.connect(to: scroll)
+    }
+}
+
+/// CADisplayLink retains its target. Keep the observer weak so that a removed
+/// probe cannot retain its view tree through the run loop, even during teardown.
+@MainActor
+private final class BernScrollBrowsingDisplayTarget: NSObject {
+    weak var observer: BernNativeScrollBrowsingObserver?
+
+    init(_ observer: BernNativeScrollBrowsingObserver) {
+        self.observer = observer
+        super.init()
+    }
+    @objc func tick(_ link: CADisplayLink) {
+        guard let observer else { link.invalidate(); return }
+        observer.tick()
+    }
+}
+
+@MainActor
+private final class BernNativeScrollBrowsingObserver: NSObject {
+    weak var scrollView: UIScrollView?
+    var owners: Set<UUID> = []
+    let source: UUID
+    private weak var activity: BernScrollBrowsingActivity?
+    private weak var pan: UIPanGestureRecognizer?
+    private var displayLink: CADisplayLink?
+    private var observing = false
+    private var suspended = false
+
+    init(scrollView: UIScrollView, activity: BernScrollBrowsingActivity, source: UUID) {
+        self.scrollView = scrollView
+        self.activity = activity
+        self.source = source
+        super.init()
+    }
+
+    func start() {
+        guard !observing, let scrollView else { return }
+        observing = true
+        suspended = !isForeground
+        pan = scrollView.panGestureRecognizer
+        pan?.addTarget(self, action: #selector(panChanged(_:)))
+        let center = NotificationCenter.default
+        center.addObserver(self, selector: #selector(suspend(_:)), name: UIApplication.willResignActiveNotification, object: nil)
+        center.addObserver(self, selector: #selector(resume(_:)), name: UIApplication.didBecomeActiveNotification, object: nil)
+        if let scene = scrollView.window?.windowScene {
+            center.addObserver(self, selector: #selector(suspend(_:)), name: UIScene.willDeactivateNotification, object: scene)
+            center.addObserver(self, selector: #selector(resume(_:)), name: UIScene.didActivateNotification, object: scene)
+        }
+        // A replacement probe may arrive during a drag or its momentum.
+        // isTracking alone can mean a touch that has not become a scroll.
+        if scrollView.isDragging || scrollView.isDecelerating || pan?.state == .began || pan?.state == .changed {
+            begin()
+        }
+    }
+
+    func stop() {
+        observing = false
+        pan?.removeTarget(self, action: #selector(panChanged(_:)))
+        pan = nil
+        NotificationCenter.default.removeObserver(self)
+        finish()
+    }
+
+    @objc private func panChanged(_ sender: UIPanGestureRecognizer) {
+        guard observing, !suspended, sender === pan else { return }
+        switch sender.state {
+        case .began, .changed: begin()
+        // UIKit may not have installed its deceleration state when targets
+        // see ended/cancelled. The active link samples after event delivery.
+        default: break
+        }
+    }
+
+    private func begin() {
+        guard observing, !suspended else { return }
+        activity?.report(source, true)
+        guard displayLink == nil else { return }
+        let link = CADisplayLink(target: BernScrollBrowsingDisplayTarget(self), selector: #selector(BernScrollBrowsingDisplayTarget.tick(_:)))
+        displayLink = link
+        link.add(to: .main, forMode: .common)
+    }
+
+    func tick() {
+        guard observing, !suspended, let scrollView, scrollView.window != nil,
+              scrollView.isDragging || scrollView.isTracking || scrollView.isDecelerating else {
+            finish()
+            return
+        }
+    }
+
+    @objc private func suspend(_ note: Notification) {
+        suspended = true
+        finish()
+    }
+
+    @objc private func resume(_ note: Notification) { suspended = !isForeground }
+
+    private var isForeground: Bool {
+        if let scene = scrollView?.window?.windowScene { return scene.activationState == .foregroundActive }
+        return UIApplication.shared.applicationState == .active
+    }
+
+    private func finish() {
+        displayLink?.invalidate()
+        displayLink = nil
+        activity?.report(source, false)
+    }
+}
+#endif
 
 private struct BernKeyedNudge<Key: Equatable>: ViewModifier {
     let key: @MainActor () -> Key
@@ -4010,17 +4417,31 @@ private struct BernGlow: ViewModifier {
 
     func body(content: Content) -> some View {
         content.overlay {
-            GeometryReader { proxy in
-                let frame = proxy.frame(in: .global)
-                let at = pointer?.location.flatMap { location in
-                    frame.contains(location) ? CGPoint(x: location.x - frame.minX, y: location.y - frame.minY) : nil
-                }
-                BernGlowLight(at: at, size: proxy.size, radius: radius, opacity: opacity)
+            if let pointer {
+                BernGlowTracking(pointer: pointer, radius: radius, opacity: opacity)
+                    .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+                    .blendMode(.plusLighter)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
             }
-            .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
-            .blendMode(.plusLighter)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
+        }
+    }
+}
+
+/// Only the light subscribes to pointer movement. Publishing positions into
+/// the window's environment refreshes unrelated native controls mid-touch.
+private struct BernGlowTracking: View {
+    @Bindable var pointer: BernPointer
+    let radius: Double
+    let opacity: Double
+
+    var body: some View {
+        GeometryReader { proxy in
+            let frame = proxy.frame(in: .global)
+            let at = pointer.location.flatMap { location in
+                frame.contains(location) ? CGPoint(x: location.x - frame.minX, y: location.y - frame.minY) : nil
+            }
+            BernGlowLight(at: at, size: proxy.size, radius: radius, opacity: opacity)
         }
     }
 }

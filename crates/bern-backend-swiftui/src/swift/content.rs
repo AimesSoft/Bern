@@ -338,11 +338,12 @@ impl Generator<'_> {
             .map(|action| self.action(action))
             .unwrap_or_default();
         out.line(format!(
-            "BernWebPage(url: {}, cookiesFile: {}, cookieDomain: {}, userAgent: {}, closeOn: {}, label: {}) {{ {close} }}",
+            "BernWebPage(url: {}, cookiesFile: {}, cookieDomain: {}, userAgent: {}, contentMode: .{}, closeOn: {}, label: {}) {{ {close} }}",
             text("url"),
             text("cookies_file"),
             text("cookie_domain"),
             text("user_agent"),
+            element.keyword("content_mode").unwrap_or("auto"),
             text("close_on"),
             self.text_prop(element, "label")
                 .unwrap_or_else(|| "nil".into()),
