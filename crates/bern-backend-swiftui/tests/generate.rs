@@ -287,6 +287,24 @@ fn rows_give_items_their_widths_and_sized_stacks_start_them() {
 /// Both spacers of a centered label keep their share, even through a condition.
 #[test]
 fn centered_row_keeps_both_spacers() {
+    use bern_ir::{Element, Expr, ExprKind, IfNode, Node, Prop};
+    use bern_protocol::{Type, Value};
+    let element = |kind: &str, props, children| {
+        Node::Element(Element {
+            kind: kind.into(),
+            id: None,
+            path: format!("test.{kind}"),
+            props,
+            template: None,
+            children,
+            action: None,
+            source: SourceLocation {
+                file: "centered-row.rs".into(),
+                line: 1,
+                column: 1,
+            },
+        })
+    };
     let (config, mut compiled) = showcase();
     let spacer = || element("Spacer", Default::default(), vec![]);
     let text = element(
@@ -2480,6 +2498,22 @@ fn content_in_a_window_starts_at_its_top_leading_corner() {
         "swiftc rejected the generated code:\n{}",
         String::from_utf8_lossy(&result.stderr)
     );
+}
+
+/// Whole-window motion must not feed its painted coordinates into safe-area layout.
+#[test]
+fn whole_window_motion_is_ignored_by_layout() {
+    let style = include_str!("../templates/BernStyle.swift");
+    assert!(style.contains("private struct BernMoveIn: GeometryEffect"));
+    assert!(style.contains(
+        "content.modifier(BernMoveIn(edge: edge, progress: shown ? 1 : 0).ignoredByLayout())"
+    ));
+    assert!(style.contains("BernMoveOut(edge: edge, progress: 1).ignoredByLayout()"));
+    assert!(style.contains("BernMoveOut(edge: edge, progress: 0).ignoredByLayout()"));
+    let start = style.find("private struct BernMoveIn:").unwrap();
+    let end = start + style[start..].find("private struct BernMoveOut:").unwrap();
+    assert!(!style[start..end].contains("visualEffect"));
+    assert!(style[start..end].contains("1 - min(progress, 1)"));
 }
 
 /// Slider feedback is tied to the interaction binding, never observed values.

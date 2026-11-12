@@ -2082,8 +2082,9 @@ private struct BernWholeWindow: ViewModifier {
 
 /// A page across the whole window coming in from `edge`: it stops at the
 /// edge, where a spring would carry it past, lifting it off the far edge
-/// and showing what lies behind for a moment.
-private struct BernMoveIn: AnimatableModifier {
+/// and showing what lies behind for a moment. Applied with ignoredByLayout:
+/// painted coordinates must not change which safe areas the page reaches.
+private struct BernMoveIn: GeometryEffect {
     let edge: Edge
     nonisolated var progress: Double
 
@@ -2092,19 +2093,17 @@ private struct BernMoveIn: AnimatableModifier {
         set { progress = newValue }
     }
 
-    func body(content: Content) -> some View {
-        let away = 1 - min(progress, 1)
-        let edge = edge
-        return content.visualEffect { content, proxy in
-            content.offset(bernAway(edge, size: proxy.size, by: away))
-        }
+    nonisolated func effectValue(size: CGSize) -> ProjectionTransform {
+        let away = bernAway(edge, size: size, by: 1 - min(progress, 1))
+        return ProjectionTransform(CGAffineTransform(translationX: away.width, y: away.height))
     }
 }
 
 /// A page across the whole window going out to `edge`: a tenth of its size
 /// past it, so the slow end of its spring passes off screen instead of
 /// keeping its last strip at the edge. A geometry effect, as SwiftUI's own
-/// move: a view on its way out is drawn on, not built again.
+/// move: a view on its way out is drawn on, not built again. This effect is
+/// also ignored by layout, keeping safe areas fixed while the page leaves.
 private struct BernMoveOut: GeometryEffect {
     let edge: Edge
     nonisolated var progress: Double
@@ -2134,7 +2133,8 @@ extension AnyTransition {
     /// Out to beyond `edge`, for a page across the whole window: see
     /// `BernMoveOut`.
     static func bernMoveOut(edge: Edge) -> AnyTransition {
-        .modifier(active: BernMoveOut(edge: edge, progress: 1), identity: BernMoveOut(edge: edge, progress: 0))
+        .modifier(active: BernMoveOut(edge: edge, progress: 1).ignoredByLayout(),
+                  identity: BernMoveOut(edge: edge, progress: 0).ignoredByLayout())
     }
 }
 
@@ -4377,7 +4377,7 @@ private struct BernEntranceLook: ViewModifier {
         if case .grow(let edge) = appear {
             content.modifier(BernGrow(edge: edge, progress: shown ? 1 : 0))
         } else if case .move(let edge) = appear, whole {
-            content.modifier(BernMoveIn(edge: edge, progress: shown ? 1 : 0))
+            content.modifier(BernMoveIn(edge: edge, progress: shown ? 1 : 0).ignoredByLayout())
         } else if case .move(let edge) = appear {
             let shown = shown
             content.visualEffect { content, proxy in
