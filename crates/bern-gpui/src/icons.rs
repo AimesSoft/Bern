@@ -3,7 +3,7 @@
 //! an SVG as a mask in the color it is given, as a template image.
 
 use crate::units::px;
-use gpui::{AssetSource, IntoElement, Rgba, SharedString, Styled, svg};
+use gpui::{AssetSource, IntoElement, ParentElement, Rgba, SharedString, Styled, div, svg};
 use std::borrow::Cow;
 
 /// The application's icons as GPUI assets, at `icons/<name>.svg`.
@@ -43,4 +43,56 @@ pub(crate) fn icon(name: &str, size: f32, color: Rgba) -> gpui::AnyElement {
         .flex_none()
         .text_color(color)
         .into_any_element()
+}
+
+/// Two copies of the same mask, the accent clipped from the top down.
+pub(crate) fn decorated(
+    name: &str,
+    size: f32,
+    foreground: Rgba,
+    accent: Rgba,
+    surface: Rgba,
+    progress: Option<f32>,
+    badge: Option<&str>,
+) -> gpui::AnyElement {
+    if progress.is_none() && badge.is_none() {
+        return icon(name, size, foreground);
+    }
+    let fraction = progress
+        .filter(|value| value.is_finite())
+        .unwrap_or(0.0)
+        .clamp(0.0, 1.0);
+    let mut glyph = div()
+        .relative()
+        .flex_none()
+        .size(px(size))
+        .child(icon(name, size, foreground));
+    if fraction > 0.0 {
+        glyph = glyph.child(
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .w(px(size))
+                .h(px(size * fraction))
+                .overflow_hidden()
+                .child(icon(name, size, accent)),
+        );
+    }
+    if let Some(badge) = badge {
+        glyph = glyph.child(
+            div()
+                .absolute()
+                .right(px(-size * 0.06))
+                .bottom(px(-size * 0.06))
+                .size(px(size * 0.52))
+                .rounded(px(size))
+                .bg(surface)
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(icon(badge, size * 0.4, accent)),
+        );
+    }
+    glyph.into_any_element()
 }

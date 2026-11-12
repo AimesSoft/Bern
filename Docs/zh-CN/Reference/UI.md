@@ -164,7 +164,7 @@ SwiftUI 目标可在 `style!` 中用 `Sidebar { background: color(light: "#FAFAF
 
 | 接口 | 当前语义 |
 | --- | --- |
-| `WebPage(url:, cookies_file:, cookie_domain:, user_agent:, close_on:, label:) => action` | 填满所在位置的网页，会话独立，随组件一起消失。按下 CSS 选择器 `close_on` 找到的元素时，先于页面自己的处理运行动作：为其他应用的 WebView 做的页面可以用它自带的按钮关闭。不跟随 Web 以外的协议。`cookies_file` 指向一个内容为 `name=value; name=value` 的文件，在页面出现时读取并设置到 `cookie_domain` 上：登录 Cookie 不进入状态，命令行读不到。浏览器目标无法给其他站点的框架设置 Cookie。tvOS 没有网页引擎，不可用 |
+| `WebPage(url:, cookies_file:, cookie_domain:, user_agent:, content_mode:, close_on:, label:) => action` | 填满所在位置的网页，会话独立，随组件一起消失。按下 CSS 选择器 `close_on` 找到的元素时，先于页面自己的处理运行动作：为其他应用的 WebView 做的页面可以用它自带的按钮关闭。不跟随 Web 以外的协议。`cookies_file` 指向一个内容为 `name=value; name=value` 的文件，在页面出现时读取并设置到 `cookie_domain` 上：登录 Cookie 不进入状态，命令行读不到。浏览器目标无法给其他站点的框架设置 Cookie。tvOS 没有网页引擎，不可用。`content_mode: auto`（默认）保留网页引擎的推荐浏览环境；`mobile` 和 `desktop` 显式请求对应模式。iOS 使用 WebKit 原生模式，除了 UA，也会调整网页可见的平台和布局行为；自定义 `user_agent` 仍原样保留。其他目标暂不支持此请求，构建时会警告并保留引擎默认模式，不用伪造的 UA 或脚本代替。 |
 | `Modal(width:, height:)` | 窗口内居中面板，尺寸受可用窗口约束，背景遮罩；正文可滚动、页脚可单独放置。不写 `height` 时与内容一样高：正文的 `ScrollView` 取它滚动的内容的高度，超出窗口时面板停在窗口边缘、正文滚动。背景子树使用 `Stack(enabled: false)` 禁用 |
 | `Flow(gap:)` | 按内容固有尺寸从左到右换行；每行的子项竖直居中，`Spacer` 换行时不占宽度，排好后占满所在行余下的宽度 |
 | `Timer(interval:, enabled:) => command()` | 挂载且启用时定期提交命令；卸载、禁用时取消，间隔单位为秒。不能用来驱动逐帧绘制 |

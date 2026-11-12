@@ -1429,11 +1429,15 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("cookies_file", PropKind::DisplayText),
                 opt("cookie_domain", PropKind::DisplayText),
                 opt("user_agent", PropKind::DisplayText),
+                opt(
+                    "content_mode",
+                    PropKind::Keyword(&["auto", "mobile", "desktop"]),
+                ),
                 opt("close_on", PropKind::DisplayText),
                 opt("label", PropKind::DisplayText),
             ],
             Children::None,
-            "A web page filling its place, its session gone with it; `cookies_file` names a file of `name=value; name=value` to sign in with on `cookie_domain`, kept out of the state; a press on what the CSS selector `close_on` finds runs the action",
+            "A web page filling its place, its session gone with it; `content_mode` prefers auto (the default), mobile or desktop browsing independently of `user_agent`; `cookies_file` names a file of `name=value; name=value` to sign in with on `cookie_domain`, kept out of the state; a press on what the CSS selector `close_on` finds runs the action",
         )
     },
     spec(
@@ -1507,6 +1511,9 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 req("id", PropKind::Id),
                 req("icon", PropKind::Icon),
                 opt("font_size", PropKind::Number),
+                opt("icon_progress", PropKind::NumberValue),
+                opt("badge_icon", PropKind::Icon),
+                opt("badge_visible", PropKind::Bool),
                 opt("height", PropKind::Length),
                 req("label", PropKind::DisplayText),
                 opt(
@@ -1523,7 +1530,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("default_focus", PropKind::Flag),
             ],
             Children::None,
-            "Icon-only button with an accessible name; `prominence: plain` draws no background, as the icons at the foot of a sidebar; `height` makes it a round system button of that diameter; `pick` asks for a file and `paste` reads the clipboard as `Button` does; `default_focus: true` starts the focus on it as `Button` does",
+            "Icon-only button with an accessible name; `icon_progress` colors the actual icon in the theme accent from top to bottom (0–1, non-finite values treated as zero); `badge_icon` overlays a small icon at its bottom-right, shown unless `badge_visible` is false; these decorations never change layout or hit testing; `prominence: plain` draws no background, as the icons at the foot of a sidebar; `height` makes it a round system button of that diameter; `pick` asks for a file and `paste` reads the clipboard as `Button` does; `default_focus: true` starts the focus on it as `Button` does",
         )
     },
     ComponentSpec {
@@ -1883,6 +1890,15 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
                 "a `{}` either asks for a file (`pick:`) or reads the clipboard (`paste:`), not both",
                 spec.name
             ),
+        });
+    }
+    if spec.name == "IconButton"
+        && shape.props.contains(&"badge_visible")
+        && !shape.props.contains(&"badge_icon")
+    {
+        errors.push(ShapeError {
+            prop: Some("badge_visible".into()),
+            message: "`badge_visible` controls `badge_icon`; supply a badge icon".into(),
         });
     }
     if spec.name == "StatusItem" && shape.props.contains(&"icon") == shape.props.contains(&"image")
@@ -2391,5 +2407,33 @@ mod tests {
         assert!(!check_shape(&item).is_empty());
         item.parent = Some("Section");
         assert!(check_shape(&item).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod icon_decoration_tests {
+    use super::*;
+
+    #[test]
+    fn decorations_are_optional_and_a_visibility_binding_needs_a_badge() {
+        let mut shape = ElementShape {
+            name: "IconButton",
+            props: vec!["id", "icon", "label"],
+            keywords: Vec::new(),
+            has_template: false,
+            children: None,
+            has_action: true,
+            parent: None,
+            is_root: false,
+        };
+        assert!(check_shape(&shape).is_empty());
+        shape.props.extend(["icon_progress", "badge_visible"]);
+        assert!(
+            check_shape(&shape)
+                .iter()
+                .any(|error| error.prop.as_deref() == Some("badge_visible"))
+        );
+        shape.props.push("badge_icon");
+        assert!(check_shape(&shape).is_empty());
     }
 }

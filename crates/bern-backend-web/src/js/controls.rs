@@ -53,6 +53,9 @@ impl Generator<'_> {
                     ("role", Self::keyword(element, "role")),
                     ("prominence", Self::keyword(element, "prominence")),
                     ("fontSize", element.number("font_size").map(number)),
+                    ("iconProgress", self.value_prop(element, "icon_progress")),
+                    ("badgeIcon", element.icon("badge_icon").map(string)),
+                    ("badgeVisible", self.value_prop(element, "badge_visible")),
                     (
                         "diameter",
                         (element.kind == "IconButton")

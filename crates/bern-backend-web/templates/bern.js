@@ -1946,9 +1946,31 @@ export function contextMenu(node, ctx, label, items) {
   onCleanup(() => list.remove());
 }
 
-export function IconButton(p, ctx, { id, icon: name, label, enabled, style, setFile, fileKinds, fontSize, prominence, diameter, defaultFocus }, action) {
+export function IconButton(p, ctx, { id, icon: name, label, enabled, style, setFile, fileKinds, fontSize, prominence, diameter, defaultFocus, iconProgress, badgeIcon, badgeVisible }, action) {
   const node = el("button", { class: `bern-icon-button${prominence === "prominent" ? " bern-icon-button-prominent" : ""}`, type: "button" }, icon(name, fontSize ?? 16));
   if (fontSize != null) { node.firstElementChild.style.width = `${fontSize}px`; node.firstElementChild.style.height = `${fontSize}px`; }
+  if (iconProgress != null || badgeIcon != null) {
+    const base = node.firstElementChild;
+    const glyph = el("span", { class: "bern-icon-glyph", "aria-hidden": "true" });
+    Object.assign(glyph.style, { width: `${fontSize ?? 16}px`, height: `${fontSize ?? 16}px` });
+    glyph.append(base);
+    if (iconProgress != null) {
+      const fill = icon(name, fontSize ?? 16);
+      fill.classList.add("bern-icon-fill");
+      glyph.append(fill);
+      effect(() => {
+        const value = Number(typeof iconProgress === "function" ? iconProgress() : iconProgress);
+        const fraction = Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
+        fill.style.clipPath = `inset(0 0 ${(1 - fraction) * 100}% 0)`;
+      });
+    }
+    if (badgeIcon != null) {
+      const badge = el("span", { class: "bern-icon-badge" }, icon(badgeIcon));
+      glyph.append(badge);
+      effect(() => { badge.hidden = badgeVisible != null && !(typeof badgeVisible === "function" ? badgeVisible() : badgeVisible); });
+    }
+    node.append(glyph);
+  }
   // A round button of an exact diameter.
   if (diameter != null) { Object.assign(node.style, { width: `${diameter}px`, height: `${diameter}px`, minWidth: `${diameter}px`, borderRadius: "50%", padding: "0" }); }
   bindAttr(node, "aria-label", label);

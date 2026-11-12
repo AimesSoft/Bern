@@ -128,6 +128,18 @@ const DEVICE_TARGET: &str = "aarch64-apple-ios";
 
 pub struct SwiftUiIos;
 
+/// The shared SwiftUI features plus the browsing modes of iOS WebKit.
+fn features() -> &'static [&'static str] {
+    static FEATURES: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
+    FEATURES.get_or_init(|| {
+        crate::FEATURES
+            .iter()
+            .copied()
+            .chain([bern_target_api::feature::WEB_CONTENT_MODE])
+            .collect()
+    })
+}
+
 /// The simulator's architecture as Swift and Rust name it, and the Rust
 /// target of the Mac, which runs the command line tools.
 fn architectures() -> (&'static str, &'static str, &'static str) {
@@ -149,7 +161,7 @@ impl Target for SwiftUiIos {
             window_chrome: true,
             text_marks: true,
             dynamic_items: true,
-            features: crate::FEATURES,
+            features: features(),
             id: "swiftui-ios",
             ui: "swiftui",
             platforms: &["ios"],

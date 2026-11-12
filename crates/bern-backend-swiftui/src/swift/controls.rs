@@ -151,11 +151,28 @@ impl Generator<'_> {
         let icon = element.icon("icon");
         match (element.kind.as_str(), icon) {
             ("IconButton", Some(icon)) => {
-                out.line(format!(
-                    "SwiftUI.Label({label}, systemImage: {})",
-                    string(icon)
-                ));
-                out.line(".labelStyle(.iconOnly)");
+                if element.prop("icon_progress").is_some() || element.icon("badge_icon").is_some() {
+                    let progress = element
+                        .expr("icon_progress")
+                        .map(|value| format!("Double({})", self.expr(value)))
+                        .unwrap_or_else(|| "nil".into());
+                    let badge = element
+                        .icon("badge_icon")
+                        .map(string)
+                        .unwrap_or_else(|| "nil".into());
+                    let visible = element
+                        .expr("badge_visible")
+                        .map(|value| self.expr(value))
+                        .unwrap_or_else(|| "true".into());
+                    out.line(format!("BernIconGlyph(name: {}, progress: {progress}, badge: {badge}, badgeVisible: {visible})", string(icon)));
+                    out.line(format!(".accessibilityElement(children: .ignore).accessibilityLabel(SwiftUI.Text(verbatim: {label}))"));
+                } else {
+                    out.line(format!(
+                        "SwiftUI.Label({label}, systemImage: {})",
+                        string(icon)
+                    ));
+                    out.line(".labelStyle(.iconOnly)");
+                }
                 if let Some(size) = element.number("font_size") {
                     out.line(format!(".font(.system(size: {}))", double(size)));
                 }
