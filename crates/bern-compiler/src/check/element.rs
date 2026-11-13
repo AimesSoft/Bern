@@ -633,13 +633,22 @@ impl Checker<'_> {
                 );
             }
         }
-        // A television's layout is chosen by the device, not the width:
-        // optional, one at most, and without a breakpoint.
+        // A television's or watch's layout is chosen by the device, not the
+        // width: optional, one at most, and without a breakpoint.
         let tv = sizes.iter().filter(|name| **name == "tv").count();
         if tv > 1 {
             self.error(
                 element.span,
                 format!("error[B401]: `Adaptive` has at most one `Layout(size: tv)`, found {tv}"),
+            );
+        }
+        let watch = sizes.iter().filter(|name| **name == "watch").count();
+        if watch > 1 {
+            self.error(
+                element.span,
+                format!(
+                    "error[B401]: `Adaptive` has at most one `Layout(size: watch)`, found {watch}"
+                ),
             );
         }
     }

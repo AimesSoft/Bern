@@ -99,7 +99,11 @@ impl Generator<'_> {
         }
         out.close("}");
         out.line("HorizontalDivider()");
-        out.open("LazyColumn(Modifier.fillMaxWidth().weight(1f)) {");
+        if self.watch {
+            out.open("BernLazyList(Modifier.fillMaxWidth().weight(1f), androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 4.dp)) {");
+        } else {
+            out.open("LazyColumn(Modifier.fillMaxWidth().weight(1f)) {");
+        }
         out.open(format!(
             "items(tableRows, key = {{ {var} -> BernKey.of({var}.{key}) }}) {{ {var} ->"
         ));
@@ -161,7 +165,9 @@ impl Generator<'_> {
         }
         out.close("}");
         out.close("}");
-        out.line("HorizontalDivider()");
+        if !self.watch {
+            out.line("HorizontalDivider()");
+        }
         out.close("}");
         out.close("}");
         out.close("}");

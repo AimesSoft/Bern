@@ -57,12 +57,12 @@ pub fn lower(
         let mut layouts = Vec::new();
         for size in &feature.layouts {
             match LayoutSize::parse(&size.to_string())
-                .filter(|size| LayoutSize::REQUIRED.contains(size))
+                .filter(|size| LayoutSize::REQUIRED.contains(size) || *size == LayoutSize::Watch)
             {
                 Some(size) => layouts.push(size),
                 None => diagnostics.push(
                     Diagnostic::error(format!(
-                        "unknown layout size `{size}`; sizes are compact and expanded"
+                        "unknown layout size `{size}`; sizes are compact, expanded and watch"
                     ))
                     .at(location(declared.file, size.span())),
                 ),

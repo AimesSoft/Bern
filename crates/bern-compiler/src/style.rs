@@ -14,8 +14,8 @@ use bern_target_api::Diagnostic;
 use proc_macro2::{Ident, Span};
 
 /// Platforms a rule may name in `#[target(…)]` and `#[exempt(…)]`.
-pub const PLATFORMS: [&str; 7] = [
-    "macos", "ios", "tvos", "windows", "linux", "android", "browser",
+pub const PLATFORMS: [&str; 8] = [
+    "macos", "ios", "tvos", "windows", "linux", "android", "wearos", "browser",
 ];
 
 /// Controls that take style overrides, with the states that apply to them.

@@ -159,7 +159,7 @@ impl LayoutConfig {
     /// Whether the breakpoints give `size` a range of widths.
     pub fn has(&self, size: LayoutSize) -> bool {
         match size {
-            LayoutSize::Compact | LayoutSize::Expanded => true,
+            LayoutSize::Compact | LayoutSize::Expanded | LayoutSize::Watch => true,
             LayoutSize::Medium => self.medium_below.is_some(),
             LayoutSize::Large => self.expanded_below.is_some(),
         }
@@ -174,6 +174,8 @@ pub enum LayoutSize {
     Medium,
     Expanded,
     Large,
+    /// A device layout, never selected from width breakpoints.
+    Watch,
 }
 
 impl LayoutSize {
@@ -195,6 +197,7 @@ impl LayoutSize {
             LayoutSize::Medium => "medium",
             LayoutSize::Expanded => "expanded",
             LayoutSize::Large => "large",
+            LayoutSize::Watch => "watch",
         }
     }
 
@@ -210,7 +213,10 @@ impl LayoutSize {
     }
 
     pub fn parse(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|size| size.name() == name)
+        Self::ALL
+            .into_iter()
+            .chain([Self::Watch])
+            .find(|size| size.name() == name)
     }
 }
 
@@ -317,6 +323,7 @@ impl FeatureDef {
             .find(|exemption| exemption.platform == platform);
         self.coverage
             .iter()
+            .filter(|row| (row.size == LayoutSize::Watch) == (platform == "wearos"))
             .map(|SizeCoverage { size, coverage }| {
                 let result = match (coverage, exemption, &self.guaranteed) {
                     (Coverage::Covered { entries }, _, _) => FeatureResult::Covered {

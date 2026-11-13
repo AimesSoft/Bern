@@ -203,6 +203,7 @@ bern run --target web_app --port 4173
 ## 电视、快捷键与起始焦点
 
 - `Layout(size: tv)` 是电视上的布局，`Adaptive` 里最多一个，不影响其他尺寸的必需与回退规则；表达式可读 `window.tv`。tvOS 在构建时只保留电视显示的部分，所以手机与桌面布局里电视没有的能力（如 `pick:`）不会让 tvOS 构建失败。
+- `Layout(size: watch)` 是 Wear OS 手表上的布局，`Adaptive` 里最多一个；表达式可读 `window.watch`。应用声明 `wearos` 目标时，所有可达的 `Adaptive` 都必须显式提供 `Layout(size: watch)`（不回落到手机 `compact`），`#[bern::features]` 也会单独校验 `watch` 覆盖；其他后端在检查前就会裁剪掉 `watch` 分支与仅被它引用的组件。`platform = "wearos"` 会使用 Wear Material 3 打出独立的手表 APK（`minSdk = 30`、`android.hardware.type.watch`、默认 `android.standalone = true`）。
 - `Shortcut(key:, enabled:) => 动作` 是没有控件的快捷键，键的写法与控件的 `shortcut` 相同。电视上 `escape`、`space` 与方向键分别是遥控器的返回、播放/暂停与触控板方向（方向只在焦点无处可移时到达）。Android 手机与平板上，系统的返回（按钮或手势）先运行最后生效的 `escape` 快捷键，没有时才离开应用：按 Esc 关闭的页面或图层，按返回也会关闭。
 - `Button` / `IconButton` 的 `default_focus: true` 让界面出现时焦点从它开始；电视上每个页面都应给出一个。
 - `window.keyboard` 是否连着实体键盘：电脑上总是成立，手机与平板跟随键盘的连接与断开。只对键盘有用的内容（如快捷键设置）写在 `if window.keyboard { … }` 里，没接键盘的手机上就不出现。

@@ -1123,6 +1123,11 @@ fn target_config(name: String, target: RawTarget, errors: &mut Vec<Diagnostic>) 
             "target `{name}`: tvOS has no WebView; omit webview or set it to false"
         )));
     }
+    if target.platform == "wearos" && target.webview == Some(true) {
+        errors.push(Diagnostic::error(format!(
+            "target `{name}`: Wear OS has no WebView; omit webview or set it to false"
+        )));
+    }
     if target.javascript && target.web_mode.as_deref() == Some("ui") {
         errors.push(Diagnostic::error(format!(
             "target `{name}`: JavaScript hosting currently requires web_mode = \"app\""
@@ -1133,9 +1138,20 @@ fn target_config(name: String, target: RawTarget, errors: &mut Vec<Diagnostic>) 
             "target `{name}`: web_extension requires a browser target"
         )));
     }
-    if target.android.is_some() && target.platform != "android" {
+    if target.android.is_some() && !matches!(target.platform.as_str(), "android" | "wearos") {
         errors.push(Diagnostic::error(format!(
-            "target `{name}`: android host options require an Android target"
+            "target `{name}`: android host options require an Android or Wear OS target"
+        )));
+    }
+
+    if target.platform != "wearos"
+        && target
+            .android
+            .as_ref()
+            .is_some_and(|options| options.standalone.is_some())
+    {
+        errors.push(Diagnostic::error(format!(
+            "target `{name}`: android.standalone applies to Wear OS targets only"
         )));
     }
 
@@ -1240,9 +1256,9 @@ fn android_abis(
     let Some(abis) = abis else {
         return Vec::new();
     };
-    if platform != "android" {
+    if !matches!(platform, "android" | "wearos") {
         errors.push(Diagnostic::error(format!(
-            "target `{name}`: `abis` applies to Android targets only"
+            "target `{name}`: `abis` applies to Android and Wear OS targets only"
         )));
         return Vec::new();
     }
@@ -1940,7 +1956,19 @@ mod tests {
             &mut errors,
         );
         assert_eq!(errors.len(), 1);
-        assert!(errors[0].message.contains("require an Android target"));
+        assert!(
+            errors[0]
+                .message
+                .contains("require an Android or Wear OS target")
+        );
+        let mut wear_errors = Vec::new();
+        let wear = target_config(
+            "watch".into(),
+            parse("platform = 'wearos'\nandroid = { network = true }"),
+            &mut wear_errors,
+        );
+        assert!(wear_errors.is_empty(), "{wear_errors:?}");
+        assert!(wear.android.unwrap().network);
         assert!(
             toml::from_str::<RawTarget>("platform = 'android'\nandroid = { netwrok = true }")
                 .is_err()

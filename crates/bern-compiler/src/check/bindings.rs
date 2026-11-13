@@ -197,6 +197,7 @@ impl Checker<'_> {
                 || field.as_deref() == Some("tabletop")
                 || field.as_deref() == Some("fold")
                 || field.as_deref() == Some("tv")
+                || field.as_deref() == Some("watch")
                 || field.as_deref() == Some("webview")
                 || field.as_deref() == Some("menu_bar")
                 || field.as_deref() == Some("keyboard")
@@ -206,7 +207,7 @@ impl Checker<'_> {
             if !known || path.segments.len() != 2 {
                 self.error(
                     path.span(),
-                    "the hosting window offers `window.fullscreen` (the actual full-screen state), `window.idle` (no input for `idle_after` seconds), its size: `window.compact`, `window.medium`, `window.expanded`, `window.large`, `window.short` (shorter than the compact breakpoint, as a phone on its side), `window.fold` (where a foldable's fold lies), `window.tv` (the window is on a television), `window.webview` (the target supports WebView), `window.menu_bar` (the application's `MenuBar` shows in the system menu bar), `window.keyboard` (a hardware keyboard is attached), `window.touch` (a direct touch screen is available), and `window.app_version` (`version` of `[app]` in Bern.toml)",
+                    "the hosting window offers `window.fullscreen` (the actual full-screen state), `window.idle` (no input for `idle_after` seconds), its size: `window.compact`, `window.medium`, `window.expanded`, `window.large`, `window.short` (shorter than the compact breakpoint, as a phone on its side), `window.fold` (where a foldable's fold lies), `window.tv` (the window is on a television), `window.watch` (the window is on a watch), `window.webview` (the target supports WebView), `window.menu_bar` (the application's `MenuBar` shows in the system menu bar), `window.keyboard` (a hardware keyboard is attached), `window.touch` (a direct touch screen is available), and `window.app_version` (`version` of `[app]` in Bern.toml)",
                 );
                 return None;
             }
@@ -242,6 +243,7 @@ impl Checker<'_> {
                 && field != "tabletop"
                 && field != "fold"
                 && field != "tv"
+                && field != "watch"
                 && field != "webview"
                 && field != "menu_bar"
                 && field != "keyboard"

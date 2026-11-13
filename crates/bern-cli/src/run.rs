@@ -34,7 +34,8 @@ pub fn start(run: &Run, port: Option<u16>, trace: Option<&str>) -> Result<ExitCo
             package,
             adb,
             forward,
-        } => android(apk, package, adb, forward.as_ref(), trace),
+            watch,
+        } => android(apk, package, adb, forward.as_ref(), *watch, trace),
     }
 }
 
@@ -65,41 +66,79 @@ pub fn validate_port(run: &Run, port: Option<u16>) -> Result<(), String> {
     Ok(())
 }
 
-/// Install the APK on the one Android device `adb` reaches, start it, and
-/// show its log until the app's process ends.
+/// Install the APK on the Android or Wear OS device `adb` reaches, start it,
+/// and show its log until the app's process ends.
 fn android(
     apk: &Path,
     package: &str,
     adb: &Path,
     forward: Option<&(std::path::PathBuf, String)>,
+    watch: bool,
     trace: Option<&str>,
 ) -> Result<ExitCode, String> {
-    let run = |args: &[&str]| {
+    let adb_run = |args: &[&str]| {
         Command::new(adb)
             .args(args)
             .output()
             .map_err(|error| format!("cannot run {}: {error}", adb.display()))
     };
-    let devices = run(&["devices"])?;
+    let devices = adb_run(&["devices"])?;
     let listed: Vec<String> = String::from_utf8_lossy(&devices.stdout)
         .lines()
         .skip(1)
         .filter_map(|line| line.strip_suffix("\tdevice").map(str::to_string))
         .collect();
-    let device = match listed.as_slice() {
+    if listed.is_empty() {
+        return Err(if watch {
+            "no Wear OS device is connected; start a Wear OS emulator or connect a watch with ADB debugging on"
+        } else {
+            "no Android device is connected; connect one with USB debugging on, or start an emulator"
+        }
+        .into());
+    }
+    let is_watch_device = |serial: &str| {
+        adb_run(&["-s", serial, "shell", "getprop", "ro.build.characteristics"])
+            .ok()
+            .is_some_and(|output| {
+                String::from_utf8_lossy(&output.stdout)
+                    .split([',', ' ', '\r', '\n'])
+                    .any(|part| part.trim() == "watch")
+            })
+    };
+    let matching: Vec<String> = listed
+        .iter()
+        .filter(|serial| is_watch_device(serial) == watch)
+        .cloned()
+        .collect();
+    let device = match matching.as_slice() {
         [device] => device.clone(),
         [] => {
-            return Err(
-                "no Android device is connected; connect one with USB debugging on, or start an emulator"
-                    .into(),
-            );
+            return Err(if watch {
+                format!(
+                    "no Wear OS watch is connected (found: {}); start a Wear OS emulator",
+                    listed.join(", ")
+                )
+            } else {
+                format!(
+                    "no Android phone or tablet is connected (only Wear OS watches: {})",
+                    listed.join(", ")
+                )
+            });
         }
         _ => {
             return Err(format!(
-                "several Android devices are connected ({}); keep one",
-                listed.join(", ")
+                "several {} devices are connected ({}); keep one",
+                if watch { "Wear OS" } else { "Android" },
+                matching.join(", ")
             ));
         }
+    };
+    let run = |args: &[&str]| {
+        let mut full = Vec::with_capacity(args.len() + 2);
+        full.push("-s");
+        full.push(device.as_str());
+        full.extend_from_slice(args);
+        adb_run(&full)
     };
     eprintln!(
         "    \x1b[1;32mInstalling\x1b[0m {} on {device}",
@@ -192,7 +231,14 @@ fn android(
         }
     }
     let mut log = Command::new(adb)
-        .args(["logcat", "-v", "brief", &format!("--pid={process}")])
+        .args([
+            "-s",
+            device.as_str(),
+            "logcat",
+            "-v",
+            "brief",
+            &format!("--pid={process}"),
+        ])
         .spawn()
         .map_err(|error| format!("cannot read the device log: {error}"))?;
     while pid().as_deref() == Some(process.as_str()) {

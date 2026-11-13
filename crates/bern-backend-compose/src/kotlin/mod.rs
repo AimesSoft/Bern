@@ -124,6 +124,7 @@ impl Ctx {
 pub struct Generator<'a> {
     app: &'a Application,
     multicast: bool,
+    watch: bool,
     /// Whether a container anywhere declares `stagger`. Only then do the
     /// children of containers and the roots of components take part in
     /// the turns.
@@ -146,13 +147,24 @@ impl<'a> Generator<'a> {
             app,
             staggers,
             multicast: false,
+            watch: false,
         }
+    }
+
+    /// Generate for Wear OS (`ComposeWearos`).
+    pub fn with_watch(mut self, watch: bool) -> Self {
+        self.watch = watch;
+        self
     }
 
     /// Hold Android's Wi-Fi multicast filter open while the activity is visible.
     pub fn with_multicast(mut self, enabled: bool) -> Self {
         self.multicast = enabled;
         self
+    }
+
+    fn platform(&self) -> &'static str {
+        if self.watch { "wearos" } else { PLATFORM }
     }
 
     fn types(&self) -> &TypeTable {
@@ -163,7 +175,7 @@ impl<'a> Generator<'a> {
     fn style_of(&self, element: &Element) -> Option<crate::style::Resolved> {
         crate::style::resolve(
             self.app,
-            PLATFORM,
+            self.platform(),
             &element.kind,
             element.keyword("variant"),
         )

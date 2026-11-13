@@ -83,8 +83,8 @@ pub enum Run {
         bundle_id: String,
         system: SimulatedSystem,
     },
-    /// Install the APK on the Android device `adb` reaches, start its
-    /// activity and show its log until it exits.
+    /// Install the APK on the Android or Wear OS device `adb` reaches,
+    /// start its activity and show its log until it exits.
     Android {
         apk: PathBuf,
         package: String,
@@ -92,6 +92,8 @@ pub enum Run {
         /// The socket on this computer and the app's abstract socket that
         /// `adb forward` joins, for the control channel.
         forward: Option<(PathBuf, String)>,
+        /// True when targeting a Wear OS watch rather than a phone/tablet/TV.
+        watch: bool,
     },
 }
 

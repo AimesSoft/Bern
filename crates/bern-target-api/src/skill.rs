@@ -94,19 +94,35 @@ pub fn listens(channels: &[String]) -> bool {
 /// What an Android app needs: the programs run on this computer and reach
 /// the device through `adb forward`.
 pub fn android_connect(app: &Application) -> String {
+    android_connect_for(app, false)
+}
+
+/// What an Android or Wear OS app needs: the programs run on this computer
+/// and reach the device through `adb forward`.
+pub fn android_connect_for(app: &Application, watch: bool) -> String {
     let id = &app.app.bundle_id;
     let dir = format!(
         "bern-{:016x}",
         bern_protocol::fingerprint_bytes(id.as_bytes())
     );
+    let (target, socket, device, extra) = if watch {
+        (
+            "wearos",
+            "wearos.sock",
+            "Wear OS watch",
+            "\n\nWhen the phone or tablet app runs too, pass `--engine wearos`.",
+        )
+    } else {
+        ("android", "android.sock", "Android device", "")
+    };
     format!(
-        "The app runs on the Android device and the programs run on this computer, which reaches the device through `adb`. `bern run --target android` forwards the control channel; when the app was started otherwise, forward it first:\n\n\
+        "The app runs on the {device} and the programs run on this computer, which reaches the device through `adb`. `bern run --target {target}` forwards the control channel; when the app was started otherwise, forward it first:\n\n\
          ```bash\n\
          dir=\"${{BERN_IPC_DIR:-${{TMPDIR:-/tmp}}}}/{dir}\"\n\
-         mkdir -p \"$dir\" && chmod 700 \"$dir\" && rm -f \"$dir/android.sock\"\n\
-         adb forward localfilesystem:\"$dir/android.sock\" localabstract:bern.{id}\n\
+         mkdir -p \"$dir\" && chmod 700 \"$dir\" && rm -f \"$dir/{socket}\"\n\
+         adb forward localfilesystem:\"$dir/{socket}\" localabstract:bern.{id}\n\
          ```\n\n\
-         On Windows the folder is `%TEMP%\\{dir}`."
+         On Windows the folder is `%TEMP%\\{dir}`.{extra}"
     )
 }
 
@@ -464,7 +480,7 @@ pub fn markdown(app: &Application, place: &Place) -> String {
         out,
         "- Write parameters as `--name value` or `--name=value`. Text goes as it is; `int` and `float` as numbers; `bool` as `true` or `false`; an optional parameter takes `none` for no value; a choice takes its variant name. Lists, records and variants with fields go as JSON (see Types below).\n\
          - Each run waits for the result and prints it as JSON. Exit status: 0 done, 1 the command failed (`error[code]: message` on standard error), 2 wrong usage, 3 the app is not running or the connection was lost.\n\
-         - `--engine` picks the app when several copies run: by the system it runs on (`macos`, `ios`, `tvos`, `windows`, `linux`, `android`), or by its id, which is new each time it starts; the error lists them. `--session ID` picks the window session for `ui` and `window` commands when several are open.\n\
+         - `--engine` picks the app when several copies run: by the system it runs on (`macos`, `ios`, `tvos`, `windows`, `linux`, `android`, `wearos`), or by its id, which is new each time it starts; the error lists them. `--session ID` picks the window session for `ui` and `window` commands when several are open.\n\
          - `{cli} state` prints the state below, `{cli} sessions` the open UI sessions and windows, `{cli} catalog` the whole catalog as JSON, `{cli} --help` the commands.\n"
     );
 

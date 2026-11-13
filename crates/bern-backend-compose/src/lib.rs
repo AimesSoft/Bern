@@ -12,6 +12,9 @@ mod names;
 mod project;
 mod style;
 pub mod toolchain;
+mod wear_runtime;
+mod wearos;
+pub use wearos::ComposeWearos;
 
 pub use project::KOTLIN;
 
@@ -300,6 +303,8 @@ impl Target for ComposeAndroid {
     ) -> Result<Vec<GeneratedFile>, Vec<Diagnostic>> {
         let app = &bern_target_api::svg::prepare(app, &context.target);
         bern_target_api::svg::validate(app, context)?;
+        let watch = context.target.platform == "wearos";
+        let platform = context.target.platform.as_str();
         let product = product_name(app);
         let package = names::package(&app.app.bundle_id);
         let main = PathBuf::from("project/app/src/main");
@@ -308,7 +313,7 @@ impl Target for ComposeAndroid {
         // adaptive, round and themed icons), or the declared PNG or the
         // Bern logo as drawn.
         let failed = |message: String| vec![Diagnostic::error(message)];
-        let (mut launcher, round) = match icon::source(app, "android", &context.project_dir) {
+        let (mut launcher, round) = match icon::source(app, platform, &context.project_dir) {
             icon::Source::Native(dir) => {
                 let res = icon::android_res(&dir).map_err(|message| {
                     failed(format!("the Android icon {} {message}", dir.display()))
@@ -327,7 +332,7 @@ impl Target for ComposeAndroid {
             }
             _ => {
                 let images =
-                    icon::images(app, "android", &context.project_dir, icon::Shape::AsDrawn)
+                    icon::images(app, platform, &context.project_dir, icon::Shape::AsDrawn)
                         .map_err(failed)?;
                 let launcher = adaptive_icon(&main, "ic_launcher", &icon::largest(&images).png)
                     .map_err(failed)?;
@@ -338,7 +343,7 @@ impl Target for ComposeAndroid {
         // alias, its resources renamed from `ic_launcher` to
         // `ic_launcher_<name>` so they sit beside the primary icon's.
         let mut icons = Vec::new();
-        let alternates = icon::alternates(app, "android", &context.project_dir).map_err(failed)?;
+        let alternates = icon::alternates(app, platform, &context.project_dir).map_err(failed)?;
         if !alternates.is_empty() {
             icons.push(project::LauncherIcon {
                 alias: ".BernIconDefault".into(),
@@ -397,18 +402,19 @@ impl Target for ComposeAndroid {
             GeneratedFile::text("project/gradle.properties", project::GRADLE_PROPERTIES),
             GeneratedFile::text(
                 "project/app/build.gradle.kts",
-                project::app_build(
+                project::app_build_for(
                     app,
                     &build_abis(context)
                         .iter()
                         .map(|abi| abi.name)
                         .collect::<Vec<_>>(),
                     split_abis(context),
+                    watch,
                 ),
             ),
             GeneratedFile::text(
                 main.join("AndroidManifest.xml"),
-                project::manifest(app, round, context.target.android.as_ref(), &icons),
+                project::manifest_for(app, round, context.target.android.as_ref(), &icons, watch),
             ),
             GeneratedFile::text(
                 main.join("res/xml/bern_file_paths.xml"),
@@ -418,10 +424,13 @@ impl Target for ComposeAndroid {
                 main.join("baseline-prof.txt"),
                 project::baseline_profile(app),
             ),
-            GeneratedFile::text(main.join("res/values/themes.xml"), project::theme(false)),
+            GeneratedFile::text(
+                main.join("res/values/themes.xml"),
+                project::theme_for(false, watch),
+            ),
             GeneratedFile::text(
                 main.join("res/values-night/themes.xml"),
-                project::theme(true),
+                project::theme_for(true, watch),
             ),
             // A Media3 view that draws into a TextureView, which a rounded
             // frame can clip; the default SurfaceView cannot be clipped.
@@ -461,6 +470,7 @@ impl Target for ComposeAndroid {
                     .join(package.replace('.', "/"))
                     .join("BernGenerated.kt"),
                 Generator::new(app)
+                    .with_watch(watch)
                     .with_multicast(
                         context
                             .target
@@ -473,6 +483,10 @@ impl Target for ComposeAndroid {
             GeneratedFile::text("glue/Cargo.toml", glue::cargo_toml(context, app)),
             GeneratedFile::text("glue/src/lib.rs", glue::lib_rs(context, app)),
         ];
+        if watch {
+            files.retain(|file| !file.path.starts_with(sources.join("dev/bern/runtime")));
+            files.extend(wear_runtime::files(&app.engine_kinds(), &package));
+        }
         if glue::ipc(context) {
             files.extend([
                 GeneratedFile::text("tools/Cargo.toml", glue::tools_cargo_toml(context, app)),
@@ -480,13 +494,13 @@ impl Target for ComposeAndroid {
                 GeneratedFile::text("tools/src/mcp.rs", glue::mcp_rs(context, app)),
             ]);
         }
-        if project::for_television(app) {
+        if !watch && project::for_television(app) {
             files.push(GeneratedFile::text(
                 main.join("res/drawable/bern_tv_banner.xml"),
                 project::TV_BANNER,
             ));
         }
-        if bern_target_api::svg::used(app) {
+        if !watch && bern_target_api::svg::used(app) {
             files.push(GeneratedFile::text(
                 sources.join("dev/bern/runtime/BernSvg.kt"),
                 bern_target_api::svg::template(include_str!("../templates/BernSvg.kt"), true),
@@ -522,13 +536,13 @@ impl Target for ComposeAndroid {
         }
         files.extend(launcher);
         let manifest = serde_json::json!({
-            "target": self.descriptor().id,
+            "target": if watch { "compose-wearos" } else { self.descriptor().id },
             "ui": "compose",
-            "platform": "android",
+            "platform": platform,
             "ir_version": app.ir_version,
             "generator": "bern-backend-compose",
             "generator_version": env!("CARGO_PKG_VERSION"),
-            "minimum_sdk": MINIMUM_SDK,
+            "minimum_sdk": if watch { project::WEAR_MINIMUM_SDK } else { MINIMUM_SDK },
             "target_sdk": TARGET_SDK,
             "abis": build_abis(context).iter().map(|abi| abi.name).collect::<Vec<_>>(),
             "profile": if context.release { "release" } else { "debug" },
@@ -565,9 +579,15 @@ impl Target for ComposeAndroid {
         let bin = toolchain::ndk_bin(&tools.ndk);
         let path = |path: &PathBuf| path.display().to_string();
         let abis = build_abis(context);
+        let watch = context.target.platform == "wearos";
+        let minimum_sdk = if watch {
+            project::WEAR_MINIMUM_SDK
+        } else {
+            MINIMUM_SDK
+        };
         let engine = |abi: &Abi| {
             let compiler =
-                |suffix: &str| path(&bin.join(format!("{}{MINIMUM_SDK}-{suffix}", abi.clang)));
+                |suffix: &str| path(&bin.join(format!("{}{minimum_sdk}-{suffix}", abi.clang)));
             let target = abi.rust.replace('-', "_");
             let env = vec![
                 (
@@ -627,24 +647,37 @@ impl Target for ComposeAndroid {
         let kotlin = BuildStep::Mirror {
             dir: gradle_project.join("app/src/main/kotlin"),
             files: Vec::new(),
-            keep: [
-                "BernRuntime",
-                "BernViews",
-                "BernStyle",
-                "BernFeatures",
-                "BernPictureTries",
-                "BernMedia",
-                "BernScene",
-                "BernAppIcon",
-            ]
-            .iter()
-            .map(|name| PathBuf::from(format!("dev/bern/runtime/{name}.kt")))
-            .chain(
-                bern_target_api::svg::used(app)
-                    .then(|| PathBuf::from("dev/bern/runtime/BernSvg.kt")),
-            )
-            .chain([PathBuf::from(package.replace('.', "/")).join("BernGenerated.kt")])
-            .collect(),
+            keep: if watch {
+                wear_runtime::files(&app.engine_kinds(), &package)
+                    .into_iter()
+                    .map(|file| {
+                        file.path
+                            .strip_prefix("project/app/src/main/kotlin")
+                            .expect("runtime source")
+                            .to_path_buf()
+                    })
+                    .chain([PathBuf::from(package.replace('.', "/")).join("BernGenerated.kt")])
+                    .collect()
+            } else {
+                [
+                    "BernRuntime",
+                    "BernViews",
+                    "BernStyle",
+                    "BernFeatures",
+                    "BernPictureTries",
+                    "BernMedia",
+                    "BernScene",
+                    "BernAppIcon",
+                ]
+                .iter()
+                .map(|name| PathBuf::from(format!("dev/bern/runtime/{name}.kt")))
+                .chain(
+                    bern_target_api::svg::used(app)
+                        .then(|| PathBuf::from("dev/bern/runtime/BernSvg.kt")),
+                )
+                .chain([PathBuf::from(package.replace('.', "/")).join("BernGenerated.kt")])
+                .collect()
+            },
         };
         let assets = gradle_project.join("app/src/main/assets/bern/resources");
         let mut steps = Vec::new();
@@ -769,15 +802,19 @@ impl Target for ComposeAndroid {
                 products.push(output.join("bin").join(&program));
             }
             forward = Some((
-                bern_transport_ipc::socket_dir(&app.app.bundle_id)
-                    .join(bern_transport_ipc::ANDROID_FORWARD),
+                bern_transport_ipc::socket_dir(&app.app.bundle_id).join(if watch {
+                    bern_transport_ipc::WEAROS_FORWARD
+                } else {
+                    bern_transport_ipc::ANDROID_FORWARD
+                }),
                 bern_transport_ipc::android_socket(&app.app.bundle_id),
             ));
             products.push(context.output_dir.join(skill::path(app)));
         }
         // The agent skill beside `bin/`, where the app listens.
         let place = glue::ipc(context).then(|| {
-            skill::Place::beside_bin(app, cfg!(windows)).connect(skill::android_connect(app))
+            skill::Place::beside_bin(app, cfg!(windows))
+                .connect(skill::android_connect_for(app, watch))
         });
         steps.extend(skill::steps(app, &context.output_dir, place.as_ref()));
         Ok(BuildPlan {
@@ -788,6 +825,7 @@ impl Target for ComposeAndroid {
                 package: app.app.bundle_id.clone(),
                 adb: toolchain::adb(),
                 forward,
+                watch,
             }),
             products,
         })
@@ -815,8 +853,12 @@ impl Target for ComposeAndroid {
         let product = product_name(app);
         let gradle_project = context.output_dir.join("project");
         let dist = bern_target_api::dist_dir(context);
+        let platform = context.target.platform.as_str();
         let name = |extension: &str| {
-            dist.join(format!("{product}-{}-android.{extension}", app.app.version))
+            dist.join(format!(
+                "{product}-{}-{platform}.{extension}",
+                app.app.version
+            ))
         };
         let path = |path: &PathBuf| path.display().to_string();
         let mut env = vec![("ANDROID_HOME".to_string(), path(&tools.sdk))];
@@ -848,7 +890,7 @@ impl Target for ComposeAndroid {
         if split_abis(context) {
             for abi in build_abis(context) {
                 let apk = dist.join(format!(
-                    "{product}-{}-android-{}.apk",
+                    "{product}-{}-{platform}-{}.apk",
                     app.app.version, abi.name
                 ));
                 steps.push(BuildStep::Copy {

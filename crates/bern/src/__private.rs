@@ -126,6 +126,8 @@ pub struct WindowState {
     pub fold: <f64 as BernValue>::Ref,
     /// Whether the window is a television's.
     pub tv: <bool as BernValue>::Ref,
+    /// Whether this target is a watch, independent of its screen width.
+    pub watch: <bool as BernValue>::Ref,
     /// Build-time availability of a web document engine.
     pub webview: <bool as BernValue>::Ref,
     /// Whether the application's `MenuBar` shows in a system menu bar,
@@ -153,6 +155,7 @@ pub fn window() -> WindowState {
         tabletop: bool::reference(),
         fold: f64::reference(),
         tv: bool::reference(),
+        watch: bool::reference(),
         webview: bool::reference(),
         menu_bar: bool::reference(),
         keyboard: bool::reference(),

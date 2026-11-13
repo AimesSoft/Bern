@@ -252,14 +252,28 @@ impl Generator<'_> {
             } else {
                 format!(", value = {{ {value} }}")
             };
-            out.line(format!(
-                "BernControl({target}, \"text_input\", {label}, actions = BernControlActions(edit = {{ {change} }}{value_action}))"
-            ));
-            out.line(format!(
-                "BernHeldTextInput({value}, {{ {change} }}, {label}, {prompt}, {}, Modifier.testTag({target}){weight}, labelHidden = {})",
-                string(kind),
-                element.keyword("label_hidden") == Some("true")
-            ));
+            if self.watch {
+                out.open("run {");
+                out.line("val bernInputFocus = remember { BernWearInputFocus() }");
+                out.line(format!(
+                    "BernControl({target}, \"text_input\", {label}, actions = BernControlActions(edit = {{ {change} }}, focus = {{ bernInputFocus.request() }}{value_action}))"
+                ));
+                out.line(format!(
+                    "BernHeldTextInput({value}, {{ {change} }}, {label}, {prompt}, {}, Modifier.testTag({target}){weight}, labelHidden = {}, inputFocus = bernInputFocus)",
+                    string(kind),
+                    element.keyword("label_hidden") == Some("true")
+                ));
+                out.close("}");
+            } else {
+                out.line(format!(
+                    "BernControl({target}, \"text_input\", {label}, actions = BernControlActions(edit = {{ {change} }}{value_action}))"
+                ));
+                out.line(format!(
+                    "BernHeldTextInput({value}, {{ {change} }}, {label}, {prompt}, {}, Modifier.testTag({target}){weight}, labelHidden = {})",
+                    string(kind),
+                    element.keyword("label_hidden") == Some("true")
+                ));
+            }
             return;
         }
         let field = self.field(element, "value").expect("text field");
@@ -278,17 +292,34 @@ impl Generator<'_> {
         } else {
             format!(", value = {{ {field} }}")
         };
-        out.line(format!(
-            "BernControl({target}, \"text_input\", {label}, actions = BernControlActions(edit = {{ {field} = it }}{submit}{value}))"
-        ));
-        out.line(format!(
-            "BernTextInput({field}, {{ {field} = it }}, {label}, {prompt}, {}, {}, Modifier.testTag({target}){weight}, labelHidden = {})",
-            string(kind),
-            action
-                .map(|action| format!("{{ {action} }}"))
-                .unwrap_or_else(|| "null".into()),
-            element.keyword("label_hidden") == Some("true")
-        ));
+        if self.watch {
+            out.open("run {");
+            out.line("val bernInputFocus = remember { BernWearInputFocus() }");
+            out.line(format!(
+                "BernControl({target}, \"text_input\", {label}, actions = BernControlActions(edit = {{ {field} = it }}, focus = {{ bernInputFocus.request() }}{submit}{value}))"
+            ));
+            out.line(format!(
+                "BernTextInput({field}, {{ {field} = it }}, {label}, {prompt}, {}, {}, Modifier.testTag({target}){weight}, labelHidden = {}, inputFocus = bernInputFocus)",
+                string(kind),
+                action
+                    .map(|action| format!("{{ {action} }}"))
+                    .unwrap_or_else(|| "null".into()),
+                element.keyword("label_hidden") == Some("true")
+            ));
+            out.close("}");
+        } else {
+            out.line(format!(
+                "BernControl({target}, \"text_input\", {label}, actions = BernControlActions(edit = {{ {field} = it }}{submit}{value}))"
+            ));
+            out.line(format!(
+                "BernTextInput({field}, {{ {field} = it }}, {label}, {prompt}, {}, {}, Modifier.testTag({target}){weight}, labelHidden = {})",
+                string(kind),
+                action
+                    .map(|action| format!("{{ {action} }}"))
+                    .unwrap_or_else(|| "null".into()),
+                element.keyword("label_hidden") == Some("true")
+            ));
+        }
     }
 
     pub(super) fn switch(&self, out: &mut Out, element: &Element, ctx: &Ctx) {

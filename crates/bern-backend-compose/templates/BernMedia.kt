@@ -612,6 +612,7 @@ private fun BernVideoSurface(playerID: String, window: String, fit: BernVideoFit
     )
 }
 
+// @bern:wear-skip-start
 /// What the video area shows while there is no picture.
 @Composable
 private fun BernVideoStatus(state: BernPlayerState?) {
@@ -635,6 +636,9 @@ private fun BernVideoStatus(state: BernPlayerState?) {
     }
 }
 
+// @bern:wear-skip-end
+
+// @bern:wear-skip-start
 /// The standard control bar. It shows the merged state only and turns user
 /// input into media commands: dragging previews locally and commits once,
 /// and state updates never call back into a command.
@@ -736,3 +740,5 @@ private fun BernVideoControls(target: String, playerID: String, state: BernPlaye
         )
     }
 }
+
+// @bern:wear-skip-end

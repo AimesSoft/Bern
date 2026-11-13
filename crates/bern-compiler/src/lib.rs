@@ -2023,6 +2023,7 @@ fn check_icon_choice(
 /// Lower the feature contracts that scope a component and prove what each
 /// scope reaches.
 fn prove_contracts(
+    watch: bool,
     declared: &[Located<ast::FeaturesItem>],
     contract_scopes: &BTreeMap<String, String>,
     components: &[ir::ComponentDef],
@@ -2046,6 +2047,16 @@ fn prove_contracts(
             ))
         })
         .collect();
+    if watch {
+        for feature in contracts
+            .iter_mut()
+            .flat_map(|contract| &mut contract.features)
+        {
+            if !feature.layouts.contains(&ir::LayoutSize::Watch) {
+                feature.layouts.push(ir::LayoutSize::Watch);
+            }
+        }
+    }
     features::prove(&mut contracts, components, windows, protocol, diagnostics);
     contracts
 }
@@ -2208,6 +2219,10 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
         );
     }
     let contracts = prove_contracts(
+        config
+            .targets
+            .iter()
+            .any(|target| target.platform == "wearos"),
         &sources.features,
         &contract_scopes,
         &lowered,

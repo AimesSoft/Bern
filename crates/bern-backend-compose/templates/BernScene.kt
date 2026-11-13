@@ -660,6 +660,7 @@ fun BernFlow(gap: Dp, align: Alignment.Horizontal = Alignment.Start, content: @C
     ) { content() }
 }
 
+// @bern:wear-skip-start
 // MARK: - Modals
 
 /// `Modal`: a Material dialog over the window, which dims what lies below
@@ -759,6 +760,8 @@ private fun Modifier.bernFitHeight(most: Dp) = layout { measurable, constraints 
     layout(placeable.width, placeable.height) { placeable.place(0, 0) }
 }
 
+// @bern:wear-skip-end
+
 // MARK: - Timers
 
 /// `Timer`: runs `action` every `interval` seconds (at least 0.05) while
@@ -785,6 +788,7 @@ fun BernWatch(value: Any?, action: () -> Unit) {
     LaunchedEffect(value) { current() }
 }
 
+// @bern:wear-skip-start
 // MARK: - Control groups
 
 /// `ControlGroup`: related controls on one capsule of the tonal surface,
@@ -805,6 +809,8 @@ fun BernControlGroup(label: String?, height: Dp?, content: @Composable RowScope.
     }
 }
 
+// @bern:wear-skip-end
+
 // MARK: - Forms
 
 /// The rows of a form's sections: their least height and their insets
@@ -824,6 +830,7 @@ private val BernHeadingTop = HorizontalAlignmentLine(::min)
 
 /// A scrolling form: its sections `gap` apart (20 unless given). One
 /// opening with a plain section starts at the top of its page.
+// @bern:wear-skip-start
 @Composable
 fun BernForm(gap: Dp?, rows: BernRows, content: @Composable ColumnScope.() -> Unit) {
     // It keeps no room around its rows: a canvas that bleeds in it reaches
@@ -841,6 +848,8 @@ fun BernForm(gap: Dp?, rows: BernRows, content: @Composable ColumnScope.() -> Un
         )
     }
 }
+
+// @bern:wear-skip-end
 
 /// Room `top` above a form's rows, unless a plain section opens them. The
 /// form keeps at least the height it is asked for: a smaller one would be
@@ -971,6 +980,7 @@ object BernSearchPalettes {
     }
 }
 
+// @bern:wear-skip-start
 /// `Search(style: palette)`: a search button that opens the search over
 /// the window, a Material dialog: the field and a way to close it on top,
 /// the results below, built only while it is open. A compact window shows
@@ -1150,6 +1160,9 @@ fun BernSearchItem(
     )
 }
 
+// @bern:wear-skip-end
+
+// @bern:wear-skip-start
 // MARK: - Search fields of a set size
 
 /// The search field standing in a page at its own `height` and text
@@ -1208,3 +1221,5 @@ fun BernSizedSearchField(
         }
     }
 }
+
+// @bern:wear-skip-end

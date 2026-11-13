@@ -138,6 +138,7 @@
 | `WebPage`、`nudge_motion`、`Pages(all:)`、Android TV 的启动器、侧边栏与焦点（2026-11-04） | 各后端的生成器测试；SwiftUI 针对 macOS、iOS 和 tvOS 做了类型检查；Compose 随 Android 构建编译 | `WebPage` 在 macOS 上用 Cookie 文件登录。在 Android TV 16 模拟器上，启动器通过 `LEANBACK_LAUNCHER` 列出应用，`Tabs` 是遥控器进入时展开并跟随遥控器的侧边栏，获得焦点的控件放大并有白色外框，返回键运行 `escape`，`default_focus` 在控件可用后取得焦点。在 tvOS 27 模拟器上，启动后标签有变化的 `Tabs` 会重建，`Text(bold:)` 可以跟随状态 |
 | 系统用应用打开文件：`[[app.opens]]`、`bern::files::take_opened`、`make_default_opener`（2026-11-06） | macOS、Windows、Linux、Android 和 iOS 的打开方式、右键菜单和默认应用，见设计文档“系统用应用打开文件”。声明由各后端的生成器测试覆盖 |
 | 引擎提供的图片：`bern::files::serve`（2026-11-07） | macOS、iOS、tvOS、Android、Windows 和 Linux 上，`Image(source:)` 能显示引擎提供的协议 URL，在内存里解码，不用临时文件，见设计文档“引擎提供的图片”。浏览器和 GPUI 目标暂不读取 |
+| Wear OS 目标 `compose-wearos`、`Layout(size: watch)`、`window.watch`（2026-11-13） | 独立打包的 Wear Material 3（`1.7.1`，`minSdk = 30`）目标，底层共用 Compose 引擎、JNI 与 IPC；`check` 强制要求可达 `Adaptive` 包含 `Layout(size: watch)`，功能契约单独证明 `watch`；编译器、生成器与 `examples/wearos` APK/命令行构建通过；不含 WebView/`WebPage`/`Svg` 运行时 | Wear OS 6.0（API 36，384×384、320 dpi 小圆屏模拟器）：实测 `examples/wearos` 的触控计数、表冠旋转滚动（列表与表单）、右滑返回、`SwitchButton`、`Slider`、`Picker` 滚轮弹层、`Menu` 弹层、显式 `ui focus` 唤起手表输入法、`ui set-language`、未保存草稿关闭 `AlertDialog` 确认协议以及 `--engine wearos` 与引擎的实时同步。手表上未实测：视频播放、`Table`、`Tabs`、`SplitView` 与真实手表硬件 |
 
 Firefox 与 Safari 手机布局尚未实测。用于验收的应用在 macOS 上由应用自带的媒体内核播放，其他平台的播放器仍有模拟状态；播放器界面和图片过渡的验收不等于已接入完整媒体播放功能。
 
