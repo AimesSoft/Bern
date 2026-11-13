@@ -164,14 +164,14 @@ SwiftUI 目标可在 `style!` 中用 `Sidebar { background: color(light: "#FAFAF
 
 | 接口 | 当前语义 |
 | --- | --- |
-| `WebPage(url:, cookies_file:, cookie_domain:, user_agent:, close_on:, label:) => action` | 填满所在位置的网页，会话独立，随组件一起消失。按下 CSS 选择器 `close_on` 找到的元素时，先于页面自己的处理运行动作：为其他应用的 WebView 做的页面可以用它自带的按钮关闭。不跟随 Web 以外的协议。`cookies_file` 指向一个内容为 `name=value; name=value` 的文件，在页面出现时读取并设置到 `cookie_domain` 上：登录 Cookie 不进入状态，命令行读不到。浏览器目标无法给其他站点的框架设置 Cookie。tvOS 没有网页引擎，不可用 |
+| `WebPage(url:, cookies_file:, cookie_domain:, user_agent:, content_mode:, close_on:, label:) => action` | 填满所在位置的网页，会话独立，随组件一起消失。按下 CSS 选择器 `close_on` 找到的元素时，先于页面自己的处理运行动作：为其他应用的 WebView 做的页面可以用它自带的按钮关闭。不跟随 Web 以外的协议。`cookies_file` 指向一个内容为 `name=value; name=value` 的文件，在页面出现时读取并设置到 `cookie_domain` 上：登录 Cookie 不进入状态，命令行读不到。浏览器目标无法给其他站点的框架设置 Cookie。tvOS 没有网页引擎，不可用。`content_mode: auto`（默认）保留网页引擎的推荐浏览环境；`mobile` 和 `desktop` 显式请求对应模式。iOS 使用 WebKit 原生模式，除了 UA，也会调整网页可见的平台和布局行为；自定义 `user_agent` 仍原样保留。其他目标暂不支持此请求，构建时会警告并保留引擎默认模式，不用伪造的 UA 或脚本代替。 |
 | `Modal(width:, height:)` | 窗口内居中面板，尺寸受可用窗口约束，背景遮罩；正文可滚动、页脚可单独放置。不写 `height` 时与内容一样高：正文的 `ScrollView` 取它滚动的内容的高度，超出窗口时面板停在窗口边缘、正文滚动。背景子树使用 `Stack(enabled: false)` 禁用 |
 | `Flow(gap:)` | 按内容固有尺寸从左到右换行；每行的子项竖直居中，`Spacer` 换行时不占宽度，排好后占满所在行余下的宽度 |
 | `Timer(interval:, enabled:) => command()` | 挂载且启用时定期提交命令；卸载、禁用时取消，间隔单位为秒。不能用来驱动逐帧绘制 |
 | `Watch(value:) => command()` | 挂载时运行一次动作，之后值每变一次运行一次，相等的新值不算变化。用来把只在界面里的草稿告诉引擎：表格选中的行、侧栏选中的页面、搜索框的文字。值是布尔、数值、文本、枚举，或它们的可选值与列表。写在 `if` 里时，条件成立的那一刻运行一次 |
 | `Text(color:)` | 用强调色或状态色画文字：`accent`、`status.success`、`status.warning`、`status.error`，各平台用自己的文字颜色；与 `emphasis` 二选一。`mark` 是文字下的底纹，不改变文字颜色 |
 | `Accordion(count:, selected:, collapsed_width:, height:, gap:, corner:)` | 一列展开，其余列固定折叠宽度；selected 从 0 开始，animate 驱动列宽及位置；height 可省略，此时填满父布局剩余高度，应放在有高度约束的容器中（如窗口内的 Column） |
-| `Sidebar(width:)` | 固定列宽。`SidebarHeader` 固定在列表上方，`SidebarFooter` 固定在下方。`SidebarHeader(role: title)` 表示头部只用应用的图标与名称给窗口命名：标题栏本身就显示应用名称的平台（Windows 的两种前端与 Linux GTK）不显示它，其他平台照常显示 |
+| `Sidebar(width:)` | 固定列宽。`SidebarHeader` 固定在列表上方，`SidebarFooter` 固定在下方。`SidebarHeader(role: title)` 表示头部只用应用的图标与名称给窗口命名：标题栏本身就显示应用名称的平台（Windows 的两种前端与 Linux GTK）不显示它，其他平台照常显示。iOS 与 tvOS 的标题头部会替代自动生成的侧栏导航标题；普通内容头部仍保留该标题 |
 | `SidebarItem(badge:)` | 显示正数计数；模块页面清单的 badge 可绑定模块状态字段 |
 | `Search(style: palette)` | 从工具栏入口打开命令面板；`panel_prompt`、`width`、`height` 设置提示与面板尺寸 |
 | `SearchItem(id:, label:) => command()` | 面板结果，可带 icon、detail、hint 或自定义子内容；`navigation: false` 不参与方向键选择，仍可点击与 Tab 聚焦 |

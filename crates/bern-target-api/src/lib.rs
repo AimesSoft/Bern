@@ -135,6 +135,10 @@ pub mod feature {
     pub const SCROLL_BROWSING: &str = "scroll_browsing";
     /// `blur` bound to state, changing with `animate`.
     pub const BOUND_BLUR: &str = "bound_blur";
+    /// `WebPage(content_mode:)`: a preference for the engine's mobile or
+    /// desktop browsing environment, not only its user-agent string.
+    /// Without it, non-auto modes warn and keep the engine's default.
+    pub const WEB_CONTENT_MODE: &str = "web_content_mode";
     /// `Text(bold:)`: a text bold while a condition holds.
     pub const TEXT_BOLD: &str = "text_bold";
     /// `appearance: dark` or `light` on a part of the interface; without it

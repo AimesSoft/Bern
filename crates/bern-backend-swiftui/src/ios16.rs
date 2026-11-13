@@ -138,14 +138,10 @@ const CALLS: &[(&str, &str)] = &[
         "case .extraLarge: return .extraLarge",
         "case .extraLarge: return .large",
     ),
-    // A view that glows reads where the pointer is.
+    // Pointer changes belong to the light, not the whole window's environment.
     (
-        "@Environment(\\.bernPointer) private var pointer\n",
-        "@Environment(\\.bernPointer) private var pointer\n    @Environment(\\.bernPointerLocation16) private var bernPointerLocation\n",
-    ),
-    (
-        ".environment(\\.bernPointer, pointer)",
-        ".environment(\\.bernPointer, pointer).environment(\\.bernPointerLocation16, pointer.location)",
+        "@Bindable var pointer: BernPointer",
+        "@ObservedObject var pointer: BernPointer",
     ),
 ];
 

@@ -60,6 +60,7 @@ const CHECKS: &[(&str, Check)] = &[
     (feature::SCROLL_ANCHOR, scroll_anchor),
     (feature::SCROLL_BROWSING, scroll_browsing),
     (feature::BOUND_BLUR, bound_blur),
+    (feature::WEB_CONTENT_MODE, web_content_mode),
     (feature::TEXT_BOLD, text_bold),
     (feature::APPEARANCE, appearance),
     (feature::SHORTCUTS, shortcuts),
@@ -1022,6 +1023,25 @@ fn bound_blur(descriptor: &TargetDescriptor, app: &Application, diagnostics: &mu
         diagnostics.push(
             Diagnostic::error(format!(
                 "target `{}` cannot blur by a value that follows state",
+                descriptor.id
+            ))
+            .at(element.source.clone()),
+        );
+    }
+}
+
+fn web_content_mode(
+    descriptor: &TargetDescriptor,
+    app: &Application,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some(element) = first_element(app, |element| {
+        element.kind == "WebPage"
+            && matches!(element.keyword("content_mode"), Some("mobile" | "desktop"))
+    }) {
+        diagnostics.push(
+            Diagnostic::warning(format!(
+                "target `{}` cannot set `WebPage(content_mode:)`; the web engine keeps its default browsing environment, independently of `user_agent`",
                 descriptor.id
             ))
             .at(element.source.clone()),

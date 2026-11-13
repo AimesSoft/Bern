@@ -292,6 +292,8 @@ private extension BernRubyText {
                     for offset in stride(from: 0, to: 4000 * 300, by: 4) where data[offset + 3] > 20 {
                         ink += 1
                         // Core Graphics may color-convert red into the device RGB space.
+                        precondition(Double(data[offset + 3]) <= ceil(alpha * 255) + 1,
+                                     "highlight must not composite bright text over its dim copy")
                         precondition(abs(Int(data[offset]) - Int(data[offset + 3])) <= 3 &&
                                      Int(data[offset + 1]) * 3 < Int(data[offset]) &&
                                      Int(data[offset + 2]) * 3 < Int(data[offset]),
@@ -334,6 +336,33 @@ private extension BernRubyText {
         precondition(CFEqual(CTFontCopyFontDescriptor(animated.testNativeFont),
                              CTFontCopyFontDescriptor(systemFont)),
                      "ruby must retain the actual system font descriptor and fallback cascade")
+        for scheme in [ColorScheme.light, .dark] {
+            let subject = BernRubyText(text: "東京", ruby: #"[[0,2,"とうきょう"]]"#, size: 32,
+                style: "body", weight: "regular", bold: false, color: .primary,
+                lineHeight: nil, lines: nil, mark: nil,
+                lit: { -1 }, path: { "" }, clock: { 0 }, since: { 0 }) { Text("東京") }
+                .environment(\.colorScheme, scheme)
+                .frame(width: 200, height: 90, alignment: .topLeading)
+            let renderer = ImageRenderer(content: subject)
+            renderer.scale = 2
+            let image = renderer.cgImage!
+            let pixels = CGContext(data: nil, width: image.width, height: image.height,
+                bitsPerComponent: 8, bytesPerRow: image.width * 4,
+                space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            pixels.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+            let data = pixels.data!.assumingMemoryBound(to: UInt8.self)
+            var ink = 0
+            for offset in stride(from: 0, to: image.width * image.height * 4, by: 4) where data[offset + 3] > 200 {
+                ink += 1
+                for channel in 0..<3 {
+                    let expected = scheme == .dark ? Int(data[offset + 3]) : 0
+                    precondition(abs(Int(data[offset + channel]) - expected) <= 3,
+                                 "macOS primary must resolve in the local SwiftUI environment")
+                }
+            }
+            precondition(ink > 100, "render actual production macOS ruby ink")
+        }
         let route = BernLitRoute("0 0 2 4")
         precondition(route.place(at: 1) == 2)
         print("native ruby passed")
@@ -366,4 +395,403 @@ private extension BernRubyText {
         String::from_utf8_lossy(&ran.stdout),
         String::from_utf8_lossy(&ran.stderr)
     );
+}
+
+/// Build a hosted UI regression from the complete production Ruby renderer.
+/// BERN_IOS_TEST_DEVICE opts into execution; launch success alone is not a pass.
+#[cfg(target_os = "macos")]
+#[test]
+fn build_ruby_semantic_color_probe_for_ios_16() {
+    use std::process::Command;
+    let style = include_str!("../templates/BernStyle.swift");
+    let ruby = &style
+        [style.find("// MARK: - Ruby text").unwrap()..style.find("// MARK: - Text marks").unwrap()];
+    let route = &style[style.find("struct BernLitRoute:").unwrap()
+        ..style.find("/// A `Text` lit along").unwrap()];
+    let root = test_dir("ruby-semantic-color-ios16");
+    let bundle = root.join("ColorProbe.app");
+    std::fs::create_dir_all(&bundle).unwrap();
+    let source = root.join("ColorProbe.swift");
+    let tests = r##"
+@MainActor private final class RubyProbeState: ObservableObject {
+    @Published var scheme: ColorScheme = .light
+    @Published var contrast: ColorSchemeContrast = .standard
+    @Published var lit: Double = -1
+    @Published var alternate = false
+}
+
+private struct RubyProbeRegion: UIViewRepresentable {
+    let name: String
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.isUserInteractionEnabled = false
+        view.accessibilityIdentifier = name
+        return view
+    }
+    func updateUIView(_ view: UIView, context: Context) {}
+}
+
+private struct RubyProbeContent: View {
+    @ObservedObject var state: RubyProbeState
+    static let background = Color(.sRGB, white: 0.4, opacity: 1)
+    private func row(_ name: String, color: Color, mark: Color? = nil,
+                     text: String = "東京", reading: String = "とうきょう",
+                     width: CGFloat = 300, lines: Int? = nil, height: CGFloat = 78) -> some View {
+        HStack(spacing: 20) {
+            BernRubyText(text: text, ruby: "[[0,2,\"\(reading)\"]]", size: 32,
+                style: "body", weight: "regular", bold: false, color: color,
+                lineHeight: nil, lines: lines, mark: mark,
+                lit: { state.lit }, path: { "" }, clock: { 0 }, since: { 0 }) {
+                    Text(verbatim: text).font(.system(size: 32)).foregroundColor(color)
+                }
+                .frame(width: width)
+                .background(RubyProbeRegion(name: name))
+                .frame(width: 300, height: height, alignment: .topLeading)
+            Text(verbatim: text).font(.system(size: 32)).foregroundColor(color)
+                .lineLimit(1).frame(width: 180, height: height, alignment: .topLeading)
+                .background(RubyProbeRegion(name: name + "-text"))
+            color.frame(width: 24, height: 24)
+                .background(RubyProbeRegion(name: name + "-color"))
+            (mark ?? .clear).frame(width: 24, height: 24)
+                .background(RubyProbeRegion(name: name + "-mark"))
+        }
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            row("primary", color: .primary)
+            row("secondary", color: .secondary)
+            row("opacity", color: .primary.opacity(0.5))
+            row("explicit", color: (state.alternate ? Color.blue : Color.red).opacity(0.65))
+            row("mark", color: .primary, mark: .secondary.opacity(0.7))
+            row("emoji", color: .primary, text: "東京😀", reading: "とう😀きょう")
+            row("wrapped", color: .primary, text: "東京へ行く。東京へ行く。東京へ行く。",
+                width: 110, lines: 2, height: 150)
+        }
+        .padding(24)
+        .background(Self.background)
+        .environment(\.colorScheme, state.scheme)
+    }
+}
+
+private struct RubyProbePixels {
+    let width: Int
+    let height: Int
+    let scale: CGFloat
+    let bytes: [UInt8]
+    @MainActor init(_ view: UIView) {
+        let format = UIGraphicsImageRendererFormat()
+        // Inspect native pixels: downsampling text can overshoot its ink opacity.
+        scale = view.window!.screen.scale
+        format.scale = scale
+        format.opaque = true
+        let image = UIGraphicsImageRenderer(size: view.bounds.size, format: format).image { _ in
+            precondition(view.drawHierarchy(in: view.bounds, afterScreenUpdates: true), "capture the actual hosted UI")
+        }.cgImage!
+        width = image.width
+        height = image.height
+        let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+            bytesPerRow: width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        bytes = Array(UnsafeBufferPointer(start: context.data!.assumingMemoryBound(to: UInt8.self), count: width * height * 4))
+    }
+    func pixel(_ x: Int, _ y: Int) -> [Double] {
+        precondition(x >= 0 && x < width && y >= 0 && y < height)
+        let i = (y * width + x) * 4
+        return (0..<3).map { Double(bytes[i + $0]) / 255 }
+    }
+    func sample(_ rect: CGRect) -> [Double] { pixel(Int(rect.midX * scale), Int(rect.midY * scale)) }
+    func strongest(_ rect: CGRect, background: [Double]) -> [Double] {
+        let rect = rect.applying(CGAffineTransform(scaleX: scale, y: scale))
+        var result = background, strength = 0.0
+        for y in max(0, Int(ceil(rect.minY)))..<min(height, Int(floor(rect.maxY))) {
+            for x in max(0, Int(ceil(rect.minX)))..<min(width, Int(floor(rect.maxX))) {
+                let value = pixel(x, y)
+                let distance = zip(value, background).reduce(0.0) { $0 + abs($1.0 - $1.1) }
+                if distance > strength { strength = distance; result = value }
+            }
+        }
+        precondition(strength > 0.05, "missing ink in \(rect)")
+        return result
+    }
+    func coloredCount(_ rect: CGRect) -> Int {
+        let rect = rect.applying(CGAffineTransform(scaleX: scale, y: scale))
+        var result = 0
+        for y in max(0, Int(ceil(rect.minY)))..<min(height, Int(floor(rect.maxY))) {
+            for x in max(0, Int(ceil(rect.minX)))..<min(width, Int(floor(rect.maxX))) {
+                let value = pixel(x, y)
+                if value.max()! - value.min()! > 0.2 { result += 1 }
+            }
+        }
+        return result
+    }
+}
+
+@main private final class RubyColorProbe: UIResponder, UIApplicationDelegate {
+    var window: UIWindow?
+    private let state = RubyProbeState()
+    private var host: UIHostingController<RubyProbeContent>!
+    private var step = 0
+    private var primaryIdentity: ObjectIdentifier?
+    private var full: RubyProbePixels?
+    private var matrix: [(UIUserInterfaceStyle, ColorScheme, ColorSchemeContrast)] = []
+
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        setbuf(stdout, nil)
+        for native in [UIUserInterfaceStyle.light, .dark] {
+            for scheme in [ColorScheme.light, .dark] {
+                for contrast in [ColorSchemeContrast.standard, .increased] { matrix.append((native, scheme, contrast)) }
+            }
+        }
+        let window = UIWindow(frame: UIScreen.main.bounds)
+        host = UIHostingController(rootView: RubyProbeContent(state: state))
+        host.view.backgroundColor = UIColor(white: 0.4, alpha: 1)
+        let container = UIViewController()
+        container.addChild(host)
+        container.view.addSubview(host.view)
+        host.view.frame = window.bounds
+        host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        host.didMove(toParent: container)
+        window.rootViewController = container
+        self.window = window
+        window.makeKeyAndVisible()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30) { preconditionFailure("ruby UI probe timed out") }
+        advance()
+        return true
+    }
+
+    private func descendants(_ view: UIView) -> [UIView] {
+        [view] + view.subviews.flatMap { descendants($0) }
+    }
+    private func region(_ name: String) -> CGRect {
+        let views = descendants(host.view).filter { $0.accessibilityIdentifier == name }
+        precondition(views.count == 1, "missing region \(name)")
+        return views[0].convert(views[0].bounds, to: host.view)
+    }
+    private func ink(_ name: String, marks: Bool = false) -> BernRubyInkView {
+        let area = region(name)
+        let views = descendants(host.view).compactMap { $0 as? BernRubyInkView }.filter {
+            $0.marks == marks && $0.convert($0.bounds, to: host.view).intersects(area.insetBy(dx: 1, dy: 1))
+        }
+        precondition(views.count == 1, "missing production ink view \(name), marks=\(marks): \(views.count)")
+        return views[0]
+    }
+    private func rgba(_ color: UIColor) -> [CGFloat] {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        precondition(color.getRed(&r, green: &g, blue: &b, alpha: &a))
+        return [r, g, b, a]
+    }
+    private func close(_ a: [Double], _ b: [Double], _ message: String, tolerance: Double = 0.02) {
+        precondition(zip(a, b).allSatisfy { abs($0 - $1) <= tolerance }, "\(message): \(a), expected \(b)")
+    }
+    private func advance() {
+        if step < matrix.count {
+            let entry = matrix[step]
+            window!.overrideUserInterfaceStyle = entry.0
+            state.scheme = entry.1
+            state.contrast = entry.2
+        } else {
+            state.scheme = .dark
+            state.contrast = .standard
+            state.lit = [-1.0, 0, 1.5, 100][step - matrix.count]
+            state.alternate = true
+        }
+        window!.rootViewController!.setOverrideTraitCollection(
+            UITraitCollection(accessibilityContrast: state.contrast == .increased ? .high : .normal), forChild: host)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { self.check() }
+    }
+    private func check() {
+        host.view.layoutIfNeeded()
+        let primary = ink("primary")
+        if let identity = primaryIdentity {
+            precondition(ObjectIdentifier(primary) == identity, "test runtime changes on the same native view")
+        } else { primaryIdentity = ObjectIdentifier(primary) }
+        let native = rgba(primary.tintColor.resolvedColor(with: primary.traitCollection))
+        let expected: CGFloat = state.scheme == .dark ? 1 : 0
+        precondition(native.prefix(3).allSatisfy { abs($0 - expected) < 0.03 }, "primary \(state.scheme): \(native)")
+        precondition(native[3] > 0.99)
+        let secondary = rgba(ink("secondary").tintColor)
+        let brightness = secondary.prefix(3).reduce(0, +) / 3
+        precondition(state.scheme == .dark ? brightness > 0.7 : brightness < 0.4, "secondary \(state.scheme): \(secondary)")
+        precondition(secondary[3] > 0 && secondary[3] < native[3], "secondary keeps its opacity")
+        precondition(abs(rgba(ink("opacity").tintColor)[3] - 0.5) < 0.01)
+        precondition(abs(rgba(ink("explicit").tintColor)[3] - 0.65) < 0.01)
+        let pixels = RubyProbePixels(host.view)
+        let background = pixels.pixel(5, 5)
+        if state.lit < 0 {
+            for name in ["primary", "secondary", "opacity", "explicit", "mark"] {
+                let view = ink(name)
+                let drawing = view.document!.layout(width: view.bounds.width)
+                let frame = region(name)
+                precondition(abs(frame.height - drawing.size.height) < 1, "annotation height participates in layout")
+                let row = drawing.rows[0]
+                let boundary = row.baseline - CTFontGetAscent(view.document!.font)
+                precondition(boundary > 2, "ruby has reserved height")
+                let annotation = CGRect(x: frame.minX, y: frame.minY, width: frame.width, height: boundary)
+                let base = CGRect(x: frame.minX, y: frame.minY + boundary, width: frame.width,
+                                  height: row.baseline - boundary)
+                let swatch = pixels.sample(region(name + "-color"))
+                let control = pixels.strongest(region(name + "-text"), background: background)
+                close(pixels.strongest(base, background: background), swatch, "\(name) base UI pixels \(state.scheme)")
+                close(pixels.strongest(annotation, background: background), swatch, "\(name) ruby UI pixels \(state.scheme)")
+                close(control, swatch, "SwiftUI Text control \(name)")
+            }
+            let markView = ink("mark", marks: true)
+            let row = markView.document!.layout(width: markView.bounds.width).rows[0]
+            let origin = region("mark").origin
+            let band = CGRect(x: origin.x + row.width / 2, y: origin.y + row.baseline + 2, width: 1, height: 1)
+            close(pixels.sample(band), pixels.sample(region("mark-mark")), "independent mark color and alpha")
+            let emojiView = ink("emoji")
+            let emojiDrawing = emojiView.document!.layout(width: emojiView.bounds.width)
+            let emojiFrame = region("emoji")
+            let boundary = emojiDrawing.rows[0].baseline - CTFontGetAscent(emojiView.document!.font)
+            precondition(pixels.coloredCount(CGRect(x: emojiFrame.minX, y: emojiFrame.minY, width: emojiFrame.width, height: boundary)) > 8,
+                         "ruby color emoji retain their palette")
+            precondition(pixels.coloredCount(CGRect(x: emojiFrame.minX, y: emojiFrame.minY + boundary,
+                         width: emojiFrame.width, height: emojiFrame.height - boundary)) > 40, "base color emoji retain their palette")
+            let wrapped = ink("wrapped")
+            let drawing = wrapped.document!.layout(width: wrapped.bounds.width)
+            precondition(drawing.rows.count == 2, "wrapping and line limit")
+            precondition((CTLineGetGlyphRuns(drawing.rows.last!.line) as! [CTRun]).contains {
+                (CTRunGetAttributes($0) as NSDictionary)["BernRubyTruncation"] != nil
+            }, "truncation keeps the ellipsis")
+            if step == matrix.count { full = pixels }
+        } else {
+            let full = full!
+            for name in ["primary", "opacity", "wrapped"] {
+                let view = ink(name), frame = region(name)
+                let drawing = view.document!.layout(width: view.bounds.width)
+                if state.lit == 0 {
+                    let bright = full.strongest(frame, background: background)
+                    let expected = zip(bright, background).map { ($0 - $1) * 0.4 + $1 }
+                    close(pixels.strongest(frame, background: background), expected, "\(name) unsung alpha", tolerance: 0.025)
+                } else if state.lit == 1.5 && name == "wrapped" {
+                    let row = drawing.rows[1]
+                    let rect = CGRect(x: frame.minX, y: frame.minY + row.top, width: frame.width, height: row.height)
+                    let bright = full.strongest(rect, background: background)
+                    close(pixels.strongest(rect, background: background), zip(bright, background).map { ($0 - $1) * 0.4 + $1 },
+                          "later wrapped rows stay dim", tolerance: 0.025)
+                    let first = drawing.rows[0]
+                    let firstRect = CGRect(x: frame.minX, y: frame.minY, width: frame.width, height: first.height)
+                    close(pixels.strongest(firstRect, background: background), full.strongest(firstRect, background: background), "sung glyphs brighten")
+                    let a = CTLineGetOffsetForStringIndex(first.line, drawing.offsets[1], nil)
+                    let b = CTLineGetOffsetForStringIndex(first.line, drawing.offsets[2], nil)
+                    let middle = (a + b) / 2
+                    for (left, right, alpha) in [(a, middle, 1.0), (middle, b, 0.4)] {
+                        let part = CGRect(x: frame.minX + left + 2,
+                            y: frame.minY + first.baseline - CTFontGetAscent(view.document!.font),
+                            width: right - left - 4, height: CTFontGetAscent(view.document!.font))
+                        let bright = full.strongest(part, background: background)
+                        close(pixels.strongest(part, background: background),
+                              zip(bright, background).map { ($0 - $1) * alpha + $1 },
+                              "fractional scalar highlight", tolerance: 0.025)
+                    }
+                } else if state.lit == 100 && name != "wrapped" {
+                    close(pixels.strongest(frame, background: background), full.strongest(frame, background: background),
+                          "highlight must retain explicit foreground opacity", tolerance: 0.025)
+                }
+            }
+        }
+        print("PASS ruby UI", step, "native", window!.overrideUserInterfaceStyle.rawValue,
+              "local", state.scheme, "contrast", state.contrast, "lit", state.lit, "primary", native)
+        step += 1
+        if step == matrix.count + 4 {
+            print("PASS all ruby UI cases")
+            exit(EXIT_SUCCESS)
+        }
+        advance()
+    }
+}
+"##;
+    std::fs::write(
+        &source,
+        format!("import UIKit\nimport SwiftUI\nimport CoreText\n{ruby}\n{route}\n{tests}"),
+    )
+    .unwrap();
+    std::fs::write(
+        bundle.join("Info.plist"),
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>CFBundleExecutable</key><string>ColorProbe</string>
+<key>CFBundleIdentifier</key><string>dev.bern.semantic-color-probe</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleVersion</key><string>1</string>
+<key>CFBundleShortVersionString</key><string>1.0</string>
+<key>MinimumOSVersion</key><string>16.0</string>
+<key>UIDeviceFamily</key><array><integer>1</integer><integer>2</integer></array>
+<key>UILaunchScreen</key><dict/>
+</dict></plist>"#,
+    )
+    .unwrap();
+    let arch = if cfg!(target_arch = "aarch64") {
+        "arm64"
+    } else {
+        "x86_64"
+    };
+    let result = Command::new("xcrun")
+        .args([
+            "--sdk",
+            "iphonesimulator",
+            "swiftc",
+            "-swift-version",
+            "6",
+            "-parse-as-library",
+            "-target",
+        ])
+        .arg(format!("{arch}-apple-ios16.0-simulator"))
+        .arg(&source)
+        .arg("-o")
+        .arg(bundle.join("ColorProbe"))
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let result = Command::new("codesign")
+        .args(["--force", "--sign", "-"])
+        .arg(&bundle)
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    if let Some(device) = std::env::var_os("BERN_IOS_TEST_DEVICE") {
+        let result = Command::new("xcrun")
+            .args(["simctl", "install"])
+            .arg(&device)
+            .arg(&bundle)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let result = Command::new("xcrun")
+            .args([
+                "simctl",
+                "launch",
+                "--console",
+                "--terminate-running-process",
+            ])
+            .arg(&device)
+            .arg("dev.bern.semantic-color-probe")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&result.stdout);
+        assert!(
+            result.status.success() && stdout.contains("PASS all ruby UI cases"),
+            "{stdout}\n{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    } else {
+        eprintln!(
+            "built UIKit probe at {}; UI assertions NOT RUN (no BERN_IOS_TEST_DEVICE)",
+            bundle.display()
+        );
+    }
 }

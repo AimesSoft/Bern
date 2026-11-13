@@ -136,6 +136,11 @@ extension BernSvgDocument: UIViewRepresentable {
 
 // MARK: - Web pages
 
+/// A preference for the browsing environment, independent of a custom UA.
+enum BernWebContentMode {
+    case auto, mobile, desktop
+}
+
 /// `WebPage`: a page of the web, signed in with the cookies of a file. Its
 /// session is its own and goes with it.
 struct BernWebPage: View {
@@ -143,12 +148,13 @@ struct BernWebPage: View {
     let cookiesFile: String
     let cookieDomain: String
     let userAgent: String
+    let contentMode: BernWebContentMode
     let closeOn: String
     let label: String?
     let close: () -> Void
 
     var body: some View {
-        BernWebPageView(url: url, cookiesFile: cookiesFile, cookieDomain: cookieDomain, userAgent: userAgent, closeOn: closeOn, close: close)
+        BernWebPageView(url: url, cookiesFile: cookiesFile, cookieDomain: cookieDomain, userAgent: userAgent, contentMode: contentMode, closeOn: closeOn, close: close)
             .accessibilityLabel(label ?? "")
     }
 }
@@ -201,6 +207,7 @@ private struct BernWebPageView {
     let cookiesFile: String
     let cookieDomain: String
     let userAgent: String
+    let contentMode: BernWebContentMode
     let closeOn: String
     let close: () -> Void
 
@@ -208,6 +215,15 @@ private struct BernWebPageView {
     func makeView(_ coordinator: BernWebPageCoordinator) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
+        #if os(iOS)
+        // A custom UA alone does not change iPad's desktop environment.
+        // Leave the recommended mode untouched unless explicitly requested.
+        switch contentMode {
+        case .auto: break
+        case .mobile: configuration.defaultWebpagePreferences.preferredContentMode = .mobile
+        case .desktop: configuration.defaultWebpagePreferences.preferredContentMode = .desktop
+        }
+        #endif
         if !closeOn.isEmpty {
             configuration.userContentController.addUserScript(WKUserScript(
                 source: bernWebCloseScript(closeOn), injectionTime: .atDocumentStart, forMainFrameOnly: true))

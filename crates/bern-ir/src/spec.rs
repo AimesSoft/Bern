@@ -1429,11 +1429,15 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("cookies_file", PropKind::DisplayText),
                 opt("cookie_domain", PropKind::DisplayText),
                 opt("user_agent", PropKind::DisplayText),
+                opt(
+                    "content_mode",
+                    PropKind::Keyword(&["auto", "mobile", "desktop"]),
+                ),
                 opt("close_on", PropKind::DisplayText),
                 opt("label", PropKind::DisplayText),
             ],
             Children::None,
-            "A web page filling its place, its session gone with it; `cookies_file` names a file of `name=value; name=value` to sign in with on `cookie_domain`, kept out of the state; a press on what the CSS selector `close_on` finds runs the action",
+            "A web page filling its place, its session gone with it; `content_mode` prefers auto (the default), mobile or desktop browsing independently of `user_agent`; `cookies_file` names a file of `name=value; name=value` to sign in with on `cookie_domain`, kept out of the state; a press on what the CSS selector `close_on` finds runs the action",
         )
     },
     spec(

@@ -139,7 +139,11 @@ platform = "ios"
 #[test]
 fn ios_16_opens_scroll_views_at_their_anchor_and_has_the_largest_size_it_can() {
     let root = workspace();
-    let (config, compiled) = project(&root.join("target/bern-test/ios16-front-end-project"));
+    let test_root = std::env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| root.join("target"))
+        .join("bern-test");
+    let (config, compiled) = project(&test_root.join("ios16-front-end-project"));
     let target = config
         .targets
         .iter()
@@ -148,7 +152,7 @@ fn ios_16_opens_scroll_views_at_their_anchor_and_has_the_largest_size_it_can() {
         .clone();
     assert_eq!(target.frontends, ["swiftui", "swiftui-16"]);
     let app = compiled.app.on_platform(&target.platform);
-    let output = root.join("target/bern-test/ios16-front-end");
+    let output = test_root.join("ios16-front-end");
     let _ = std::fs::remove_dir_all(&output);
     let context = BuildContext {
         project_dir: config.dir.clone(),
@@ -207,6 +211,26 @@ fn ios_16_opens_scroll_views_at_their_anchor_and_has_the_largest_size_it_can() {
         style.contains("case .extraLarge: return .large\n"),
         "{style}"
     );
+
+    // A touch changes only the glow's subscriber. Broadcasting its location
+    // through the window environment resets native segments before their action.
+    assert!(!style.contains("bernPointerLocation16"));
+    assert!(style.contains("@ObservedObject var pointer: BernPointer"));
+    assert!(style.contains("BernGlowTracking(pointer: pointer, radius: radius, opacity: opacity)"));
+    let tracking = style
+        .split("private struct BernGlowTracking:")
+        .nth(1)
+        .unwrap();
+    assert!(
+        tracking
+            .split("private struct BernGlowLight:")
+            .next()
+            .unwrap()
+            .contains("pointer.location")
+    );
+    let newer_style = read("Sources17/BernStyle.swift");
+    assert!(newer_style.contains("@Bindable var pointer: BernPointer"));
+    assert!(!read("Sources/BernCompat16.swift").contains("BernPointerLocation16Key"));
 
     support::check_ios(&root, &output);
 }

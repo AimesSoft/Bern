@@ -63,19 +63,10 @@ private struct BernWindowContext16Key: EnvironmentKey {
     static let defaultValue: BernWindowContext? = nil
 }
 
-private struct BernPointerLocation16Key: EnvironmentKey {
-    static let defaultValue: CGPoint? = nil
-}
-
 extension EnvironmentValues {
     var bernWindowContext16: BernWindowContext? {
         get { self[BernWindowContext16Key.self] }
         set { self[BernWindowContext16Key.self] = newValue }
-    }
-
-    var bernPointerLocation16: CGPoint? {
-        get { self[BernPointerLocation16Key.self] }
-        set { self[BernPointerLocation16Key.self] = newValue }
     }
 }
 

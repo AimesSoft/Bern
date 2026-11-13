@@ -78,7 +78,9 @@ pub fn generated(target: &dyn Target, platform: &str, ui: Option<&str>) -> Strin
     for prop in ["icon_progress", "badge_icon", "badge_visible"] {
         button.props.remove(prop);
     }
-    compiled.app.components[0].body = Node::Element(Element {
+    // The root WindowSet is extracted into the window catalog; the example
+    // need not contain any reusable components after compilation.
+    compiled.app.windows.windows[0].content = Node::Element(Element {
         kind: "Row".into(),
         id: None,
         path: "test.icons".into(),

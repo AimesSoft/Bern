@@ -575,12 +575,19 @@ impl Generator<'_> {
         };
         let snap = element.keyword("snap");
         let position = self.field(element, "position");
+        let browsing = self.field(element, "browsing");
         // The scroll view's entrance moves what it scrolls, which
         // mounts with it: it runs on appear.
         let entrance = element
             .keyword("appear")
             .and_then(|_| self.transition_line(element, true));
         out.open(format!("SwiftUI.ScrollView({axis}) {{"));
+        if browsing.is_some() {
+            // A background inside the content can find its nearest native
+            // scroll ancestor, including in nested scroll views. Group adds
+            // no layout; probes of multiple children share one observer.
+            out.open("SwiftUI.Group {");
+        }
         // Where it opens centered: a mark at that fraction of the content,
         // scrolled to the middle once, which SwiftUI keeps within reach.
         let open_center = self.length(element, "open_center");
@@ -642,6 +649,10 @@ impl Generator<'_> {
         if open_center.is_some() {
             out.close("}");
         }
+        if browsing.is_some() {
+            out.close("}");
+            out.line(".bernScrollBrowsingContent()");
+        }
         out.close("}");
         if marks_top {
             out.line(".bernScrollTopRoom()");
@@ -672,7 +683,7 @@ impl Generator<'_> {
                 crate::style::motion(self.app, "smooth")
             ));
         }
-        if let Some(browsing) = self.field(element, "browsing") {
+        if let Some(browsing) = browsing {
             out.line(format!(
                 ".bernScrollBrowsing({})",
                 self.binding_of(&browsing)
