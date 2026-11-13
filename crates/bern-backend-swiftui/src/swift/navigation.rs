@@ -91,10 +91,11 @@ impl Generator<'_> {
         }
         // The header stays at the top of the sidebar, below the window's
         // buttons; the list scrolls below it.
-        if let Some(header) = sidebar.children.iter().find_map(|node| match node {
+        let header = sidebar.children.iter().find_map(|node| match node {
             Node::Element(child) if child.kind == "SidebarHeader" => Some(child),
             _ => None,
-        }) {
+        });
+        if let Some(header) = header {
             out.open(".safeAreaInset(edge: .top, spacing: 0) {");
             out.open("SwiftUI.VStack(alignment: .leading, spacing: 8) {");
             self.nodes(out, &header.children, ctx);
@@ -127,9 +128,11 @@ impl Generator<'_> {
         // The detail column and the sidebar control are both named after
         // the selected destination.
         let title = labeled.then(|| self.nav_label(&selection, &sidebar.children, "SidebarItem"));
-        // A compact iOS split view shows the sidebar as the first screen of
-        // a stack, titled like the window.
-        if self.platform.uikit() {
+        // A compact split view needs a window title only when its header
+        // does not already supply one. Keep content headers independent.
+        if self.platform.uikit()
+            && !header.is_some_and(|header| header.keyword("role") == Some("title"))
+        {
             out.line(".navigationTitle(bernWindow.title)");
         }
         // Outermost, so the header and footer follow too.
