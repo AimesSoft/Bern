@@ -1157,12 +1157,156 @@ mod mac {
 /// over a free overlay: there the bar shows and, unlocked, the plate.
 /// Unlocked, the window drags but by its buttons; locked, it lets clicks
 /// through but over a button that shows.
+/// Free stretch of the Windows taskbar an overlay stands in, in screen pixels.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Room {
+    left: i32,
+    right: i32,
+    top: i32,
+    bottom: i32,
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+impl Room {
+    fn width(self) -> i32 {
+        (self.right - self.left).max(0)
+    }
+}
+
+/// Between an overlay on the taskbar and nearby taskbar controls, in pixels.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const TASKBAR_GAP: i32 = 8;
+
+/// Extra margin given to the currently chosen taskbar gap so small icon shifts
+/// do not make the overlay bounce between the left and right sides.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const TASKBAR_STICKY: i32 = 48;
+
+/// Clamp, sort and coalesce horizontal taskbar occupancy intervals `[left, right)`
+/// within `[bar_left, bar_right)`.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn merge_intervals(raw: &[(i32, i32)], bar_left: i32, bar_right: i32) -> Vec<(i32, i32)> {
+    let mut spans: Vec<(i32, i32)> = raw
+        .iter()
+        .filter_map(|&(l, r)| {
+            let l = l.max(bar_left);
+            let r = r.min(bar_right);
+            (r > l).then_some((l, r))
+        })
+        .collect();
+    spans.sort_unstable_by_key(|&(l, r)| (l, r));
+    let mut merged: Vec<(i32, i32)> = Vec::with_capacity(spans.len());
+    for (l, r) in spans {
+        if let Some(last) = merged.last_mut()
+            && l <= last.1 + 2
+        {
+            last.1 = last.1.max(r);
+        } else {
+            merged.push((l, r));
+        }
+    }
+    merged
+}
+
+/// Choose the usable horizontal room on the taskbar from all occupied control
+/// spans (start, search, task buttons, widgets, system tray), avoiding controls
+/// on both the left and right sides of the bar.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn pick_taskbar_room(
+    bar: Room,
+    occupied: &[(i32, i32)],
+    gap: i32,
+    min_width: i32,
+    want_width: i32,
+    current: Option<Room>,
+) -> Option<Room> {
+    if bar.bottom - bar.top > bar.right - bar.left {
+        let room = Room {
+            left: bar.left + gap,
+            right: bar.right - gap,
+            top: bar.top,
+            bottom: bar.bottom,
+        };
+        return (room.width() >= min_width).then_some(room);
+    }
+
+    let merged = merge_intervals(occupied, bar.left, bar.right);
+    let mut gaps = Vec::new();
+    let mut edge = bar.left;
+    for (l, r) in merged {
+        if l > edge {
+            let usable = (edge + gap, l - gap);
+            if usable.1 - usable.0 >= min_width {
+                gaps.push(usable);
+            }
+        }
+        edge = edge.max(r);
+    }
+    if bar.right > edge {
+        let usable = (edge + gap, bar.right - gap);
+        if usable.1 - usable.0 >= min_width {
+            gaps.push(usable);
+        }
+    }
+    if gaps.is_empty() {
+        return None;
+    }
+
+    let widest = *gaps
+        .iter()
+        .max_by_key(|&&(l, r)| (r - l, r))
+        .expect("non-empty gaps");
+
+    if let Some(prev) = current
+        && let Some(&cur) = gaps
+            .iter()
+            .filter(|&&(l, r)| r.min(prev.right) > l.max(prev.left))
+            .max_by_key(|&&(l, r)| r.min(prev.right) - l.max(prev.left))
+    {
+        let cur_w = cur.1 - cur.0;
+        let widest_w = widest.1 - widest.0;
+        if cur_w >= want_width || cur_w + TASKBAR_STICKY >= widest_w {
+            return Some(Room {
+                left: cur.0,
+                right: cur.1,
+                top: bar.top,
+                bottom: bar.bottom,
+            });
+        }
+    }
+
+    let mid = (bar.left + bar.right) / 2;
+    let chosen = gaps
+        .iter()
+        .copied()
+        .filter(|&(l, r)| r > mid && r - l >= want_width)
+        .max_by_key(|&(_, r)| r)
+        .or_else(|| {
+            gaps.iter()
+                .copied()
+                .filter(|&(l, r)| r - l >= want_width)
+                .max_by_key(|&(l, r)| (r - l, r))
+        })
+        .unwrap_or(widest);
+
+    Some(Room {
+        left: chosen.0,
+        right: chosen.1,
+        top: bar.top,
+        bottom: bar.bottom,
+    })
+}
+
 #[cfg(target_os = "windows")]
 mod win {
-    use super::{Line, Overlay, Place, Route};
+    use super::{
+        Line, Overlay, Place, Room, Route, TASKBAR_GAP, merge_intervals, pick_taskbar_room,
+    };
     use std::cell::RefCell;
     use std::collections::HashMap;
-    use std::sync::{Mutex, mpsc};
+    use std::sync::{Condvar, Mutex, OnceLock, mpsc};
+    use std::time::{Duration, Instant};
     use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
     use windows::Win32::Graphics::Direct2D::Common::{
         D2D_RECT_F, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
@@ -1192,24 +1336,28 @@ mod win {
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::System::Threading::GetCurrentThreadId;
     use windows::Win32::UI::Accessibility::{
-        CUIAutomation, IUIAutomation, TreeScope_Descendants, UIA_BoundingRectanglePropertyId,
-        UIA_ButtonControlTypeId, UIA_CONTROLTYPE_ID, UIA_ComboBoxControlTypeId,
-        UIA_ControlTypePropertyId, UIA_EditControlTypeId, UIA_IsOffscreenPropertyId,
-        UIA_ListItemControlTypeId, UIA_MenuItemControlTypeId, UIA_SplitButtonControlTypeId,
+        CUIAutomation, IUIAutomation, IUIAutomationCondition, IUIAutomationElement,
+        TreeScope_Children, UIA_ButtonControlTypeId, UIA_CONTROLTYPE_ID, UIA_CheckBoxControlTypeId,
+        UIA_ComboBoxControlTypeId, UIA_CustomControlTypeId, UIA_EditControlTypeId,
+        UIA_GroupControlTypeId, UIA_ListControlTypeId, UIA_ListItemControlTypeId,
+        UIA_MenuItemControlTypeId, UIA_PaneControlTypeId, UIA_RadioButtonControlTypeId,
+        UIA_SplitButtonControlTypeId, UIA_ToolBarControlTypeId, UIA_WindowControlTypeId,
     };
     use windows::Win32::UI::HiDpi::{
         DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForWindow, SetThreadDpiAwarenessContext,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DispatchMessageW, FindWindowExW, FindWindowW, GWL_EXSTYLE,
-        GetCursorPos, GetMessageW, GetWindowLongPtrW, GetWindowRect, HTCAPTION, HTCLIENT,
-        HTTRANSPARENT, HWND_TOPMOST, IDC_ARROW, KillTimer, LoadCursorW, MA_NOACTIVATE, MSG,
-        PostThreadMessageW, RegisterClassExW, SPI_GETWORKAREA, SW_HIDE, SW_SHOWNOACTIVATE,
-        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetTimer, SetWindowLongPtrW, SetWindowPos,
-        ShowWindow, SystemParametersInfoW, TranslateMessage, ULW_ALPHA, UPDATELAYEREDWINDOWINFO,
-        UpdateLayeredWindow, UpdateLayeredWindowIndirect, WM_APP, WM_EXITSIZEMOVE, WM_LBUTTONDOWN,
-        WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_NCHITTEST, WM_TIMER, WNDCLASSEXW, WS_EX_LAYERED,
-        WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
+        GWL_STYLE, GetCursorPos, GetMessageW, GetParent, GetWindowLongPtrW, GetWindowRect,
+        HTCAPTION, HTCLIENT, HTTRANSPARENT, HWND_NOTOPMOST, HWND_TOP, HWND_TOPMOST, IDC_ARROW,
+        IsWindow, IsWindowVisible, KillTimer, LoadCursorW, MA_NOACTIVATE, MSG, PostThreadMessageW,
+        RegisterClassExW, SPI_GETWORKAREA, SW_HIDE, SW_SHOWNOACTIVATE, SWP_FRAMECHANGED,
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetParent, SetTimer, SetWindowLongPtrW,
+        SetWindowPos, ShowWindow, SystemParametersInfoW, TranslateMessage, ULW_ALPHA,
+        UPDATELAYEREDWINDOWINFO, UpdateLayeredWindow, UpdateLayeredWindowIndirect, WM_APP,
+        WM_EXITSIZEMOVE, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_NCHITTEST, WM_TIMER,
+        WNDCLASSEXW, WS_CHILD, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+        WS_EX_TRANSPARENT, WS_POPUP,
     };
     use windows::core::{BOOL, PCWSTR, w};
     use windows_numerics::Vector2;
@@ -1223,6 +1371,9 @@ mod win {
 
     static CHANNEL: Mutex<Option<(mpsc::Sender<Message>, u32)>> = Mutex::new(None);
 
+    /// Posted to the overlay thread when the background taskbar scan updates.
+    const WM_TASKBAR_ROOM: u32 = WM_APP + 1;
+
     /// Around the text and between lines, in points.
     const MARGIN: f32 = 12.0;
     const GAP: f32 = 2.0;
@@ -1231,21 +1382,33 @@ mod win {
     const BUTTON: f32 = 28.0;
     const BUTTON_GAP: f32 = 8.0;
     const BAR_GAP: f32 = 8.0;
-    /// How often an overlay on the taskbar is put back on top of it, and
-    /// looks again for the room the taskbar leaves it.
-    const TOPMOST_TIMER: usize = 1;
-    /// Between an overlay on the taskbar and what is beside it, in pixels.
-    const TASKBAR_GAP: i32 = 8;
-    /// What takes room on the taskbar, read through UI Automation: its
-    /// buttons, the items of its lists, and the search box. Their panes and
-    /// lists are left out, as they may stretch over free room.
-    const OCCUPYING: [UIA_CONTROLTYPE_ID; 6] = [
+    /// How often a taskbar overlay keeps its child z-order and checks whether
+    /// the taskbar window itself was recreated.
+    const TASKBAR_TIMER: usize = 1;
+    /// Taskbar UIA scan cadence: fast right after changes, backing off while idle
+    /// to bound native UIA allocations.
+    const SCAN_FAST: Duration = Duration::from_millis(1000);
+    const SCAN_MAX: Duration = Duration::from_secs(30);
+    /// Leaf control types that occupy taskbar space directly without recursing.
+    const LEAF_OCCUPYING: [UIA_CONTROLTYPE_ID; 8] = [
         UIA_ButtonControlTypeId,
         UIA_SplitButtonControlTypeId,
         UIA_MenuItemControlTypeId,
         UIA_ListItemControlTypeId,
         UIA_EditControlTypeId,
         UIA_ComboBoxControlTypeId,
+        UIA_CheckBoxControlTypeId,
+        UIA_RadioButtonControlTypeId,
+    ];
+    /// Pure container control types ignored when empty so layout spacers do not
+    /// block taskbar room.
+    const CONTAINER_TYPES: [UIA_CONTROLTYPE_ID; 6] = [
+        UIA_PaneControlTypeId,
+        UIA_WindowControlTypeId,
+        UIA_GroupControlTypeId,
+        UIA_ListControlTypeId,
+        UIA_ToolBarControlTypeId,
+        UIA_CustomControlTypeId,
     ];
     /// How often the pointer is looked for over a free overlay, in
     /// milliseconds.
@@ -1314,17 +1477,201 @@ mod win {
         buttons: Vec<(RECT, usize)>,
         /// What it shows now.
         frame: Option<Frame>,
+        /// On the taskbar, the `Shell_TrayWnd` it is attached to as a child.
+        parent: Option<HWND>,
+        /// Whether this overlay is currently requested to be shown.
+        visible: bool,
         /// On the taskbar, the room it had when it was last drawn.
         room: Option<Room>,
     }
 
-    /// The free stretch of the taskbar an overlay stands in, in pixels.
-    #[derive(Clone, Copy, Debug, PartialEq)]
-    struct Room {
-        left: i32,
-        right: i32,
-        top: i32,
-        bottom: i32,
+    #[derive(Clone, PartialEq, Eq)]
+    struct TaskbarSnapshot {
+        tray: isize,
+        bar: Room,
+        occupied: Vec<(i32, i32)>,
+    }
+
+    struct ScannerState {
+        overlay_thread: u32,
+        target: Option<(isize, isize)>,
+        snapshot: Option<TaskbarSnapshot>,
+        nudge: bool,
+    }
+
+    struct Scanner {
+        state: Mutex<ScannerState>,
+        wake: Condvar,
+    }
+
+    static SCANNER: OnceLock<Scanner> = OnceLock::new();
+
+    fn scanner() -> &'static Scanner {
+        SCANNER.get_or_init(|| {
+            let s = Scanner {
+                state: Mutex::new(ScannerState {
+                    overlay_thread: 0,
+                    target: None,
+                    snapshot: None,
+                    nudge: false,
+                }),
+                wake: Condvar::new(),
+            };
+            let _ = std::thread::Builder::new()
+                .name("bern-taskbar-scan".into())
+                .spawn(scan_loop);
+            s
+        })
+    }
+
+    fn set_scanner_thread(thread: u32) {
+        let s = scanner();
+        let mut guard = s.state.lock().unwrap_or_else(|e| e.into_inner());
+        guard.overlay_thread = thread;
+    }
+
+    fn refresh_scanner(windows: &HashMap<String, Window>) {
+        let target = windows
+            .values()
+            .find(|w| w.visible && w.overlay.place == Place::Taskbar)
+            .and_then(|w| {
+                let tray = find_taskbar()?;
+                Some((tray.0 as isize, w.hwnd.0 as isize))
+            });
+        let s = scanner();
+        let mut guard = s.state.lock().unwrap_or_else(|e| e.into_inner());
+        if guard.target != target {
+            guard.target = target;
+            if target.is_none() {
+                guard.snapshot = None;
+            } else {
+                guard.nudge = true;
+            }
+            s.wake.notify_one();
+        }
+    }
+
+    fn latest_taskbar_snapshot(tray: HWND) -> Option<TaskbarSnapshot> {
+        let s = SCANNER.get()?;
+        let guard = s.state.lock().unwrap_or_else(|e| e.into_inner());
+        guard
+            .snapshot
+            .as_ref()
+            .filter(|snap| snap.tray == tray.0 as isize)
+            .cloned()
+    }
+
+    fn scan_loop() {
+        // SAFETY: background thread sets its own DPI awareness and MTA COM
+        // apartment once so UIA rects match physical screen pixels without
+        // blocking the overlay message loop.
+        unsafe {
+            let _ = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        }
+        let automation: Option<IUIAutomation> =
+            // SAFETY: COM is initialized on this thread.
+            unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER) }.ok();
+
+        let s = scanner();
+        let mut prev_key: Option<(isize, isize, Room)> = None;
+        let mut prev_raw: Vec<(i32, i32)> = Vec::new();
+        let mut settled_streak = 0u32;
+        let mut idle = SCAN_FAST;
+
+        loop {
+            let target = {
+                let mut guard = s.state.lock().unwrap_or_else(|e| e.into_inner());
+                while guard.target.is_none() {
+                    prev_key = None;
+                    prev_raw.clear();
+                    settled_streak = 0;
+                    idle = SCAN_FAST;
+                    guard = s.wake.wait(guard).unwrap_or_else(|e| e.into_inner());
+                }
+                guard.nudge = false;
+                guard.target
+            };
+            let Some((tray_raw, exclude_raw)) = target else {
+                continue;
+            };
+            let tray = HWND(tray_raw as *mut _);
+            let measured = automation
+                .as_ref()
+                .and_then(|uia| unsafe { scan_taskbar_once(uia, tray, exclude_raw) });
+
+            let mut changed = false;
+            let mut settled = false;
+            if let Some((bar, raw_merged)) = measured {
+                let key = (tray_raw, exclude_raw, bar);
+                let same_key = prev_key == Some(key);
+                settled = same_key && prev_raw == raw_merged;
+                let shown = if same_key {
+                    let mut combined = Vec::with_capacity(prev_raw.len() + raw_merged.len());
+                    combined.extend_from_slice(&prev_raw);
+                    combined.extend_from_slice(&raw_merged);
+                    merge_intervals(&combined, bar.left, bar.right)
+                } else {
+                    raw_merged.clone()
+                };
+                prev_key = Some(key);
+                prev_raw = raw_merged;
+
+                let next_snap = TaskbarSnapshot {
+                    tray: tray_raw,
+                    bar,
+                    occupied: shown,
+                };
+                let mut guard = s.state.lock().unwrap_or_else(|e| e.into_inner());
+                if guard.target == Some((tray_raw, exclude_raw))
+                    && guard.snapshot.as_ref() != Some(&next_snap)
+                {
+                    guard.snapshot = Some(next_snap);
+                    changed = true;
+                    if guard.overlay_thread != 0 {
+                        // SAFETY: wakes the overlay thread to re-layout against the new room.
+                        let _ = unsafe {
+                            PostThreadMessageW(
+                                guard.overlay_thread,
+                                WM_TASKBAR_ROOM,
+                                WPARAM(0),
+                                LPARAM(0),
+                            )
+                        };
+                    }
+                }
+            }
+
+            if changed || !settled {
+                settled_streak = 0;
+                idle = SCAN_FAST;
+            } else {
+                settled_streak = settled_streak.saturating_add(1);
+                if settled_streak >= 3 {
+                    idle = (idle * 2).min(SCAN_MAX);
+                }
+            }
+
+            let mut guard = s.state.lock().unwrap_or_else(|e| e.into_inner());
+            let until = Instant::now() + idle;
+            while guard.target.is_some() && !guard.nudge {
+                let left = until.saturating_duration_since(Instant::now());
+                if left.is_zero() {
+                    break;
+                }
+                let (next_guard, res) = s
+                    .wake
+                    .wait_timeout(guard, left)
+                    .unwrap_or_else(|e| e.into_inner());
+                guard = next_guard;
+                if res.timed_out() {
+                    break;
+                }
+            }
+            if guard.nudge {
+                idle = SCAN_FAST;
+            }
+        }
     }
 
     /// What a window shows, kept for lines to light up in: a frame moves
@@ -1472,8 +1819,6 @@ mod win {
     thread_local! {
         static WINDOWS: RefCell<HashMap<String, Window>> = RefCell::new(HashMap::new());
         static FACTORIES: RefCell<Option<(ID2D1Factory, IDWriteFactory)>> = const { RefCell::new(None) };
-        /// Made the first time the taskbar is read.
-        static AUTOMATION: RefCell<Option<IUIAutomation>> = const { RefCell::new(None) };
     }
 
     /// Do `act` with the window `hwnd` and the factories, unless they are
@@ -1594,29 +1939,40 @@ mod win {
                 LRESULT(0)
             }
             WM_TIMER => {
-                // What is on the taskbar changes as windows open and close:
-                // draw again in the room it leaves now.
                 with_window(hwnd, |window, d2d, dwrite| {
-                    // SAFETY: reads the shell's windows, and draws a window of
-                    // this thread.
+                    if !window.visible || window.overlay.place != Place::Taskbar {
+                        return;
+                    }
+                    // SAFETY: reads the shell's window handle and redraws if
+                    // the taskbar restarted or its free room changed.
                     unsafe {
-                        if window.overlay.place == Place::Taskbar && taskbar_room() != window.room {
+                        let tray = find_taskbar();
+                        let desired = tray.and_then(|t| {
+                            let scale = GetDpiForWindow(hwnd).max(96) as f32 / 96.0;
+                            live_taskbar_room(
+                                t,
+                                dwrite,
+                                &window.overlay.lines,
+                                scale,
+                                2.0 * scale,
+                                window.room,
+                            )
+                        });
+                        if tray != window.parent || desired != window.room {
                             let _ = draw(window, d2d, dwrite);
+                        } else if window.parent.is_some() {
+                            let _ = SetWindowPos(
+                                hwnd,
+                                Some(HWND_TOP),
+                                0,
+                                0,
+                                0,
+                                0,
+                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                            );
                         }
                     }
                 });
-                // SAFETY: keeps a window of this thread on top of the taskbar.
-                let _ = unsafe {
-                    SetWindowPos(
-                        hwnd,
-                        Some(HWND_TOPMOST),
-                        0,
-                        0,
-                        0,
-                        0,
-                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-                    )
-                };
                 LRESULT(0)
             }
             // SAFETY: the default handling of a window of this thread.
@@ -1628,9 +1984,6 @@ mod win {
         // SAFETY: this thread's own settings, window class and factories.
         unsafe {
             let _ = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-            // UI Automation reads the taskbar. In the multithreaded apartment
-            // its calls wait without pumping this thread's messages.
-            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
             let instance = GetModuleHandleW(None).unwrap_or_default();
             let class = WNDCLASSEXW {
                 cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
@@ -1651,7 +2004,9 @@ mod win {
                 return;
             };
             FACTORIES.with(|factories| *factories.borrow_mut() = Some((d2d, dwrite)));
-            let _ = ready.send(GetCurrentThreadId());
+            let thread_id = GetCurrentThreadId();
+            set_scanner_thread(thread_id);
+            let _ = ready.send(thread_id);
             let mut message = MSG::default();
             while GetMessageW(&mut message, None, 0, 0).as_bool() {
                 if message.hwnd.is_invalid() && message.message == WM_APP {
@@ -1662,6 +2017,21 @@ mod win {
                             }
                         });
                     }
+                    continue;
+                }
+                if message.hwnd.is_invalid() && message.message == WM_TASKBAR_ROOM {
+                    WINDOWS.with(|windows| {
+                        let mut windows = windows.borrow_mut();
+                        FACTORIES.with(|factories| {
+                            if let Some((d2d, dwrite)) = factories.borrow().as_ref() {
+                                for window in windows.values_mut() {
+                                    if window.visible && window.overlay.place == Place::Taskbar {
+                                        let _ = draw(window, d2d, dwrite);
+                                    }
+                                }
+                            }
+                        });
+                    });
                     continue;
                 }
                 let _ = TranslateMessage(&message);
@@ -1678,17 +2048,20 @@ mod win {
     ) {
         match message {
             Message::Hide(id) => WINDOWS.with(|windows| {
-                if let Some(window) = windows.borrow_mut().get_mut(&id) {
+                let mut windows = windows.borrow_mut();
+                if let Some(window) = windows.get_mut(&id) {
+                    window.visible = false;
                     window.over = false;
                     window.hot = None;
                     // SAFETY: a window of this thread.
                     unsafe {
-                        let _ = KillTimer(Some(window.hwnd), TOPMOST_TIMER);
+                        let _ = KillTimer(Some(window.hwnd), TASKBAR_TIMER);
                         let _ = KillTimer(Some(window.hwnd), HOVER_TIMER);
                         let _ = KillTimer(Some(window.hwnd), LIT_TIMER);
                         let _ = ShowWindow(window.hwnd, SW_HIDE);
                     }
                 }
+                refresh_scanner(&windows);
             }),
             Message::Lit(id, overlay) => {
                 let moved = WINDOWS.with(|windows| {
@@ -1712,41 +2085,49 @@ mod win {
             }
             Message::Show(id, overlay) => WINDOWS.with(|windows| {
                 let mut windows = windows.borrow_mut();
-                let window = windows.entry(id.clone()).or_insert_with(|| {
-                    // SAFETY: a window of the class this thread registered.
-                    let hwnd = unsafe {
-                        CreateWindowExW(
-                            WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
-                            w!("BernOverlay"),
-                            w!(""),
-                            WS_POPUP,
-                            0,
-                            0,
-                            1,
-                            1,
-                            None,
-                            None,
-                            Some(instance),
-                            None,
-                        )
-                    }
-                    .unwrap_or_default();
-                    Window {
-                        id: id.clone(),
-                        hwnd,
-                        overlay: Overlay::default(),
-                        place: super::saved_place(&id),
-                        over: false,
-                        hot: None,
-                        pressed: None,
-                        buttons: Vec::new(),
-                        frame: None,
-                        room: None,
-                    }
-                });
-                window.overlay = overlay;
-                // SAFETY: draws a window of this thread.
-                let _ = unsafe { draw(window, d2d, dwrite) };
+                {
+                    let window = windows.entry(id.clone()).or_insert_with(|| {
+                        // SAFETY: a window of the class this thread registered.
+                        let hwnd = unsafe {
+                            CreateWindowExW(
+                                WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                                w!("BernOverlay"),
+                                w!(""),
+                                WS_POPUP,
+                                0,
+                                0,
+                                1,
+                                1,
+                                None,
+                                None,
+                                Some(instance),
+                                None,
+                            )
+                        }
+                        .unwrap_or_default();
+                        Window {
+                            id: id.clone(),
+                            hwnd,
+                            overlay: Overlay::default(),
+                            place: super::saved_place(&id),
+                            over: false,
+                            hot: None,
+                            pressed: None,
+                            buttons: Vec::new(),
+                            frame: None,
+                            parent: None,
+                            visible: false,
+                            room: None,
+                        }
+                    });
+                    window.overlay = overlay;
+                    window.visible = true;
+                }
+                refresh_scanner(&windows);
+                if let Some(window) = windows.get_mut(&id) {
+                    // SAFETY: draws a window of this thread.
+                    let _ = unsafe { draw(window, d2d, dwrite) };
+                }
             }),
         }
     }
@@ -1855,104 +2236,293 @@ mod win {
         }
     }
 
-    /// The room an overlay on the taskbar has: from the last thing on the
-    /// taskbar to the notification area, the taskbar's height, in pixels.
-    /// What is on it is read through UI Automation, as the taskbar of
-    /// Windows 11 draws its buttons, widgets and search box in XAML, with
-    /// no windows of their own.
-    unsafe fn taskbar_room() -> Option<Room> {
-        // SAFETY: reads the shell's windows.
+    fn find_taskbar() -> Option<HWND> {
+        // SAFETY: queries the shell's primary taskbar window handle.
+        unsafe { FindWindowW(w!("Shell_TrayWnd"), None).ok() }.filter(|&h| !h.0.is_null())
+    }
+
+    unsafe fn has_visible_child(parent: HWND, class_name: PCWSTR) -> bool {
+        let mut child = HWND::default();
+        loop {
+            // SAFETY: enumerates child windows of `parent`.
+            let Ok(next) = (unsafe {
+                FindWindowExW(
+                    Some(parent),
+                    (!child.0.is_null()).then_some(child),
+                    class_name,
+                    None,
+                )
+            }) else {
+                break;
+            };
+            if next.0.is_null() {
+                break;
+            }
+            // SAFETY: checks visibility of a live child window handle.
+            if unsafe { IsWindowVisible(next) }.as_bool() {
+                return true;
+            }
+            child = next;
+        }
+        false
+    }
+
+    unsafe fn scan_taskbar_once(
+        automation: &IUIAutomation,
+        tray: HWND,
+        exclude_raw: isize,
+    ) -> Option<(Room, Vec<(i32, i32)>)> {
+        // SAFETY: runs on the background UIA scanner thread against `tray`.
         unsafe {
-            let tray = FindWindowW(w!("Shell_TrayWnd"), None).ok()?;
+            if !IsWindow(Some(tray)).as_bool() {
+                return None;
+            }
             let mut bar = RECT::default();
             GetWindowRect(tray, &mut bar).ok()?;
-            let mut right = bar.right;
-            if let Ok(notify) = FindWindowExW(Some(tray), None, w!("TrayNotifyWnd"), None) {
-                let mut area = RECT::default();
-                if GetWindowRect(notify, &mut area).is_ok() && area.left > bar.left {
-                    right = area.left;
-                }
+            if bar.right <= bar.left || bar.bottom <= bar.top {
+                return None;
             }
-            let mut left = bar.left;
-            // A taskbar on the side of the screen keeps its whole width.
-            if bar.right - bar.left > bar.bottom - bar.top {
-                for item in taskbar_items(tray, &bar) {
-                    if item.right <= right {
-                        left = left.max(item.right);
-                    }
-                }
-            }
-            Some(Room {
-                left: left + TASKBAR_GAP,
-                right: right - TASKBAR_GAP,
+            let bar_room = Room {
+                left: bar.left,
+                right: bar.right,
                 top: bar.top,
                 bottom: bar.bottom,
-            })
+            };
+            let mut raw = Vec::new();
+            if let Some(span) = notify_span(tray, &bar) {
+                raw.push(span);
+            }
+
+            let is_xaml = has_visible_child(
+                tray,
+                w!("Windows.UI.Composition.DesktopWindowContentBridge"),
+            );
+            if let Ok(root) = automation.ElementFromHandle(tray)
+                && let Ok(true_cond) = automation.CreateTrueCondition()
+            {
+                let _ = collect_occupied(&true_cond, &root, &bar, exclude_raw, is_xaml, &mut raw);
+            }
+            if raw.is_empty() {
+                return None;
+            }
+            Some((bar_room, merge_intervals(&raw, bar.left, bar.right)))
         }
     }
 
-    /// Where each thing that takes room on the taskbar is, in pixels.
-    unsafe fn taskbar_items(tray: HWND, bar: &RECT) -> Vec<RECT> {
-        AUTOMATION.with(|automation| {
-            let mut automation = automation.borrow_mut();
-            if automation.is_none() {
-                // SAFETY: COM is initialized on this thread in `run`.
-                *automation =
-                    unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER) }.ok();
-            }
-            let Some(automation) = automation.as_ref() else {
-                return Vec::new();
-            };
-            // SAFETY: reads the shell's window through UI Automation.
-            unsafe { read_taskbar(automation, tray, bar) }.unwrap_or_default()
-        })
-    }
-
-    unsafe fn read_taskbar(
-        automation: &IUIAutomation,
-        tray: HWND,
+    unsafe fn collect_occupied(
+        true_cond: &IUIAutomationCondition,
+        element: &IUIAutomationElement,
         bar: &RECT,
-    ) -> windows::core::Result<Vec<RECT>> {
-        // SAFETY: UI Automation calls on objects made on this thread.
+        exclude_raw: isize,
+        is_xaml: bool,
+        acc: &mut Vec<(i32, i32)>,
+    ) -> Option<i32> {
+        // SAFETY: UIA calls on the background scanner thread.
         unsafe {
-            let root = automation.ElementFromHandle(tray)?;
-            let cache = automation.CreateCacheRequest()?;
-            for property in [
-                UIA_BoundingRectanglePropertyId,
-                UIA_ControlTypePropertyId,
-                UIA_IsOffscreenPropertyId,
-            ] {
-                cache.AddProperty(property)?;
-            }
-            let shown = automation.ControlViewCondition()?;
-            let found = root.FindAllBuildCache(TreeScope_Descendants, &shown, &cache)?;
-            // Wider than half the taskbar is not one thing on it.
-            let half = (bar.right - bar.left) / 2;
-            let mut items = Vec::new();
-            for index in 0..found.Length()? {
-                let Ok(element) = found.GetElement(index) else {
+            let kids = element.FindAll(TreeScope_Children, true_cond).ok()?;
+            let count = kids.Length().unwrap_or(0);
+            let bar_width = bar.right - bar.left;
+            for index in 0..count {
+                let Ok(child) = kids.GetElement(index) else {
                     continue;
                 };
-                let (Ok(rect), Ok(kind), Ok(offscreen)) = (
-                    element.CachedBoundingRectangle(),
-                    element.CachedControlType(),
-                    element.CachedIsOffscreen(),
-                ) else {
+                if exclude_raw != 0
+                    && child
+                        .CurrentNativeWindowHandle()
+                        .is_ok_and(|h| h.0 as isize == exclude_raw)
+                {
+                    continue;
+                }
+                if child.CurrentIsOffscreen().is_ok_and(|b| b.as_bool()) {
+                    continue;
+                }
+                let Ok(rect) = child.CurrentBoundingRectangle() else {
                     continue;
                 };
                 let width = rect.right - rect.left;
-                if offscreen.as_bool()
-                    || !OCCUPYING.contains(&kind)
-                    || width <= 0
-                    || width > half
+                if width <= 0
+                    || rect.bottom <= rect.top
                     || rect.bottom <= bar.top
                     || rect.top >= bar.bottom
                 {
                     continue;
                 }
-                items.push(rect);
+                let cls = child
+                    .CurrentClassName()
+                    .map(|b| b.to_string())
+                    .unwrap_or_default();
+                let is_legacy = matches!(
+                    cls.as_str(),
+                    "ReBarWindow32" | "WorkerW" | "MSTaskSwWClass" | "MSTaskListWClass"
+                );
+                if is_legacy {
+                    if is_xaml {
+                        continue;
+                    }
+                    if collect_occupied(true_cond, &child, bar, exclude_raw, is_xaml, acc).is_none()
+                    {
+                        acc.push((rect.left, rect.right));
+                    }
+                    continue;
+                }
+
+                let kind = child.CurrentControlType().unwrap_or(UIA_CONTROLTYPE_ID(0));
+                if LEAF_OCCUPYING.contains(&kind) && width <= bar_width / 2 {
+                    acc.push((rect.left, rect.right));
+                    continue;
+                }
+
+                // Recurse into containers (even sub-full-width ones such as
+                // TaskbarFrame or Widgets wrappers) so empty spans stay free.
+                match collect_occupied(true_cond, &child, bar, exclude_raw, is_xaml, acc) {
+                    None if width <= bar_width / 2 => acc.push((rect.left, rect.right)),
+                    Some(0) if width <= bar_width / 2 && !CONTAINER_TYPES.contains(&kind) => {
+                        acc.push((rect.left, rect.right));
+                    }
+                    _ => {}
+                }
             }
-            Ok(items)
+            Some(count)
+        }
+    }
+
+    fn measure_lines_width(dwrite: &IDWriteFactory, lines: &[Line], scale: f32) -> f32 {
+        lines
+            .iter()
+            .filter(|line| !line.text.is_empty())
+            .filter_map(|line| unsafe { layout(dwrite, line, scale, UNLIMITED) })
+            .map(|(_, w, _)| w)
+            .fold(0.0, f32::max)
+    }
+
+    fn min_taskbar_width(lines: &[Line], scale: f32, margin: f32) -> i32 {
+        let min_glyph = lines
+            .iter()
+            .filter(|line| !line.text.is_empty())
+            .map(|line| line.size as f32 * scale)
+            .fold(0.0, f32::max);
+        (min_glyph + 2.0 * margin).ceil() as i32
+    }
+
+    unsafe fn notify_span(tray: HWND, bar: &RECT) -> Option<(i32, i32)> {
+        // SAFETY: queries the shell's notification area rect.
+        unsafe {
+            let notify = FindWindowExW(Some(tray), None, w!("TrayNotifyWnd"), None).ok()?;
+            if notify.0.is_null() || !IsWindowVisible(notify).as_bool() {
+                return None;
+            }
+            let mut area = RECT::default();
+            if GetWindowRect(notify, &mut area).is_ok()
+                && area.right > area.left
+                && area.bottom > bar.top
+                && area.top < bar.bottom
+            {
+                Some((area.left, area.right))
+            } else {
+                None
+            }
+        }
+    }
+
+    unsafe fn live_taskbar_room(
+        tray: HWND,
+        dwrite: &IDWriteFactory,
+        lines: &[Line],
+        scale: f32,
+        margin: f32,
+        current: Option<Room>,
+    ) -> Option<Room> {
+        let snap = latest_taskbar_snapshot(tray)?;
+        let bar_rect = RECT {
+            left: snap.bar.left,
+            top: snap.bar.top,
+            right: snap.bar.right,
+            bottom: snap.bar.bottom,
+        };
+        let want = measure_lines_width(dwrite, lines, scale) + 2.0 * margin;
+        let tb_gap = (TASKBAR_GAP as f32 * scale).round() as i32;
+        let min_w = min_taskbar_width(lines, scale, margin);
+        // SAFETY: reads the live notification area rect so newly added tray
+        // icons shrink available room immediately without waiting for UIA.
+        if let Some(notify) = unsafe { notify_span(tray, &bar_rect) } {
+            let mut occupied = snap.occupied.clone();
+            occupied.push(notify);
+            pick_taskbar_room(
+                snap.bar,
+                &occupied,
+                tb_gap,
+                min_w,
+                want.ceil() as i32,
+                current,
+            )
+        } else {
+            pick_taskbar_room(
+                snap.bar,
+                &snap.occupied,
+                tb_gap,
+                min_w,
+                want.ceil() as i32,
+                current,
+            )
+        }
+    }
+
+    unsafe fn sync_parent(window: &mut Window, tray: Option<HWND>) {
+        // SAFETY: updates Win32 parent/style only when switching mode or when
+        // the taskbar window handle changes.
+        unsafe {
+            if window.overlay.place == Place::Taskbar {
+                let valid_tray = tray.filter(|&t| IsWindow(Some(t)).as_bool());
+                let Some(tray) = valid_tray else {
+                    window.parent = None;
+                    return;
+                };
+                let style = GetWindowLongPtrW(window.hwnd, GWL_STYLE) as u32;
+                let current_parent = GetParent(window.hwnd).ok();
+                if (style & WS_CHILD.0) == 0 || current_parent != Some(tray) {
+                    let _ = SetWindowPos(
+                        window.hwnd,
+                        Some(HWND_NOTOPMOST),
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                    );
+                    let _ = SetParent(window.hwnd, Some(tray));
+                    let new_style = (style & !WS_POPUP.0) | WS_CHILD.0;
+                    SetWindowLongPtrW(window.hwnd, GWL_STYLE, new_style as isize);
+                    let _ = SetWindowPos(
+                        window.hwnd,
+                        Some(HWND_TOP),
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+                    );
+                    window.parent = Some(tray);
+                    window.room = None;
+                }
+            } else {
+                let style = GetWindowLongPtrW(window.hwnd, GWL_STYLE) as u32;
+                if (style & WS_CHILD.0) != 0 {
+                    let _ = SetParent(window.hwnd, None);
+                    let new_style = (style & !WS_CHILD.0) | WS_POPUP.0;
+                    SetWindowLongPtrW(window.hwnd, GWL_STYLE, new_style as isize);
+                    let _ = SetWindowPos(
+                        window.hwnd,
+                        Some(HWND_TOPMOST),
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+                    );
+                }
+                window.parent = None;
+                window.room = None;
+            }
         }
     }
 
@@ -1976,16 +2546,32 @@ mod win {
         // SAFETY: Win32, Direct2D and DirectWrite calls on this thread's
         // window and its own device contexts and bitmap.
         unsafe {
+            let free = window.overlay.place == Place::Free;
+            let tray = if free { None } else { find_taskbar() };
+            sync_parent(window, tray);
+
             let dpi = GetDpiForWindow(hwnd).max(96);
             let scale = dpi as f32 / 96.0;
-            let free = window.overlay.place == Place::Free;
             // On the taskbar the lines fill its height, with no room around.
             let (margin, gap) = if free {
                 (MARGIN * scale, GAP * scale)
             } else {
                 (2.0 * scale, 0.0)
             };
-            let room = if free { None } else { taskbar_room() };
+            let room = if free {
+                None
+            } else if let Some(tray) = window.parent {
+                live_taskbar_room(
+                    tray,
+                    dwrite,
+                    &window.overlay.lines,
+                    scale,
+                    margin,
+                    window.room,
+                )
+            } else {
+                None
+            };
             if room != window.room {
                 if let Some(room) = room {
                     eprintln!(
@@ -1994,6 +2580,14 @@ mod win {
                     );
                 }
                 window.room = room;
+            }
+            if !free && room.is_none() {
+                let _ = KillTimer(Some(hwnd), HOVER_TIMER);
+                let _ = KillTimer(Some(hwnd), LIT_TIMER);
+                let _ = ShowWindow(hwnd, SW_HIDE);
+                window.frame = None;
+                SetTimer(Some(hwnd), TASKBAR_TIMER, 1000, None);
+                return Ok(());
             }
             // On the taskbar a line is as wide as its room; one that has not
             // room for a character is left out.
@@ -2085,9 +2679,9 @@ mod win {
                 let _ = KillTimer(Some(hwnd), LIT_TIMER);
                 let _ = ShowWindow(hwnd, SW_HIDE);
                 window.frame = None;
-                // Still on the taskbar, it looks for room again every second.
-                if room.is_some() {
-                    SetTimer(Some(hwnd), TOPMOST_TIMER, 1000, None);
+                // Still on the taskbar, it checks again if the layout changes.
+                if !free {
+                    SetTimer(Some(hwnd), TASKBAR_TIMER, 1000, None);
                 }
                 return Ok(());
             }
@@ -2370,10 +2964,18 @@ mod win {
 
             let (left, top) = match window.overlay.place {
                 Place::Taskbar => room.map_or((0, 0), |room| {
-                    (
-                        room.right - width,
-                        (room.top + room.bottom) / 2 - height / 2,
-                    )
+                    let screen_x = room.right - width;
+                    let screen_y = (room.top + room.bottom) / 2 - height / 2;
+                    if let Some(tray) = window.parent {
+                        let mut pt = POINT {
+                            x: screen_x,
+                            y: screen_y,
+                        };
+                        let _ = ScreenToClient(tray, &mut pt);
+                        (pt.x, pt.y)
+                    } else {
+                        (screen_x, screen_y)
+                    }
                 }),
                 Place::Free => {
                     let (x, y) = window.place.unwrap_or_else(|| {
@@ -2426,9 +3028,14 @@ mod win {
             result?;
             keep_moving(window);
             let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+            let insert_after = if window.parent.is_some() {
+                HWND_TOP
+            } else {
+                HWND_TOPMOST
+            };
             let _ = SetWindowPos(
                 hwnd,
-                Some(HWND_TOPMOST),
+                Some(insert_after),
                 0,
                 0,
                 0,
@@ -2436,7 +3043,7 @@ mod win {
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
             );
             match window.overlay.place {
-                Place::Taskbar => SetTimer(Some(hwnd), TOPMOST_TIMER, 1000, None),
+                Place::Taskbar => SetTimer(Some(hwnd), TASKBAR_TIMER, 1000, None),
                 Place::Free => SetTimer(Some(hwnd), HOVER_TIMER, HOVER_EVERY, None),
             };
         }
@@ -2601,5 +3208,79 @@ mod tests {
         assert!(
             as_json(&overlay(0.5)).contains(r#""lit":0,"path":"0 0 1 2","clock":0.5,"since":0"#)
         );
+    }
+
+    #[test]
+    fn taskbar_room_avoids_widgets_on_left_aligned_taskbar() {
+        let bar = Room {
+            left: 0,
+            right: 1920,
+            top: 1032,
+            bottom: 1080,
+        };
+        // Left-aligned taskbar: Start/apps on the left, Widgets next to the
+        // notification area on the right.
+        let occupied = [(0, 620), (1480, 1650), (1652, 1920)];
+        assert_eq!(
+            pick_taskbar_room(bar, &occupied, 8, 40, 260, None),
+            Some(Room {
+                left: 628,
+                right: 1472,
+                top: 1032,
+                bottom: 1080,
+            })
+        );
+    }
+
+    #[test]
+    fn taskbar_room_picks_wider_left_gap_and_stays_sticky_for_centered_taskbar() {
+        let bar = Room {
+            left: 0,
+            right: 1920,
+            top: 1032,
+            bottom: 1080,
+        };
+        // Centered icons leave a wide left gap and a cramped right gap next to
+        // a wide widgets/tray block.
+        let occupied = [(0, 180), (700, 1220), (1450, 1920)];
+        let left_gap = Room {
+            left: 188,
+            right: 692,
+            top: 1032,
+            bottom: 1080,
+        };
+        let right_gap = Room {
+            left: 1228,
+            right: 1442,
+            top: 1032,
+            bottom: 1080,
+        };
+        // Short text fits on the right beside the notification area.
+        assert_eq!(
+            pick_taskbar_room(bar, &occupied, 8, 40, 180, None),
+            Some(right_gap)
+        );
+        // Long text moves to the wider left gap instead of truncating on the right.
+        assert_eq!(
+            pick_taskbar_room(bar, &occupied, 8, 40, 320, None),
+            Some(left_gap)
+        );
+        // Once on the left gap, it stays there while within sticky hysteresis.
+        assert_eq!(
+            pick_taskbar_room(bar, &occupied, 8, 40, 200, Some(left_gap)),
+            Some(left_gap)
+        );
+    }
+
+    #[test]
+    fn taskbar_room_returns_none_when_taskbar_is_full() {
+        let bar = Room {
+            left: 0,
+            right: 1280,
+            top: 976,
+            bottom: 1024,
+        };
+        let occupied = [(0, 900), (920, 1280)];
+        assert_eq!(pick_taskbar_room(bar, &occupied, 8, 40, 200, None), None);
     }
 }
