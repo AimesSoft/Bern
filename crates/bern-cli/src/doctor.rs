@@ -49,6 +49,12 @@ const SPECS: &[Spec] = &[
     ("iOS · SwiftUI", &["ios"], Some(("macos", "macOS")), ios),
     ("tvOS · SwiftUI", &["tvos"], Some(("macos", "macOS")), tvos),
     (
+        "watchOS · SwiftUI",
+        &["watchos"],
+        Some(("macos", "macOS")),
+        watchos,
+    ),
+    (
         "Windows · WinUI 3",
         &["windows"],
         Some(("windows", "Windows")),
@@ -189,6 +195,12 @@ fn tvos() -> Status {
     simulator("tvOS", "appletvsimulator", "tvos")
 }
 
+/// The watchOS simulator SDK and the Rust target for the Apple Watch
+/// simulator, whose standard library rustup ships (tier 2).
+fn watchos() -> Status {
+    simulator("watchOS", "watchsimulator", "watchos")
+}
+
 /// The simulator SDK `sdk` of `system` and the Rust target for its
 /// simulator on this Mac.
 fn simulator(system: &str, sdk: &str, os: &str) -> Status {
@@ -208,7 +220,11 @@ fn simulator(system: &str, sdk: &str, os: &str) -> Status {
         );
     }
     let simulator = if std::env::consts::ARCH == "x86_64" {
-        format!("x86_64-apple-{os}")
+        if os == "watchos" {
+            format!("x86_64-apple-{os}-sim")
+        } else {
+            format!("x86_64-apple-{os}")
+        }
     } else {
         format!("aarch64-apple-{os}-sim")
     };
@@ -391,7 +407,9 @@ mod tests {
     #[test]
     fn checks_cover_every_platform_once() {
         let checks = checks();
-        for platform in ["macos", "ios", "tvos", "windows", "linux", "browser"] {
+        for platform in [
+            "macos", "ios", "tvos", "watchos", "windows", "linux", "android", "wearos", "browser",
+        ] {
             assert_eq!(
                 checks
                     .iter()

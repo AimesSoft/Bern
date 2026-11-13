@@ -126,9 +126,9 @@ pub fn android_connect_for(app: &Application, watch: bool) -> String {
     )
 }
 
-/// What an app in the iOS or tvOS simulator needs: it listens only when
-/// started with the directory the programs use. `system` is the one it
-/// runs on, `ios` or `tvos`.
+/// What an app in the iOS, tvOS or watchOS simulator needs: it listens only
+/// when started with the directory the programs use. `system` is the one it
+/// runs on, `ios`, `tvos` or `watchos`.
 pub fn simulator_connect(app: &Application, system: &str) -> String {
     let id = &app.app.bundle_id;
     format!(
@@ -480,7 +480,7 @@ pub fn markdown(app: &Application, place: &Place) -> String {
         out,
         "- Write parameters as `--name value` or `--name=value`. Text goes as it is; `int` and `float` as numbers; `bool` as `true` or `false`; an optional parameter takes `none` for no value; a choice takes its variant name. Lists, records and variants with fields go as JSON (see Types below).\n\
          - Each run waits for the result and prints it as JSON. Exit status: 0 done, 1 the command failed (`error[code]: message` on standard error), 2 wrong usage, 3 the app is not running or the connection was lost.\n\
-         - `--engine` picks the app when several copies run: by the system it runs on (`macos`, `ios`, `tvos`, `windows`, `linux`, `android`, `wearos`), or by its id, which is new each time it starts; the error lists them. `--session ID` picks the window session for `ui` and `window` commands when several are open.\n\
+         - `--engine` picks the app when several copies run: by the system it runs on (`macos`, `ios`, `tvos`, `watchos`, `windows`, `linux`, `android`, `wearos`), or by its id, which is new each time it starts; the error lists them. `--session ID` picks the window session for `ui` and `window` commands when several are open.\n\
          - `{cli} state` prints the state below, `{cli} sessions` the open UI sessions and windows, `{cli} catalog` the whole catalog as JSON, `{cli} --help` the commands.\n"
     );
 

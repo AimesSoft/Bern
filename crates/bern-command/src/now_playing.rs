@@ -64,7 +64,7 @@ pub fn take_commands() -> Vec<Command> {
 
 /// Show `now` as what plays, or that nothing plays.
 pub fn update(now: Option<&NowPlaying>) {
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "watchos"))]
     apple::update(now.cloned());
     #[cfg(target_os = "windows")]
     windows_smtc::update(now.cloned());
@@ -75,6 +75,7 @@ pub fn update(now: Option<&NowPlaying>) {
     #[cfg(not(any(
         target_os = "macos",
         target_os = "ios",
+        target_os = "watchos",
         target_os = "windows",
         target_os = "linux",
         target_os = "android"
@@ -175,9 +176,9 @@ mod android {
     }
 }
 
-/// macOS and iOS: `MPNowPlayingInfoCenter` and `MPRemoteCommandCenter`,
-/// used on the main thread.
-#[cfg(any(target_os = "macos", target_os = "ios"))]
+/// macOS, iOS and watchOS: `MPNowPlayingInfoCenter` and
+/// `MPRemoteCommandCenter`, used on the main thread.
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "watchos"))]
 mod apple {
     use super::{Command, NowPlaying, push};
     use block2::RcBlock;
@@ -217,7 +218,7 @@ mod apple {
             };
             return;
         };
-        #[cfg(target_os = "ios")]
+        #[cfg(any(target_os = "ios", target_os = "watchos"))]
         unsafe {
             session()
         };
@@ -290,7 +291,7 @@ mod apple {
             };
             Some(Retained::into_super(Retained::into_super(artwork)))
         }
-        #[cfg(target_os = "ios")]
+        #[cfg(any(target_os = "ios", target_os = "watchos"))]
         {
             use objc2::msg_send;
             use objc2::runtime::AnyClass;
@@ -344,9 +345,9 @@ mod apple {
         let _ = MPRemoteCommand::class();
     }
 
-    /// iOS plays on behind the lock screen and shows its controls only for
-    /// a playback session.
-    #[cfg(target_os = "ios")]
+    /// iOS and watchOS play on behind the lock screen and show their
+    /// controls only for a playback session.
+    #[cfg(any(target_os = "ios", target_os = "watchos"))]
     unsafe fn session() {
         use objc2_avf_audio::{AVAudioSession, AVAudioSessionCategoryPlayback};
         static ACTIVE: Once = Once::new();

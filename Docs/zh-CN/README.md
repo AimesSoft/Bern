@@ -19,7 +19,7 @@
 
 ## 实现与专题
 
-- [macOS](Implementation/macOS-SwiftUI.md)、[iOS](Implementation/iOS-SwiftUI.md)、[tvOS](Implementation/tvOS-SwiftUI.md)、[Android](Implementation/Android-Compose.md)、[Windows](Implementation/Windows-WinUI3.md)、[Linux](Implementation/Linux-GTK.md)、[Web](Implementation/Web.md)：实现细节、历次验证与限制。
+- [macOS](Implementation/macOS-SwiftUI.md)、[iOS](Implementation/iOS-SwiftUI.md)、[tvOS](Implementation/tvOS-SwiftUI.md)、[watchOS](Implementation/watchOS-SwiftUI.md)、[Android](Implementation/Android-Compose.md)、[Windows](Implementation/Windows-WinUI3.md)、[Linux](Implementation/Linux-GTK.md)、[Web](Implementation/Web.md)：实现细节、历次验证与限制。
 - [GPUI](Implementation/GPUI.md)：显式选择的自绘桌面目标，第一版（macOS、Windows、Linux）：依赖版本、结构、窗口框架与视频表面、已实现的组件与实测。
 - [动画 SVG](Implementation/Animated-SVG.md)：可选组件接口、资源、依赖、静态回退和验证范围。
 - [JavaScript 与目标能力](Implementation/JavaScript.md)：WebView／浏览器与 Boa 的条件构建、脚本上下文和能力分支。

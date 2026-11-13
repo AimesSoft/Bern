@@ -12,7 +12,7 @@ impl Generator<'_> {
     /// is Command on Apple systems. None on tvOS, which has no keyboard
     /// shortcuts; see `shortcut_line`.
     pub(super) fn shortcut(&self, element: &Element) -> Option<String> {
-        if self.platform == Platform::Tvos {
+        if matches!(self.platform, Platform::Tvos | Platform::Watchos) {
             return None;
         }
         self.keyboard(element, "shortcut")
@@ -45,6 +45,9 @@ impl Generator<'_> {
     /// screen and enabled. Keys the remote has no button for, and controls
     /// whose action is not a press, give nothing there.
     pub(super) fn shortcut_line(&self, element: &Element, action: Option<&str>) -> Option<String> {
+        if self.platform == Platform::Watchos {
+            return None;
+        }
         if self.platform != Platform::Tvos {
             return self
                 .shortcut(element)
@@ -65,6 +68,9 @@ impl Generator<'_> {
     /// and enabled, without a control; on tvOS the remote's button that
     /// stands for the key, where it has one.
     pub(super) fn key_shortcut(&self, out: &mut Out, element: &Element) {
+        if self.platform == Platform::Watchos {
+            return;
+        }
         let action = element
             .action
             .as_ref()
@@ -787,6 +793,20 @@ impl Generator<'_> {
             ));
             return;
         }
+        if self.platform == Platform::Watchos && element.keyword("style") != Some("inline") {
+            out.line(format!(
+                "BernWatchPicker(selection: {binding}, label: {label}, options: {}, labelHidden: {}, capsule: {}, height: {})",
+                pairs(),
+                element.keyword("label_hidden") == Some("true"),
+                element.keyword("shape") == Some("capsule"),
+                self.length(element, "height").unwrap_or_else(|| "32.0".into())
+            ));
+            out.line(format!(
+                ".bernControl({}, role: \"picker\", label: {label}, actions: {actions})",
+                self.target(element, ctx)
+            ));
+            return;
+        }
         // tvOS's segmented control takes a television's size, too large in
         // a scene laid out at the design's: `BernSegments` draws it there.
         if self.platform == Platform::Tvos && element.keyword("style") == Some("segmented") {
@@ -932,6 +952,17 @@ impl Generator<'_> {
 
     pub(super) fn language_picker(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         let label = self.text_prop(element, "label").unwrap_or_default();
+        if self.platform == Platform::Watchos {
+            out.line(format!(
+                "BernWatchPicker(selection: SwiftUI.Binding(get: {{ BernLanguage.shared.current }}, set: {{ BernLanguage.shared.select($0) }}), label: {label}, options: BernLanguage.shared.supported.map {{ (BernLanguage.autonym($0), $0) }}, labelHidden: {})",
+                element.keyword("label_hidden") == Some("true")
+            ));
+            out.line(format!(
+                ".bernControl({}, role: \"picker\", label: {label}, actions: BernControlActions(select: {{ BernLanguage.shared.select($0) }}, value: {{ BernLanguage.shared.current }}))",
+                self.target(element, ctx)
+            ));
+            return;
+        }
         out.open(
             "SwiftUI.Picker(selection: SwiftUI.Binding(get: { BernLanguage.shared.current }, set: { BernLanguage.shared.select($0) })) {",
         );

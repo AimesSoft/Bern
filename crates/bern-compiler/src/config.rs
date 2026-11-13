@@ -1128,6 +1128,11 @@ fn target_config(name: String, target: RawTarget, errors: &mut Vec<Diagnostic>) 
             "target `{name}`: Wear OS has no WebView; omit webview or set it to false"
         )));
     }
+    if target.platform == "watchos" && target.webview == Some(true) {
+        errors.push(Diagnostic::error(format!(
+            "target `{name}`: watchOS has no WebView; omit webview or set it to false"
+        )));
+    }
     if target.javascript && target.web_mode.as_deref() == Some("ui") {
         errors.push(Diagnostic::error(format!(
             "target `{name}`: JavaScript hosting currently requires web_mode = \"app\""
@@ -2323,17 +2328,18 @@ mod tests {
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(every, None);
         assert_eq!(platforms["android"], "icon.png");
-        // An Icon Composer document serves macOS and iOS alike.
+        // An Icon Composer document serves macOS, iOS and watchOS alike.
         let (_, platforms, errors) = check_icons(
             &files,
-            r#"{ macos = "apple/App.icon", ios = "apple/App.icon" }"#,
+            r#"{ macos = "apple/App.icon", ios = "apple/App.icon", watchos = "apple/App.icon" }"#,
         );
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(platforms["macos"], "apple/App.icon");
         assert_eq!(platforms["ios"], "apple/App.icon");
+        assert_eq!(platforms["watchos"], "apple/App.icon");
 
         for (extra, value, expected) in [
-            (vec![], r#"{ watchos = "icon.png" }"#, "not a platform"),
+            (vec![], r#"{ visionos = "icon.png" }"#, "not a platform"),
             (vec![], r#"{ tvos = "win/app.ico" }"#, "`.brandassets`"),
             (
                 vec![(

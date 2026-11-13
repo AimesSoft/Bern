@@ -62,8 +62,8 @@ pub const ANDROID_FORWARD: &str = "android.sock";
 pub const WEAROS_FORWARD: &str = "wearos.sock";
 
 /// The system this engine runs on, in its socket's name: `macos`, `ios`,
-/// `tvos`, `windows`, `linux`, `android` or `wearos`. Clients pick an engine
-/// by it, since the engine id is new each time the app starts.
+/// `tvos`, `watchos`, `windows`, `linux`, `android` or `wearos`. Clients pick
+/// an engine by it, since the engine id is new each time the app starts.
 pub const SYSTEM: &str = std::env::consts::OS;
 
 /// Directory holding the sockets of one application, unique per user.
@@ -122,6 +122,7 @@ mod platform {
             target_os = "macos",
             target_os = "ios",
             target_os = "tvos",
+            target_os = "watchos",
             target_os = "freebsd"
         ))]
         {

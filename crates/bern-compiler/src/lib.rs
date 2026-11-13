@@ -2222,7 +2222,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
         config
             .targets
             .iter()
-            .any(|target| target.platform == "wearos"),
+            .any(|target| matches!(target.platform.as_str(), "wearos" | "watchos")),
         &sources.features,
         &contract_scopes,
         &lowered,

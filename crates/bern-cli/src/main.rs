@@ -190,6 +190,7 @@ fn registry() -> Registry {
     registry.register(Box::new(bern_backend_swiftui::SwiftUiMacos));
     registry.register(Box::new(bern_backend_swiftui::SwiftUiIos));
     registry.register(Box::new(bern_backend_swiftui::SwiftUiTvos));
+    registry.register(Box::new(bern_backend_swiftui::SwiftUiWatchos));
     registry.register(Box::new(bern_backend_web::WebBrowser));
     registry.register(Box::new(bern_backend_gtk::GtkLinux));
     registry.register(Box::new(bern_backend_gpui::Gpui::MACOS));
@@ -448,6 +449,7 @@ fn os_name(os: &str) -> &str {
         "macos" => "macOS",
         "ios" => "iOS",
         "tvos" => "tvOS",
+        "watchos" => "watchOS",
         "android" => "Android",
         "wearos" => "Wear OS",
         "windows" => "Windows",

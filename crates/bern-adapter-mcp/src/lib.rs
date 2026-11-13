@@ -61,7 +61,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
 
 fn help(name: &str, descriptor: &ProtocolDescriptor) -> String {
     format!(
-        "{name}-mcp: MCP server for the running `{}` engine, on standard input and output\n\nUsage: {name}-mcp [--engine ID|SYSTEM]\n\nOptions:\n  --engine ID|SYSTEM  Connect to this engine, by its id, which is new each time\n                      the app starts, or by the system it runs on: macos, ios,\n                      tvos, windows, linux, android or wearos. Without it, connect\n                      to the only one running; when several run, tool calls fail\n                      with an error listing them.\n",
+        "{name}-mcp: MCP server for the running `{}` engine, on standard input and output\n\nUsage: {name}-mcp [--engine ID|SYSTEM]\n\nOptions:\n  --engine ID|SYSTEM  Connect to this engine, by its id, which is new each time\n                      the app starts, or by the system it runs on: macos, ios,\n                      tvos, watchos, windows, linux, android or wearos. Without\n                      it, connect to the only one running; when several run,\n                      tool calls fail with an error listing them.\n",
         descriptor.namespace
     )
 }

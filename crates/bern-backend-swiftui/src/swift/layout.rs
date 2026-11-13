@@ -181,7 +181,9 @@ impl Generator<'_> {
             ));
             out.line(match self.platform {
                 Platform::Macos => ".ignoresSafeArea(.container, edges: .top)",
-                Platform::Ios | Platform::Tvos => ".ignoresSafeArea(.container)",
+                Platform::Ios | Platform::Tvos | Platform::Watchos => {
+                    ".ignoresSafeArea(.container)"
+                }
             });
             // Over the layer the title bar keeps its controls, not the
             // window's title, also when the content before had a split
@@ -601,7 +603,11 @@ impl Generator<'_> {
         // room the scroll view keeps above it. Its content is one view in
         // that space: a single element as it is, several in the stack
         // SwiftUI would put them in.
-        let marks_top = !horizontal && matches!(self.platform, Platform::Ios | Platform::Tvos);
+        let marks_top = !horizontal
+            && matches!(
+                self.platform,
+                Platform::Ios | Platform::Tvos | Platform::Watchos
+            );
         let one_view = match element.children.as_slice() {
             [Node::Component(_)] => true,
             [Node::Element(child)] => child.kind != "ForEach",

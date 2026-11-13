@@ -61,8 +61,9 @@ impl Generator<'_> {
                 self.nav_values(&sidebar.children, "SidebarItem", &ty)
             ));
         }
-        // tvOS's sidebar is a floating panel of the system's width.
-        if self.platform == Platform::Tvos {
+        // tvOS's sidebar is a floating panel of the system's width; watchOS
+        // stacks its split view across the watch screen.
+        if matches!(self.platform, Platform::Tvos | Platform::Watchos) {
         } else if let Some(width) = self.length(sidebar, "width") {
             out.line(format!(
                 ".navigationSplitViewColumnWidth(min: {width}, ideal: {width}, max: {width})"
@@ -82,7 +83,7 @@ impl Generator<'_> {
             _ => None,
         }) {
             // tvOS has no sidebar placement; its search takes the screen.
-            let placement = if self.platform == Platform::Tvos {
+            let placement = if matches!(self.platform, Platform::Tvos | Platform::Watchos) {
                 ".automatic"
             } else {
                 ".sidebar"
@@ -130,7 +131,7 @@ impl Generator<'_> {
         let title = labeled.then(|| self.nav_label(&selection, &sidebar.children, "SidebarItem"));
         // A compact split view needs a window title only when its header
         // does not already supply one. Keep content headers independent.
-        if self.platform.uikit()
+        if (self.platform.uikit() || self.platform == Platform::Watchos)
             && !header.is_some_and(|header| header.keyword("role") == Some("title"))
         {
             out.line(".navigationTitle(bernWindow.title)");

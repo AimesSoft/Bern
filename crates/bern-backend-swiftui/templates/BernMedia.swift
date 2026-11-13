@@ -121,6 +121,7 @@ final class BernMedia {
     /// Let the application's media kernel execute every player when it can
     /// draw into a Metal layer, or else attach AVFoundation.
     func attachExecutor() {
+        #if !os(watchOS)
         var offer = BernWriter()
         offer.u32(1)
         offer.u32(BernSurfaceKind.metalLayer.rawValue)
@@ -129,6 +130,7 @@ final class BernMedia {
             kernel = kind
             return
         }
+        #endif
         var writer = BernWriter()
         writer.text("avfoundation")
         writer.text("1")
@@ -220,11 +222,14 @@ final class BernMedia {
             surface.view.player = nil
             surfaces[token] = nil
         }
+        #if !os(watchOS)
         for (token, surface) in kernelSurfaces where surface.window == window {
             detachKernel(token: token)
         }
+        #endif
     }
 
+    #if !os(watchOS)
     /// Kernel surfaces by attachment token.
     @ObservationIgnored private var kernelSurfaces: [String: (window: String, link: CADisplayLink, frames: BernKernelFrames)] = [:]
 
@@ -273,6 +278,7 @@ final class BernMedia {
         view.u8(0)
         BernHost.shared.mediaPost(.view, view.bytes)
     }
+    #endif
 }
 
 // MARK: - AVFoundation executor
@@ -375,7 +381,9 @@ final class BernAVPlayer {
         player.actionAtItemEnd = .pause
         // System media keys and Now Playing would change playback without
         // a Bern command; they are not connected.
+        #if !os(watchOS)
         player.preventsDisplaySleepDuringVideoPlayback = true
+        #endif
         playerObservations = [
             player.observe(\.timeControlStatus) { [weak self] _, _ in
                 Task { @MainActor in self?.report() }
@@ -548,6 +556,7 @@ final class BernAVPlayer {
 enum BernVideoFit {
     case contain, cover, fill
 
+    #if !os(watchOS)
     var gravity: AVLayerVideoGravity {
         switch self {
         case .contain: .resizeAspect
@@ -555,6 +564,7 @@ enum BernVideoFit {
         case .fill: .resize
         }
     }
+    #endif
 
     /// Code of the fit in the C ABI (`VideoFit` in bern-media).
     var code: UInt32 {
@@ -588,6 +598,7 @@ final class BernPlayerOwner: @unchecked Sendable {
     }
 }
 
+#if !os(watchOS)
 /// Round a presenter's layer: the picture is a layer of its own, which a
 /// SwiftUI clip does not reach. A change of radius moves with `motion`.
 @MainActor
@@ -609,6 +620,7 @@ func bernRoundCorners(_ layer: CALayer?, _ radius: Double, motion: BernMotion?) 
     }
     layer.cornerRadius = radius
 }
+#endif
 
 /// Surface geometry is independent of how the renderer fits the video inside it.
 /// Full-player surfaces include letterboxing so kernel overlays can use it too.
@@ -657,6 +669,10 @@ struct BernVideo: View {
         VStack(spacing: 6) {
             ZStack {
                 if state != nil {
+                    #if os(watchOS)
+                    BernVideoSurface(playerID: playerID, window: window.id, corner: corner)
+                        .opacity(BernVideo.showsVideo(state) ? 1 : 0)
+                    #else
                     if BernMedia.shared.kernel != nil {
                         BernKernelVideoSurface(
                             playerID: playerID, window: window.id, fit: fit, corner: corner,
@@ -671,6 +687,7 @@ struct BernVideo: View {
                         )
                         .opacity(BernVideo.showsVideo(state) ? 1 : 0)
                     }
+                    #endif
                 }
                 BernVideoStatus(state: state)
             }
@@ -988,6 +1005,7 @@ struct BernSurfaceSize: Equatable {
     }
 }
 
+#if !os(watchOS)
 /// The frame clock of kernel surfaces. A thread of its own runs their
 /// display links, one per surface, so the kernel's frames keep the
 /// display's pace while the main thread lays out or animates.
@@ -1068,3 +1086,4 @@ final class BernKernelFrames: NSObject, @unchecked Sendable {
         BernKernelClock.shared.step(self, now: link.timestamp, target: link.targetTimestamp)
     }
 }
+#endif

@@ -49,7 +49,12 @@ impl Generator<'_> {
             None => String::new(),
         };
 
-        if self.platform == Platform::Tvos {
+        if matches!(self.platform, Platform::Tvos | Platform::Watchos) {
+            let spacing = if self.platform == Platform::Watchos {
+                8
+            } else {
+                24
+            };
             out.open("SwiftUI.List {");
             out.open(format!(
                 "SwiftUI.ForEach({items}, id: \\.{key}) {{ {var} in"
@@ -63,7 +68,7 @@ impl Generator<'_> {
                 "SwiftUI.Button(action: {{ {set}{} }}) {{",
                 primary.clone().unwrap_or_default()
             ));
-            out.open("SwiftUI.HStack(spacing: 24) {");
+            out.open(format!("SwiftUI.HStack(spacing: {spacing}) {{"));
             for column in &columns {
                 self.nodes(out, &column.children, ctx);
             }

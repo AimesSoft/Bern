@@ -1,5 +1,5 @@
-//! The `swiftui + macos` target, and with it the `swiftui + ios` and
-//! `swiftui + tvos` targets.
+//! The `swiftui + macos` target, and with it the `swiftui + ios`,
+//! `swiftui + tvos` and `swiftui + watchos` targets.
 //!
 //! Generates idiomatic SwiftUI from the shared IR: standard scenes,
 //! containers and controls, which keep the system styles and colors
@@ -15,6 +15,7 @@ mod resources;
 mod style;
 mod swift;
 pub mod tvos;
+pub mod watchos;
 
 use bern_ir::spec::COMPONENTS;
 use bern_ir::{Application, IR_VERSION, Node, WindowInitial, WindowRole};
@@ -28,6 +29,7 @@ use std::path::{Path, PathBuf};
 pub use ios::{MINIMUM_IOS, SwiftUiIos};
 pub use swift::{Generator, Platform};
 pub use tvos::{MINIMUM_TVOS, SwiftUiTvos};
+pub use watchos::{MINIMUM_WATCHOS, SwiftUiWatchos};
 
 /// Minimum deployment target, chosen in the design document.
 pub const MINIMUM_MACOS: &str = "14.0";

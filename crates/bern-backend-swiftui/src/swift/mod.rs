@@ -103,6 +103,7 @@ pub enum Platform {
     Macos,
     Ios,
     Tvos,
+    Watchos,
 }
 
 impl Platform {
@@ -118,6 +119,7 @@ impl Platform {
             Platform::Macos => "macOS",
             Platform::Ios => "iOS",
             Platform::Tvos => "tvOS",
+            Platform::Watchos => "watchOS",
         }
     }
 }
@@ -142,6 +144,7 @@ impl<'a> Generator<'a> {
             Platform::Macos => "macos",
             Platform::Ios => "ios",
             Platform::Tvos => "tvos",
+            Platform::Watchos => "watchos",
         }
     }
 

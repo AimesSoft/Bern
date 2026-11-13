@@ -15,6 +15,7 @@ impl Generator<'_> {
         out.line(match self.platform {
             Platform::Macos => "import AppKit",
             Platform::Ios | Platform::Tvos => "import UIKit",
+            Platform::Watchos => "import WatchKit",
         });
         out.line("import SwiftUI");
         out.line("");
@@ -155,7 +156,9 @@ impl Generator<'_> {
             .filter(|window| {
                 window.initial == bern_ir::WindowInitial::Open
                     && window.id != app.windows.primary
-                    && (self.platform.uikit() || window.role != WindowRole::Settings)
+                    && (self.platform.uikit()
+                        || self.platform == Platform::Watchos
+                        || window.role != WindowRole::Settings)
             })
             .map(|window| string(&window.id))
             .collect();
@@ -199,8 +202,8 @@ impl Generator<'_> {
                 out.line("@UIApplicationDelegateAdaptor(BernOrientationDelegate.self) private var delegate");
                 out.line("");
             }
-            // A television has no orientations to ask for.
-            Platform::Tvos => {}
+            // A television or watch has no orientations to ask for.
+            Platform::Tvos | Platform::Watchos => {}
         }
         out.open("init() {");
         out.open(format!(
@@ -227,6 +230,7 @@ impl Generator<'_> {
             }
             Platform::Ios => self.ios_scene(&mut out, &initial),
             Platform::Tvos => self.tvos_scene(&mut out, &initial),
+            Platform::Watchos => self.watchos_scene(&mut out, &initial),
         }
         out.close("}");
         out.close("}");
@@ -440,6 +444,40 @@ impl Generator<'_> {
         for (index, window) in app.windows.windows.iter().enumerate() {
             out.line(format!("case {}:", string(&window.id)));
             out.line(format!("    BernWindow{index}()"));
+        }
+        out.line("default:");
+        out.line("    SwiftUI.EmptyView()");
+        out.close("}");
+        out.close("}");
+        out.line(".environment(BernEngine.shared)");
+        out.close("}");
+    }
+
+    /// The scene of a watchOS app: one full-screen window group hosting the
+    /// primary window, with secondary windows presented as watch sheets over
+    /// it. Sheets without their own navigation get a title and a Done action
+    /// so windows with close checks can still ask to close.
+    fn watchos_scene(&self, out: &mut Out, initial: &[String]) {
+        let app = self.app;
+        out.open("SwiftUI.WindowGroup {");
+        out.open(format!(
+            "BernVirtualHost(initial: [{}]) {{ kind in",
+            initial.join(", ")
+        ));
+        out.open("switch kind {");
+        for (index, window) in app.windows.windows.iter().enumerate() {
+            out.line(format!("case {}:", string(&window.id)));
+            out.indent += 1;
+            if window.id == app.windows.primary || self.has_navigation(&window.content, 0) {
+                out.line(format!("BernWindow{index}()"));
+            } else {
+                out.line(format!(
+                    "BernSheetChrome(kind: {}, title: {}) {{ BernWindow{index}() }}",
+                    string(&window.id),
+                    string(&window.title.key)
+                ));
+            }
+            out.indent -= 1;
         }
         out.line("default:");
         out.line("    SwiftUI.EmptyView()");

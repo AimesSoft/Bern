@@ -17,8 +17,8 @@ use std::path::{Path, PathBuf};
 
 /// Platforms that can have an icon of their own under `[app.icon]`, named
 /// as `[targets]` names them.
-pub const PLATFORMS: [&str; 8] = [
-    "macos", "ios", "tvos", "windows", "linux", "android", "wearos", "browser",
+pub const PLATFORMS: [&str; 9] = [
+    "macos", "ios", "tvos", "watchos", "windows", "linux", "android", "wearos", "browser",
 ];
 
 /// Where one platform's icon comes from.
@@ -441,7 +441,9 @@ pub fn icns(images: &[Image]) -> Vec<u8> {
 pub fn accepted(platform: &str) -> &'static str {
     match platform {
         "macos" => "a square PNG, an `.icns` file or an Icon Composer `.icon` folder",
-        "ios" => "a square PNG, an `.appiconset` folder or an Icon Composer `.icon` folder",
+        "ios" | "watchos" => {
+            "a square PNG, an `.appiconset` folder or an Icon Composer `.icon` folder"
+        }
         "tvos" => "a square PNG or a `.brandassets` folder",
         "windows" => "a square PNG or an `.ico` file",
         "linux" => "a square PNG or an icon theme folder laid out like `hicolor`",
@@ -473,8 +475,8 @@ pub fn check_native(platform: &str, path: &Path) -> Result<(), String> {
                 Err("is not an SVG image".into())
             }
         }
-        ("macos" | "ios", true, "icon") => icon_document(path).map(drop),
-        ("ios", true, _) => app_icon_set(path).map(drop),
+        ("macos" | "ios" | "watchos", true, "icon") => icon_document(path).map(drop),
+        ("ios" | "watchos", true, _) => app_icon_set(path).map(drop),
         ("tvos", true, _) => crate::brand_assets::check(path).map(drop),
         ("android" | "wearos", true, _) => android_res(path).map(drop),
         ("linux", true, _) => theme_icons(path).map(drop),

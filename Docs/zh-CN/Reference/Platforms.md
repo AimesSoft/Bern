@@ -2,7 +2,7 @@
 
 # 平台能力与验证范围
 
-更新：2026-10-29。下表按 [bern-target-api](../../../crates/bern-target-api/src/lib.rs) 与各后端 `TargetDescriptor.features` 整理。macOS 与 iOS 共用同一份 SwiftUI 清单；tvOS 与它们共用 SwiftUI 生成器，清单在 [tvOS 描述](../../../crates/bern-backend-swiftui/src/tvos.rs)中单列。
+更新：2026-11-14。下表按 [bern-target-api](../../../crates/bern-target-api/src/lib.rs) 与各后端 `TargetDescriptor.features` 整理。macOS 与 iOS 共用同一份 SwiftUI 清单；tvOS 与 watchOS 与它们共用 SwiftUI 生成器，清单在 [tvOS 描述](../../../crates/bern-backend-swiftui/src/tvos.rs)与 [watchOS 描述](../../../crates/bern-backend-swiftui/src/watchos.rs)中单列。
 
 可选的 GPUI 目标（`ui = "gpui"`，macOS、Windows、Linux）是第一版，三个平台都构建并运行过，下表不含它；它声明的组件与功能见 [GPUI 实现记录](../Implementation/GPUI.md)。
 
@@ -139,14 +139,15 @@
 | 系统用应用打开文件：`[[app.opens]]`、`bern::files::take_opened`、`make_default_opener`（2026-11-06） | macOS、Windows、Linux、Android 和 iOS 的打开方式、右键菜单和默认应用，见设计文档“系统用应用打开文件”。声明由各后端的生成器测试覆盖 |
 | 引擎提供的图片：`bern::files::serve`（2026-11-07） | macOS、iOS、tvOS、Android、Windows 和 Linux 上，`Image(source:)` 能显示引擎提供的协议 URL，在内存里解码，不用临时文件，见设计文档“引擎提供的图片”。浏览器和 GPUI 目标暂不读取 |
 | Wear OS 目标 `compose-wearos`、`Layout(size: watch)`、`window.watch`（2026-11-13） | 独立打包的 Wear Material 3（`1.7.1`，`minSdk = 30`）目标，底层共用 Compose 引擎、JNI 与 IPC；`check` 强制要求可达 `Adaptive` 包含 `Layout(size: watch)`，功能契约单独证明 `watch`；编译器、生成器与 `examples/wearos` APK/命令行构建通过；不含 WebView/`WebPage`/`Svg` 运行时 | Wear OS 6.0（API 36，384×384、320 dpi 小圆屏模拟器）：实测 `examples/wearos` 的触控计数、表冠旋转滚动（列表与表单）、右滑返回、`SwitchButton`、`Slider`、`Picker` 滚轮弹层、`Menu` 弹层、显式 `ui focus` 唤起手表输入法、`ui set-language`、未保存草稿关闭 `AlertDialog` 确认协议以及 `--engine wearos` 与引擎的实时同步。手表上未实测：视频播放、`Table`、`Tabs`、`SplitView` 与真实手表硬件 |
+| Apple Watch 目标 `swiftui-watchos`（2026-11-14） | 独立的 `watchos` SwiftUI 目标（`MinimumOSVersion = 11.0`、`WKWatchOnly`、`BernWatchKit.swift`），含钥匙串 `secrets`、`MPNowPlayingInfoCenter` `now_playing`、`AVKit.VideoPlayer`、sheet 选择弹层 `BernWatchPicker` / `BernWatchMenu`、可达 `Adaptive` 的 `B401` `Layout(size: watch)` 检查、`watch` 功能契约证明，以及 Watch-Only `-watchos.ipa` 打包（外层 `ITSWatchOnlyContainer` 壳包裹 `Watch/<App>.app`）；Swift 6 类型检查测试与 `examples/wearos` 模拟器 `.app`、真机 `.ipa` 构建均通过；不含 `WebPage`/动态 `Svg`、`file_pick` 与 `paste` | Apple Watch Series 12（46mm，watchOS 27.2 模拟器）：安装 `examples/wearos` 并经 `--engine watchos` IPC 与模拟器截图逐项验证：`Adaptive` 选中 `watch`、`Form` 按钮与滑块单层底板无嵌套边框、`NavigationStack` 推入与返回、`Settings` 二级窗口 sheet 单左上角 `×` 关闭按钮、`Toggle`、`Slider`、`BernWatchPicker`、`TextField` 草稿编辑、运行时 `ui set-language` 及未保存草稿关闭 `Alert`（`ConfirmationRequired` → `Cancel` / `Discard`）。未实测：Apple Watch 物理真机、Sideloadly/真机 `.ipa` 签名安装、视频播放、`Table`、`Tabs`、`SplitView` 以及手表上的钥匙串与系统播放中心交互 |
 
 Firefox 与 Safari 手机布局尚未实测。用于验收的应用在 macOS 上由应用自带的媒体内核播放，其他平台的播放器仍有模拟状态；播放器界面和图片过渡的验收不等于已接入完整媒体播放功能。
 
 ## 来源与维护
 
 - 功能定义及拒绝规则：[bern-target-api 的功能定义](../../../crates/bern-target-api/src/lib.rs)与[功能检查](../../../crates/bern-target-api/src/check/features.rs)。
-- [SwiftUI 清单](../../../crates/bern-backend-swiftui/src/lib.rs)及 [iOS 描述](../../../crates/bern-backend-swiftui/src/ios.rs)、[tvOS 描述](../../../crates/bern-backend-swiftui/src/tvos.rs)。
+- [SwiftUI 清单](../../../crates/bern-backend-swiftui/src/lib.rs)及 [iOS 描述](../../../crates/bern-backend-swiftui/src/ios.rs)、[tvOS 描述](../../../crates/bern-backend-swiftui/src/tvos.rs)、[watchOS 描述](../../../crates/bern-backend-swiftui/src/watchos.rs)。
 - [Web](../../../crates/bern-backend-web/src/lib.rs)、[Compose](../../../crates/bern-backend-compose/src/lib.rs)、[GTK](../../../crates/bern-backend-gtk/src/lib.rs)、[WinUI 3](../../../crates/bern-backend-winui3/src/lib.rs) 清单。
-- 验收：[macOS](../Implementation/macOS-SwiftUI.md)、[iOS](../Implementation/iOS-SwiftUI.md)、[tvOS](../Implementation/tvOS-SwiftUI.md)、[Android](../Implementation/Android-Compose.md)、[Web](../Implementation/Web.md)、[Linux](../Implementation/Linux-GTK.md)、[Windows](../Implementation/Windows-WinUI3.md)。
+- 验收：[macOS](../Implementation/macOS-SwiftUI.md)、[iOS](../Implementation/iOS-SwiftUI.md)、[tvOS](../Implementation/tvOS-SwiftUI.md)、[watchOS](../Implementation/watchOS-SwiftUI.md)、[Android](../Implementation/Android-Compose.md)、[Web](../Implementation/Web.md)、[Linux](../Implementation/Linux-GTK.md)、[Windows](../Implementation/Windows-WinUI3.md)。
 
 新增后端特性时同时更新此表和对应实现记录，并保留对尚未验收场景的说明。

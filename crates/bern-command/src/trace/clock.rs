@@ -5,7 +5,12 @@
 //! `g_get_monotonic_time`), the performance counter on Windows, and
 //! `performance.now()` on a web page (`requestAnimationFrame` times).
 
-#[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
+#[cfg(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "tvos",
+    target_os = "watchos"
+))]
 pub fn now_ns() -> u64 {
     unsafe extern "C" {
         fn clock_gettime_nsec_np(clock: u32) -> u64;
@@ -71,6 +76,7 @@ pub fn now_ns() -> u64 {
     target_os = "macos",
     target_os = "ios",
     target_os = "tvos",
+    target_os = "watchos",
     target_os = "linux",
     target_os = "android",
     windows,

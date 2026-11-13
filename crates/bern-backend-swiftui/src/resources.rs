@@ -120,7 +120,7 @@ pub fn check_declared(app: &Application, platform: Platform) -> Vec<Diagnostic> 
     // resources.
     let product = crate::product_name(app);
     let reserved = |first: &str| -> bool {
-        platform.uikit()
+        (platform.uikit() || platform == Platform::Watchos)
             && (IOS_BUNDLE_FILES.contains(&first)
                 || first == product
                 || first.starts_with(crate::ios::ICON_NAME)
@@ -773,6 +773,175 @@ pub fn info_plist_tvos(app: &Application, executable: &str, minimum_tvos: &str) 
         bundle = xml(&app.app.bundle_id),
         version = xml(&app.app.version),
         cleartext = cleartext_http(app),
+    )
+}
+
+/// The Info.plist of a standalone watchOS app for the simulator (`WKWatchOnly`).
+/// When embedded into a Watch-Only `.ipa` container for devices, `package()`
+/// updates `CFBundleIdentifier`, `WKCompanionAppBundleIdentifier` and
+/// `CFBundleSupportedPlatforms`.
+pub fn info_plist_watchos(app: &Application, executable: &str, minimum_watchos: &str) -> String {
+    let name = translation(
+        &app.app.name,
+        &app.languages.default,
+        &app.languages.default,
+    );
+    let localizations: String = app
+        .languages
+        .supported
+        .iter()
+        .map(|language| format!("\n        <string>{}</string>", xml(language)))
+        .collect();
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>{region}</string>
+    <key>CFBundleDisplayName</key>
+    <string>{name}</string>
+    <key>CFBundleExecutable</key>
+    <string>{executable}</string>
+    <key>CFBundleIcons</key>
+    <dict>
+        <key>CFBundlePrimaryIcon</key>
+        <dict>
+            <key>CFBundleIconName</key>
+            <string>{icon}</string>
+        </dict>
+    </dict>
+    <key>CFBundleIdentifier</key>
+    <string>{bundle}</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleLocalizations</key>
+    <array>{localizations}
+    </array>
+    <key>CFBundleName</key>
+    <string>{name}</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>{version}</string>
+    <key>CFBundleSupportedPlatforms</key>
+    <array>
+        <string>WatchSimulator</string>
+    </array>
+    <key>CFBundleVersion</key>
+    <string>{version}</string>
+    <key>MinimumOSVersion</key>
+    <string>{minimum_watchos}</string>
+    <key>UIDeviceFamily</key>
+    <array>
+        <integer>4</integer>
+    </array>
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationPortraitUpsideDown</string>
+    </array>
+    <key>WKApplication</key>
+    <true/>
+    <key>WKWatchOnly</key>
+    <true/>{audio}{cleartext}
+</dict>
+</plist>
+"#,
+        region = xml(&app.languages.default),
+        name = xml(name),
+        executable = xml(executable),
+        icon = crate::watchos::ICON_NAME,
+        bundle = xml(&app.app.bundle_id),
+        version = xml(&app.app.version),
+        audio = if app.app.background_audio {
+            "\n    <key>UIBackgroundModes</key>\n    <array>\n        <string>audio</string>\n    </array>"
+        } else {
+            ""
+        },
+        cleartext = cleartext_http(app),
+    )
+}
+
+/// The Info.plist of the outer iPhoneOS Watch-Only stub container
+/// (`com.apple.product-type.application.watchapp2-container`) inside a
+/// `-watchos.ipa` archive, holding `Watch/<Product>.app`.
+pub fn info_plist_watchos_container(
+    app: &Application,
+    executable: &str,
+    minimum_ios: &str,
+) -> String {
+    let name = translation(
+        &app.app.name,
+        &app.languages.default,
+        &app.languages.default,
+    );
+    let localizations: String = app
+        .languages
+        .supported
+        .iter()
+        .map(|language| format!("\n        <string>{}</string>", xml(language)))
+        .collect();
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>{region}</string>
+    <key>CFBundleDisplayName</key>
+    <string>{name}</string>
+    <key>CFBundleExecutable</key>
+    <string>{executable}</string>
+    <key>CFBundleIcons</key>
+    <dict>
+        <key>CFBundlePrimaryIcon</key>
+        <dict>
+            <key>CFBundleIconName</key>
+            <string>{icon}</string>
+        </dict>
+    </dict>
+    <key>CFBundleIdentifier</key>
+    <string>{bundle}</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleLocalizations</key>
+    <array>{localizations}
+    </array>
+    <key>CFBundleName</key>
+    <string>{name}</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>{version}</string>
+    <key>CFBundleSupportedPlatforms</key>
+    <array>
+        <string>iPhoneOS</string>
+    </array>
+    <key>CFBundleVersion</key>
+    <string>{version}</string>
+    <key>ITSWatchOnlyContainer</key>
+    <true/>
+    <key>LSApplicationLaunchProhibited</key>
+    <true/>
+    <key>LSRequiresIPhoneOS</key>
+    <true/>
+    <key>MinimumOSVersion</key>
+    <string>{minimum_ios}</string>
+    <key>UIDeviceFamily</key>
+    <array>
+        <integer>1</integer>
+        <integer>2</integer>
+    </array>
+</dict>
+</plist>
+"#,
+        region = xml(&app.languages.default),
+        name = xml(name),
+        executable = xml(executable),
+        icon = crate::watchos::ICON_NAME,
+        bundle = xml(&app.app.bundle_id),
+        version = xml(&app.app.version),
     )
 }
 

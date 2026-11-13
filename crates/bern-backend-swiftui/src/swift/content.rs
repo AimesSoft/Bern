@@ -150,6 +150,7 @@ impl Generator<'_> {
                 Platform::Ios => "17.0".into(),
                 // tvOS reads its body at ten feet.
                 Platform::Tvos => "29.0".into(),
+                Platform::Watchos => "16.0".into(),
             })
     }
 

@@ -13,7 +13,7 @@ bern-protocol.workspace = true
 
 # The system credential stores behind `secrets`, and the system's now
 # playing behind `now_playing`.
-[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
+[target.'cfg(any(target_os = "macos", target_os = "ios", target_os = "watchos"))'.dependencies]
 security-framework = "3"
 objc2 = "0.6"
 block2 = "0.6"
@@ -26,7 +26,7 @@ objc2-media-player = { version = "0.3", default-features = false, features = ["s
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAttributedString", "NSBox", "NSButton", "NSCell", "NSColor", "NSControl", "NSEvent", "NSFont", "NSFontDescriptor", "NSGraphics", "NSImage", "NSPanel", "NSResponder", "NSScreen", "NSShadow", "NSText", "NSTextField", "NSUserInterfaceItemIdentification", "NSView", "NSWindow", "objc2-core-foundation"] }
 objc2-media-player = { version = "0.3", default-features = false, features = ["objc2-app-kit"] }
 
-[target.'cfg(target_os = "ios")'.dependencies]
+[target.'cfg(any(target_os = "ios", target_os = "watchos"))'.dependencies]
 objc2-avf-audio = { version = "0.3", default-features = false, features = ["std", "AVAudioSession", "AVAudioSessionTypes"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
