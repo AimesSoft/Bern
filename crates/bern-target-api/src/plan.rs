@@ -102,15 +102,17 @@ pub enum Run {
 pub enum SimulatedSystem {
     Ios,
     Tvos,
+    Watchos,
 }
 
 impl SimulatedSystem {
     /// The system's name in simulator runtimes and in messages: `iOS`,
-    /// `tvOS`.
+    /// `tvOS`, `watchOS`.
     pub fn name(self) -> &'static str {
         match self {
             SimulatedSystem::Ios => "iOS",
             SimulatedSystem::Tvos => "tvOS",
+            SimulatedSystem::Watchos => "watchOS",
         }
     }
 }

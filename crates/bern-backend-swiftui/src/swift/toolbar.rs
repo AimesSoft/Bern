@@ -70,7 +70,7 @@ impl Generator<'_> {
                 {
                     let placement = match self.platform {
                         Platform::Macos => ".toolbar",
-                        Platform::Ios | Platform::Tvos => ".automatic",
+                        Platform::Ios | Platform::Tvos | Platform::Watchos => ".automatic",
                     };
                     self.searchable(out, search, placement, ctx);
                 }
@@ -88,6 +88,20 @@ impl Generator<'_> {
             return;
         };
         let presented = self.field(panel, "presented").expect("bool field");
+        if self.platform == Platform::Watchos {
+            out.open(format!(
+                ".sheet(isPresented: {}) {{",
+                self.binding_of(&presented)
+            ));
+            out.open("SwiftUI.ScrollView {");
+            out.open("SwiftUI.VStack(alignment: .leading, spacing: 10) {");
+            self.nodes(out, &panel.children, ctx);
+            out.close("}");
+            out.line(".frame(maxWidth: .infinity, alignment: .topLeading)");
+            out.close("}");
+            out.close("}");
+            return;
+        }
         out.open(format!(
             ".inspector(isPresented: {}) {{",
             self.binding_of(&presented)
@@ -169,7 +183,7 @@ impl Generator<'_> {
                 out.close("}");
                 ".automatic"
             }
-            Platform::Ios | Platform::Tvos => ".primaryAction",
+            Platform::Ios | Platform::Tvos | Platform::Watchos => ".primaryAction",
         };
         self.toolbar_groups(out, trailing, placement, ctx);
     }
@@ -188,23 +202,29 @@ impl Generator<'_> {
                 // to: an item of their own, without a background.
                 Node::Element(element) if element.kind == "Text" => {
                     groups.push(Vec::new());
-                    out.open("if #available(macOS 26.0, iOS 26.0, tvOS 26.0, *) {");
-                    out.open(format!("SwiftUI.ToolbarItem(placement: {placement}) {{"));
-                    self.element(out, element, ctx);
-                    out.close("}");
-                    out.line(".sharedBackgroundVisibility(.hidden)");
-                    out.close("} else {");
-                    out.indent += 1;
-                    out.open(format!("SwiftUI.ToolbarItem(placement: {placement}) {{"));
-                    self.element(out, element, ctx);
-                    out.close("}");
-                    out.close("}");
+                    if self.platform == Platform::Watchos {
+                        out.open(format!("SwiftUI.ToolbarItem(placement: {placement}) {{"));
+                        self.element(out, element, ctx);
+                        out.close("}");
+                    } else {
+                        out.open("if #available(macOS 26.0, iOS 26.0, tvOS 26.0, *) {");
+                        out.open(format!("SwiftUI.ToolbarItem(placement: {placement}) {{"));
+                        self.element(out, element, ctx);
+                        out.close("}");
+                        out.line(".sharedBackgroundVisibility(.hidden)");
+                        out.close("} else {");
+                        out.indent += 1;
+                        out.open(format!("SwiftUI.ToolbarItem(placement: {placement}) {{"));
+                        self.element(out, element, ctx);
+                        out.close("}");
+                        out.close("}");
+                    }
                 }
                 node => groups.last_mut().expect("a group").push(node.clone()),
             }
         }
         for (index, group) in groups.iter().filter(|group| !group.is_empty()).enumerate() {
-            if index > 0 {
+            if index > 0 && self.platform != Platform::Watchos {
                 out.open("if #available(macOS 26.0, iOS 26.0, tvOS 26.0, *) {");
                 out.line(format!(
                     "SwiftUI.ToolbarSpacer(.fixed, placement: {placement})"
@@ -247,6 +267,9 @@ impl Generator<'_> {
                 _ => None,
             })
             .collect();
+        if self.platform == Platform::Watchos {
+            return self.watch_menu(out, element, &items, hide_disabled, &label, ctx);
+        }
         out.open("SwiftUI.Menu {");
         for item in &items {
             if item.kind == "Divider" {
@@ -367,6 +390,108 @@ impl Generator<'_> {
                 out.line(format!(".help({label})"));
             } else {
                 out.line(".menuStyle(.button)");
+                out.line(".bernButtonLook(.secondary)");
+            }
+        }
+        out.line(format!(
+            ".bernControl({}, role: \"menu\", label: {label}, actions: BernControlActions())",
+            self.target(element, ctx)
+        ));
+        for item in items.iter().filter(|item| item.kind == "MenuItem") {
+            let item_label = self.text_prop(item, "label").unwrap_or_default();
+            let (action, file) = self.pressed(item);
+            let enabled = item
+                .expr("enabled")
+                .map(|expr| self.expr(expr))
+                .unwrap_or_else(|| "true".into());
+            out.line(format!(
+                ".bernControl({}, role: \"button\", label: {item_label}, enabled: {enabled}, actions: BernControlActions(activate: {{ {action} }}{file}))",
+                self.target(item, ctx)
+            ));
+        }
+    }
+
+    /// `Menu` on watchOS, which has no pull-down menu: a button opening a
+    /// Crown-scrollable sheet of the menu's items.
+    fn watch_menu(
+        &self,
+        out: &mut Out,
+        element: &Element,
+        items: &[&Element],
+        hide_disabled: bool,
+        label: &str,
+        ctx: &Ctx,
+    ) {
+        let icon_only = element.keyword("style") == Some("icon");
+        let diameter = self
+            .length(element, "height")
+            .filter(|_| icon_only && !ctx.toolbar);
+        out.open(format!("BernWatchMenu(labelText: {label}) {{"));
+        match element.icon("icon") {
+            Some(icon) => {
+                out.line(format!(
+                    "SwiftUI.Label({label}, systemImage: {})",
+                    string(icon)
+                ));
+                if icon_only {
+                    out.line(".labelStyle(.iconOnly)");
+                }
+            }
+            None => out.line(format!("SwiftUI.Text(verbatim: {label})")),
+        }
+        out.close("} items: { bernDismissMenu in");
+        out.indent += 1;
+        for item in items {
+            if item.kind == "Divider" {
+                out.line("SwiftUI.Divider()");
+                continue;
+            }
+            let visible = item.expr("enabled").filter(|_| hide_disabled);
+            if let Some(visible) = visible {
+                out.open(format!("if {} {{", self.expr(visible)));
+            }
+            let item_label = self.text_prop(item, "label").unwrap_or_default();
+            let (action, _) = self.pressed(item);
+            let role = if item.keyword("role") == Some("destructive") {
+                "role: .destructive, "
+            } else {
+                ""
+            };
+            out.open(format!("SwiftUI.Button({role}action: {{"));
+            out.line("bernDismissMenu()");
+            out.line(&action);
+            out.close("}) {");
+            out.indent += 1;
+            match item.icon("icon") {
+                Some(icon) => out.line(format!(
+                    "SwiftUI.Label({item_label}, systemImage: {})",
+                    string(icon)
+                )),
+                None => out.line(format!("SwiftUI.Text(verbatim: {item_label})")),
+            }
+            out.close("}");
+            if let Some(enabled) = item.expr("enabled") {
+                out.line(format!(".disabled(!({}))", self.expr(enabled)));
+            }
+            if visible.is_some() {
+                out.close("}");
+            }
+        }
+        out.close("}");
+        if !ctx.toolbar {
+            if element.keyword("shape") == Some("capsule") {
+                out.line(format!(
+                    ".bernCapsuleControl(height: {})",
+                    self.length(element, "height")
+                        .unwrap_or_else(|| "32.0".into())
+                ));
+            } else if let Some(diameter) = &diameter {
+                out.line(format!(
+                    ".bernCircleControl(diameter: {diameter}, prominent: false)"
+                ));
+            } else if icon_only {
+                out.line(".bernButtonLook(.icon)");
+            } else {
                 out.line(".bernButtonLook(.secondary)");
             }
         }

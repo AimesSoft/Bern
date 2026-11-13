@@ -18,10 +18,10 @@ import UIKit
 
 // MARK: - Pointer, keyboard and focus
 
-/// A keyboard shortcut. tvOS has none: the generated code gives its
-/// controls none there, and the Siri Remote's buttons stand for the keys
-/// they have (`bernRemoteShortcut`).
-#if os(tvOS)
+/// A keyboard shortcut. tvOS and watchOS have none: the generated code gives
+/// controls none there, and on tvOS the Siri Remote's buttons stand for the
+/// keys they have (`bernRemoteShortcut`).
+#if os(tvOS) || os(watchOS)
 typealias BernKeyboardShortcut = Never
 #else
 typealias BernKeyboardShortcut = KeyboardShortcut
@@ -61,7 +61,7 @@ enum BernShortcuts {
         return (key, parts)
     }
 
-    #if !os(tvOS)
+    #if !os(tvOS) && !os(watchOS)
     /// The keyboard shortcut a text stands for.
     static func keyboard(_ text: String) -> KeyboardShortcut? {
         guard let (key, modifiers) = parts(text) else { return nil }
@@ -156,7 +156,7 @@ extension View {
     /// there the focus is what stands over a control
     /// (`bernTelevisionFocus`).
     @ViewBuilder func bernHover(_ action: @escaping (Bool) -> Void) -> some View {
-        #if os(tvOS)
+        #if os(tvOS) || os(watchOS)
         self
         #else
         onHover(perform: action)
@@ -196,9 +196,9 @@ extension View {
         #endif
     }
 
-    /// A list row without the separator below it; tvOS lists have none.
+    /// A list row without the separator below it; tvOS and watchOS lists have none.
     @ViewBuilder func bernListRowSeparatorHidden() -> some View {
-        #if os(tvOS)
+        #if os(tvOS) || os(watchOS)
         self
         #else
         listRowSeparator(.hidden)
@@ -217,7 +217,7 @@ extension View {
 
     /// A keyboard shortcut on a hidden button that runs `action`.
     @ViewBuilder func bernHiddenShortcut(_ shortcut: BernKeyboardShortcut?, action: @escaping () -> Void) -> some View {
-        #if os(tvOS)
+        #if os(tvOS) || os(watchOS)
         self
         #else
         background {
@@ -269,7 +269,7 @@ private struct BernPopoverPresentation<Panel: View>: ViewModifier {
     }
 
     @ViewBuilder private func presentation(_ content: Content) -> some View {
-        #if os(tvOS)
+        #if os(tvOS) || os(watchOS)
         content.sheet(isPresented: $presented, content: panel)
         #elseif os(macOS)
         content.popover(isPresented: $presented, arrowEdge: .bottom) {
@@ -399,6 +399,9 @@ enum BernColor: Equatable, Sendable {
                 ? NSColor(srgbRed: dr, green: dg, blue: db, alpha: 1)
                 : NSColor(srgbRed: lr, green: lg, blue: lb, alpha: 1)
         })
+        #elseif os(watchOS)
+        let _ = (lr, lg, lb)
+        return Color(red: dr, green: dg, blue: db)
         #else
         return Color(uiColor: UIColor { traits in
             traits.userInterfaceStyle == .dark
@@ -454,6 +457,18 @@ enum BernColor: Equatable, Sendable {
         case "selection.background": return Color(nsColor: .selectedContentBackgroundColor)
         case "selection.foreground": return Color(nsColor: .alternateSelectedControlTextColor)
         case "disabled.foreground": return Color(nsColor: .disabledControlTextColor)
+        default: return .primary
+        }
+        #elseif os(watchOS)
+        switch role {
+        case "text.placeholder": return Color.secondary.opacity(0.6)
+        case "surface.canvas": return Color.black
+        case "surface.panel": return Color(white: 0.14)
+        case "surface.raised": return Color(white: 0.2)
+        case "control.border": return Color.white.opacity(0.18)
+        case "selection.background": return MainActor.assumeIsolated { accentColor }
+        case "selection.foreground": return .white
+        case "disabled.foreground": return Color.secondary.opacity(0.5)
         default: return .primary
         }
         #else
@@ -1127,6 +1142,7 @@ private struct BernSystemButtonLook: ViewModifier {
     let look: BernButtonLook
     @Environment(\.bernControlGroupHeight) private var groupHeight
     @Environment(\.bernOnBar) private var onBar
+    @Environment(\.bernInForm) private var inForm
     @Environment(\.bernSceneScaled) private var scaled
     @Environment(\.bernAccent) private var accent
     @Environment(\.controlSize) private var controlSize
@@ -1159,6 +1175,33 @@ private struct BernSystemButtonLook: ViewModifier {
         } else {
             standard(content)
         }
+        #elseif os(watchOS)
+        // A watchOS Form already wraps each row in a rounded platter card:
+        // secondary buttons keep that single row platter instead of nesting a
+        // capsule bezel inside it, while prominent/icon/flat buttons clear the
+        // outer row card so only their own control surface appears.
+        if inForm && groupHeight == nil && !onBar {
+            switch look {
+            case .secondary:
+                content.bernPrimaryLabel()
+            case .prominent:
+                if #available(watchOS 26.0, *) {
+                    content.buttonStyle(.glassProminent).bernAccentTint().listRowBackground(Color.clear)
+                } else {
+                    content.buttonStyle(.borderedProminent).bernAccentTint().listRowBackground(Color.clear)
+                }
+            case .icon:
+                if #available(watchOS 26.0, *) {
+                    content.buttonStyle(.glass).buttonBorderShape(.circle).bernPrimaryLabel().listRowBackground(Color.clear)
+                } else {
+                    content.buttonStyle(.bordered).buttonBorderShape(.circle).bernPrimaryLabel().listRowBackground(Color.clear)
+                }
+            case .flat:
+                content.buttonStyle(.borderless).foregroundStyle(.secondary).listRowBackground(Color.clear)
+            }
+        } else {
+            standard(content)
+        }
         #else
         standard(content)
         #endif
@@ -1169,7 +1212,7 @@ private struct BernSystemButtonLook: ViewModifier {
             content.buttonStyle(BernGroupedButtonStyle(height: groupHeight)).foregroundStyle(.primary)
         } else if onBar && (look == .icon || look == .flat) {
             content.buttonStyle(BernGroupedButtonStyle(height: 0)).foregroundStyle(.primary)
-        } else if #available(macOS 26.0, iOS 26.0, tvOS 26.0, *) {
+        } else if #available(macOS 26.0, iOS 26.0, tvOS 26.0, watchOS 26.0, *) {
             switch look {
             case .secondary: content.buttonStyle(.glass).bernPrimaryLabel()
             case .prominent: content.buttonStyle(.glassProminent).bernAccentTint()
@@ -1219,7 +1262,7 @@ private struct BernGlassCapsule: ViewModifier {
     var prominent = false
     @Environment(\.bernAccent) private var accent
     @ViewBuilder func body(content: Content) -> some View {
-        if #available(macOS 26.0, iOS 26.0, tvOS 26.0, *) {
+        if #available(macOS 26.0, iOS 26.0, tvOS 26.0, watchOS 26.0, *) {
             if prominent {
                 content.foregroundStyle(BernColor.role("on_accent").color)
                     .background(accent ?? .accentColor, in: Capsule())
@@ -1242,6 +1285,8 @@ extension View {
     func bernToolbarTitleHidden() -> some View {
         #if os(tvOS)
         self
+        #elseif os(watchOS)
+        navigationBarTitleDisplayMode(.inline)
         #elseif os(iOS)
         // A large title is drawn with the content, out of the toolbar's reach.
         if #available(iOS 18.0, *) {
@@ -1276,7 +1321,7 @@ extension View {
             self
         }
         #else
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, watchOS 26.0, *) {
             scrollEdgeEffectHidden(true, for: .all)
         } else {
             self
@@ -1386,7 +1431,7 @@ struct BernThemeChoice: ViewModifier {
             .tint(chosen?.color)
             .onChange(of: chosen, initial: true) {
                 BernThemeState.shared.accent = chosen
-                #if canImport(UIKit)
+                #if canImport(UIKit) && !os(watchOS)
                 let tint = chosen.map { UIColor($0.color) }
                 for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
                     for window in scene.windows { window.tintColor = tint }
@@ -1447,9 +1492,9 @@ struct BernSearchable<Results: View>: ViewModifier {
             .onSubmit(of: .search) { submit?() }
         #endif
         SwiftUI.Group {
-            #if os(tvOS)
-            // tvOS searches on a screen of its own, which takes the focus
-            // when it opens.
+            #if os(tvOS) || os(watchOS)
+            // tvOS and watchOS search on a screen of their own, which takes
+            // focus when it opens.
             field
             #else
             if #available(macOS 15.0, iOS 18.0, *) {
@@ -1570,11 +1615,19 @@ struct BernSplitButton<Content: View>: View {
             .font(.system(size: 13, weight: .medium))
             .modifier(BernGlassCapsule(prominent: isOn))
         } else {
+            #if os(watchOS)
+            HStack(spacing: 4) {
+                Toggle(isOn: $isOn) { toggleLabel }.bernButtonToggle()
+                Button { showing = true } label: { Image(systemName: "chevron.down") }
+                    .accessibilityLabel(Text(verbatim: more)).help(more)
+            }
+            #else
             ControlGroup {
                 Toggle(isOn: $isOn) { toggleLabel }.bernButtonToggle()
                 Button { showing = true } label: { Image(systemName: "chevron.down") }
                     .accessibilityLabel(Text(verbatim: more)).help(more)
             }
+            #endif
         }
     }
 
@@ -1732,10 +1785,13 @@ private struct BernSidebarNavigation<Value: Hashable>: ViewModifier {
             .focused($focused)
             .focusEffectDisabled()
             .simultaneousGesture(TapGesture().onEnded { focused = true })
+            #if !os(watchOS)
             .onKeyPress(.upArrow) { move(-1) }
             .onKeyPress(.downArrow) { move(1) }
+            #endif
     }
 
+    #if !os(watchOS)
     private func move(_ offset: Int) -> KeyPress.Result {
         guard !values.isEmpty else { return .ignored }
         let current = values.firstIndex(of: selection) ?? (offset > 0 ? -1 : values.count)
@@ -1743,6 +1799,7 @@ private struct BernSidebarNavigation<Value: Hashable>: ViewModifier {
         selection = values[next]
         return .handled
     }
+    #endif
 }
 
 extension View {
@@ -2515,7 +2572,7 @@ struct BernRubyText<Plain: View>: View, Animatable {
     let clock: @MainActor () -> Double
     let since: @MainActor () -> Double
     @ViewBuilder var plain: () -> Plain
-    #if os(macOS)
+    #if os(macOS) || os(watchOS)
     @Environment(\.self) private var environment
     #endif
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -2556,7 +2613,7 @@ struct BernRubyText<Plain: View>: View, Animatable {
             BernRubyLayout(document: document) {
                 TimelineView(.animation(minimumInterval: 1.0 / 60, paused: route.isEmpty || since <= 0)) { timeline in
                     let place = route.isEmpty ? number : route.place(at: clock + (since > 0 ? timeline.date.timeIntervalSince1970 - since : 0))
-                    #if os(macOS)
+                    #if os(macOS) || os(watchOS)
                     Canvas { graphics, size in
                         let layout = document.layout(width: size.width, color: color.resolve(in: environment).cgColor)
                         graphics.withCGContext { context in
@@ -2597,6 +2654,8 @@ struct BernRubyText<Plain: View>: View, Animatable {
         // its title1 is 76 pt and must not stand in for the SwiftUI style.
         #if os(tvOS)
         let largeTitleSize: CGFloat = 68
+        #elseif os(watchOS)
+        let largeTitleSize: CGFloat = 24
         #else
         let largeTitleSize = UIFont.preferredFont(forTextStyle: .largeTitle).pointSize
         #endif
@@ -2614,7 +2673,7 @@ struct BernRubyText<Plain: View>: View, Animatable {
     }
 }
 
-#if !os(macOS)
+#if !os(macOS) && !os(watchOS)
 /// Keep native text shaping intact, including ruby and color glyphs. SwiftUI's
 /// native-view bridge supplies the resolved color through tintColor, without
 /// inspecting Color providers or rasterizing SwiftUI to discover a color.
@@ -2855,7 +2914,7 @@ private struct BernMark: ViewModifier {
     let color: BernColor
 
     func body(content: Content) -> some View {
-        if #available(macOS 15, iOS 18, tvOS 18, *) {
+        if #available(macOS 15, iOS 18, tvOS 18, watchOS 11, *) {
             content.textRenderer(BernMarkRenderer(color: color.color))
         } else {
             // Before text renderers there are no line positions: underline.
@@ -2864,7 +2923,7 @@ private struct BernMark: ViewModifier {
     }
 }
 
-@available(macOS 15, iOS 18, tvOS 18, *)
+@available(macOS 15, iOS 18, tvOS 18, watchOS 11, *)
 private struct BernMarkRenderer: TextRenderer {
     let color: Color
 
@@ -2897,7 +2956,7 @@ private struct BernLitting: ViewModifier {
     let lit: @MainActor () -> Double
 
     func body(content: Content) -> some View {
-        if #available(macOS 15, iOS 18, tvOS 18, *) {
+        if #available(macOS 15, iOS 18, tvOS 18, watchOS 11, *) {
             content.textRenderer(BernLitRenderer(lit: lit()))
         } else {
             content
@@ -2907,7 +2966,7 @@ private struct BernLitting: ViewModifier {
 
 #if os(macOS)
 private typealias BernLitPlatformView = NSView
-#else
+#elseif !os(watchOS)
 private typealias BernLitPlatformView = UIView
 #endif
 
@@ -2975,30 +3034,43 @@ struct BernLitText: View {
     let path: @MainActor () -> String
     let clock: @MainActor () -> Double
     let since: @MainActor () -> Double
+    #if !os(watchOS)
     @StateObject private var measured = BernLitMeasured()
+    #endif
 
     var body: some View {
         let number = lit()
         let route = BernLitRoute(number >= 0 ? path() : "")
         if route.isEmpty {
             bernLit(text, number).bernLitting { number }
-        } else if #available(macOS 15, iOS 18, tvOS 18, *) {
-            SwiftUI.Text(verbatim: text)
-                .textRenderer(BernLitMeasure(measured: measured))
-                .opacity(0.4)
-                .overlay {
-                    BernLitLayer(text: text, measured: measured, route: route, clock: clock(), since: since())
-                        .allowsHitTesting(false)
-                }
         } else {
+            #if os(watchOS)
             let (clock, since) = (clock(), since())
             TimelineView(.animation(minimumInterval: 1.0 / 30, paused: since <= 0)) { timeline in
-                bernLit(text, route.place(at: clock + (since > 0 ? timeline.date.timeIntervalSince1970 - since : 0)))
+                let place = route.place(at: clock + (since > 0 ? timeline.date.timeIntervalSince1970 - since : 0))
+                SwiftUI.Text(verbatim: text).textRenderer(BernLitRenderer(lit: place))
             }
+            #else
+            if #available(macOS 15, iOS 18, tvOS 18, *) {
+                SwiftUI.Text(verbatim: text)
+                    .textRenderer(BernLitMeasure(measured: measured))
+                    .opacity(0.4)
+                    .overlay {
+                        BernLitLayer(text: text, measured: measured, route: route, clock: clock(), since: since())
+                            .allowsHitTesting(false)
+                    }
+            } else {
+                let (clock, since) = (clock(), since())
+                TimelineView(.animation(minimumInterval: 1.0 / 30, paused: since <= 0)) { timeline in
+                    bernLit(text, route.place(at: clock + (since > 0 ? timeline.date.timeIntervalSince1970 - since : 0)))
+                }
+            }
+            #endif
         }
     }
 }
 
+#if !os(watchOS)
 /// A line of text as `BernLitMeasure` found it: its bounds, and where each
 /// glyph starts, then where the last ends.
 struct BernLitGlyphs: Equatable {
@@ -3183,8 +3255,9 @@ private struct BernLitLayer: UIViewRepresentable {
     }
 }
 #endif
+#endif
 
-@available(macOS 15, iOS 18, tvOS 18, *)
+@available(macOS 15, iOS 18, tvOS 18, watchOS 11, *)
 private struct BernLitRenderer: TextRenderer {
     let lit: Double
 
@@ -3708,8 +3781,16 @@ struct BernOpenCenter<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
     var body: some View {
+        #if os(watchOS)
+        content()
+            .defaultScrollAnchor(
+                UnitPoint(
+                    x: horizontal ? min(max(at, 0), 1) : 0.5,
+                    y: horizontal ? 0.5 : min(max(at, 0), 1)))
+        #else
         content()
             .background(BernOpenCenterProbe(at: min(max(at, 0), 1), horizontal: horizontal))
+        #endif
     }
 }
 
@@ -3764,7 +3845,7 @@ final class BernOpenCenterView: NSView {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in self?.open() }
     }
 }
-#else
+#elseif !os(watchOS)
 private struct BernOpenCenterProbe: UIViewRepresentable {
     let at: Double
     let horizontal: Bool
@@ -4009,9 +4090,17 @@ private struct BernToolbarSpace: View {
 /// scroll view from inside its content, without installing another gesture.
 private struct BernScrollBrowsing: ViewModifier {
     let browsing: Binding<Bool>
+    #if !os(watchOS)
     @StateObject private var activity = BernScrollBrowsingActivity()
+    #endif
 
     func body(content: Content) -> some View {
+        #if os(watchOS)
+        content.onScrollPhaseChange { _, phase in
+            let byHand = phase == .tracking || phase == .interacting || phase == .decelerating
+            if browsing.wrappedValue != byHand { browsing.wrappedValue = byHand }
+        }
+        #else
         if #available(macOS 15.0, iOS 18.0, tvOS 18.0, *) {
             content.onScrollPhaseChange { _, phase in
                 let byHand = phase == .tracking || phase == .interacting || phase == .decelerating
@@ -4021,9 +4110,15 @@ private struct BernScrollBrowsing: ViewModifier {
             content.environment(\.bernScrollBrowsingContext,
                 BernScrollBrowsingContext(activity: activity, binding: browsing))
         }
+        #endif
     }
 }
 
+#if os(watchOS)
+private struct BernScrollBrowsingContent: ViewModifier {
+    func body(content: Content) -> some View { content }
+}
+#else
 @MainActor
 private struct BernScrollBrowsingContext {
     let activity: BernScrollBrowsingActivity
@@ -4420,6 +4515,7 @@ private final class BernNativeScrollBrowsingObserver: NSObject {
     }
 }
 #endif
+#endif
 
 private struct BernKeyedNudge<Key: Equatable>: ViewModifier {
     let key: @MainActor () -> Key
@@ -4627,8 +4723,8 @@ private struct BernPinch: ViewModifier {
     @State private var start: Double?
 
     func body(content: Content) -> some View {
-        #if os(tvOS)
-        // A television has no touch screen to pinch: only the adjustment
+        #if os(tvOS) || os(watchOS)
+        // A television or watch has no multi-finger pinch: only the adjustment
         // of assistive technologies.
         content
             .accessibilityAdjustableAction { direction in bernAdjust(value, range, direction, commit) }
@@ -5760,7 +5856,7 @@ struct BernSearchPalette<Results: View>: View {
                 Image(systemName: "magnifyingglass").font(.system(size: 14))
                 Text(verbatim: prompt).font(.system(size: 13)).lineLimit(1)
                 Spacer(minLength: 4)
-                #if !os(tvOS)
+                #if !os(tvOS) && !os(watchOS)
                 if let shortcut { Text(verbatim: BernShortcuts.display(shortcut)).font(.system(size: 11.5, weight: .medium)) }
                 #endif
             }
@@ -6031,9 +6127,11 @@ struct BernPaletteInput: View {
             .autocorrectionDisabled()
             .focused($focused)
             .onSubmit(submit)
+            #if !os(watchOS)
             .onKeyPress(.upArrow) { up(); return .handled }
             .onKeyPress(.downArrow) { down(); return .handled }
             .onKeyPress(.escape) { cancel(); return .handled }
+            #endif
             .onAppear {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { focused = true }
             }
@@ -6104,7 +6202,7 @@ private struct BernCircleControl: ViewModifier {
         if onBar && !prominent {
             // The bar is the glass; the button is a target of its size.
             control
-        } else if #available(macOS 26.0, iOS 26.0, tvOS 26.0, *) {
+        } else if #available(macOS 26.0, iOS 26.0, tvOS 26.0, watchOS 26.0, *) {
             if prominent {
                 control
                     .background(accent ?? .accentColor, in: Circle())
@@ -6236,7 +6334,7 @@ private struct BernCapsuleControl: ViewModifier {
             .contentShape(Capsule())
         if filled {
             control.background(.fill.tertiary, in: Capsule())
-        } else if #available(macOS 26.0, iOS 26.0, tvOS 26.0, *) {
+        } else if #available(macOS 26.0, iOS 26.0, tvOS 26.0, watchOS 26.0, *) {
             if prominent {
                 // Keep the accent legible when the window's native glass
                 // desaturates; the glass still supplies the interactive surface.
@@ -6901,7 +6999,7 @@ private struct BernTelevisionField: ViewModifier {
 struct BernKeyShortcut: View {
     #if os(tvOS)
     let remote: BernRemoteKey?
-    #else
+    #elseif !os(watchOS)
     let shortcut: KeyboardShortcut?
     #endif
     let enabled: Bool
@@ -6915,7 +7013,7 @@ struct BernKeyShortcut: View {
         self.enabled = enabled
         self.action = action
     }
-    #else
+    #elseif !os(watchOS)
     init(shortcut: KeyboardShortcut?, enabled: Bool, action: @escaping () -> Void) {
         self.shortcut = shortcut
         self.enabled = enabled
@@ -6927,6 +7025,8 @@ struct BernKeyShortcut: View {
         #if os(tvOS)
         Color.clear.frame(width: 0, height: 0).accessibilityHidden(true)
             .bernRemoteShortcut(remote, enabled: enabled, action: action)
+        #elseif os(watchOS)
+        EmptyView()
         #else
         Button("", action: action)
             .keyboardShortcut(shortcut)
@@ -6978,7 +7078,7 @@ struct BernShortcutInput: View {
     }
 
     @ViewBuilder private var field: some View {
-        #if os(tvOS)
+        #if os(tvOS) || os(watchOS)
         SwiftUI.Text(verbatim: shown).foregroundStyle(.secondary)
         #else
         SwiftUI.Button {
@@ -7175,13 +7275,13 @@ extension View {
         self.listRowBackground(Color.clear)
             .listRowInsets(EdgeInsets())
             .bernListRowSeparatorHidden()
-            #if canImport(UIKit)
+            #if canImport(UIKit) && !os(watchOS)
             .background(BernUnclippedRow())
             #endif
     }
 }
 
-#if canImport(UIKit)
+#if canImport(UIKit) && !os(watchOS)
 /// UIKit clips a grouped list's cells to their section's rounded shape, the
 /// content too. A plain row has nothing to round: its cell and the views up
 /// to it stop clipping, again whenever UIKit lays the row out.

@@ -75,6 +75,7 @@ pub fn delete(name: &str) -> Result<(), CommandError> {
 #[cfg(any(
     target_os = "macos",
     target_os = "ios",
+    target_os = "watchos",
     target_os = "windows",
     target_os = "linux"
 ))]
@@ -82,7 +83,7 @@ fn failed(error: impl std::fmt::Display) -> CommandError {
     CommandError::new("secrets_failed", error.to_string())
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "watchos"))]
 mod system {
     use super::*;
     use security_framework::passwords;
@@ -157,6 +158,7 @@ mod system {
     target_os = "android",
     target_os = "macos",
     target_os = "ios",
+    target_os = "watchos",
     target_os = "windows",
     target_os = "linux"
 )))]

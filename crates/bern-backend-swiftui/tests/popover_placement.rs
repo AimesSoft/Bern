@@ -7,7 +7,7 @@ fn ios_popovers_leave_the_arrow_edge_to_the_system() {
         .unwrap();
     let end = source[start..].find("private func release()").unwrap() + start;
     let presentation = &source[start..end];
-    assert!(presentation.contains("#if os(tvOS)\n        content.sheet("));
+    assert!(presentation.contains("#if os(tvOS) || os(watchOS)\n        content.sheet("));
     assert!(presentation.contains(
         "#elseif os(macOS)\n        content.popover(isPresented: $presented, arrowEdge: .bottom)"
     ));

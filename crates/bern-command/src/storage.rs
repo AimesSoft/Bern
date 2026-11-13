@@ -146,7 +146,7 @@ impl Folders {
                 .or_else(|| home().map(|home| home.join(fallback)))
         };
         let (settings, data, cache) = match os {
-            "macos" | "ios" => {
+            "macos" | "ios" | "watchos" => {
                 let support = home().map(|home| home.join("Library/Application Support"));
                 let caches = home().map(|home| home.join("Library/Caches"));
                 (support.clone(), support, caches)
@@ -368,6 +368,14 @@ mod tests {
                 some("/Users/a/Library/Application Support/app.id"),
                 some("/Users/a/Library/Application Support/app.id"),
                 some("/Users/a/Library/Caches/app.id")
+            )
+        );
+        assert_eq!(
+            folders("watchos", &[("HOME", "/w")], None),
+            (
+                some("/w/Library/Application Support/app.id"),
+                some("/w/Library/Application Support/app.id"),
+                some("/w/Library/Caches/app.id")
             )
         );
         assert_eq!(

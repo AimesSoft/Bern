@@ -483,7 +483,7 @@ pub struct AndroidOptions {
 impl TargetConfig {
     pub fn has_webview(&self) -> bool {
         self.platform == "browser"
-            || (!matches!(self.platform.as_str(), "tvos" | "wearos")
+            || (!matches!(self.platform.as_str(), "tvos" | "wearos" | "watchos")
                 && self.webview.unwrap_or(matches!(
                     self.platform.as_str(),
                     "macos" | "ios" | "android" | "windows" | "linux" | "browser"
@@ -746,7 +746,7 @@ pub struct Registry {
 /// Default UI technology per platform.
 pub fn default_ui(platform: &str) -> Option<&'static str> {
     match platform {
-        "macos" | "ios" | "tvos" => Some("swiftui"),
+        "macos" | "ios" | "tvos" | "watchos" => Some("swiftui"),
         "linux" => Some("gtk"),
         "windows" => Some("winui3"),
         "android" | "wearos" => Some("compose"),

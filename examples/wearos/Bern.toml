@@ -28,6 +28,10 @@ compact_below = 600
 platform = "wearos"
 channels = ["ipc"]
 
+[targets.watchos]
+platform = "watchos"
+channels = ["ipc"]
+
 # The same engine and declarations on a phone, with their own UI layout.
 [targets.android]
 platform = "android"

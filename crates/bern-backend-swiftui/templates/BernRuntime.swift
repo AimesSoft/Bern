@@ -9,11 +9,16 @@
 // lifecycle, snapshots and the video view — is in BernAppKit.swift and
 // BernUIKit.swift, of which a build compiles the one for its platform.
 
+#if !os(watchOS)
 import GameController
+#endif
 import ImageIO
 import Network
 import SwiftUI
 import UniformTypeIdentifiers
+#if os(watchOS)
+import WatchKit
+#endif
 
 // MARK: - Binary values
 
@@ -491,6 +496,8 @@ final class BernKeyboard {
     private init() {
         #if os(macOS)
         attached = true
+        #elseif os(watchOS)
+        attached = false
         #else
         attached = GCKeyboard.coalesced != nil
         for name in [Notification.Name.GCKeyboardDidConnect, .GCKeyboardDidDisconnect] {
@@ -579,13 +586,17 @@ final class BernWindowContext {
     var short: Bool { layoutHeight < bernAppBreakpoints.compact }
     /// On a television: `window.tv`.
     var tv: Bool { bernTelevision }
+    /// On a watch: `window.watch`.
+    var watch: Bool { bernWatch }
     /// A hardware keyboard is attached: `window.keyboard`.
     var keyboard: Bool { BernKeyboard.shared.attached }
-    /// UIKit on a phone/tablet supplies direct touch; a TV remote and a
-    /// Mac trackpad are not a touch screen.
+    /// UIKit on a phone/tablet and WatchKit on a watch supply direct touch;
+    /// a TV remote and a Mac trackpad are not a touch screen.
     var touch: Bool {
         #if os(iOS)
         !ProcessInfo.processInfo.isiOSAppOnMac
+        #elseif os(watchOS)
+        true
         #else
         false
         #endif
@@ -787,6 +798,14 @@ let bernTelevision: Bool = {
     #endif
 }()
 
+let bernWatch: Bool = {
+    #if os(watchOS)
+    true
+    #else
+    false
+    #endif
+}()
+
 struct BernBreakpoints: Sendable {
     let compact: CGFloat
     let medium: CGFloat?
@@ -861,6 +880,7 @@ struct BernAdaptive<Content: View>: View {
     /// there, is the phone's from its first build.
     private var size: String {
         if bernTelevision && declared.contains("tv") { return "tv" }
+        if bernWatch && declared.contains("watch") { return "watch" }
         return breakpoints.size(of: width ?? window?.layoutWidth ?? .infinity)
     }
 
@@ -1059,7 +1079,9 @@ final class BernHost {
         engineID = String(decoding: Self.take(bern_app_engine_id(app)), as: UTF8.self)
         channel = String(decoding: Self.take(bern_app_channel(app)), as: UTF8.self)
         receiveState(Self.take(bern_app_snapshot(app)))
+        #if !os(watchOS)
         BernKernelClock.shared.serve(app)
+        #endif
         BernMedia.shared.attachExecutor()
         BernMedia.shared.receive(Self.take(bern_media_snapshot(app)))
         platformDidStart()
@@ -1067,7 +1089,9 @@ final class BernHost {
 
     func stop() {
         // No kernel frame may reach the app once it is gone.
+        #if !os(watchOS)
         BernKernelClock.shared.serve(nil)
+        #endif
         if let handle { bern_app_stop(handle) }
         handle = nil
     }
@@ -2222,7 +2246,7 @@ struct BernImage: View {
         // The iOS simulator decodes gain maps to HDR as black, and cannot
         // show HDR anyway; it shows the SDR picture.
         #if !targetEnvironment(simulator)
-        if #available(macOS 15, iOS 18, tvOS 18, *) {
+        if #available(macOS 15, iOS 18, tvOS 18, watchOS 11, *) {
             decoded = create([kCGImageSourceDecodeRequest: kCGImageSourceDecodeToHDR])
         }
         #endif
@@ -2275,7 +2299,9 @@ struct BernImage: View {
                 Color.clear
             }
         }
+        #if !os(watchOS)
         .allowedDynamicRange(.high)
+        #endif
         let shown = Group {
             if covers {
                 Color.clear
@@ -2386,6 +2412,8 @@ final class BernPictures {
         network.start(queue: DispatchQueue(label: "dev.bern.pictures.network", qos: .utility))
         #if os(macOS)
         let front = NSApplication.didBecomeActiveNotification
+        #elseif os(watchOS)
+        let front = WKApplication.didBecomeActiveNotification
         #else
         let front = UIApplication.didBecomeActiveNotification
         #endif
@@ -2694,9 +2722,9 @@ struct BernDrop: ViewModifier {
         content
             .onAppear { if opens { BernFiles.register(token, kinds: kinds, give: give) } }
             .onDisappear { BernFiles.unregister(token) }
-            // A television has no drag and drop: there only the files the
-            // system opens with the app arrive.
-            #if !os(tvOS)
+            // A television or watch has no drag and drop: there only the files
+            // the system opens with the app arrive.
+            #if !os(tvOS) && !os(watchOS)
             .onDrop(
                 of: [.fileURL] + BernFiles.types(kinds),
                 delegate: BernDropDelegate(
@@ -2708,7 +2736,7 @@ struct BernDrop: ViewModifier {
     }
 }
 
-#if !os(tvOS)
+#if !os(tvOS) && !os(watchOS)
 @MainActor
 private struct BernDropDelegate: DropDelegate {
     let kinds: String
@@ -2830,15 +2858,20 @@ struct BernSliderInteraction<Content: View>: View {
     let step: Double?
     let onEditingChanged: (Bool) -> Void
     @ViewBuilder let content: (Binding<Double>, @escaping (Bool) -> Void) -> Content
+    @Environment(\.bernInForm) private var inForm
     @State private var editing = false
     @State private var lastDetent: Double?
     @State private var feedback = 0
 
     private var feedbackEnabled: Bool {
-        #if os(iOS)
+        #if os(watchOS)
+        return true
+        #elseif os(iOS)
         if #available(iOS 26.0, *) { return true }
-        #endif
         return false
+        #else
+        return false
+        #endif
     }
 
     private func detent(_ value: Double) -> Double? {
@@ -2874,8 +2907,14 @@ struct BernSliderInteraction<Content: View>: View {
     }
 
     var body: some View {
+        #if os(watchOS)
         content(interactionBinding, edit)
             .modifier(BernSliderFeedback(trigger: feedback))
+            .listRowBackground(inForm ? Color.clear : nil)
+        #else
+        content(interactionBinding, edit)
+            .modifier(BernSliderFeedback(trigger: feedback))
+        #endif
     }
 }
 
@@ -2891,6 +2930,8 @@ private struct BernSliderFeedback: ViewModifier {
         } else {
             content
         }
+        #elseif os(watchOS)
+        content.sensoryFeedback(.selection, trigger: trigger)
         #else
         content
         #endif
@@ -3072,7 +3113,7 @@ struct BernMasonry: Layout {
 /// reads it is drawn again each time.
 @MainActor
 func bernLit(_ text: String, _ lit: @autoclosure () -> Double) -> SwiftUI.Text {
-    if #available(macOS 15, iOS 18, tvOS 18, *) { return SwiftUI.Text(verbatim: text) }
+    if #available(macOS 15, iOS 18, tvOS 18, watchOS 11, *) { return SwiftUI.Text(verbatim: text) }
     let lit = lit()
     let scalars = text.unicodeScalars
     guard lit >= 0 else { return SwiftUI.Text(verbatim: text) }

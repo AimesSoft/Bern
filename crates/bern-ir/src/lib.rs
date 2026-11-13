@@ -323,7 +323,9 @@ impl FeatureDef {
             .find(|exemption| exemption.platform == platform);
         self.coverage
             .iter()
-            .filter(|row| (row.size == LayoutSize::Watch) == (platform == "wearos"))
+            .filter(|row| {
+                (row.size == LayoutSize::Watch) == matches!(platform, "wearos" | "watchos")
+            })
             .map(|SizeCoverage { size, coverage }| {
                 let result = match (coverage, exemption, &self.guaranteed) {
                     (Coverage::Covered { entries }, _, _) => FeatureResult::Covered {

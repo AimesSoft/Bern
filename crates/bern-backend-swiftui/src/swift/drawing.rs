@@ -25,7 +25,10 @@ impl Generator<'_> {
         // room the scroll view keeps above it. A Mac window's only safe
         // area is its title bar.
         if element.keyword("bleed") == Some("true")
-            && matches!(self.platform, Platform::Ios | Platform::Tvos)
+            && matches!(
+                self.platform,
+                Platform::Ios | Platform::Tvos | Platform::Watchos
+            )
         {
             out.line("SwiftUI.Color.clear");
             out.line(frame);

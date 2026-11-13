@@ -91,6 +91,16 @@ pub fn lib_rs(context: &BuildContext, app: &Application, platform: Platform) -> 
             session_spec(app, WindowPresentation::Native),
             String::new(),
         ),
+        // A watch runs one scene, so every window stays virtual.
+        Platform::Watchos => (
+            if declared {
+                "::std::env::var_os(\"BERN_IPC_DIR\").is_some()".to_string()
+            } else {
+                "false".to_string()
+            },
+            session_spec(app, WindowPresentation::Virtual),
+            NATIVE_WINDOWS.to_string(),
+        ),
         // A television runs one scene, so its windows stay virtual: the
         // app never switches native windows on there.
         Platform::Ios | Platform::Tvos => (
