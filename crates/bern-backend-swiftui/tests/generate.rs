@@ -810,6 +810,91 @@ fn context(
     }
 }
 
+/// A title header owns the sidebar's name; content headers do not replace it.
+#[test]
+fn sidebar_title_headers_do_not_repeat_the_native_window_title() {
+    use bern_backend_swiftui::SwiftUiTvos;
+    use bern_ir::{Element, Node, Prop};
+
+    for role in [None, Some(""), Some("content"), Some("title")] {
+        let (config, mut compiled) = showcase();
+        if let Some(role) = role {
+            let main = compiled
+                .app
+                .components
+                .iter_mut()
+                .find(|component| component.name == "main_window")
+                .unwrap();
+            let Node::Element(split) = &mut main.body else {
+                panic!("main window must be a split view")
+            };
+            let sidebar = split
+                .children
+                .iter_mut()
+                .find_map(|node| match node {
+                    Node::Element(element) if element.kind == "Sidebar" => Some(element),
+                    _ => None,
+                })
+                .unwrap();
+            sidebar.children.push(Node::Element(Element {
+                kind: "SidebarHeader".into(),
+                id: None,
+                path: "main_window.sidebar_header".into(),
+                props: if role.is_empty() {
+                    Default::default()
+                } else {
+                    [("role".into(), Prop::Keyword { value: role.into() })].into()
+                },
+                template: None,
+                children: Vec::new(),
+                action: None,
+                source: sidebar.source.clone(),
+            }));
+        }
+        for (name, target) in [
+            ("ios", &SwiftUiIos as &dyn Target),
+            ("tvos", &SwiftUiTvos as &dyn Target),
+            ("macos", &SwiftUiMacos as &dyn Target),
+        ] {
+            let output = std::env::var_os("CARGO_TARGET_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| workspace().join("target"))
+                .join("bern-test/sidebar-title-header");
+            let mut context = context(&config, &compiled, name, &output);
+            if name == "ios" {
+                context.target.frontends = vec!["swiftui".into(), "swiftui-16".into()];
+            }
+            let app = compiled.app.on_platform(name);
+            let files = target.generate(&app, &context).unwrap();
+            let generated: Vec<_> = files
+                .iter()
+                .filter(|file| {
+                    file.path
+                        .file_name()
+                        .is_some_and(|name| name == "BernGenerated.swift")
+                })
+                .collect();
+            assert_eq!(generated.len(), if name == "ios" { 2 } else { 1 });
+            for file in generated {
+                let swift = std::str::from_utf8(&file.contents).unwrap();
+                assert_eq!(
+                    swift.contains(".navigationTitle(bernWindow.title)"),
+                    name != "macos" && role != Some("title"),
+                    "{name} {role:?}: {}",
+                    file.path.display()
+                );
+                if role.is_some() {
+                    assert!(swift.contains(".safeAreaInset(edge: .top, spacing: 0)"));
+                }
+                assert!(
+                    swift.contains(".navigationTitle({ () -> String in"),
+                    "the selected detail destination keeps its title"
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn ios_resources_must_not_take_the_bundles_own_names() {
     let (config, compiled) = showcase();
