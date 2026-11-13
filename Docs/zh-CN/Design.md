@@ -1813,13 +1813,13 @@ bern::overlay::show("lyrics", &Overlay {
 for (overlay, button) in bern::overlay::take_presses() { /* … */ }
 ```
 
-- 文字带柔和的阴影，在任何背景上都看得清，窗口本身透明。`Place::Free` 在用户上次放下的地方（第一次在主屏幕下方居中），位置由 `storage` 记住；`Place::Taskbar` 立在 Windows 任务栏上通知区域的左边。
+- 文字带柔和的阴影，在任何背景上都看得清，窗口本身透明。`Place::Free` 在用户上次放下的地方（第一次在主屏幕下方居中），位置由 `storage` 记住；`Place::Taskbar` 立在 Windows 任务栏上通知区域的左边，只占任务栏上的空位：从任务栏上最后一样东西（应用按钮、小组件、搜索框）到通知区域，放不下的行末尾变成省略号，连一个字都放不下时不显示。
 - 未锁定时可以拖动；锁定时点击穿过它，落到下面的窗口上。
 - `buttons` 是自由放置的悬浮文字上方的一排按钮，指针移到文字上时出现，未锁定时连同一块半透明的底板；锁定时只出现 `while_locked` 的按钮，各在未锁定时的位置上，也只有它们接收指针，用户由此就地解锁。按钮的按下经 `take_presses` 回到引擎，每次都唤醒引擎。`symbol` 是 SF Symbols 名称：macOS 画任何一个，其他平台画 `backward.fill`、`forward.fill`、`play.fill`、`pause.fill`、`lock.fill`、`lock.open.fill` 与 `xmark`。
 - Android 上应用先要用户允许“显示在其他应用的上层”：`allowed()` 回答是否已允许，`ask()` 打开系统的设置页；`[app].overlays = true` 声明 `SYSTEM_ALERT_WINDOW` 权限。那里没有悬停，未锁定时点一下文字出现按钮，几秒后收起，窗口上移按钮那么高，文字不动。
 - `supported()` 回答这个系统是否有悬浮文字：iOS、tvOS 与网页没有。
 
-各平台的实现：macOS 是无边框、不激活的 `NSPanel`，在状态栏层级、所有桌面空间与全屏应用之上，每行一个文字标签；按钮是 `NSButton`，指针由定时读 `NSEvent.mouseLocation` 得知，锁定时面板只在指针落在按钮上时接收鼠标。Windows 是分层的置顶工具窗口，Direct2D 与 DirectWrite 画进位图，`UpdateLayeredWindow` 取它的透明度；锁定时带 `WS_EX_TRANSPARENT`，指针落在按钮上时去掉；按钮的图形来自系统图标字体（Windows 11 的 Segoe Fluent Icons，之前是 Segoe MDL2 Assets）；任务栏上的每秒放回任务栏上面。Linux 由 GTK 宿主经 `overlay::install` 接上：无装饰的透明窗口，锁定时输入区域只含解锁的按钮，未锁定时按下即由合成器移动；GTK 4 不能要求位置与置顶，这两样由桌面决定。Android 是 `TYPE_APPLICATION_OVERLAY` 的系统浮窗，锁定时带 `FLAG_NOT_TOUCHABLE`，按钮的图形由宿主自己画。
+各平台的实现：macOS 是无边框、不激活的 `NSPanel`，在状态栏层级、所有桌面空间与全屏应用之上，每行一个文字标签；按钮是 `NSButton`，指针由定时读 `NSEvent.mouseLocation` 得知，锁定时面板只在指针落在按钮上时接收鼠标。Windows 是分层的置顶工具窗口，Direct2D 与 DirectWrite 画进位图，`UpdateLayeredWindow` 取它的透明度；锁定时带 `WS_EX_TRANSPARENT`，指针落在按钮上时去掉；按钮的图形来自系统图标字体（Windows 11 的 Segoe Fluent Icons，之前是 Segoe MDL2 Assets）；任务栏上的每秒放回任务栏上面，并经 UI Automation 重读任务栏上有什么（Windows 11 的任务栏按钮、小组件与搜索框是 XAML 画的，没有自己的窗口），空位变了就按新的空位重画。Linux 由 GTK 宿主经 `overlay::install` 接上：无装饰的透明窗口，锁定时输入区域只含解锁的按钮，未锁定时按下即由合成器移动；GTK 4 不能要求位置与置顶，这两样由桌面决定。Android 是 `TYPE_APPLICATION_OVERLAY` 的系统浮窗，锁定时带 `FLAG_NOT_TOUCHABLE`，按钮的图形由宿主自己画。
 
 实现进度（2026-11-03）：一个实际的音乐应用实测：macOS 上显示、拖动、锁定后点击穿过，指针移上去出现按钮，暂停、锁定与就地解锁有效；Android 模拟器上显示，点一下出现按钮，暂停、播放与锁定有效。Linux 只在 Broadway 显示上试过：指针移上去出现按钮与底板，按钮有效；锁定后的输入区域与真实合成器上的置顶未验证。Windows 只编译，未运行。
 

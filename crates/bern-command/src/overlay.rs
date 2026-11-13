@@ -7,7 +7,8 @@
 //! Locked, clicks go through it to what lies under it; unlocked, a faint
 //! plate shows behind the text and it can be dragged. Where it was left is
 //! kept for the next time. [`Place::Taskbar`] stands it on the Windows
-//! taskbar, beside the notification area; elsewhere it is a free overlay.
+//! taskbar, beside the notification area, in the room the taskbar's own
+//! buttons leave; elsewhere it is a free overlay.
 //!
 //! A free overlay can carry a bar of [`Button`]s above its lines, which
 //! shows while the pointer is over it (on Android, where nothing hovers, a
@@ -208,7 +209,9 @@ pub enum Place {
     /// screen.
     #[default]
     Free,
-    /// On the Windows taskbar, beside the notification area.
+    /// On the Windows taskbar, beside the notification area, in the room
+    /// its buttons, widgets and search box leave: a longer line ends in an
+    /// ellipsis.
     Taskbar,
 }
 
@@ -1173,7 +1176,8 @@ mod win {
     use windows::Win32::Graphics::DirectWrite::{
         DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
         DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_HIT_TEST_METRICS,
-        DWRITE_TEXT_METRICS, DWriteCreateFactory, IDWriteFactory, IDWriteFontCollection,
+        DWRITE_TEXT_METRICS, DWRITE_TRIMMING, DWRITE_TRIMMING_GRANULARITY_CHARACTER,
+        DWRITE_WORD_WRAPPING_NO_WRAP, DWriteCreateFactory, IDWriteFactory, IDWriteFontCollection,
         IDWriteTextLayout,
     };
     use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
@@ -1182,8 +1186,17 @@ mod win {
         CreateCompatibleDC, CreateDIBSection, DIB_RGB_COLORS, DeleteDC, DeleteObject, GdiFlush,
         GetDC, HBITMAP, HDC, HGDIOBJ, ReleaseDC, ScreenToClient, SelectObject,
     };
+    use windows::Win32::System::Com::{
+        CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
+    };
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::System::Threading::GetCurrentThreadId;
+    use windows::Win32::UI::Accessibility::{
+        CUIAutomation, IUIAutomation, TreeScope_Descendants, UIA_BoundingRectanglePropertyId,
+        UIA_ButtonControlTypeId, UIA_CONTROLTYPE_ID, UIA_ComboBoxControlTypeId,
+        UIA_ControlTypePropertyId, UIA_EditControlTypeId, UIA_IsOffscreenPropertyId,
+        UIA_ListItemControlTypeId, UIA_MenuItemControlTypeId, UIA_SplitButtonControlTypeId,
+    };
     use windows::Win32::UI::HiDpi::{
         DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForWindow, SetThreadDpiAwarenessContext,
     };
@@ -1218,8 +1231,22 @@ mod win {
     const BUTTON: f32 = 28.0;
     const BUTTON_GAP: f32 = 8.0;
     const BAR_GAP: f32 = 8.0;
-    /// How often an overlay on the taskbar is put back on top of it.
+    /// How often an overlay on the taskbar is put back on top of it, and
+    /// looks again for the room the taskbar leaves it.
     const TOPMOST_TIMER: usize = 1;
+    /// Between an overlay on the taskbar and what is beside it, in pixels.
+    const TASKBAR_GAP: i32 = 8;
+    /// What takes room on the taskbar, read through UI Automation: its
+    /// buttons, the items of its lists, and the search box. Their panes and
+    /// lists are left out, as they may stretch over free room.
+    const OCCUPYING: [UIA_CONTROLTYPE_ID; 6] = [
+        UIA_ButtonControlTypeId,
+        UIA_SplitButtonControlTypeId,
+        UIA_MenuItemControlTypeId,
+        UIA_ListItemControlTypeId,
+        UIA_EditControlTypeId,
+        UIA_ComboBoxControlTypeId,
+    ];
     /// How often the pointer is looked for over a free overlay, in
     /// milliseconds.
     const HOVER_TIMER: usize = 2;
@@ -1287,6 +1314,17 @@ mod win {
         buttons: Vec<(RECT, usize)>,
         /// What it shows now.
         frame: Option<Frame>,
+        /// On the taskbar, the room it had when it was last drawn.
+        room: Option<Room>,
+    }
+
+    /// The free stretch of the taskbar an overlay stands in, in pixels.
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct Room {
+        left: i32,
+        right: i32,
+        top: i32,
+        bottom: i32,
     }
 
     /// What a window shows, kept for lines to light up in: a frame moves
@@ -1434,6 +1472,8 @@ mod win {
     thread_local! {
         static WINDOWS: RefCell<HashMap<String, Window>> = RefCell::new(HashMap::new());
         static FACTORIES: RefCell<Option<(ID2D1Factory, IDWriteFactory)>> = const { RefCell::new(None) };
+        /// Made the first time the taskbar is read.
+        static AUTOMATION: RefCell<Option<IUIAutomation>> = const { RefCell::new(None) };
     }
 
     /// Do `act` with the window `hwnd` and the factories, unless they are
@@ -1554,6 +1594,17 @@ mod win {
                 LRESULT(0)
             }
             WM_TIMER => {
+                // What is on the taskbar changes as windows open and close:
+                // draw again in the room it leaves now.
+                with_window(hwnd, |window, d2d, dwrite| {
+                    // SAFETY: reads the shell's windows, and draws a window of
+                    // this thread.
+                    unsafe {
+                        if window.overlay.place == Place::Taskbar && taskbar_room() != window.room {
+                            let _ = draw(window, d2d, dwrite);
+                        }
+                    }
+                });
                 // SAFETY: keeps a window of this thread on top of the taskbar.
                 let _ = unsafe {
                     SetWindowPos(
@@ -1577,6 +1628,9 @@ mod win {
         // SAFETY: this thread's own settings, window class and factories.
         unsafe {
             let _ = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+            // UI Automation reads the taskbar. In the multithreaded apartment
+            // its calls wait without pumping this thread's messages.
+            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
             let instance = GetModuleHandleW(None).unwrap_or_default();
             let class = WNDCLASSEXW {
                 cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
@@ -1629,6 +1683,7 @@ mod win {
                     window.hot = None;
                     // SAFETY: a window of this thread.
                     unsafe {
+                        let _ = KillTimer(Some(window.hwnd), TOPMOST_TIMER);
                         let _ = KillTimer(Some(window.hwnd), HOVER_TIMER);
                         let _ = KillTimer(Some(window.hwnd), LIT_TIMER);
                         let _ = ShowWindow(window.hwnd, SW_HIDE);
@@ -1686,6 +1741,7 @@ mod win {
                         pressed: None,
                         buttons: Vec::new(),
                         frame: None,
+                        room: None,
                     }
                 });
                 window.overlay = overlay;
@@ -1695,11 +1751,16 @@ mod win {
         }
     }
 
-    /// The text of a line laid out, and its size in pixels.
+    /// As wide as a line is laid out when nothing limits it, in pixels.
+    const UNLIMITED: f32 = 8192.0;
+
+    /// The text of a line laid out on one line, and its size in pixels.
+    /// Wider than `limit`, its end gives way to an ellipsis.
     unsafe fn layout(
         dwrite: &IDWriteFactory,
         line: &super::Line,
         scale: f32,
+        limit: f32,
     ) -> Option<(IDWriteTextLayout, f32, f32)> {
         let weight = if line.bold {
             DWRITE_FONT_WEIGHT_BOLD
@@ -1719,15 +1780,25 @@ mod win {
                     w!(""),
                 )
                 .ok()?;
+            if limit < UNLIMITED {
+                format.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP).ok()?;
+                let ellipsis = dwrite.CreateEllipsisTrimmingSign(&format).ok()?;
+                let trimming = DWRITE_TRIMMING {
+                    granularity: DWRITE_TRIMMING_GRANULARITY_CHARACTER,
+                    delimiter: 0,
+                    delimiterCount: 0,
+                };
+                format.SetTrimming(&trimming, &ellipsis).ok()?;
+            }
             let text: Vec<u16> = line.text.encode_utf16().collect();
             let layout = dwrite
-                .CreateTextLayout(&text, &format, 8192.0, 8192.0)
+                .CreateTextLayout(&text, &format, limit.max(1.0), UNLIMITED)
                 .ok()?;
             let mut metrics = DWRITE_TEXT_METRICS::default();
             layout.GetMetrics(&mut metrics).ok()?;
             Some((
                 layout,
-                metrics.widthIncludingTrailingWhitespace,
+                metrics.widthIncludingTrailingWhitespace.min(limit),
                 metrics.height,
             ))
         }
@@ -1784,22 +1855,104 @@ mod win {
         }
     }
 
-    /// Where an overlay on the taskbar goes: its right edge beside the
-    /// notification area, its middle on the taskbar's, in pixels.
-    unsafe fn taskbar_spot(width: i32, height: i32) -> Option<(i32, i32)> {
+    /// The room an overlay on the taskbar has: from the last thing on the
+    /// taskbar to the notification area, the taskbar's height, in pixels.
+    /// What is on it is read through UI Automation, as the taskbar of
+    /// Windows 11 draws its buttons, widgets and search box in XAML, with
+    /// no windows of their own.
+    unsafe fn taskbar_room() -> Option<Room> {
         // SAFETY: reads the shell's windows.
         unsafe {
             let tray = FindWindowW(w!("Shell_TrayWnd"), None).ok()?;
             let mut bar = RECT::default();
             GetWindowRect(tray, &mut bar).ok()?;
-            let mut right = bar.right - 8;
+            let mut right = bar.right;
             if let Ok(notify) = FindWindowExW(Some(tray), None, w!("TrayNotifyWnd"), None) {
                 let mut area = RECT::default();
-                if GetWindowRect(notify, &mut area).is_ok() {
-                    right = area.left - 8;
+                if GetWindowRect(notify, &mut area).is_ok() && area.left > bar.left {
+                    right = area.left;
                 }
             }
-            Some((right - width, (bar.top + bar.bottom) / 2 - height / 2))
+            let mut left = bar.left;
+            // A taskbar on the side of the screen keeps its whole width.
+            if bar.right - bar.left > bar.bottom - bar.top {
+                for item in taskbar_items(tray, &bar) {
+                    if item.right <= right {
+                        left = left.max(item.right);
+                    }
+                }
+            }
+            Some(Room {
+                left: left + TASKBAR_GAP,
+                right: right - TASKBAR_GAP,
+                top: bar.top,
+                bottom: bar.bottom,
+            })
+        }
+    }
+
+    /// Where each thing that takes room on the taskbar is, in pixels.
+    unsafe fn taskbar_items(tray: HWND, bar: &RECT) -> Vec<RECT> {
+        AUTOMATION.with(|automation| {
+            let mut automation = automation.borrow_mut();
+            if automation.is_none() {
+                // SAFETY: COM is initialized on this thread in `run`.
+                *automation =
+                    unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER) }.ok();
+            }
+            let Some(automation) = automation.as_ref() else {
+                return Vec::new();
+            };
+            // SAFETY: reads the shell's window through UI Automation.
+            unsafe { read_taskbar(automation, tray, bar) }.unwrap_or_default()
+        })
+    }
+
+    unsafe fn read_taskbar(
+        automation: &IUIAutomation,
+        tray: HWND,
+        bar: &RECT,
+    ) -> windows::core::Result<Vec<RECT>> {
+        // SAFETY: UI Automation calls on objects made on this thread.
+        unsafe {
+            let root = automation.ElementFromHandle(tray)?;
+            let cache = automation.CreateCacheRequest()?;
+            for property in [
+                UIA_BoundingRectanglePropertyId,
+                UIA_ControlTypePropertyId,
+                UIA_IsOffscreenPropertyId,
+            ] {
+                cache.AddProperty(property)?;
+            }
+            let shown = automation.ControlViewCondition()?;
+            let found = root.FindAllBuildCache(TreeScope_Descendants, &shown, &cache)?;
+            // Wider than half the taskbar is not one thing on it.
+            let half = (bar.right - bar.left) / 2;
+            let mut items = Vec::new();
+            for index in 0..found.Length()? {
+                let Ok(element) = found.GetElement(index) else {
+                    continue;
+                };
+                let (Ok(rect), Ok(kind), Ok(offscreen)) = (
+                    element.CachedBoundingRectangle(),
+                    element.CachedControlType(),
+                    element.CachedIsOffscreen(),
+                ) else {
+                    continue;
+                };
+                let width = rect.right - rect.left;
+                if offscreen.as_bool()
+                    || !OCCUPYING.contains(&kind)
+                    || width <= 0
+                    || width > half
+                    || rect.bottom <= bar.top
+                    || rect.top >= bar.bottom
+                {
+                    continue;
+                }
+                items.push(rect);
+            }
+            Ok(items)
         }
     }
 
@@ -1825,14 +1978,36 @@ mod win {
         unsafe {
             let dpi = GetDpiForWindow(hwnd).max(96);
             let scale = dpi as f32 / 96.0;
+            let free = window.overlay.place == Place::Free;
+            // On the taskbar the lines fill its height, with no room around.
+            let (margin, gap) = if free {
+                (MARGIN * scale, GAP * scale)
+            } else {
+                (2.0 * scale, 0.0)
+            };
+            let room = if free { None } else { taskbar_room() };
+            if room != window.room {
+                if let Some(room) = room {
+                    eprintln!(
+                        "bern overlay: taskbar room {}..{} of {}..{}",
+                        room.left, room.right, room.top, room.bottom
+                    );
+                }
+                window.room = room;
+            }
+            // On the taskbar a line is as wide as its room; one that has not
+            // room for a character is left out.
+            let limit = room.map_or(UNLIMITED, |room| {
+                (room.right - room.left) as f32 - 2.0 * margin
+            });
             let lines: Vec<DrawnLine> = window
                 .overlay
                 .lines
                 .iter()
                 .enumerate()
-                .filter(|(_, line)| !line.text.is_empty())
+                .filter(|(_, line)| !line.text.is_empty() && limit >= line.size as f32 * scale)
                 .filter_map(|(index, line)| {
-                    layout(dwrite, line, scale).map(|(layout, w, h)| {
+                    layout(dwrite, line, scale, limit).map(|(layout, w, h)| {
                         let spans = line.ruby_spans();
                         let band = if spans.is_empty() {
                             0.0
@@ -1870,14 +2045,20 @@ mod win {
                             {
                                 continue;
                             }
+                            // Over what the ellipsis cut off.
+                            if left.max(right) > w + 0.5 {
+                                continue;
+                            }
                             let available = (right - left).abs().max(1.0);
                             let mut style = line.clone();
                             style.text = text;
                             style.size *= 0.45;
-                            if let Some((_, measured, _)) = self::layout(dwrite, &style, scale) {
+                            if let Some((_, measured, _)) =
+                                self::layout(dwrite, &style, scale, UNLIMITED)
+                            {
                                 style.size *= (available / measured.max(1.0)).min(1.0) as f64;
                                 if let Some((reading, wide, high)) =
-                                    self::layout(dwrite, &style, scale)
+                                    self::layout(dwrite, &style, scale, UNLIMITED)
                                 {
                                     readings.push((
                                         reading,
@@ -1904,15 +2085,12 @@ mod win {
                 let _ = KillTimer(Some(hwnd), LIT_TIMER);
                 let _ = ShowWindow(hwnd, SW_HIDE);
                 window.frame = None;
+                // Still on the taskbar, it looks for room again every second.
+                if room.is_some() {
+                    SetTimer(Some(hwnd), TOPMOST_TIMER, 1000, None);
+                }
                 return Ok(());
             }
-            let free = window.overlay.place == Place::Free;
-            // On the taskbar the lines fill its height, with no room around.
-            let (margin, gap) = if free {
-                (MARGIN * scale, GAP * scale)
-            } else {
-                (2.0 * scale, 0.0)
-            };
             // Every button has its slot; locked, only those that unlock show.
             let slots = if free {
                 window.overlay.buttons.len()
@@ -2191,7 +2369,12 @@ mod win {
             }
 
             let (left, top) = match window.overlay.place {
-                Place::Taskbar => taskbar_spot(width, height).unwrap_or((0, 0)),
+                Place::Taskbar => room.map_or((0, 0), |room| {
+                    (
+                        room.right - width,
+                        (room.top + room.bottom) / 2 - height / 2,
+                    )
+                }),
                 Place::Free => {
                     let (x, y) = window.place.unwrap_or_else(|| {
                         let mut area = RECT::default();
