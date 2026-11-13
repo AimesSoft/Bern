@@ -48,7 +48,7 @@ fun BernScrollColumn(modifier: Modifier, state: ScrollState, content: @Composabl
     val room = remember { BernScrollRoom() }
     val focus = remember { FocusRequester() }
     CompositionLocalProvider(LocalBernViewport provides viewport, LocalBernScrollRoom provides room) {
-        ScreenScaffold(scrollState = state, modifier = modifier) { padding ->
+        ScreenScaffold(scrollState = state, contentPadding = PaddingValues(), modifier = modifier) { padding ->
             Column(Modifier.fillMaxSize().onGloballyPositioned { viewport.bounds = it.boundsInRoot() }
                 .bernScrollRoom(room, state)
                 .requestFocusOnHierarchyActive()
@@ -163,7 +163,8 @@ fun BernPopoverButton(target: String, label: String, icon: ImageVector?, present
     BernControl(target, "popover_button", label, actions = BernControlActions(
         activate = { show(true) }, value = { if (showing) "open" else "closed" }))
     if (shortcut != null) BernShortcut(shortcut) { show(true) }
-    if (icon != null) BernIconButton(label, icon, true, Modifier.testTag(target), style, iconSize) { show(true) }
+    if (icon != null) BernIconButton(label, icon, true, Modifier.testTag(target), style, iconSize,
+        prominence = if (plain) BernProminence.Plain else BernProminence.Standard) { show(true) }
     else BernButton(label, null, if (plain) BernProminence.Plain else BernProminence.Standard,
         style = style, modifier = Modifier.testTag(target)) { show(true) }
     val dark = if (windowTheme) BernThemeState.appearance?.lowercase() != "light" else bernDark()
