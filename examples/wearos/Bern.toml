@@ -1,0 +1,34 @@
+[app]
+id = "wear_demo"
+bundle_id = "dev.bern.wear.demo"
+version = "0.1.0"
+name = { en = "Bern Watch", "zh-Hans" = "Bern 手表" }
+
+[languages]
+supported = ["en", "zh-Hans"]
+default = "en"
+
+[protocol]
+package = "wear-demo-protocol"
+source = "wear-demo-protocol/src/lib.rs"
+
+[engine]
+package = "wear-demo-core"
+type = "wear_demo_core::WatchEngine"
+
+[ui]
+package = "wear-demo-ui"
+sources = ["wear-demo-ui/src/lib.rs"]
+root = "app"
+
+[layouts]
+compact_below = 600
+
+[targets.wearos]
+platform = "wearos"
+channels = ["ipc"]
+
+# The same engine and declarations on a phone, with their own UI layout.
+[targets.android]
+platform = "android"
+channels = ["ipc"]

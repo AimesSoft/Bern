@@ -417,9 +417,9 @@ pub const TEXT_STYLES: &[&str] = &[
 pub const EMPHASIS: &[&str] = &["primary", "secondary", "tertiary"];
 
 /// Layout sizes of `Adaptive`, as written in `Layout(size: …)`: the four
-/// sizes of the available width, and `tv`, the layout a television shows
-/// whatever its width.
-pub const LAYOUT_SIZES: &[&str] = &["compact", "medium", "expanded", "large", "tv"];
+/// sizes of the available width, `tv` (for a television), and `watch` (for
+/// a watch, regardless of width).
+pub const LAYOUT_SIZES: &[&str] = &["compact", "medium", "expanded", "large", "tv", "watch"];
 
 /// The feature an entry with a business action reaches.
 const FEATURE: PropSpec = opt("feature", PropKind::Feature);
@@ -1128,7 +1128,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         "Adaptive",
         &[opt("id", PropKind::Id)],
         Children::Only(&["Layout"]),
-        "Chooses one `Layout` per size by the available width, or the `tv` layout on a television; state is kept across sizes",
+        "Chooses one `Layout` per size by the available width, the `tv` layout on a television, or the `watch` layout on a watch; state is kept across sizes",
     ),
     ComponentSpec {
         placement: Placement::Within(&["Adaptive"]),

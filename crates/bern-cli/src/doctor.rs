@@ -56,6 +56,7 @@ const SPECS: &[Spec] = &[
     ),
     ("Linux · GTK 4", &["linux"], Some(("linux", "Linux")), linux),
     ("Android · Compose", &["android"], None, android),
+    ("Wear OS · Compose", &["wearos"], None, android),
     ("Web · WebAssembly", &["browser"], None, web),
 ];
 

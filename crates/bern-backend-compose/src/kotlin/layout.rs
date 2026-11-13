@@ -936,7 +936,7 @@ impl Generator<'_> {
             out.open(format!(
                 "if (previewCount < previewItems.size && previewHeight >= {more}) {{"
             ));
-            out.open(format!("Box(Modifier.height({more}.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(50)).padding(horizontal = 6.dp), contentAlignment = Alignment.Center) {{"));
+            out.open(format!("Box(Modifier.height({more}.dp).background(bernSurfaceVariant(), RoundedCornerShape(50)).padding(horizontal = 6.dp), contentAlignment = Alignment.Center) {{"));
             out.line("Text(\"+${previewItems.size - previewCount}\", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)");
             out.close("}");
             out.close("}");
@@ -972,7 +972,11 @@ impl Generator<'_> {
                     ));
                 }
                 if lazy {
-                    out.open("LazyColumn(Modifier.fillMaxSize()) {");
+                    if self.watch {
+                        out.open("BernLazyList {");
+                    } else {
+                        out.open("LazyColumn(Modifier.fillMaxSize()) {");
+                    }
                     out.open(format!(
                         "items({}, key = {{ {var} -> BernKey.of({key}) }}) {{ {var} ->",
                         self.expr(items)
@@ -980,11 +984,17 @@ impl Generator<'_> {
                     out.open(format!(
                         "CompositionLocalProvider(LocalBernItemKeys provides LocalBernItemKeys.current + \"[${{{key}}}]\") {{"
                     ));
-                    out.open("Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {");
+                    out.open(if self.watch {
+                        "Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp)) {"
+                    } else {
+                        "Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {"
+                    });
                     self.nodes(out, &element.children, &inner.within(Scope::Column));
                     out.close("}");
                     out.close("}");
-                    out.line("HorizontalDivider()");
+                    if !self.watch {
+                        out.line("HorizontalDivider()");
+                    }
                     out.close("}");
                     out.close("}");
                 } else {
@@ -1112,12 +1122,20 @@ impl Generator<'_> {
                 None => out.line(format!("{} = null,", size.name())),
             }
         }
-        // The layout a television shows, chosen by the device.
+        // The layout a television or watch shows, chosen by the device.
         if let Some(layout) = element.children.iter().find_map(|node| match node {
             Node::Element(layout) if layout.keyword("size") == Some("tv") => Some(layout),
             _ => None,
         }) {
             out.open("tv = {");
+            self.nodes(out, &layout.children, &ctx.within(Scope::Other));
+            out.close("},");
+        }
+        if let Some(layout) = element.children.iter().find_map(|node| match node {
+            Node::Element(layout) if layout.keyword("size") == Some("watch") => Some(layout),
+            _ => None,
+        }) {
+            out.open("watch = {");
             self.nodes(out, &layout.children, &ctx.within(Scope::Other));
             out.close("},");
         }

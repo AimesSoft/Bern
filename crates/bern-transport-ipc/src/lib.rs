@@ -57,9 +57,13 @@ pub fn android_socket(bundle_id: &str) -> String {
 /// app's [`android_socket`], named like an engine.
 pub const ANDROID_FORWARD: &str = "android.sock";
 
+/// The socket in [`socket_dir`] that `bern run --target wearos` forwards
+/// to the Wear OS app's [`android_socket`].
+pub const WEAROS_FORWARD: &str = "wearos.sock";
+
 /// The system this engine runs on, in its socket's name: `macos`, `ios`,
-/// `tvos`, `windows`, `linux` or `android`. Clients pick an engine by it,
-/// since the engine id is new each time the app starts.
+/// `tvos`, `windows`, `linux`, `android` or `wearos`. Clients pick an engine
+/// by it, since the engine id is new each time the app starts.
 pub const SYSTEM: &str = std::env::consts::OS;
 
 /// Directory holding the sockets of one application, unique per user.
@@ -675,6 +679,7 @@ impl Engine {
         let (id, system) = match stem.split_once('.') {
             Some((id, system)) => (id, Some(system)),
             None if path.file_name()? == ANDROID_FORWARD => (stem, Some("android")),
+            None if path.file_name()? == WEAROS_FORWARD => (stem, Some("wearos")),
             None => (stem, None),
         };
         Some(Engine {

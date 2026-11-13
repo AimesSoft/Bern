@@ -94,6 +94,8 @@ import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
@@ -198,6 +200,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
+// @bern:wear-icons-start
 // MARK: - Icons
 
 /// Bern icon names (SF Symbols naming) as Material icons. The branches are
@@ -565,6 +568,7 @@ object BernKey {
         else -> value.toString()
     }
 }
+// @bern:wear-icons-end
 
 // MARK: - Text and labels
 
@@ -591,6 +595,7 @@ fun BernLabel(title: String, icon: ImageVector?, style: TextStyle, fontSize: Flo
 
 enum class BernProminence { Standard, Prominent, Plain }
 
+// @bern:wear-skip-start
 /// A Material button; `shape` a capsule of its own height, `fill` across
 /// its container.
 @Composable
@@ -714,9 +719,11 @@ fun BernIconButton(
     }
 }
 
+// @bern:wear-skip-end
+
 /// The native vector is redrawn at full size and clipped, never stretched.
 @Composable
-private fun BernIconGlyph(icon: ImageVector, label: String, side: Dp,
+internal fun BernIconGlyph(icon: ImageVector, label: String, side: Dp,
     progress: Double?, badge: ImageVector?, badgeVisible: Boolean) {
     val fraction = progress?.takeIf { it.isFinite() }?.coerceIn(0.0, 1.0)?.toFloat() ?: 0f
     Box(Modifier.size(side)) {
@@ -728,7 +735,7 @@ private fun BernIconGlyph(icon: ImageVector, label: String, side: Dp,
         if (badge != null && badgeVisible) {
             Icon(badge, contentDescription = null, tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.align(Alignment.BottomEnd).offset(x = side * 0.06f, y = side * 0.06f)
-                    .size(side * 0.52f).background(MaterialTheme.colorScheme.surface, CircleShape)
+                    .size(side * 0.52f).background(MaterialTheme.colorScheme.background, CircleShape)
                     .padding(side * 0.06f))
         }
     }
@@ -806,6 +813,7 @@ fun Modifier.bernEditingPresses(registry: BernEditingRegions): Modifier =
         }
     }
 
+// @bern:wear-skip-start
 @Composable
 fun BernTextInput(
     value: String,
@@ -864,6 +872,9 @@ fun BernHeldTextInput(
     )
 }
 
+// @bern:wear-skip-end
+
+// @bern:wear-skip-start
 // MARK: - Tables
 
 /// The headings of a `Table`, as a Material data table's: with a choice,
@@ -953,6 +964,9 @@ fun BernTableRow(
     }
 }
 
+// @bern:wear-skip-end
+
+// @bern:wear-skip-start
 @Composable
 fun BernSearchField(
     value: String,
@@ -1047,6 +1061,9 @@ fun BernSlider(
     }
 }
 
+// @bern:wear-skip-end
+
+// @bern:wear-skip-start
 /// A slider showing engine state: dragging moves only the slider, letting
 /// go runs `commit` with the new value; keys and accessibility actions
 /// commit at once.
@@ -1072,6 +1089,9 @@ fun BernControlledSlider(
     )
 }
 
+// @bern:wear-skip-end
+
+// @bern:wear-skip-start
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun <T> BernPicker(
@@ -1250,6 +1270,8 @@ fun <T> BernPicker(
     }
 }
 
+// @bern:wear-skip-end
+
 @Composable
 fun BernLanguagePicker(label: String, target: String, labelHidden: Boolean = false, inRow: Boolean = false) {
     BernControl(
@@ -1264,6 +1286,7 @@ fun BernLanguagePicker(label: String, target: String, labelHidden: Boolean = fal
 
 // MARK: - Progress and pictures
 
+// @bern:wear-skip-start
 /// `Progress(style: ring)`: how far `value` is of `total`, as an arc in the
 /// accent from the top, clockwise, with round ends, `width` across and
 /// `strokeWidth` thick; at nothing yet, a dot at the top. It lies over what
@@ -1302,6 +1325,8 @@ fun BernProgress(value: Double?, total: Double, label: String?) {
         }
     }
 }
+
+// @bern:wear-skip-end
 
 /// A picture from a declared resource. With one side given, the other
 /// follows the picture's aspect ratio, or `aspect` when given; with neither
@@ -1424,13 +1449,18 @@ fun BernAdaptive(
     expanded: (@Composable () -> Unit)?,
     large: (@Composable () -> Unit)?,
     tv: (@Composable () -> Unit)? = null,
+    watch: (@Composable () -> Unit)? = null,
 ) {
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        // A television shows the `tv` layout where there is one; elsewhere
-        // the width chooses.
-        val size = if (BernHost.television && tv != null) "tv" else BernHost.layouts.sizeOf(maxWidth.value.toDouble())
+        // A watch or television shows its own layout where there is one;
+        // elsewhere the width chooses.
+        val size = if (BernHost.watch && watch != null) "watch"
+        else if (BernHost.television && tv != null) "tv"
+        else BernHost.layouts.sizeOf(maxWidth.value.toDouble())
         if (target != null) BernControl(target, "adaptive", "", actions = BernControlActions(value = { size }))
-        if (size == "tv") {
+        if (size == "watch") {
+            key("watch") { watch?.invoke() }
+        } else if (size == "tv") {
             key("tv") { tv?.invoke() }
         } else {
             val layouts = listOf("compact" to compact, "medium" to medium, "expanded" to expanded, "large" to large)
@@ -1443,6 +1473,7 @@ fun BernAdaptive(
 
 // MARK: - Menus
 
+// @bern:wear-skip-start
 /// A button opening a menu of commands. With an icon only the icon shows
 /// (`iconOnly`, or an icon in a top bar); with a `shape` height it is a
 /// round tonal button of that diameter, or a tonal capsule with its label.
@@ -1517,6 +1548,8 @@ fun BernContextMenu(menu: @Composable (dismiss: () -> Unit) -> Unit, content: @C
     }
 }
 
+// @bern:wear-skip-end
+
 /// Runs `open` on a secondary click, or once a press has been held without
 /// moving; it sees the press before the views inside, and takes the rest of
 /// it from them.
@@ -1544,6 +1577,7 @@ fun Modifier.bernMenuPress(open: () -> Unit): Modifier = pointerInput(Unit) {
     }
 }
 
+// @bern:wear-skip-start
 // MARK: - Navigation
 
 /// A row that pushes a route. In a section's rows it is as tall as they
@@ -1918,6 +1952,8 @@ fun RowScope.BernTabItem(
     )
 }
 
+// @bern:wear-skip-end
+
 // MARK: - Queries
 
 /// What a query subscription shows, as the session runtime reports it.
@@ -2124,6 +2160,7 @@ fun BernUnavailable(title: String, icon: ImageVector, message: String?, retry: (
     }
 }
 
+// @bern:wear-skip-start
 /// A picker in the top bar: the chosen option, opening a menu of the
 /// others, as the bar has room for one line.
 @Composable
@@ -2160,6 +2197,8 @@ fun <T> BernToolbarPicker(
     }
 }
 
+// @bern:wear-skip-end
+
 // MARK: - Inline Markdown
 
 /// A `Text` with `markdown`: its inline Markdown styled, links opening in
@@ -2167,7 +2206,7 @@ fun <T> BernToolbarPicker(
 @Composable
 fun BernMarkdownText(text: String, style: TextStyle, color: Color, lines: Int? = null) {
     val link = MaterialTheme.colorScheme.primary
-    val code = MaterialTheme.colorScheme.surfaceVariant
+    val code = bernSurfaceVariant()
     val styled = remember(text, link, code) { bernInlineMarkdown(text, link, code) }
     Text(
         styled,
@@ -2271,9 +2310,9 @@ fun BernRubyText(
         return
     }
     val measurer = androidx.compose.ui.text.rememberTextMeasurer()
-    val resolved = androidx.compose.material3.LocalTextStyle.current.merge(style).let {
+    val resolved = LocalTextStyle.current.merge(style).let {
         it.copy(color = if (color != Color.Unspecified) color else
-            if (it.color != Color.Unspecified) it.color else androidx.compose.material3.LocalContentColor.current)
+            if (it.color != Color.Unspecified) it.color else LocalContentColor.current)
     }
     val small = resolved.copy(fontSize = resolved.fontSize * 0.5f,
         lineHeight = androidx.compose.ui.unit.TextUnit.Unspecified, letterSpacing = 0.sp)

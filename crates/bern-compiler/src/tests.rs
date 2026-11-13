@@ -1771,10 +1771,13 @@ pub enum OtherFeature {
             ("#[commands(media.fly)]", "`media.fly` is neither a command"),
             (
                 "#[layouts(huge)]",
-                "unknown layout size `huge`; sizes are compact and expanded",
+                "unknown layout size `huge`; sizes are compact, expanded and watch",
             ),
-            // Contracts cover the required sizes only.
-            ("#[layouts(medium)]", "sizes are compact and expanded"),
+            // Contracts cover the required sizes and watch.
+            (
+                "#[layouts(medium)]",
+                "sizes are compact, expanded and watch",
+            ),
         ] {
             let output = failure(features, ADD, LAYOUTS);
             assert!(output.contains(expected), "{features}: {output}");

@@ -216,6 +216,7 @@ val LocalBernDark = compositionLocalOf<Boolean?> { null }
 @Composable
 fun bernDark(): Boolean = LocalBernDark.current ?: isSystemInDarkTheme()
 
+// @bern:wear-skip-start
 /// Material colors for `dark`, with complete containers for a fixed accent.
 @Composable
 fun BernScheme(dark: Boolean, content: @Composable () -> Unit) {
@@ -316,6 +317,8 @@ internal fun bernAccentScheme(color: Color, fixed: Color, dark: Boolean): androi
         onTertiaryFixed = Color.Black, onTertiaryFixedVariant = Color(0xFF333333),
     )
 }
+
+// @bern:wear-skip-end
 
 /// Content always drawn light or dark (`appearance:`), whatever the
 /// window's appearance; what opens from it follows it.
@@ -630,6 +633,7 @@ fun Modifier.bernShadow(look: BernLook, motion: BernMotion, shape: Shape): Modif
     return shadow(elevation, shape, clip = false, ambientColor = shade, spotColor = shade)
 }
 
+// @bern:wear-skip-start
 // MARK: - Buttons with content
 
 /// A button that shows its content instead of a label: the style draws its
@@ -718,12 +722,15 @@ fun BernToggleButton(
     }
 }
 
+// @bern:wear-skip-end
+
 // MARK: - Search in the toolbar
 
 /// Where a query in a search's results says that it found nothing, in
 /// place of its own empty view; `null` once it finds something.
 val LocalBernSearchEmpty = staticCompositionLocalOf<((String?) -> Unit)?> { null }
 
+// @bern:wear-skip-start
 /// A search the toolbar opens over the window: the field on top and its
 /// results below it. External entries focus it with `ui.focus`.
 @Composable
@@ -879,6 +886,8 @@ fun BernSplitButton(
         }
     }
 }
+
+// @bern:wear-skip-end
 
 // MARK: - Pictures from the engine
 
@@ -1296,8 +1305,20 @@ object BernFiles {
 
     /// Asks for one file of `kinds` with the system's document picker.
     fun pick(kinds: String, then: (String) -> Unit) {
+        if (pick == null || pickFolder == null) {
+            BernHost.failure = BernFailure(null, "platform_unavailable", "The app has no activity for selecting documents")
+            return
+        }
         picked = then
-        if (words(kinds) == listOf("folder")) pickFolder?.launch(null) else pick?.launch(mimeTypes(kinds))
+        try {
+            if (words(kinds) == listOf("folder")) pickFolder!!.launch(null) else pick!!.launch(mimeTypes(kinds))
+        } catch (missing: android.content.ActivityNotFoundException) {
+            picked = null
+            BernHost.failure = BernFailure(null, "platform_unavailable", "This device has no system document picker")
+        } catch (denied: SecurityException) {
+            picked = null
+            BernHost.failure = BernFailure(null, "permission_denied", denied.message ?: "The system refused document access")
+        }
     }
 
     fun mimeTypes(kinds: String): Array<String> {
@@ -1699,6 +1720,7 @@ class BernViewport {
 
 val LocalBernViewport = compositionLocalOf<BernViewport?> { null }
 
+// @bern:wear-skip-start
 /// A vertical scroll view: its content in a column that scrolls, the part
 /// in sight told to the grids in it.
 @Composable
@@ -1715,6 +1737,8 @@ fun BernScrollColumn(modifier: Modifier, state: ScrollState, content: @Composabl
         )
     }
 }
+
+// @bern:wear-skip-end
 
 /// The room a vertical scroll view keeps around what it scrolls. While a
 /// canvas that bleeds is in it, the view reaches past each edge of the
@@ -2646,6 +2670,7 @@ private fun bernFraction(value: Double, motion: BernMotion?): Float {
     return animateFloatAsState(target, motion.spec(), label = "fraction").value
 }
 
+// @bern:wear-skip-start
 // MARK: - Popover buttons
 
 /// A button that shows `content` in a popover, such as a volume slider;
@@ -2707,6 +2732,8 @@ fun BernPopoverButton(
         }
     }
 }
+
+// @bern:wear-skip-end
 
 // MARK: - Where a scroll view opens
 

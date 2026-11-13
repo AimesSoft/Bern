@@ -471,3 +471,12 @@ Android 与 Material 3 都没有表格控件，`Table` 按 Material 数据表的
 `SurfaceView` 不能被圆角裁剪；窗口在表面销毁前归还内核。遥控器的返回键按键到达 `BernShortcuts` 后，系统还会再走一次 Back 回调，这时引擎的回答还没关掉快捷键，所以 500 毫秒内的回调不再执行。
 
 验证：一个实际应用在 Android 手机、平板和 Android TV 模拟器上用自带内核播放 1080p HEVC（MediaCodec 解码、Vulkan 渲染），字幕和横屏全屏正常，遥控器的确定和返回只生效一次。
+
+## Wear OS（`compose-wearos`，2026-11-13）
+
+- **独立目标（`platform = "wearos"`）**：在 `bern-backend-compose` 中由 `ComposeWearos` 实现，生成独立的手表 APK（`minSdk = 30`、`compileSdk = 37`、`targetSdk = 36`，`versionCode` 加 `1_000_000` 以与手机 APK 区分），清单声明 `<uses-feature android:name="android.hardware.type.watch" />`（不写 `required="false"`）及 `com.google.android.wearable.standalone`（默认 `true`，可通过 `android = { standalone = false }` 配置）。
+- **Wear Compose Material 3（`1.7.1`）**：以 `androidx.wear.compose:compose-material3` 和 `compose-foundation` 替换手机版 Material 3。使用 `AppScaffold` + `TimeText`、带旋转表冠与弧形滚动条的 `ScreenScaffold`、`ScalingLazyColumn` 呈现 `List`、`SwipeToDismissBox` 承接导航与虚拟窗口右滑返回、`AlertDialog` 呈现关闭确认与错误提示、`SwitchButton`/`CheckboxButton`、`Slider`、`Picker` 滚轮弹层、`SplitCheckboxButton`/`CheckboxButton` 呈现表格行，以及初始禁止自动取焦的 `EditText` 桥接（仅在触摸、无障碍或显式 `ui focus` 时进入编辑，避免打开设置页时表单自动滚离顶部）。
+- **布局与能力规则**：面向 `wearos` 时要求所有可达 `Adaptive` 显式提供 `Layout(size: watch)`，`#[bern::features]` 单独检查 `watch` 覆盖；`on_watch()` 保留实际运行尺寸并仅裁剪非手表分支，其他后端通过 `without_watch()` 在检查前裁剪 `watch` 分支。排除无 WebView 的 `WebPage` 与动态 `Svg`，并在系统缺少文档选择器时由 `BernFiles.pick` 明确报告 `platform_unavailable` / `permission_denied`。
+- **IPC 隔离**：`bern run --target wearos` 自动筛选 `ro.build.characteristics` 含 `watch` 的设备，并经 `wearos.sock` 转发通道，使 `--engine wearos` 可与手机模拟器并存。
+- **验证**：编译器与生成器测试（`crates/bern-backend-compose/tests/wearos.rs`），以及 `examples/wearos` 在 Wear OS 6.0（API 36、`384×384`、`320 dpi` 小圆屏）模拟器上的端到端实测：按钮点击、`ScalingLazyColumn` 与 `BernForm` 旋钮滚动、右滑返回、`SwitchButton`、`Slider`、`Picker` 滚轮弹层、`Menu` 弹层、显式 `ui focus` 唤起手表键盘、`ui set-language`、未保存草稿关闭 `AlertDialog` 确认协议以及引擎状态同步。未在手表上实测：视频播放、`Table`、`Tabs`、`SplitView` 及真机硬件。
+

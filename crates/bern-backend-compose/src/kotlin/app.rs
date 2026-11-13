@@ -2,7 +2,7 @@
 //! the windows.
 
 use super::values::{generate_engine, generate_enum, generate_record, generate_sessions};
-use super::{Generator, Out, PLATFORM};
+use super::{Generator, Out};
 use crate::names::{double, member, string};
 use bern_ir::WindowRole;
 
@@ -15,7 +15,7 @@ impl Generator<'_> {
         out.line("");
         out.line(format!("package {package}"));
         out.line("");
-        for import in IMPORTS {
+        for import in if self.watch { WEAR_IMPORTS } else { IMPORTS } {
             out.line(format!("import {import}"));
         }
         out.line("");
@@ -27,7 +27,7 @@ impl Generator<'_> {
         for def in &app.types.records {
             generate_record(&mut out, def);
         }
-        let styles = crate::style::used(app, PLATFORM);
+        let styles = crate::style::used(app, self.platform());
         if !styles.is_empty() {
             out.line("// MARK: - Styles");
             out.line("");
@@ -175,6 +175,9 @@ impl Generator<'_> {
         out.open("override fun onCreate(savedInstanceState: Bundle?) {");
         out.line("super.onCreate(savedInstanceState)");
         out.line("enableEdgeToEdge()");
+        if self.watch {
+            out.line("BernHost.watch = true");
+        }
         out.open("BernHost.start(");
         out.line("applicationContext,");
         out.line(format!("{}L,", fingerprint as i64));
@@ -310,6 +313,66 @@ const IMPORTS: &[&str] = &[
     "androidx.compose.material3.Text",
     "androidx.compose.material3.TextButton",
     "androidx.compose.material3.VerticalDivider",
+    "androidx.compose.runtime.Composable",
+    "androidx.compose.runtime.CompositionLocalProvider",
+    "androidx.compose.runtime.LaunchedEffect",
+    "androidx.compose.runtime.getValue",
+    "androidx.compose.runtime.key",
+    "androidx.compose.runtime.mutableStateOf",
+    "androidx.compose.runtime.remember",
+    "androidx.compose.runtime.saveable.rememberSaveable",
+    "androidx.compose.runtime.setValue",
+    "androidx.compose.ui.Alignment",
+    "androidx.compose.ui.Modifier",
+    "androidx.compose.ui.layout.ContentScale",
+    "androidx.compose.ui.platform.testTag",
+    "androidx.compose.ui.platform.LocalContext",
+    "androidx.compose.ui.state.ToggleableState",
+    "androidx.compose.ui.unit.dp",
+    "dev.bern.runtime.*",
+];
+
+const WEAR_IMPORTS: &[&str] = &[
+    "androidx.compose.animation.AnimatedContent",
+    "androidx.compose.animation.AnimatedVisibility",
+    "androidx.compose.animation.SizeTransform",
+    "androidx.compose.animation.togetherWith",
+    "androidx.compose.foundation.Canvas",
+    "androidx.compose.ui.graphics.Color",
+    "androidx.compose.ui.semantics.Role",
+    "androidx.compose.ui.semantics.clearAndSetSemantics",
+    "androidx.compose.ui.semantics.contentDescription",
+    "androidx.compose.ui.semantics.role",
+    "androidx.compose.ui.semantics.semantics",
+    "android.os.Bundle",
+    "androidx.activity.ComponentActivity",
+    "androidx.activity.compose.setContent",
+    "androidx.activity.enableEdgeToEdge",
+    "androidx.compose.foundation.horizontalScroll",
+    "androidx.compose.foundation.layout.Arrangement",
+    "androidx.compose.foundation.layout.Box",
+    "androidx.compose.foundation.layout.BoxWithConstraints",
+    "androidx.compose.foundation.background",
+    "androidx.compose.foundation.shape.RoundedCornerShape",
+    "androidx.compose.ui.draw.clipToBounds",
+    "androidx.compose.foundation.layout.Column",
+    "androidx.compose.foundation.layout.Row",
+    "androidx.compose.foundation.layout.Spacer",
+    "androidx.compose.foundation.layout.fillMaxHeight",
+    "androidx.compose.foundation.layout.fillMaxSize",
+    "androidx.compose.foundation.layout.fillMaxWidth",
+    "androidx.compose.foundation.layout.padding",
+    "androidx.compose.foundation.layout.size",
+    "androidx.compose.foundation.layout.width",
+    "androidx.compose.foundation.layout.height",
+    "androidx.compose.foundation.layout.wrapContentHeight",
+    "androidx.compose.foundation.lazy.LazyColumn",
+    "androidx.compose.foundation.lazy.items",
+    "androidx.wear.compose.foundation.lazy.items",
+    "androidx.compose.foundation.rememberScrollState",
+    "androidx.compose.foundation.verticalScroll",
+    "androidx.wear.compose.material3.MaterialTheme",
+    "androidx.wear.compose.material3.Text",
     "androidx.compose.runtime.Composable",
     "androidx.compose.runtime.CompositionLocalProvider",
     "androidx.compose.runtime.LaunchedEffect",

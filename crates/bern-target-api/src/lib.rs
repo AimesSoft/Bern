@@ -475,12 +475,15 @@ pub struct AndroidOptions {
     /// The engine links C++ code against the NDK's shared runtime, which the
     /// app then carries as `libc++_shared.so`.
     pub cxx_runtime: bool,
+    /// Wear OS only: whether all core functions work without a phone.
+    /// Omitted means true; companion applications explicitly set false.
+    pub standalone: Option<bool>,
 }
 
 impl TargetConfig {
     pub fn has_webview(&self) -> bool {
         self.platform == "browser"
-            || (self.platform != "tvos"
+            || (!matches!(self.platform.as_str(), "tvos" | "wearos")
                 && self.webview.unwrap_or(matches!(
                     self.platform.as_str(),
                     "macos" | "ios" | "android" | "windows" | "linux" | "browser"
@@ -746,7 +749,7 @@ pub fn default_ui(platform: &str) -> Option<&'static str> {
         "macos" | "ios" | "tvos" => Some("swiftui"),
         "linux" => Some("gtk"),
         "windows" => Some("winui3"),
-        "android" => Some("compose"),
+        "android" | "wearos" => Some("compose"),
         "browser" => Some("web"),
         _ => None,
     }

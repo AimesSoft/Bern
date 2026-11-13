@@ -22,10 +22,34 @@ impl Application {
         let window = Known {
             layouts: self.layouts,
             television: true,
+            watch: None,
             webview: None,
             menu_bar: Some(false),
         };
         self.pruned(&window)
+    }
+
+    /// This application with what a watch never shows left out.
+    pub fn on_watch(&self) -> Application {
+        let window = Known {
+            layouts: self.layouts,
+            television: false,
+            watch: Some(true),
+            webview: Some(false),
+            menu_bar: Some(false),
+        };
+        self.pruned(&window)
+    }
+
+    /// Resolve watch-only branches for every non-watch backend as well.
+    pub fn without_watch(&self) -> Application {
+        self.pruned(&Known {
+            layouts: self.layouts,
+            television: false,
+            watch: Some(false),
+            webview: None,
+            menu_bar: None,
+        })
     }
 
     /// Resolve a target capability before checking and code generation.
@@ -34,6 +58,7 @@ impl Application {
         self.pruned(&Known {
             layouts: self.layouts,
             television: false,
+            watch: None,
             webview: Some(enabled),
             menu_bar: None,
         })
@@ -46,6 +71,7 @@ impl Application {
         self.pruned(&Known {
             layouts: self.layouts,
             television: false,
+            watch: None,
             webview: None,
             menu_bar: Some(shown),
         })
@@ -96,17 +122,18 @@ impl Application {
     }
 }
 
-/// What the window of a television is known to be.
+/// What the window of a television or watch is known to be.
 struct Known {
     layouts: Option<LayoutConfig>,
     television: bool,
+    watch: Option<bool>,
     webview: Option<bool>,
     /// Whether the application's `MenuBar` shows in a system menu bar.
     menu_bar: Option<bool>,
 }
 
 impl Known {
-    /// What a condition is known to be on a television: the window's
+    /// What a condition is known to be on a television or watch: the window's
     /// fields, and negations and combinations of them; any other condition
     /// is decided while the app runs.
     fn known(&self, expr: &Expr) -> Option<bool> {
@@ -116,6 +143,10 @@ impl Known {
             } => match field.as_str() {
                 "webview" => self.webview,
                 "menu_bar" => self.menu_bar,
+                "watch" => self.watch.or(self.television.then_some(false)),
+                // Watches have different screen sizes, shapes and attached
+                // input devices. Only the form factor is a compile-time fact.
+                "tv" if self.watch == Some(true) => Some(false),
                 _ if !self.television => None,
                 "tv" => Some(true),
                 "landscape" => Some(true),
@@ -197,8 +228,20 @@ impl Known {
                 });
                 if tv {
                     element.children.retain(|child| {
-                    matches!(child, Node::Element(layout) if layout.keyword("size") == Some("tv"))
+                        matches!(child, Node::Element(layout) if layout.keyword("size") == Some("tv"))
+                    });
+                }
+                let watch = self.watch == Some(true) && element.kind == "Adaptive"
+                && element.children.iter().any(|child| {
+                    matches!(child, Node::Element(layout) if layout.keyword("size") == Some("watch"))
                 });
+                if watch {
+                    element.children.retain(|child| {
+                        matches!(child, Node::Element(layout) if layout.keyword("size") == Some("watch"))
+                    });
+                }
+                if self.watch == Some(false) && element.kind == "Adaptive" {
+                    element.children.retain(|child| !matches!(child, Node::Element(layout) if layout.keyword("size") == Some("watch")));
                 }
                 element.children = self.prune_nodes(&element.children);
                 for prop in element.props.values_mut() {

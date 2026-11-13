@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+// @bern:wear-skip-start
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -46,6 +47,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
+// @bern:wear-skip-end
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -611,6 +613,8 @@ class BernWindowContext(
     val large: Boolean get() = size == "large"
     /// `window.tv`: the window is on a television.
     val tv: Boolean get() = BernHost.television
+    /// `window.watch`: the window is on a watch.
+    val watch: Boolean get() = BernHost.watch
     /// Direct touchscreen hardware, independent of window size or a touchpad.
     val touch: Boolean get() = BernHost.touch
     /// `window.rail`: a split view shows its sidebar as a navigation rail.
@@ -1386,6 +1390,8 @@ object BernHost {
     /// Whether the app runs on a television (Android TV, Google TV), which
     /// shows an `Adaptive`'s `tv` layout whatever its width.
     var television = false
+    /// Whether the app runs on a Wear OS watch.
+    var watch = false
     var touch = false
         private set
     /// Whether a hardware keyboard is attached, from the configuration the
@@ -2029,6 +2035,7 @@ object BernResources {
     }
 }
 
+// @bern:wear-skip-start
 // MARK: - Theme and window roots
 
 /// Material 3 colors that follow the system: dynamic colors from the
@@ -2318,6 +2325,7 @@ fun BernWindowRoot(
         }
     }
 }
+// @bern:wear-skip-end
 
 /// The audio focus of what `bern::now_playing` shows, so that a call or
 /// another app's music stops it instead of sounding over it. Playing takes

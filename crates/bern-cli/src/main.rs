@@ -197,6 +197,7 @@ fn registry() -> Registry {
     registry.register(Box::new(bern_backend_gpui::Gpui::LINUX));
     registry.register(Box::new(bern_backend_winui3::WinUi3Windows));
     registry.register(Box::new(bern_backend_compose::ComposeAndroid));
+    registry.register(Box::new(bern_backend_compose::ComposeWearos));
     registry
 }
 
@@ -448,6 +449,7 @@ fn os_name(os: &str) -> &str {
         "ios" => "iOS",
         "tvos" => "tvOS",
         "android" => "Android",
+        "wearos" => "Wear OS",
         "windows" => "Windows",
         "linux" => "Linux",
         other => other,

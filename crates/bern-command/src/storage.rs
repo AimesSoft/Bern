@@ -165,7 +165,7 @@ impl Folders {
                 xdg("XDG_DATA_HOME", ".local/share"),
                 xdg("XDG_CACHE_HOME", ".cache"),
             ),
-            "android" => {
+            "android" | "wearos" => {
                 let files = android_files.map(Path::to_path_buf);
                 // `getCacheDir()` sits beside `getFilesDir()`.
                 let cache = android_files

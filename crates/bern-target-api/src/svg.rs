@@ -95,6 +95,11 @@ const DARK_SUFFIX: &str = ".dark.png";
 /// which each frontend shows where the image is dark), and the others do
 /// too where the target has no WebView.
 pub fn prepare(app: &Application, config: &crate::TargetConfig) -> Application {
+    let app = if config.platform == "wearos" {
+        app.on_watch()
+    } else {
+        app.without_watch()
+    };
     let mut app = app.with_webview(config.has_webview());
     if config.platform == "tvos" {
         app = app.on_television();

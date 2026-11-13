@@ -17,8 +17,8 @@ use std::path::{Path, PathBuf};
 
 /// Platforms that can have an icon of their own under `[app.icon]`, named
 /// as `[targets]` names them.
-pub const PLATFORMS: [&str; 7] = [
-    "macos", "ios", "tvos", "windows", "linux", "android", "browser",
+pub const PLATFORMS: [&str; 8] = [
+    "macos", "ios", "tvos", "windows", "linux", "android", "wearos", "browser",
 ];
 
 /// Where one platform's icon comes from.
@@ -445,7 +445,7 @@ pub fn accepted(platform: &str) -> &'static str {
         "tvos" => "a square PNG or a `.brandassets` folder",
         "windows" => "a square PNG or an `.ico` file",
         "linux" => "a square PNG or an icon theme folder laid out like `hicolor`",
-        "android" => "a square PNG or a `res` folder with `mipmap-*/ic_launcher`",
+        "android" | "wearos" => "a square PNG or a `res` folder with `mipmap-*/ic_launcher`",
         "browser" => "a square PNG, an SVG or a folder of page icons",
         _ => "a square PNG",
     }
@@ -476,7 +476,7 @@ pub fn check_native(platform: &str, path: &Path) -> Result<(), String> {
         ("macos" | "ios", true, "icon") => icon_document(path).map(drop),
         ("ios", true, _) => app_icon_set(path).map(drop),
         ("tvos", true, _) => crate::brand_assets::check(path).map(drop),
-        ("android", true, _) => android_res(path).map(drop),
+        ("android" | "wearos", true, _) => android_res(path).map(drop),
         ("linux", true, _) => theme_icons(path).map(drop),
         ("browser", true, _) => page_icons(path).map(drop),
         _ => Err(format!("is not {}", accepted(platform))),

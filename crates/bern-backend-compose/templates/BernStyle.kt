@@ -163,6 +163,12 @@ class BernPalette(private val scheme: ColorScheme, private val dark: Boolean) {
 @Composable
 fun bernPalette(): BernPalette = BernPalette(MaterialTheme.colorScheme, bernDark())
 
+// @bern:wear-skip-start
+@Composable
+fun bernSurfaceVariant(): Color = MaterialTheme.colorScheme.surfaceVariant
+
+// @bern:wear-skip-end
+
 // MARK: - Styles
 
 enum class BernEdge { Leading, Trailing, Top, Bottom }
