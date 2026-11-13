@@ -6,12 +6,15 @@ import android.text.TextWatcher
 import android.text.Editable
 import android.widget.EditText
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -115,14 +118,35 @@ fun VerticalDivider(modifier: Modifier = Modifier) {
 fun BernContentButton(label: String, enabled: Boolean, style: BernStyle?, modifier: Modifier = Modifier,
     shape: BernShape? = null, prominent: Boolean = false, onDoubleTap: (() -> Unit)? = null,
     onClick: () -> Unit, content: @Composable () -> Unit) {
-    val sized = modifier.bernDoubleTap(enabled, onClick, onDoubleTap)
-        .then(shape?.height?.let { Modifier.height(it) } ?: Modifier)
-        .semantics { contentDescription = label }
-    val material: @Composable (Modifier, MutableInteractionSource?) -> Unit = { m, interaction ->
-        if (prominent) Button(onClick = onClick, enabled = enabled, modifier = m, interactionSource = interaction) { content() }
-        else FilledTonalButton(onClick = onClick, enabled = enabled, modifier = m, interactionSource = interaction) { content() }
+    val tapping = modifier.bernDoubleTap(enabled, onClick, onDoubleTap)
+    if (shape?.capsule == true || prominent) {
+        val height = shape?.height
+        val sized = (if (height != null) tapping.height(height) else tapping)
+            .semantics(mergeDescendants = true) { contentDescription = label }
+        val padding = if (height != null) PaddingValues(horizontal = 14.dp, vertical = 0.dp) else ButtonDefaults.ContentPadding
+        if (prominent) Button(onClick = onClick, enabled = enabled, modifier = sized, contentPadding = padding) { content() }
+        else FilledTonalButton(onClick = onClick, enabled = enabled, modifier = sized, contentPadding = padding) { content() }
+        return
     }
-    if (style == null) material(sized, null) else BernStyledButton(style, enabled, sized, onClick, material) { content() }
+    val interaction = remember { BernInteractions() }
+    val (look, motion) = (style ?: BernStyle()).look(false, interaction.hovered, interaction.pressed, enabled)
+    val palette = bernPalette()
+    val outline = RoundedCornerShape((style?.corner ?: 0.0).dp)
+    val sized = shape?.height?.let { tapping.height(it) } ?: tapping
+    Box(
+        sized
+            .bernTransform(look, motion)
+            .bernShadow(look, motion, outline)
+            .clip(outline)
+            .background(look.background?.let(palette::color) ?: Color.Transparent)
+            .clickable(interaction, ripple(), enabled = enabled, role = Role.Button, onClick = onClick)
+            .semantics(mergeDescendants = true) { contentDescription = label },
+    ) {
+        CompositionLocalProvider(
+            LocalContentColor provides (look.foreground?.let(palette::color) ?: LocalContentColor.current),
+            content = content,
+        )
+    }
 }
 
 @Composable
