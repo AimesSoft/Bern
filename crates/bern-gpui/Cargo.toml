@@ -1,7 +1,7 @@
 [package]
 name = "bern-gpui"
 description = "GPUI runtime of the `gpui` target: Bern's own visual specification drawn with GPUI, bound to the Bern session runtime"
-version = "0.1.16"
+version = "0.1.17"
 edition = "2024"
 license = "MIT"
 rust-version = "1.99"
