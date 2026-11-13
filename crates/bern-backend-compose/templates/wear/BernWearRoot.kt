@@ -50,12 +50,20 @@ fun BernScheme(dark: Boolean, content: @Composable () -> Unit) {
         if (accent == null) appearance else {
             val color = BernPalette(appearance, dark).color(accent)
             val on = if (color.luminance() > 0.179f) Color.Black else Color.White
+            val surface = appearance.surfaceContainer
+            fun mix(amount: Float) = Color(
+                red = surface.red + (color.red - surface.red) * amount,
+                green = surface.green + (color.green - surface.green) * amount,
+                blue = surface.blue + (color.blue - surface.blue) * amount,
+            )
+            val container = mix(if (dark) 0.25f else 0.16f)
+            val onContainer = appearance.onSurface
             appearance.copy(primary = color, primaryDim = color.copy(alpha = 0.8f), onPrimary = on,
-                primaryContainer = color, onPrimaryContainer = on,
+                primaryContainer = container, onPrimaryContainer = onContainer,
                 secondary = color, secondaryDim = color.copy(alpha = 0.8f), onSecondary = on,
-                secondaryContainer = color, onSecondaryContainer = on,
+                secondaryContainer = mix(if (dark) 0.18f else 0.12f), onSecondaryContainer = onContainer,
                 tertiary = color, tertiaryDim = color.copy(alpha = 0.8f), onTertiary = on,
-                tertiaryContainer = color, onTertiaryContainer = on)
+                tertiaryContainer = mix(if (dark) 0.14f else 0.09f), onTertiaryContainer = onContainer)
         }
     }
     CompositionLocalProvider(LocalBernDark provides dark) { MaterialTheme(colorScheme = colors, content = content) }
