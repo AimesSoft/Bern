@@ -376,7 +376,7 @@ bern-adapter-mcp = {{ {mcp_adapter} }}
         cli_adapter = context.framework.dependency("bern-adapter-cli"),
         mcp_adapter = context.framework.dependency("bern-adapter-mcp"),
         protocol = context.protocol_package,
-        protocol_path = context.protocol_path.display(),
+        protocol_path = path(&context.protocol_path),
         modules = module_dependencies(context, false),
         profiles = profiles(context, ""),
     )
@@ -425,4 +425,88 @@ fn main() {{
         name = program(app),
         version = app.app.version,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{BuildContext, Framework, ModuleBuild, TargetConfig};
+
+    #[test]
+    fn tools_manifest_normalizes_windows_dependency_paths() {
+        let app = crate::texts::tests::app(Vec::new());
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for (protocol_path, expected) in [
+            (
+                r"D:\Devs\tmp\hello\hello-protocol",
+                "D:/Devs/tmp/hello/hello-protocol",
+            ),
+            // These backslashes would parse as escapes rather than fail.
+            (r"C:\tmp\new\test", "C:/tmp/new/test"),
+            (
+                r"D:\My Projects\示例\hello-protocol",
+                "D:/My Projects/示例/hello-protocol",
+            ),
+            (
+                r"\\server\share\hello\hello-protocol",
+                "//server/share/hello/hello-protocol",
+            ),
+            (
+                r"\\?\D:\Devs\hello\hello-protocol",
+                "//?/D:/Devs/hello/hello-protocol",
+            ),
+            ("/home/dev/hello-protocol", "/home/dev/hello-protocol"),
+        ] {
+            let context = BuildContext {
+                project_dir: root.clone(),
+                workspace_dir: root.clone(),
+                output_dir: root.join("target/bern-test/tools-manifest"),
+                target: TargetConfig::default(),
+                protocol_package: "hello-protocol".into(),
+                protocol_path: protocol_path.into(),
+                protocol_module: "hello_protocol::hello".into(),
+                engine_package: "hello-core".into(),
+                engine_path: root.join("hello-core"),
+                engine_type: "hello_core::Engine".into(),
+                modules: vec![ModuleBuild {
+                    id: "extra".into(),
+                    protocol_package: "extra-protocol".into(),
+                    protocol_path: r"D:\My Projects\extra\extra-protocol".into(),
+                    protocol_module: "extra_protocol::extra".into(),
+                    engine_package: "extra-core".into(),
+                    engine_path: r"D:\My Projects\extra\extra-core".into(),
+                    engine_type: "extra_core::Engine".into(),
+                    optional: false,
+                    enabled: true,
+                    depends: Vec::new(),
+                }],
+                framework: Framework::Path(r"C:\Dev Kits\Bern\crates".into()),
+                release: false,
+            };
+            let source = tools_cargo_toml(&context, &app);
+            let manifest = source.parse::<toml::Table>().unwrap_or_else(|error| {
+                panic!("invalid tools manifest for {protocol_path:?}: {error}\n{source}")
+            });
+            let dependencies = manifest["dependencies"].as_table().unwrap();
+            for (package, expected_path) in [
+                ("hello-protocol", expected),
+                ("extra-protocol", "D:/My Projects/extra/extra-protocol"),
+                ("bern", "C:/Dev Kits/Bern/crates/bern"),
+                (
+                    "bern-adapter-cli",
+                    "C:/Dev Kits/Bern/crates/bern-adapter-cli",
+                ),
+                (
+                    "bern-adapter-mcp",
+                    "C:/Dev Kits/Bern/crates/bern-adapter-mcp",
+                ),
+            ] {
+                let actual = dependencies[package]["path"].as_str().unwrap();
+                assert_eq!(actual, expected_path, "{protocol_path:?}: {package}");
+                assert!(!actual.contains('\\'), "{protocol_path:?}: {package}");
+            }
+            assert!(!dependencies.contains_key("hello-core"));
+            assert!(!dependencies.contains_key("extra-core"));
+        }
+    }
 }
