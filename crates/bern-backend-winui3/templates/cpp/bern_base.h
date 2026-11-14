@@ -123,6 +123,16 @@ uint32_t bern_picture_kind(uint8_t const* data, size_t len);
 /// applies; zero applies all of it.
 bool bern_picture_decode(uint8_t const* data, size_t len, float headroom, BernPicture* out);
 void bern_picture_free(BernPicture picture);
+
+struct BernSvgPlayer;
+uint8_t bern_svg_cached(uint8_t const* key, size_t key_len);
+BernSvgPlayer* bern_svg_open(uint8_t const* key, size_t key_len, uint8_t const* data, size_t data_len);
+void bern_svg_free(BernSvgPlayer* player);
+uint8_t bern_svg_configure(BernSvgPlayer* player, uint8_t playing, double speed, double restart, uint8_t fit, uint8_t interactive, uint8_t dark, uint8_t reduced_motion, uint32_t text_rgba);
+uint8_t bern_svg_pointer(BernSvgPlayer* player, uint8_t kind, float x, float y);
+uint8_t bern_svg_render(BernSvgPlayer* player, double now_secs, uint32_t width_px, uint32_t height_px, uint8_t format);
+uint8_t const* bern_svg_pixels_ptr(BernSvgPlayer const* player);
+size_t bern_svg_pixels_len(BernSvgPlayer const* player);
 }
 
 namespace bern {

@@ -9,7 +9,8 @@
 
 #include "bern_base.h"
 #define BERN_WITH_SVG /*bern:svg-enabled*/
-#if BERN_WITH_SVG
+#define BERN_WITH_WEBPAGE /*bern:webpage-enabled*/
+#if BERN_WITH_WEBPAGE
 #include <WebView2.h>
 #include <wrl.h>
 #include <winrt/Microsoft.Web.WebView2.Core.h>
@@ -122,7 +123,7 @@ constexpr bool kWinUI = true;
 #include "bern_ui_motion.inl"
 #include "bern_ui_drawing.inl"
 #include "bern_ui_widgets.inl"
-#if BERN_WITH_SVG
+#if BERN_WITH_SVG || BERN_WITH_WEBPAGE
 #include "bern_ui_svg.inl"
 #endif
 #include "bern_ui_structure.inl"
@@ -142,7 +143,7 @@ constexpr bool kWinUI = false;
 #include "bern_ui_motion.inl"
 #include "bern_ui_drawing.inl"
 #include "bern_ui_widgets.inl"
-#if BERN_WITH_SVG
+#if BERN_WITH_SVG || BERN_WITH_WEBPAGE
 #include "bern_ui_svg.inl"
 #endif
 #include "bern_ui_structure.inl"

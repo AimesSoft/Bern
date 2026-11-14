@@ -825,9 +825,9 @@ impl Target for GtkLinux {
         } else {
             notes.push("dpkg-deb is not installed here, so there is no .deb; the .tar.gz runs on any Linux with GTK 4.14 and libadwaita 1.5".into());
         }
-        if bern_target_api::svg::used(app) || bern_target_api::script::webview(context) {
+        if bern_target_api::svg::webpage_used(app) || bern_target_api::script::webview(context) {
             notes.push(format!(
-                "`Svg` uses WebKitGTK, whose sandbox stops the app on Ubuntu 24.04 and later unless an AppArmor profile grants it `userns`: the .deb installs one for /opt/{id}/{executable}; the .tar.gz does not, so give the unpacked {executable} one there"
+                "`WebPage` uses WebKitGTK, whose sandbox stops the app on Ubuntu 24.04 and later unless an AppArmor profile grants it `userns`: the .deb installs one for /opt/{id}/{executable}; the .tar.gz does not, so give the unpacked {executable} one there"
             ));
         }
         Ok(BuildPlan {

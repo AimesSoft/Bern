@@ -49,8 +49,8 @@ bern-adapter-mcp = {{ {mcp_adapter} }}
         gtk = bern("bern-gtk"),
         svg = {
             let mut features = Vec::new();
-            if bern_target_api::svg::used(app) {
-                features.push("\"svg\"");
+            if bern_target_api::svg::webpage_used(app) {
+                features.push("\"webpage\"");
             }
             if bern_target_api::script::webview(context) {
                 features.push("\"script\"");
@@ -161,7 +161,7 @@ pub fn debian_control(
         "libsoup-3.0-0",
     ];
     let mut extra = String::new();
-    if scripts || bern_target_api::svg::used(app) {
+    if scripts || bern_target_api::svg::webpage_used(app) {
         depends.push("libwebkitgtk-6.0-4");
     }
     if app.uses_media() {
@@ -216,7 +216,7 @@ pub struct PackageFile {
 /// the profiles Ubuntu ships for its own WebKitGTK applications, it
 /// confines nothing else. Nothing without `Svg`.
 pub fn apparmor_files(app: &Application, executable: &Path, scripts: bool) -> Vec<PackageFile> {
-    if !scripts && !bern_target_api::svg::used(app) {
+    if !scripts && !bern_target_api::svg::webpage_used(app) {
         return Vec::new();
     }
     let name = &app.app.bundle_id;
@@ -672,15 +672,15 @@ mod tests {
     }
 
     #[test]
-    fn only_packages_with_svg_carry_an_apparmor_profile() {
-        for example in ["hello", "showcase", "gallery", "planner"] {
+    fn only_packages_with_webpage_or_webview_scripts_carry_an_apparmor_profile() {
+        for example in ["hello", "showcase", "gallery", "planner", "svg-animation"] {
             assert!(
                 apparmor_files(&app(example), Path::new("/opt/x/x"), false).is_empty(),
                 "{example}"
             );
         }
-        let svg = app("svg-animation");
-        let files = apparmor_files(&svg, Path::new("/opt/dev.bern.svgdemo/svg-demo"), false);
+        let scripted = app("svg-animation");
+        let files = apparmor_files(&scripted, Path::new("/opt/dev.bern.svgdemo/svg-demo"), true);
         let file = |name: &str| {
             files
                 .iter()

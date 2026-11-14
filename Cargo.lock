@@ -401,6 +401,7 @@ dependencies = [
  "bern-protocol",
  "bern-runtime",
  "bern-script",
+ "bern-svg",
  "bern-transport-ipc",
  "bern-transport-ws",
  "jni-sys",
@@ -475,6 +476,7 @@ name = "bern-svg"
 version = "0.1.17"
 dependencies = [
  "roxmltree 0.21.1",
+ "tiny-skia",
 ]
 
 [[package]]

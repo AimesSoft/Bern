@@ -213,7 +213,7 @@ fn unknown_content_modes_are_rejected() {
 
 #[test]
 fn native_content_mode_is_configured_before_the_web_view_is_created() {
-    let template = include_str!("../templates/BernSvg.swift");
+    let template = include_str!("../templates/BernWebPage.swift");
     let page = &template[template.find("private struct BernWebPageView").unwrap()..];
     let configured = page.find("switch contentMode").unwrap();
     let created = page.find("let view = WKWebView").unwrap();

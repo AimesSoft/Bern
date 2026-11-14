@@ -1,11 +1,24 @@
-//! Shared animated SVG assets and runtime templates for all presenters.
+//! Shared SVG lowering, `BSVG` compilation, and static rasterization across targets.
 use crate::{BuildContext, Diagnostic};
 use bern_ir::{Application, Node};
 
-/// Whether the application shows an `Svg` or a `WebPage`: both live in the
-/// web engine this module brings in.
+/// Whether the application renders an animated or interactive `Svg`.
+pub fn svg_used(app: &Application) -> bool {
+    has_kind(app, |kind| kind == "Svg")
+}
+
+/// Whether the application embeds a `WebPage` (which requires a WebView).
+pub fn webpage_used(app: &Application) -> bool {
+    has_kind(app, |kind| kind == "WebPage")
+}
+
+/// Whether the application shows an `Svg` or a `WebPage`.
 pub fn used(app: &Application) -> bool {
-    let mut used = false;
+    has_kind(app, |kind| kind == "Svg" || kind == "WebPage")
+}
+
+fn has_kind(app: &Application, pred: impl Fn(&str) -> bool) -> bool {
+    let mut found = false;
     for node in app
         .components
         .iter()
@@ -13,12 +26,25 @@ pub fn used(app: &Application) -> bool {
         .chain(app.windows.windows.iter().map(|w| &w.content))
     {
         node.walk(&mut |node| {
-            if matches!(node, Node::Element(e) if e.kind == "Svg" || e.kind == "WebPage") {
-                used = true;
+            if let Node::Element(e) = node
+                && pred(&e.kind)
+            {
+                found = true;
             }
         });
     }
-    used
+    found
+}
+
+const STATIC_PREFIX: &str = "__bern_static_svg/";
+const DARK_SUFFIX: &str = ".dark.png";
+const ANIM_PREFIX: &str = "__bern_anim_svg/";
+const ANIM_SUFFIX: &str = ".bsvg";
+
+fn original_anim_source(name: &str) -> &str {
+    name.strip_prefix(ANIM_PREFIX)
+        .and_then(|rest| rest.strip_suffix(ANIM_SUFFIX))
+        .unwrap_or(name)
 }
 
 pub fn validate(app: &Application, context: &BuildContext) -> Result<(), Vec<Diagnostic>> {
@@ -33,16 +59,19 @@ pub fn validate(app: &Application, context: &BuildContext) -> Result<(), Vec<Dia
         node.walk(&mut |node| {
             if let Node::Element(e) = node
                 && e.kind == "Svg"
-                && let Some(name) = e.resource("source")
-                && seen.insert(name.to_owned())
+                && let Some(raw_name) = e.resource("source")
             {
-                let result = std::fs::read_to_string(context.project_dir.join(name))
-                    .map_err(|e| e.to_string())
-                    .and_then(|source| bern_svg::root(&source).map(|_| ()));
-                if let Err(error) = result {
-                    errors.push(
-                        Diagnostic::error(format!("SVG `{name}`: {error}")).at(e.source.clone()),
-                    );
+                let name = original_anim_source(raw_name);
+                if seen.insert(name.to_owned()) {
+                    let result = std::fs::read_to_string(context.project_dir.join(name))
+                        .map_err(|e| e.to_string())
+                        .and_then(|source| bern_svg::compile(&source).map(|_| ()));
+                    if let Err(error) = result {
+                        errors.push(
+                            Diagnostic::error(format!("SVG `{name}`: {error}"))
+                                .at(e.source.clone()),
+                        );
+                    }
                 }
             }
         });
@@ -54,46 +83,12 @@ pub fn validate(app: &Application, context: &BuildContext) -> Result<(), Vec<Dia
     }
 }
 
-/// Templates use JSON-compatible quoted strings; Kotlin additionally
-/// needs dollar signs escaped to preserve JavaScript template literals.
-pub fn template(source: &str, kotlin: bool) -> String {
-    let quote = |s: &str| {
-        let quoted = serde_json::to_string(s).unwrap();
-        if kotlin {
-            quoted.replace('$', "\\$")
-        } else {
-            quoted
-        }
-    };
-    source
-        .replace("/*bern:svg-prefix*/", &quote(bern_svg::PREFIX))
-        .replace("/*bern:svg-suffix*/", &quote(&bern_svg::suffix()))
-}
-
-pub fn cpp_template(source: &str) -> String {
-    source
-        .replace(
-            "/*bern:svg-prefix*/",
-            &format!("R\"BERNSVG({})BERNSVG\"", bern_svg::PREFIX),
-        )
-        .replace(
-            "/*bern:svg-suffix*/",
-            &format!("R\"BERNSVG({})BERNSVG\"", bern_svg::suffix()),
-        )
-}
-
-const STATIC_PREFIX: &str = "__bern_static_svg/";
-/// The picture of a document in the dark appearance ends so, beside the
-/// one in the light appearance that ends in `.png`.
-const DARK_SUFFIX: &str = ".dark.png";
-
-/// Target lowering is shared by checking, generation, and packaging. A
-/// document engine is heavy: every `Svg` whose document neither moves nor
-/// runs becomes a picture of it, drawn when the app is built (one in the
-/// color of the text around it as a template; one with colors per
-/// appearance as two, the dark one in the `Image`'s own `dark_source`,
-/// which each frontend shows where the image is dark), and the others do
-/// too where the target has no WebView.
+/// Target lowering shared by checking, generation, and packaging:
+/// - Static SVGs (`resource.picture.is_some()`) lower to build-time PNG `Image`s
+///   (template for `currentColor`, light + dark pair for appearance-themed SVGs).
+/// - Animated and interactive SVGs (`resource.picture.is_none()`) compile to
+///   compact binary `BSVG` assets played natively by `bern-svg` on every target,
+///   with zero WebView dependency.
 pub fn prepare(app: &Application, config: &crate::TargetConfig) -> Application {
     let app = if matches!(config.platform.as_str(), "wearos" | "watchos") {
         app.on_watch()
@@ -109,7 +104,7 @@ pub fn prepare(app: &Application, config: &crate::TargetConfig) -> Application {
         .iter()
         .filter_map(|resource| Some((resource.name.clone(), resource.picture?)))
         .collect();
-    let mut resources = std::collections::BTreeMap::new();
+    let mut generated_resources = std::collections::BTreeMap::new();
     for node in app
         .components
         .iter_mut()
@@ -120,25 +115,27 @@ pub fn prepare(app: &Application, config: &crate::TargetConfig) -> Application {
             if e.kind != "Svg" {
                 return;
             }
-            let picture = e
-                .resource("source")
-                .and_then(|source| pictures.get(source))
-                .copied();
-            if picture.is_none() && config.has_webview() {
+            let Some(source) = e.resource("source").map(str::to_owned) else {
+                return;
+            };
+            if source.starts_with(ANIM_PREFIX) {
                 return;
             }
-            let Some(source) = (match picture {
-                Some(_) => e.resource("source"),
-                None => e.resource("static_source").or_else(|| e.resource("source")),
-            }) else {
+            let picture = pictures.get(&source).copied();
+            let Some(picture) = picture else {
+                let anim_name = format!("{ANIM_PREFIX}{source}{ANIM_SUFFIX}");
+                generated_resources.insert(anim_name.clone(), e.source.clone());
+                e.props.remove("static_source");
+                e.props
+                    .insert("source".into(), bern_ir::Prop::Resource { name: anim_name });
                 return;
             };
             let name = format!("{STATIC_PREFIX}{source}.png");
-            resources.insert(name.clone(), e.source.clone());
-            let dark = (picture == Some(bern_ir::SvgPicture::Themed))
+            generated_resources.insert(name.clone(), e.source.clone());
+            let dark = (picture == bern_ir::SvgPicture::Themed)
                 .then(|| format!("{STATIC_PREFIX}{source}{DARK_SUFFIX}"));
             if let Some(dark) = &dark {
-                resources.insert(dark.clone(), e.source.clone());
+                generated_resources.insert(dark.clone(), e.source.clone());
             }
             e.kind = "Image".into();
             for prop in [
@@ -154,7 +151,7 @@ pub fn prepare(app: &Application, config: &crate::TargetConfig) -> Application {
             }
             e.props
                 .insert("source".into(), bern_ir::Prop::Resource { name });
-            if picture == Some(bern_ir::SvgPicture::Tinted) {
+            if picture == bern_ir::SvgPicture::Tinted {
                 e.props.insert(
                     "rendering".into(),
                     bern_ir::Prop::Keyword {
@@ -168,7 +165,7 @@ pub fn prepare(app: &Application, config: &crate::TargetConfig) -> Application {
             }
         });
     }
-    for (name, declared) in resources {
+    for (name, declared) in generated_resources {
         if !app.resources.iter().any(|r| r.name == name) {
             app.resources.push(bern_ir::ResourceDef {
                 name,
@@ -410,20 +407,19 @@ pub fn resource_path(context: &BuildContext, name: &str) -> std::path::PathBuf {
         .and_then(|rest| rest.strip_prefix('/'))
     {
         crate::web_ui_output(context).join(file)
-    } else if name.starts_with(STATIC_PREFIX) {
+    } else if name.starts_with(STATIC_PREFIX) || name.starts_with(ANIM_PREFIX) {
         context.output_dir.join(name)
     } else {
         context.project_dir.join(name)
     }
 }
 
-/// Rasterization runs in the build tool, never in the shipped app.
-/// `static_source` supplies a deliberate final pose for animated artwork.
+/// Build-time compilation of static SVG pictures (`.png`) and animated vector
+/// scenes (`.bsvg`).
 pub fn static_files(
     app: &Application,
     context: &BuildContext,
 ) -> Result<Vec<crate::GeneratedFile>, Vec<Diagnostic>> {
-    // The largest side each picture is declared at, in points.
     let mut declared = std::collections::BTreeMap::<String, f64>::new();
     for node in app
         .components
@@ -451,6 +447,25 @@ pub fn static_files(
     }
     let mut files = Vec::new();
     for resource in &app.resources {
+        if let Some(rest) = resource.name.strip_prefix(ANIM_PREFIX)
+            && let Some(source) = rest.strip_suffix(ANIM_SUFFIX)
+        {
+            let path = context.project_dir.join(source);
+            let compiled = std::fs::read_to_string(&path)
+                .map_err(|e| e.to_string())
+                .and_then(|text| bern_svg::compile(&text));
+            files.push(crate::GeneratedFile {
+                path: resource.name.clone().into(),
+                contents: compiled.map_err(|e| {
+                    vec![
+                        Diagnostic::error(format!("animated SVG `{source}`: {e}"))
+                            .at(resource.declared.clone()),
+                    ]
+                })?,
+            });
+            continue;
+        }
+
         let Some(picture) = resource.name.strip_prefix(STATIC_PREFIX) else {
             continue;
         };
@@ -464,8 +479,6 @@ pub fn static_files(
         let render = || -> Result<Vec<u8>, String> {
             let path = context.project_dir.join(source);
             let data = std::fs::read(&path).map_err(|e| e.to_string())?;
-            // resvg follows neither media queries nor `light-dark()`: the
-            // document as it shows in this appearance.
             let data = match std::str::from_utf8(&data) {
                 Ok(text) => bern_svg::in_appearance(text, dark).into_bytes(),
                 Err(_) => data,
@@ -476,10 +489,6 @@ pub fn static_files(
             };
             options.fontdb_mut().load_system_fonts();
             let tree = resvg::usvg::Tree::from_data(&data, &options).map_err(|e| e.to_string())?;
-            // As large as it shows, double-sampled on a display of three
-            // pixels per point: six pixels per point of its largest
-            // declared side. Without a size of its own, two pixels per
-            // intrinsic unit. Each edge at most 4096.
             let size = tree.size();
             let longer = size.width().max(size.height());
             let shown = declared.get(&resource.name).copied().unwrap_or(0.0) as f32;

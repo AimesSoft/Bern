@@ -152,6 +152,23 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
     ),
     ("Label", &["title", "icon", "style", "font_size", "display"]),
     (
+        "Svg",
+        &[
+            "source",
+            "static_source",
+            "width",
+            "height",
+            "label",
+            "fit",
+            "playing",
+            "speed",
+            "restart",
+            "interactive",
+            "data",
+            "external_links",
+        ],
+    ),
+    (
         "Image",
         &[
             "source",
@@ -499,6 +516,7 @@ pub const COMPONENT_NAMES: &[&str] = &[
     "Divider",
     "Text",
     "Label",
+    "Svg",
     "Image",
     "Progress",
     "Button",
@@ -1545,6 +1563,10 @@ pub fn app() -> b::AppDef {{
                 self.children_greed(&element.children, Axis::Column)
             }
             // A picture with only its shape is as wide as its container.
+            "Svg" => Greed {
+                width: false,
+                height: false,
+            },
             "Image" => Greed {
                 width: element.prop("aspect").is_some() && element.prop("height").is_none(),
                 height: false,
@@ -2604,6 +2626,36 @@ pub fn app() -> b::AppDef {{
                 self.optional_length(element, "font_size"),
                 element.keyword("display") == Some("icon"),
             ),
+            "Svg" => {
+                let fit = match element.keyword("fit") {
+                    Some("cover") | Some("fill_width") => "Cover",
+                    Some("fill") | Some("stretch") => "Fill",
+                    _ => "Contain",
+                };
+                format!(
+                    "b::svg(c, b::SvgProps {{ element: {}, source: {}, label: {}, width: {}, height: {}, fit: b::Fit::{fit}, playing: {}, speed: {}, restart: {}, interactive: {} }})",
+                    string(&element.path),
+                    string(element.resource("source").unwrap_or_default()),
+                    optional_text("label"),
+                    self.length_value(element, "width")
+                        .unwrap_or_else(|| "0.0".into()),
+                    self.length_value(element, "height")
+                        .unwrap_or_else(|| "0.0".into()),
+                    element
+                        .expr("playing")
+                        .map(|e| format!("rt::truthy(&{})", self.expr(e, at)))
+                        .unwrap_or_else(|| "true".into()),
+                    element
+                        .expr("speed")
+                        .map(|e| format!("rt::as_f64(&{})", self.expr(e, at)))
+                        .unwrap_or_else(|| "1.0".into()),
+                    element
+                        .expr("restart")
+                        .map(|e| format!("rt::as_f64(&{})", self.expr(e, at)))
+                        .unwrap_or_else(|| "0.0".into()),
+                    element.keyword("interactive").unwrap_or("true"),
+                )
+            }
             "Image" => {
                 let fit = match element.keyword("fit") {
                     Some("cover") | Some("fill_width") => "Cover",

@@ -122,15 +122,15 @@ pub(crate) const FEATURES: &[&str] = &[
 
 pub struct SwiftUiWatchos;
 
-/// The components SwiftUI builds on watchOS: all but `Svg` and `WebPage`,
-/// since watchOS has no WebKit; static SVGs lower to `Image` beforehand.
+/// The components SwiftUI builds on watchOS: all but `WebPage`, since
+/// watchOS has no WebKit.
 fn watch_component_names() -> &'static [&'static str] {
     static NAMES: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
     NAMES.get_or_init(|| {
         component_names()
             .iter()
             .copied()
-            .filter(|name| !matches!(*name, "Svg" | "WebPage"))
+            .filter(|name| *name != "WebPage")
             .collect()
     })
 }

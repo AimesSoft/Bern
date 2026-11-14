@@ -18,14 +18,14 @@ impl Target for ComposeWearos {
         let mut descriptor = ComposeAndroid.descriptor();
         descriptor.id = "compose-wearos";
         descriptor.platforms = &["wearos"];
-        // Wear OS provides no WebView. Static SVGs are lowered to images
-        // before capability checks, as on other targets without a WebView.
+        // Wear OS provides no WebView, so `WebPage` is unavailable; `Svg` runs
+        // in pure Rust without a WebView.
         static COMPONENTS: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
         descriptor.components = COMPONENTS.get_or_init(|| {
             component_names()
                 .iter()
                 .copied()
-                .filter(|name| !matches!(*name, "WebPage" | "Svg"))
+                .filter(|name| *name != "WebPage")
                 .collect()
         });
         descriptor

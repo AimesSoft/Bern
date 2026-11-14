@@ -10,6 +10,7 @@
 #include <stdint.h>
 
 typedef struct BernApp BernApp;
+typedef struct BernSvgPlayer BernSvgPlayer;
 
 typedef struct {
     uint8_t *ptr;
@@ -78,6 +79,14 @@ void bern_media_surface_attach(BernApp *app, const uint8_t *bytes, size_t len);
 void bern_media_surface_resize(BernApp *app, const uint8_t *bytes, size_t len);
 void bern_media_surface_detach(BernApp *app, const uint8_t *bytes, size_t len);
 void bern_media_surface_frame(BernApp *app, const uint8_t *view, size_t len, double now, double target);
+uint8_t bern_svg_cached(const uint8_t *key, size_t key_len);
+BernSvgPlayer *bern_svg_open(const uint8_t *key, size_t key_len, const uint8_t *data, size_t data_len);
+void bern_svg_free(BernSvgPlayer *player);
+uint8_t bern_svg_configure(BernSvgPlayer *player, uint8_t playing, double speed, double restart, uint8_t fit, uint8_t interactive, uint8_t dark, uint8_t reduced_motion, uint32_t text_rgba);
+uint8_t bern_svg_pointer(BernSvgPlayer *player, uint8_t kind, float x, float y);
+uint8_t bern_svg_render(BernSvgPlayer *player, double now_secs, uint32_t width_px, uint32_t height_px, uint8_t format);
+const uint8_t *bern_svg_pixels_ptr(const BernSvgPlayer *player);
+size_t bern_svg_pixels_len(const BernSvgPlayer *player);
 void bern_buffer_free(BernBuffer buffer);
 
 #endif

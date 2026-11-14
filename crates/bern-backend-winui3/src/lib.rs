@@ -409,21 +409,19 @@ impl Target for WinUi3Windows {
             });
         }
         let generator = Generator::new(app);
+        let svg = bern_target_api::svg::svg_used(app);
+        let webpage = bern_target_api::svg::webpage_used(app);
         let svg_identity = format!(
-            "{}-{}-{}-{:016x}-{:016x}",
+            "{}-{}-{}-{}-{:016x}-{:016x}",
             precompiled_identity(context.release, frontends),
-            bern_target_api::svg::used(app),
+            svg,
+            webpage,
             bern_target_api::script::webview(context),
             bern_target_api::script::WINDOWS_SOURCES
                 .iter()
                 .fold(0, |identity, source| identity
                     ^ bern_protocol::fingerprint_bytes(source.as_bytes())),
-            bern_protocol::fingerprint_bytes(
-                bern_target_api::svg::cpp_template(include_str!(
-                    "../templates/cpp/bern_ui_svg.inl"
-                ))
-                .as_bytes()
-            )
+            bern_protocol::fingerprint_bytes(include_bytes!("../templates/cpp/bern_ui_svg.inl"))
         );
         let mut files = vec![
             GeneratedFile::text("glue/Cargo.toml", glue::cargo_toml(context, app)),
@@ -457,20 +455,21 @@ impl Target for WinUi3Windows {
             GeneratedFile::text("app/app_ui.inl", generator.interface()),
         ];
         files.extend(status_icos(app, context)?);
-        let svg = bern_target_api::svg::used(app);
         files.push(GeneratedFile::text(
             "app/runtime/bern_ui_svg.inl",
-            if svg {
-                bern_target_api::svg::cpp_template(include_str!("../templates/cpp/bern_ui_svg.inl"))
+            if svg || webpage {
+                include_str!("../templates/cpp/bern_ui_svg.inl")
             } else {
-                String::new()
+                ""
             },
         ));
         for (name, contents) in RUNTIME {
             files.push(GeneratedFile::text(
                 format!("app/runtime/{name}"),
                 if *name == "bern_pch.h" {
-                    contents.replace("/*bern:svg-enabled*/", if svg { "1" } else { "0" })
+                    contents
+                        .replace("/*bern:svg-enabled*/", if svg { "1" } else { "0" })
+                        .replace("/*bern:webpage-enabled*/", if webpage { "1" } else { "0" })
                 } else {
                     contents.to_string()
                 },

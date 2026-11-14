@@ -41,15 +41,15 @@ mod snapshot;
 mod status;
 mod structure;
 pub mod style;
-#[cfg(feature = "svg")]
 mod svg;
 mod table;
 pub mod text;
 pub mod theme;
 pub mod value;
 mod widgets;
-#[cfg(feature = "svg")]
-pub use svg::{Svg, SvgProps, WebPage, WebPageProps};
+pub use svg::{Svg, SvgProps};
+#[cfg(feature = "webpage")]
+pub use svg::{WebPage, WebPageProps};
 mod windows;
 
 pub use bern_ffi;
