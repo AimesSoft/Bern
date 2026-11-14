@@ -535,8 +535,8 @@ struct SplitViewProps {
     /// `Detail(titled:)`: whether the detail's header names the selected
     /// destination.
     Get titled;
-    B::Style const* sidebarStyle = nullptr;
-    B::Style const* detailStyle = nullptr;
+    StyleDef const* sidebarStyle = nullptr;
+    StyleDef const* detailStyle = nullptr;
 };
 
 /// The first element under `node` (itself included) that `pick` accepts,
@@ -730,11 +730,12 @@ inline void SplitView(Parent const& p, Ctx const& ctx, SplitViewProps props, Bui
 #endif
     MarkFill(view);
     if (props.sidebarStyle && props.sidebarStyle->base.background) {
-        PaintWith<controls::NavigationView>(view, L"NavigationView", L"Background", *props.sidebarStyle->base.background,
-            [](controls::NavigationView const& nav, media::Brush const& brush) {
-                for (auto key : {L"NavigationViewExpandedPaneBackground", L"NavigationViewDefaultPaneBackground", L"NavigationViewTopPaneBackground"})
-                    nav.Resources().Insert(winrt::box_value(key), brush);
-            });
+        auto const& bg = *props.sidebarStyle->base.background;
+        Styles::Restyle(view, ThemedXaml({
+            {L"NavigationViewExpandedPaneBackground", bg},
+            {L"NavigationViewDefaultPaneBackground", bg},
+            {L"NavigationViewTopPaneBackground", bg},
+        }));
     }
     auto registry = std::make_shared<SidebarRegistry>();
     registry->view = view;
@@ -855,7 +856,7 @@ inline void SplitView(Parent const& p, Ctx const& ctx, SplitViewProps props, Bui
     body.Children().Append(content);
     if (props.detailStyle && props.detailStyle->base.background) {
         PaintWith<controls::Grid>(body, L"Grid", L"Background", *props.detailStyle->base.background,
-            [](controls::Grid const& grid, media::Brush const& brush) { grid.Background(brush); });
+            +[](controls::Grid const& grid, media::Brush const& brush) { grid.Background(brush); });
     }
     view.Content(body);
     detail(Parent::Of(content), ctx.WithPage(page));
