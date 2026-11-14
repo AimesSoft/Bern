@@ -4043,6 +4043,51 @@ private struct BernColumnFollowsInert: ViewModifier {
     }
 }
 
+/// A split view whose sidebar column collapses without animation while a
+/// covering layer hides it on macOS, so the sidebar's tracking separator
+/// does not push the covering page's toolbar items inward; the previous
+/// column visibility returns when the cover leaves.
+struct BernSplitView<Sidebar: View, Detail: View>: View {
+    @ViewBuilder let sidebar: () -> Sidebar
+    @ViewBuilder let detail: () -> Detail
+    #if os(macOS)
+    @Environment(\.bernWindowCovered) private var windowCovered
+    @Environment(\.bernInert) private var inert
+    @State private var visibility: NavigationSplitViewVisibility = .all
+    @State private var savedVisibility: NavigationSplitViewVisibility = .all
+    private var covered: Bool { windowCovered || inert }
+    #endif
+
+    var body: some View {
+        #if os(macOS)
+        NavigationSplitView(
+            columnVisibility: $visibility,
+            sidebar: sidebar,
+            detail: {
+                detail().toolbar(removing: covered ? .sidebarToggle : nil)
+            }
+        )
+        .onChange(of: covered, initial: true) { wasCovered, isCovered in
+            guard wasCovered != isCovered || isCovered else { return }
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                if isCovered {
+                    if !wasCovered {
+                        savedVisibility = visibility
+                    }
+                    visibility = .detailOnly
+                } else {
+                    visibility = savedVisibility
+                }
+            }
+        }
+        #else
+        NavigationSplitView(sidebar: sidebar, detail: detail)
+        #endif
+    }
+}
+
 private struct BernSidebarToggleFollowsCover: ViewModifier {
     @Environment(\.bernWindowCovered) private var windowCovered
     @Environment(\.bernInert) private var inert
@@ -4054,17 +4099,26 @@ private struct BernSidebarToggleFollowsCover: ViewModifier {
         content
         #elseif os(macOS)
         // A toolbar left with no item shrinks to the title bar and moves
-        // the window's content up; an empty item holds it at its height.
-        if !covered {
+        // the window's content up; when a window-covering layer without its
+        // own toolbar hides the split view, a 1pt item holds its height.
+        let holdHeight = windowCovered && !inert
+        if #available(macOS 26.0, *) {
             content
-        } else if #available(macOS 26.0, *) {
-            content.toolbar(removing: .sidebarToggle).toolbar {
-                ToolbarItem { BernToolbarSpace() }.sharedBackgroundVisibility(.hidden)
-            }
+                .toolbar(removing: covered ? .sidebarToggle : nil)
+                .toolbar {
+                    if holdHeight {
+                        ToolbarItem(placement: .navigation) { BernToolbarSpace() }
+                            .sharedBackgroundVisibility(.hidden)
+                    }
+                }
         } else {
-            content.toolbar(removing: .sidebarToggle).toolbar {
-                ToolbarItem { BernToolbarSpace() }
-            }
+            content
+                .toolbar(removing: covered ? .sidebarToggle : nil)
+                .toolbar {
+                    if holdHeight {
+                        ToolbarItem(placement: .navigation) { BernToolbarSpace() }
+                    }
+                }
         }
         #else
         content.toolbar(removing: covered ? .sidebarToggle : nil)
@@ -4077,7 +4131,7 @@ private struct BernSidebarToggleFollowsCover: ViewModifier {
 private struct BernToolbarSpace: View {
     var body: some View {
         Color.clear
-            .frame(width: 28, height: 28)
+            .frame(width: 1, height: 28)
             .allowsHitTesting(false)
             .accessibilityHidden(true)
     }

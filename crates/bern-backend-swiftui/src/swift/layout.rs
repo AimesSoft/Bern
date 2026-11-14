@@ -173,6 +173,13 @@ impl Generator<'_> {
         );
         out.close("}");
         self.frame(out, element);
+        let has_under_bars_backdrop = element.children.iter().any(|node| {
+            matches!(
+                node,
+                Node::Element(child)
+                    if child.kind == "Stack" && child.keyword("under_bars") == Some("true")
+            )
+        });
         // The whole window to its edges, under its bars: the title bar and
         // toolbar of a Mac window, a phone's status bar and home indicator.
         if element.keyword("under_bars") == Some("true") {
@@ -209,6 +216,10 @@ impl Generator<'_> {
                     out.line(".bernSidebarToggleHidden()");
                 }
             }
+        } else if has_under_bars_backdrop {
+            // Sibling scroll views over a full-bleed backdrop share the
+            // window's bar area without drawing an opaque bar edge over it.
+            out.line(".bernScrollEdgeEffectHidden()");
         }
         // A toolbar among the layers belongs to the window, as a column's
         // does.
