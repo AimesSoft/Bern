@@ -381,12 +381,16 @@ pub(crate) fn reload() {
 /// corners. The corners clip what the layers draw. Without a surface of
 /// its own, its shadow is cast by what its layers draw.
 pub(crate) fn surface(style: &'static StyleDef, widget: &crate::layout::Layers) {
+    pane_surface(style, widget);
+    if style.bare() {
+        widget.set_shadow(style.base.shadow);
+    }
+}
+
+pub(crate) fn pane_surface(style: &'static StyleDef, widget: &impl IsA<gtk::Widget>) {
     widget.add_css_class(&format!("bern-style-{}", style.name));
     if style.corner.is_some() {
         widget.set_overflow(gtk::Overflow::Hidden);
-    }
-    if style.bare() {
-        widget.set_shadow(style.base.shadow);
     }
 }
 
