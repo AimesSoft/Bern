@@ -173,6 +173,7 @@ platform = "macos"
             palette.contains("@Environment(App_Draft.self)"),
             "{palette}"
         );
+        assert!(palette.contains("if !bernInert {"), "{palette}");
         let alias = body("alias");
         assert!(alias.contains(": ViewModifier {"), "{alias}");
         assert!(
@@ -202,4 +203,125 @@ platform = "macos"
         assert!(nested.contains(": View {"), "{nested}");
         assert!(nested.contains(".modifier(AppView_field())"), "{nested}");
     }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn inert_split_view_collapses_sidebar_and_backdrop_hides_scroll_edge() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let dir = root.join(format!(
+        "target/bern-test/covered-split-{}",
+        std::process::id()
+    ));
+    let protocol = r#"
+#[bern::protocol(namespace = "probe", version = 1)]
+pub mod probe {
+    use bern::prelude::*;
+    #[value] pub enum Tab { Home, Archive }
+    #[state] pub struct State { pub covering: bool }
+    #[commands] pub trait Commands { fn close(&mut self) -> Result<(), CommandError>; }
+}
+"#;
+    let ui = r#"
+use bern::prelude::*;
+#[bern::session]
+pub struct Draft { pub tab: probe::Tab }
+
+#[component]
+pub fn app(app: probe::Client, #[session] draft: Draft) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Probe" }, chrome: unified, initial: open) {
+                Stack {
+                    Stack(enabled: !app.covering) {
+                        SplitView {
+                            Sidebar(id: nav, selection: draft.tab) {
+                                SidebarItem(value: probe::Tab::Home, label: tr! { "en" => "Home" }, icon: "house")
+                                SidebarItem(value: probe::Tab::Archive, label: tr! { "en" => "Archive" }, icon: "archivebox")
+                            }
+                            Detail(titled: false) {
+                                Toolbar {
+                                    Button(id: open_item, label: tr! { "en" => "Open" }) => app.close()
+                                }
+                                Text(content: tr! { "en" => "Body" })
+                            }
+                        }
+                    }
+                    if app.covering {
+                        Stack(align: top_leading) {
+                            Toolbar {
+                                Button(id: back, label: tr! { "en" => "Back" }) => app.close()
+                            }
+                            cover_body()
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+pub fn cover_body() -> impl View {
+    ui! {
+        Stack(align: top_leading) {
+            Stack(under_bars: true, align: top_leading) {
+                Canvas { Shape(kind: rect, fill: surface.canvas) }
+            }
+            ScrollView {
+                Text(content: tr! { "en" => "Detail" })
+            }
+        }
+    }
+}
+"#;
+    for (package, source) in [
+        ("probe-protocol", protocol),
+        ("probe-ui", ui),
+        ("probe-core", ""),
+    ] {
+        fs::create_dir_all(dir.join(package).join("src")).unwrap();
+        fs::write(
+            dir.join(package).join("Cargo.toml"),
+            format!("[package]\nname = \"{package}\"\n"),
+        )
+        .unwrap();
+        fs::write(dir.join(package).join("src/lib.rs"), source).unwrap();
+    }
+    fs::write(
+        dir.join("Bern.toml"),
+        r#"
+[app]
+id = "covered_split_probe"
+bundle_id = "dev.bern.covered-split-probe"
+version = "0.1.0"
+name = { en = "Covered Split Probe" }
+[languages]
+supported = ["en"]
+default = "en"
+[protocol]
+package = "probe-protocol"
+source = "probe-protocol/src/lib.rs"
+[engine]
+package = "probe-core"
+type = "probe_core::Engine"
+[ui]
+package = "probe-ui"
+sources = ["probe-ui/src/lib.rs"]
+root = "app"
+[targets.macos]
+platform = "macos"
+"#,
+    )
+    .unwrap();
+    let config = bern_compiler::config::load(&dir.join("Bern.toml")).unwrap();
+    let compiled = bern_compiler::compile(&config).unwrap_or_else(|errors| panic!("{errors:?}"));
+    let swift = Generator::new(&compiled.app, Platform::Macos).generate(0);
+    assert!(swift.contains("BernSplitView {"), "{swift}");
+    let cover = swift
+        .split_once("/// Generated from the `cover_body` component.")
+        .unwrap()
+        .1;
+    assert_eq!(cover.matches(".bernScrollEdgeEffectHidden()").count(), 2);
+    let _ = fs::remove_dir_all(&dir);
 }

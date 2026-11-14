@@ -19,7 +19,7 @@ impl Generator<'_> {
             return;
         };
         let selection = self.field(sidebar, "selection").expect("selection field");
-        out.open("SwiftUI.NavigationSplitView {");
+        out.open("BernSplitView {");
         // Styled items draw their own selection: on iOS and tvOS the list
         // keeps none, and each row selects itself. The Mac's list still
         // selects, so the click that brings the window forward picks the

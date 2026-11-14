@@ -33,9 +33,20 @@ impl Generator<'_> {
                 out.line(format!(".modifier({})", self.component_call(reference)));
             }
         }
-        if children.iter().any(|n| matches!(n, Node::Element(e) if e.kind == "Toolbar" && e.children.iter().any(|n| matches!(n, Node::Element(e) if e.kind == "Search" && e.keyword("style") == Some("palette"))))) {
-            out.line(".modifier(BernPaletteDetail())");
-        }
+        let has_palette = children.iter().any(|n| {
+            matches!(
+                n,
+                Node::Element(e)
+                    if e.kind == "Toolbar"
+                        && e.children.iter().any(|n| {
+                            matches!(
+                                n,
+                                Node::Element(e)
+                                    if e.kind == "Search" && e.keyword("style") == Some("palette")
+                            )
+                        })
+            )
+        });
         let toolbars: Vec<&Element> = children
             .iter()
             .filter_map(|node| match node {
@@ -49,17 +60,29 @@ impl Generator<'_> {
             .copied()
             .filter(|toolbar| toolbar.children.iter().any(|node| !is_search(node)))
             .collect();
-        if !items.is_empty() {
-            out.open(".toolbar {");
-            for toolbar in items {
-                let children: Vec<Node> = toolbar
-                    .children
-                    .iter()
-                    .filter(|node| !is_search(node))
-                    .cloned()
-                    .collect();
-                self.toolbar_items(out, &children, ctx);
+        // A view kept mounted under a covering layer (`bernInert`) yields the
+        // window's toolbar and palette frame without unmounting its own body.
+        if has_palette || !items.is_empty() {
+            out.open(".background {");
+            out.open("if !bernInert {");
+            out.line("SwiftUI.Color.clear");
+            if has_palette {
+                out.line(".modifier(BernPaletteDetail())");
             }
+            if !items.is_empty() {
+                out.open(".toolbar {");
+                for toolbar in items {
+                    let children: Vec<Node> = toolbar
+                        .children
+                        .iter()
+                        .filter(|node| !is_search(node))
+                        .cloned()
+                        .collect();
+                    self.toolbar_items(out, &children, ctx);
+                }
+                out.close("}");
+            }
+            out.close("}");
             out.close("}");
         }
         for toolbar in toolbars {

@@ -71,6 +71,7 @@ impl Generator<'_> {
             ));
         }
         out.line("@Environment(BernWindowContext.self) private var bernWindow");
+        out.line("@Environment(\\.bernInert) private var bernInert");
         out.line("");
         out.open(if toolbar {
             "func body(content bernContent: Content) -> some View {"
@@ -107,6 +108,7 @@ impl Generator<'_> {
             sessions.join(", ")
         ));
         out.line("@Environment(BernEngine.self) private var bernEngine");
+        out.line("@Environment(\\.bernInert) private var bernInert");
         // Content written inline in the window sees the same names as a
         // component body: the window and its sessions.
         out.line("private var bernWindow: BernWindowContext { context }");
