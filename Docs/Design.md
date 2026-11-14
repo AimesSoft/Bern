@@ -1774,19 +1774,21 @@ bern::now_playing::update(Some(&NowPlaying {
     title, artist, album,
     artwork: Some(cover_bytes),   // JPEG or PNG
     duration: 245.0, position: 12.5, playing: true,
+    liked: Some(is_liked),        // None hides the favorite button
 }));
 for command in bern::now_playing::take_commands() {
     match command {
         Command::Toggle => self.toggle(),
         Command::Next => self.next(),
         Command::Seek(seconds) => self.seek(seconds),
+        Command::Like(liked) => self.set_liked(liked),
         _ => {}
     }
 }
 ```
 
-- `update` is called when the song changes, on play and pause, and when the position jumps; `None` means nothing is playing, and the system's controls go away with it. The system extrapolates progress itself from `position` and `playing`, so there is no need to update every second.
-- The commands the system sends are play, pause, play or pause, next, previous and seek to a second; each one wakes the engine (`bern::wake`), and the engine takes them with `take_commands` the next time it handles something.
+- `update` is called when the song changes, on play and pause, when its favorite state changes, and when the position jumps; `None` means nothing is playing, and the system's controls go away with it. `liked` is `Some(true)` or `Some(false)` when the item can be favorited in the system's controls and islands, or `None` when no favorite button applies. The system extrapolates progress itself from `position` and `playing`, so there is no need to update every second.
+- The commands the system sends are play, pause, play or pause, next, previous, seek to a second and favorite (`Command::Like(bool)`); each one wakes the engine (`bern::wake`), and the engine takes them with `take_commands` the next time it handles something.
 - `[app].background_audio = true` lets the app keep sounding in the background and on the lock screen: iOS declares `audio` in `UIBackgroundModes`, and Android declares the foreground service permissions, with a foreground service of type `mediaPlayback` (`BernPlaybackService`) guarding the process during playback. Desktop platforms do not need it.
 - On Android the host also holds the audio focus for what plays, so a call or another app's music stops it instead of sounding over it. `playing: true` takes the focus, and pausing or `None` gives it back. Lost for good, the engine receives `Pause`; lost for a while, it receives `Pause` and then `Play` when the focus is back, and the same happens when the user presses play during a call. A player the system cannot lower under a short sound, such as AAudio's, pauses for that while. Headphones coming out send `Pause`, and the music does not come back by itself. While the music waits for the focus the playback service stays in the foreground, since Android 12 and later would not let it back from the background. For the same reason it stays there for 30 seconds after the music stops: an engine usually reports `playing: false` while the next song loads, and only then does it leave the foreground, with the notification staying. If the system still refuses the foreground, the notification keeps up with the music; Android 15 and later then refuse the focus as well, unless the user just pressed play, and the engine receives `Pause`.
 

@@ -114,6 +114,14 @@ extension BernHost {
         let multiple = manifest?["UIApplicationSupportsMultipleScenes"] as? Bool ?? false
         platform.nativeWindows = multiple && UIDevice.current.userInterfaceIdiom == .pad
         bern_app_native_windows(platform.nativeWindows ? 1 : 0)
+        // Set the playback audio session before the Rust engine opens any
+        // CoreAudio output unit, so iOS marks the stream Now Playing eligible
+        // for the Lock Screen, Control Center and Dynamic Island.
+        if (Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String])?.contains("audio") == true {
+            try? AVAudioSession.sharedInstance().setCategory(.playback)
+            try? AVAudioSession.sharedInstance().setActive(true)
+            UIApplication.shared.beginReceivingRemoteControlEvents()
+        }
     }
 
     func platformDidStart() {}
