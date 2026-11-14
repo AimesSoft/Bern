@@ -269,7 +269,7 @@ impl Generator<'_> {
                 Node::Element(element)
                     if matches!(
                         element.kind.as_str(),
-                        "Search" | "SidebarHeader" | "SidebarFooter" | "Toolbar"
+                        "Search" | "SidebarHeader" | "SidebarFooter" | "Toolbar" | "TabAccessory"
                     ) => {}
                 Node::Element(element) if element.kind == "ForEach" => {
                     let (Some(items), Some(template)) = (element.expr("items"), &element.template)
@@ -613,8 +613,11 @@ impl Generator<'_> {
             ));
         }
         // The selected tab is one of the system parts the application's
-        // accent colors (design 8.1).
-        out.line(".bernAccentTint()");
+        // accent colors (design 8.1). watchOS TabView uses page dots and
+        // cascades any outer tint onto child sheet dismiss buttons.
+        if self.platform != Platform::Watchos {
+            out.line(".bernAccentTint()");
+        }
         if element.id.is_some() {
             let ty = swift_type(&element.field("selection").expect("selection field").ty);
             out.line(format!(

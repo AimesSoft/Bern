@@ -329,9 +329,24 @@ pub fn screen(app: demo::Client, #[session] draft: Draft) -> impl View {
         "Spacer",
         r#"Column(gap: 6) {
                     if window.watch {
-                        Button(id: add_w, label: tr! { "en" => "Add" }, feature: WatchFeature::Add) => app.add()
+                        Button(id: add_w, label: tr! { "en" => "Add" }, feature: WatchFeature::Add) {
+                            Text(content: tr! { "en" => "Add" })
+                            ContextMenu {
+                                MenuItem(id: ctx_add, label: tr! { "en" => "Again" }, feature: WatchFeature::Add) => app.add()
+                            }
+                        } => app.add()
                     } else {
                         Button(id: pick_other, label: tr! { "en" => "Pick" }, pick: draft.picked, feature: WatchFeature::Add) => app.add()
+                    }
+                    IconButton(id: plain_round, icon: "play.fill", height: 32, prominence: plain, label: tr! { "en" => "Play" }, feature: WatchFeature::Add) => app.add()
+                    PopoverButton(id: pop_list, label: tr! { "en" => "More" }, icon: "list.bullet", prominence: plain) {
+                        Text(content: tr! { "en" => "Item" })
+                    }
+                    Form {
+                        Text(content: tr! { "en" => "Heading" })
+                    }
+                    Modal(width: 220) {
+                        Text(content: tr! { "en" => "Dialog" })
                     }
                     Inspector(presented: draft.inspect) {
                         Text(content: tr! { "en" => "Info" })
@@ -359,6 +374,12 @@ pub fn screen(app: demo::Client, #[session] draft: Draft) -> impl View {
     );
     let generated = std::fs::read_to_string(output.join("Sources/BernGenerated.swift")).unwrap();
     assert!(!generated.contains("pick_c") && !generated.contains("pick_other"));
+    assert!(!generated.contains(".contextMenu {"));
+    assert!(generated.contains("BernWatchContextMenu("));
+    assert!(
+        generated.contains(".bernCircleControl(diameter: 32.0, prominent: false, plain: true)")
+    );
+    assert!(generated.contains(".listRowBackground(SwiftUI.Color.clear)"));
     assert!(generated.contains(".sheet(isPresented:"));
     typecheck(&root, &output);
 }

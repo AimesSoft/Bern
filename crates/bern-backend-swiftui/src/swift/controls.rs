@@ -235,10 +235,17 @@ impl Generator<'_> {
                 if element.kind == "IconButton" {
                     if let Some(diameter) = self.length(element, "height").filter(|_| !ctx.toolbar)
                     {
-                        out.line(format!(
-                            ".bernCircleControl(diameter: {diameter}, prominent: {})",
-                            element.keyword("prominence") == Some("prominent")
-                        ));
+                        let prominent = element.keyword("prominence") == Some("prominent");
+                        let plain = element.keyword("prominence") == Some("plain");
+                        if plain {
+                            out.line(format!(
+                                ".bernCircleControl(diameter: {diameter}, prominent: {prominent}, plain: true)"
+                            ));
+                        } else {
+                            out.line(format!(
+                                ".bernCircleControl(diameter: {diameter}, prominent: {prominent})"
+                            ));
+                        }
                     } else if !ctx.toolbar {
                         match element.keyword("prominence") {
                             Some("plain") => out.line(".bernButtonLook(.flat)"),
@@ -315,9 +322,20 @@ impl Generator<'_> {
         let Some(items) = element.context_menu() else {
             return;
         };
-        out.open(".contextMenu {");
-        self.table_menu(out, &items, "");
-        out.close("}");
+        if self.platform == Platform::Watchos {
+            let title = self
+                .text_prop(element, "label")
+                .unwrap_or_else(|| "\"\"".into());
+            out.open(format!(
+                ".modifier(BernWatchContextMenu(title: {title}) {{ dismiss in"
+            ));
+            self.table_menu(out, &items, "dismiss(); ");
+            out.close("})");
+        } else {
+            out.open(".contextMenu {");
+            self.table_menu(out, &items, "");
+            out.close("}");
+        }
         for item in items.iter().filter(|item| item.kind == "MenuItem") {
             let item_label = self.text_prop(item, "label").unwrap_or_default();
             let (action, file) = self.pressed(item);

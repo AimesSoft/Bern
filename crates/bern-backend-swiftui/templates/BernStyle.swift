@@ -5528,6 +5528,19 @@ struct BernPopoverButton<Content: View>: View {
         }
         .help(label)
         .bernPopover(isPresented: showing) {
+            #if os(watchOS)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) { content() }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+            }
+            .tint(nil)
+            .bernPopoverBackground(style?.base.background, scheme: panelScheme)
+            .foregroundStyle(style?.base.foreground?.color ?? Color.primary)
+            .environment(\.colorScheme, panelScheme)
+            .environment(\.bernControlGroupHeight, nil)
+            #else
             VStack(alignment: .leading, spacing: 12) { content() }
                 .padding(16)
                 .frame(minWidth: 240, alignment: .leading)
@@ -5536,6 +5549,7 @@ struct BernPopoverButton<Content: View>: View {
                 .foregroundStyle(style?.base.foreground?.color ?? Color.primary)
                 .environment(\.colorScheme, panelScheme)
                 .environment(\.bernControlGroupHeight, nil)
+            #endif
         }
         .bernControl(
             target, role: "popover_button", label: label,
@@ -6180,8 +6194,8 @@ struct BernCapsuleToggleStyle: ToggleStyle {
 extension View {
     /// A round system button of an exact diameter: the system's glass (or
     /// material before 26) in a circle, as the capsule controls.
-    func bernCircleControl(diameter: CGFloat, prominent: Bool) -> some View {
-        modifier(BernCircleControl(diameter: diameter, prominent: prominent))
+    func bernCircleControl(diameter: CGFloat, prominent: Bool, plain: Bool = false) -> some View {
+        modifier(BernCircleControl(diameter: diameter, prominent: prominent, plain: plain))
     }
 }
 
@@ -6190,17 +6204,23 @@ private struct BernCircleControl: ViewModifier {
     @Environment(\.bernOnBar) private var onBar
     let diameter: CGFloat
     let prominent: Bool
+    var plain = false
     @ViewBuilder func body(content: Content) -> some View {
         #if os(tvOS)
         content.buttonStyle(BernFocusShapeStyle(
-            prominent: prominent, accent: accent ?? .accentColor, circle: true, height: diameter, padding: 0))
+            prominent: prominent, accent: accent ?? .accentColor, circle: true, height: diameter, padding: 0,
+            plain: plain && !prominent))
         #else
         let control = content.buttonStyle(.plain)
-            .foregroundStyle(prominent ? BernColor.role("on_accent").color : Color.primary)
+            .foregroundStyle(
+                prominent
+                    ? BernColor.role("on_accent").color
+                    : (plain && !onBar ? Color.secondary : Color.primary)
+            )
             .frame(width: diameter, height: diameter)
             .contentShape(Circle())
-        if onBar && !prominent {
-            // The bar is the glass; the button is a target of its size.
+        if (onBar || plain) && !prominent {
+            // On a bar the bar is the glass; `plain` asks for no bezel.
             control
         } else if #available(macOS 26.0, iOS 26.0, tvOS 26.0, watchOS 26.0, *) {
             if prominent {
@@ -6368,9 +6388,14 @@ struct BernModal<Content: View>: View {
     @ViewBuilder var content: Content
     var presentation: (AnyView) -> AnyView = { $0 }
     var body: some View {
+        #if os(watchOS)
+        let fullScreen = true
+        #else
+        let fullScreen = cover && window?.compact == true
+        #endif
         Color.clear.frame(width: 0, height: 0)
             .preference(key: BernModalContent.self, value: AnyView(
-                BernModalLayer(width: width, height: height, covers: cover && window?.compact == true,
+                BernModalLayer(width: width, height: height, covers: fullScreen,
                                scale: scale, content: content, presentation: presentation)
                     .environment(\.bernReduceMotion, reduce)
                     .environment(\.bernSceneScaled, scale != 1)))
@@ -6402,7 +6427,13 @@ private struct BernModalLayer<Content: View>: View {
             // in it goes under the status bar and the home indicator.
             presentation(AnyView(content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background { Rectangle().fill(.background).ignoresSafeArea() }
+                .background {
+                    #if os(watchOS)
+                    Rectangle().fill(Color.black).ignoresSafeArea()
+                    #else
+                    Rectangle().fill(.background).ignoresSafeArea()
+                    #endif
+                }
                 .accessibilityAddTraits(.isModal)))
         } else {
             floating
@@ -6962,6 +6993,10 @@ private struct BernFieldBox: ViewModifier {
     @Environment(\.bernInForm) private var inForm
 
     @ViewBuilder func body(content: Content) -> some View {
+        #if os(watchOS)
+        // watchOS TextField draws its own rounded platter outside a form too.
+        content
+        #else
         if inForm {
             content
         } else {
@@ -6973,6 +7008,7 @@ private struct BernFieldBox: ViewModifier {
                 .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 #endif
         }
+        #endif
     }
 }
 
