@@ -29,6 +29,9 @@ pub struct NowPlaying {
     /// Where it is.
     pub position: f64,
     pub playing: bool,
+    /// Whether the item is favorited (`Some(true)`), can be favorited
+    /// (`Some(false)`), or offers no favorite control (`None`).
+    pub liked: Option<bool>,
 }
 
 /// What the system asks for.
@@ -42,6 +45,8 @@ pub enum Command {
     Previous,
     /// Go to this many seconds into the song.
     Seek(f64),
+    /// Mark the item as favorited (`true`) or no longer favorited (`false`).
+    Like(bool),
 }
 
 static COMMANDS: Mutex<Vec<Command>> = Mutex::new(Vec::new());
@@ -84,8 +89,9 @@ pub fn update(now: Option<&NowPlaying>) {
 }
 
 /// A command the host received, by name: `play`, `pause`, `toggle`,
-/// `next`, `previous`, or `seek:<seconds>`. Hosts that hear the system's
-/// commands themselves (Android's media session) hand them over here.
+/// `next`, `previous`, `like`, `unlike`, `like:<bool>`, or `seek:<seconds>`.
+/// Hosts that hear the system's commands themselves (Android's media session)
+/// hand them over here.
 pub fn command_from_host(name: &str) {
     let command = match name {
         "play" => Command::Play,
@@ -93,6 +99,8 @@ pub fn command_from_host(name: &str) {
         "toggle" => Command::Toggle,
         "next" => Command::Next,
         "previous" => Command::Previous,
+        "like" | "like:true" => Command::Like(true),
+        "unlike" | "like:false" => Command::Like(false),
         other => match other
             .strip_prefix("seek:")
             .and_then(|seconds| seconds.parse().ok())
@@ -124,8 +132,13 @@ fn as_json(now: &NowPlaying) -> String {
         out.push('"');
         out
     }
+    let liked = match now.liked {
+        Some(true) => "true",
+        Some(false) => "false",
+        None => "null",
+    };
     format!(
-        "{{\"title\":{},\"artist\":{},\"album\":{},\"artwork\":{},\"duration\":{},\"position\":{},\"playing\":{}}}",
+        "{{\"title\":{},\"artist\":{},\"album\":{},\"artwork\":{},\"duration\":{},\"position\":{},\"playing\":{},\"liked\":{}}}",
         text(&now.title),
         text(&now.artist),
         text(&now.album),
@@ -137,7 +150,8 @@ fn as_json(now: &NowPlaying) -> String {
         ),
         now.duration.max(0.0),
         now.position.max(0.0),
-        now.playing
+        now.playing,
+        liked
     )
 }
 
@@ -189,9 +203,9 @@ mod apple {
     use objc2_core_foundation::CGSize;
     use objc2_foundation::{NSData, NSMutableDictionary, NSNumber, NSString};
     use objc2_media_player::{
-        MPChangePlaybackPositionCommandEvent, MPMediaItemArtwork, MPMediaItemPropertyAlbumTitle,
-        MPMediaItemPropertyArtist, MPMediaItemPropertyArtwork, MPMediaItemPropertyPlaybackDuration,
-        MPMediaItemPropertyTitle, MPNowPlayingInfoCenter,
+        MPChangePlaybackPositionCommandEvent, MPFeedbackCommandEvent, MPMediaItemArtwork,
+        MPMediaItemPropertyAlbumTitle, MPMediaItemPropertyArtist, MPMediaItemPropertyArtwork,
+        MPMediaItemPropertyPlaybackDuration, MPMediaItemPropertyTitle, MPNowPlayingInfoCenter,
         MPNowPlayingInfoPropertyElapsedPlaybackTime, MPNowPlayingInfoPropertyPlaybackRate,
         MPRemoteCommand, MPRemoteCommandCenter, MPRemoteCommandEvent, MPRemoteCommandHandlerStatus,
     };
@@ -210,14 +224,26 @@ mod apple {
     unsafe fn show(now: Option<NowPlaying>) {
         COMMANDS.call_once(|| unsafe { listen() });
         let center = unsafe { MPNowPlayingInfoCenter::defaultCenter() };
+        let like = unsafe { MPRemoteCommandCenter::sharedCommandCenter().likeCommand() };
         let Some(now) = now else {
-            unsafe { center.setNowPlayingInfo(None) };
-            #[cfg(target_os = "macos")]
             unsafe {
-                center.setPlaybackState(objc2_media_player::MPNowPlayingPlaybackState::Stopped)
+                like.setActive(false);
+                like.setEnabled(false);
+                center.setNowPlayingInfo(None);
+                center.setPlaybackState(objc2_media_player::MPNowPlayingPlaybackState::Stopped);
             };
             return;
         };
+        match now.liked {
+            Some(liked) => unsafe {
+                like.setActive(liked);
+                like.setEnabled(true);
+            },
+            None => unsafe {
+                like.setActive(false);
+                like.setEnabled(false);
+            },
+        }
         #[cfg(any(target_os = "ios", target_os = "watchos"))]
         unsafe {
             session()
@@ -259,16 +285,13 @@ mod apple {
         {
             put(unsafe { MPMediaItemPropertyArtwork }, &artwork);
         }
-        unsafe { center.setNowPlayingInfo(Some(&info)) };
-        // macOS sends the media keys to the application whose state says
-        // it plays.
-        #[cfg(target_os = "macos")]
         unsafe {
+            center.setNowPlayingInfo(Some(&info));
             center.setPlaybackState(if now.playing {
                 objc2_media_player::MPNowPlayingPlaybackState::Playing
             } else {
                 objc2_media_player::MPNowPlayingPlaybackState::Paused
-            })
+            });
         };
     }
 
@@ -327,7 +350,9 @@ mod apple {
                 push(sent);
                 MPRemoteCommandHandlerStatus::Success
             });
-            let _ = unsafe { command.addTargetWithHandler(&handler) };
+            // `MPRemoteCommand` holds its target weakly and removes the handler
+            // as soon as the returned token is deallocated.
+            std::mem::forget(unsafe { command.addTargetWithHandler(&handler) });
         }
         let seek = unsafe { center.changePlaybackPositionCommand() };
         unsafe { seek.setEnabled(true) };
@@ -341,7 +366,23 @@ mod apple {
             push(Command::Seek(unsafe { event.positionTime() }));
             MPRemoteCommandHandlerStatus::Success
         });
-        let _ = unsafe { seek.addTargetWithHandler(&handler) };
+        std::mem::forget(unsafe { seek.addTargetWithHandler(&handler) });
+        let like = unsafe { center.likeCommand() };
+        unsafe { like.setEnabled(false) };
+        let handler = RcBlock::new(|event: NonNull<MPRemoteCommandEvent>| {
+            let event = unsafe { event.cast::<MPFeedbackCommandEvent>().as_ref() };
+            let negative = unsafe { event.isNegative() };
+            let command = unsafe { MPRemoteCommandCenter::sharedCommandCenter().likeCommand() };
+            let liked = if negative {
+                false
+            } else {
+                !unsafe { command.isActive() }
+            };
+            unsafe { command.setActive(liked) };
+            push(Command::Like(liked));
+            MPRemoteCommandHandlerStatus::Success
+        });
+        std::mem::forget(unsafe { like.addTargetWithHandler(&handler) });
         let _ = MPRemoteCommand::class();
     }
 
@@ -664,6 +705,12 @@ mod mpris {
             if !state.art.is_empty() {
                 put("mpris:artUrl", Value::from(state.art.clone()));
             }
+            if let Some(liked) = now.liked {
+                put(
+                    "xesam:userRating",
+                    Value::from(if liked { 1.0 } else { 0.0 }),
+                );
+            }
             metadata
         }
         #[zbus(property)]
@@ -772,18 +819,26 @@ mod tests {
         take_commands();
         command_from_host("toggle");
         command_from_host("seek:12.5");
+        command_from_host("like:true");
+        command_from_host("unlike");
         command_from_host("unknown");
         command_from_host("next");
         assert_eq!(
             take_commands(),
-            vec![Command::Toggle, Command::Seek(12.5), Command::Next]
+            vec![
+                Command::Toggle,
+                Command::Seek(12.5),
+                Command::Like(true),
+                Command::Like(false),
+                Command::Next,
+            ]
         );
         assert!(take_commands().is_empty());
     }
 
     #[test]
     fn the_host_reads_what_plays_as_json() {
-        let now = NowPlaying {
+        let mut now = NowPlaying {
             title: "A \"B\"".into(),
             artist: "C".into(),
             album: String::new(),
@@ -791,10 +846,15 @@ mod tests {
             duration: 200.0,
             position: 12.5,
             playing: true,
+            liked: None,
         };
         assert_eq!(
             as_json(&now),
-            r#"{"title":"A \"B\"","artist":"C","album":"","artwork":"AQIDBA==","duration":200,"position":12.5,"playing":true}"#
+            r#"{"title":"A \"B\"","artist":"C","album":"","artwork":"AQIDBA==","duration":200,"position":12.5,"playing":true,"liked":null}"#
         );
+        now.liked = Some(true);
+        assert!(as_json(&now).ends_with(r#""playing":true,"liked":true}"#));
+        now.liked = Some(false);
+        assert!(as_json(&now).ends_with(r#""playing":true,"liked":false}"#));
     }
 }

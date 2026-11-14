@@ -2463,7 +2463,8 @@ internal object BernNowPlaying {
     private fun send(name: String) = BernNative.nowPlayingCommand(name.toByteArray())
 
     /// `json` is what the engine shows: title, artist, album, artwork as
-    /// base64, duration, position and playing; empty when nothing plays.
+    /// base64, duration, position, playing and optional liked; empty when
+    /// nothing plays.
     fun update(context: Context, json: String) {
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
         if (json.isEmpty()) {
@@ -2476,6 +2477,7 @@ internal object BernNowPlaying {
             return
         }
         val now = org.json.JSONObject(json)
+        val liked: Boolean? = if (now.has("liked") && !now.isNull("liked")) now.optBoolean("liked") else null
         val session = session ?: android.media.session.MediaSession(context, "bern").also { created ->
             created.setCallback(object : android.media.session.MediaSession.Callback() {
                 override fun onPlay() = send("play")
@@ -2484,6 +2486,17 @@ internal object BernNowPlaying {
                 override fun onSkipToNext() = send("next")
                 override fun onSkipToPrevious() = send("previous")
                 override fun onSeekTo(position: Long) = send("seek:${position / 1000.0}")
+                override fun onCustomAction(action: String, extras: android.os.Bundle?) {
+                    when (action) {
+                        "like" -> send("like:true")
+                        "unlike" -> send("like:false")
+                    }
+                }
+                override fun onSetRating(rating: android.media.Rating) {
+                    if (rating.ratingStyle == android.media.Rating.RATING_HEART) {
+                        send(if (rating.hasHeart()) "like:true" else "like:false")
+                    }
+                }
             })
             // Pressing the song in the system's media controls, on the lock
             // screen or in a maker's island, opens the application.
@@ -2508,23 +2521,33 @@ internal object BernNowPlaying {
                         putBitmap(android.media.MediaMetadata.METADATA_KEY_ALBUM_ART, artwork)
                         putBitmap(android.media.MediaMetadata.METADATA_KEY_ART, artwork)
                     }
+                    if (liked != null) {
+                        putRating(android.media.MediaMetadata.METADATA_KEY_USER_RATING, android.media.Rating.newHeartRating(liked))
+                    }
                 }
                 .build()
         )
         playing = now.optBoolean("playing")
         BernAudioFocus.update(context, playing)
+        val likeIcon = if (liked == true) __APP_PACKAGE__.R.drawable.bern_now_playing_liked else __APP_PACKAGE__.R.drawable.bern_now_playing_like
+        val likeLabel = if (liked == true) BernText.string("bern.media.unlike") else BernText.string("bern.media.like")
+        val supportedActions = android.media.session.PlaybackState.ACTION_PLAY or android.media.session.PlaybackState.ACTION_PAUSE or
+            android.media.session.PlaybackState.ACTION_PLAY_PAUSE or android.media.session.PlaybackState.ACTION_STOP or
+            android.media.session.PlaybackState.ACTION_SKIP_TO_NEXT or android.media.session.PlaybackState.ACTION_SKIP_TO_PREVIOUS or
+            android.media.session.PlaybackState.ACTION_SEEK_TO or
+            (if (liked != null) android.media.session.PlaybackState.ACTION_SET_RATING else 0L)
         val state = android.media.session.PlaybackState.Builder()
-            .setActions(
-                android.media.session.PlaybackState.ACTION_PLAY or android.media.session.PlaybackState.ACTION_PAUSE or
-                    android.media.session.PlaybackState.ACTION_PLAY_PAUSE or android.media.session.PlaybackState.ACTION_STOP or
-                    android.media.session.PlaybackState.ACTION_SKIP_TO_NEXT or android.media.session.PlaybackState.ACTION_SKIP_TO_PREVIOUS or
-                    android.media.session.PlaybackState.ACTION_SEEK_TO
-            )
+            .setActions(supportedActions)
             .setState(
                 if (playing) android.media.session.PlaybackState.STATE_PLAYING else android.media.session.PlaybackState.STATE_PAUSED,
                 (now.optDouble("position", 0.0) * 1000).toLong(),
                 if (playing) 1f else 0f
             )
+            .apply {
+                if (liked != null) {
+                    addCustomAction(if (liked) "unlike" else "like", likeLabel, likeIcon)
+                }
+            }
             .build()
         session.setPlaybackState(state)
         session.isActive = true
@@ -2564,6 +2587,11 @@ internal object BernNowPlaying {
                 else action(android.R.drawable.ic_media_play, "Play", "play", 3)
             )
             .addAction(action(android.R.drawable.ic_media_next, "Next", "next", 4))
+            .apply {
+                if (liked != null) {
+                    addAction(action(likeIcon, likeLabel, if (liked) "like:false" else "like:true", 5))
+                }
+            }
             .setStyle(android.app.Notification.MediaStyle().setMediaSession(session.sessionToken).setShowActionsInCompactView(0, 1, 2))
             .build()
         notification = shown

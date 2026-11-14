@@ -445,7 +445,18 @@ impl Target for ComposeAndroid {
     app:use_controller="false" />
 "#,
             ),
-            GeneratedFile::text(sources.join("dev/bern/runtime/BernRuntime.kt"), RUNTIME),
+            GeneratedFile::text(
+                main.join("res/drawable/bern_now_playing_like.xml"),
+                project::NOW_PLAYING_LIKE,
+            ),
+            GeneratedFile::text(
+                main.join("res/drawable/bern_now_playing_liked.xml"),
+                project::NOW_PLAYING_LIKED,
+            ),
+            GeneratedFile::text(
+                sources.join("dev/bern/runtime/BernRuntime.kt"),
+                RUNTIME.replace("__APP_PACKAGE__", &package),
+            ),
             GeneratedFile::text(
                 sources.join("dev/bern/runtime/BernViews.kt"),
                 views_source(),

@@ -50,7 +50,10 @@ fn shared(source: &str) -> String {
 pub(crate) fn files(engine_kinds: &str, package: &str) -> Vec<GeneratedFile> {
     let runtime = Path::new("project/app/src/main/kotlin/dev/bern/runtime");
     let common = [
-        ("BernRuntime.kt", super::RUNTIME.to_owned()),
+        (
+            "BernRuntime.kt",
+            super::RUNTIME.replace("__APP_PACKAGE__", package),
+        ),
         ("BernViews.kt", super::views_source()),
         ("BernStyle.kt", super::STYLE.to_owned()),
         ("BernFeatures.kt", super::features_source(engine_kinds)),

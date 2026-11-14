@@ -54,6 +54,10 @@ extension BernHost {
     func platformWillStart() {
         platform.nativeWindows = false
         bern_app_native_windows(0)
+        if (Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String])?.contains("audio") == true {
+            try? AVAudioSession.sharedInstance().setCategory(.playback)
+            try? AVAudioSession.sharedInstance().setActive(true)
+        }
     }
 
     func platformDidStart() {}

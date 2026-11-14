@@ -314,6 +314,11 @@ fn gallery_generates_stagger_rails_popovers_and_four_sizes() {
         1,
         "{kotlin}"
     );
+    let runtime = file(&files, "BernRuntime.kt");
+    assert!(!runtime.contains("__APP_PACKAGE__"));
+    assert!(runtime.contains("addCustomAction(if (liked) \"unlike\" else \"like\""));
+    assert!(file(&files, "bern_now_playing_like.xml").contains("<vector"));
+    assert!(file(&files, "bern_now_playing_liked.xml").contains("<vector"));
 }
 
 /// The showcase with a `TabAccessory` in its first `Tabs`, shown while a
