@@ -167,12 +167,54 @@
 /* MARK: - Theme roles the page derives */
 
 :root,
-.bern-appearance-light,
-.bern-appearance-dark {
-  --bern-fill-subtle: var(--bern-hover-overlay);
-  --bern-fill-strong: var(--bern-pressed-overlay);
+:root[data-bern-appearance="light"],
+.bern-appearance-light {
+  --bern-fill-subtle: rgb(120 120 128 / 0.1);
+  --bern-fill-strong: rgb(120 120 128 / 0.18);
   --bern-selection-background: var(--bern-accent);
   --bern-selection-foreground: var(--bern-on-accent);
+  --bern-glass-bg: rgb(255 255 255 / 0.65);
+  --bern-glass-hover: rgb(255 255 255 / 0.8);
+  --bern-glass-active: rgb(238 238 242 / 0.86);
+  --bern-glass-border: rgb(0 0 0 / 0.1);
+  --bern-glass-shadow: 0 4px 14px rgb(0 0 0 / 0.08);
+  --bern-glass-panel-bg: rgb(250 250 252 / 0.76);
+  --bern-glass-panel-shadow: 0 16px 48px -12px rgb(0 0 0 / 0.18);
+  --bern-glass-item-hover: rgb(0 0 0 / 0.06);
+  --bern-glass-item-active: rgb(0 0 0 / 0.11);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-bern-appearance="light"]) {
+    --bern-fill-subtle: rgb(120 120 128 / 0.18);
+    --bern-fill-strong: rgb(120 120 128 / 0.28);
+    --bern-glass-bg: rgb(20 20 24 / 0.52);
+    --bern-glass-hover: rgb(36 36 42 / 0.64);
+    --bern-glass-active: rgb(50 50 58 / 0.72);
+    --bern-glass-border: rgb(255 255 255 / 0.16);
+    --bern-glass-shadow: 0 4px 16px rgb(0 0 0 / 0.28);
+    --bern-glass-panel-bg: rgb(22 22 26 / 0.72);
+    --bern-glass-panel-shadow: 0 16px 48px -12px rgb(0 0 0 / 0.55);
+    --bern-glass-item-hover: rgb(255 255 255 / 0.12);
+    --bern-glass-item-active: rgb(255 255 255 / 0.2);
+  }
+}
+
+:root[data-bern-appearance="dark"],
+.bern-appearance-dark {
+  --bern-fill-subtle: rgb(120 120 128 / 0.18);
+  --bern-fill-strong: rgb(120 120 128 / 0.28);
+  --bern-selection-background: var(--bern-accent);
+  --bern-selection-foreground: var(--bern-on-accent);
+  --bern-glass-bg: rgb(20 20 24 / 0.52);
+  --bern-glass-hover: rgb(36 36 42 / 0.64);
+  --bern-glass-active: rgb(50 50 58 / 0.72);
+  --bern-glass-border: rgb(255 255 255 / 0.16);
+  --bern-glass-shadow: 0 4px 16px rgb(0 0 0 / 0.28);
+  --bern-glass-panel-bg: rgb(22 22 26 / 0.72);
+  --bern-glass-panel-shadow: 0 16px 48px -12px rgb(0 0 0 / 0.55);
+  --bern-glass-item-hover: rgb(255 255 255 / 0.12);
+  --bern-glass-item-active: rgb(255 255 255 / 0.2);
 }
 
 /* A part in a fixed appearance takes that appearance's text color: the
@@ -687,3 +729,100 @@ body:has(.bern-window-page.bern-immersive) .bern-appbar { display: none; }
 .bern-split-capsule > .bern-split-main { width: auto; gap: 6px; padding: 0 10px 0 12px; }
 .bern-split-capsule > .bern-split-more { width: 30px; box-shadow: inset 1px 0 0 var(--bern-separator); }
 .bern-split-capsule > .bern-split-more .bern-icon { width: 14px; height: 14px; }
+
+/* MARK: - Opt-in frosted-glass controls (`glass: true`) */
+
+/* Standalone icon button: circular frosted glass (plain blur + translucent
+ * base + 1 px border + drop shadow). */
+:is(.bern-icon-button.bern-glass, .bern-glass .bern-icon-button):not(.bern-icon-button-plain, .bern-icon-button-prominent) {
+  border: 1px solid var(--bern-glass-border);
+  border-radius: 999px;
+  background: var(--bern-glass-bg);
+  box-shadow: var(--bern-glass-shadow);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+@media (hover: hover) {
+  :is(.bern-icon-button.bern-glass, .bern-glass .bern-icon-button):not(.bern-icon-button-plain, .bern-icon-button-prominent):hover:not(:disabled) {
+    background: var(--bern-glass-hover);
+  }
+}
+
+:is(.bern-icon-button.bern-glass, .bern-glass .bern-icon-button):not(.bern-icon-button-plain, .bern-icon-button-prominent):active:not(:disabled) {
+  background: var(--bern-glass-active);
+}
+
+/* Adjacent buttons in a ControlGroup: one shared frosted-glass capsule. */
+:is(.bern-control-group.bern-glass, .bern-glass .bern-control-group) {
+  gap: 2px;
+  height: var(--bern-group-height, var(--bern-control-height));
+  padding: 0 4px;
+  margin-inline: 0;
+  border: 1px solid var(--bern-glass-border);
+  border-radius: 999px;
+  background: var(--bern-glass-bg);
+  box-shadow: var(--bern-glass-shadow);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+:is(.bern-control-group.bern-glass, .bern-glass .bern-control-group):has(> :only-child) {
+  padding: 0;
+}
+
+:is(.bern-control-group.bern-glass, .bern-glass .bern-control-group) .bern-icon-button {
+  width: calc(var(--bern-group-height, var(--bern-control-height)) - 4px);
+  height: calc(var(--bern-group-height, var(--bern-control-height)) - 6px);
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+@media (hover: hover) {
+  :is(.bern-control-group.bern-glass, .bern-glass .bern-control-group) .bern-icon-button:hover:not(:disabled) {
+    background: var(--bern-glass-item-hover);
+  }
+}
+
+:is(.bern-control-group.bern-glass, .bern-glass .bern-control-group) .bern-icon-button:active:not(:disabled) {
+  background: var(--bern-glass-item-active);
+}
+
+/* Standalone capsule button (`shape: capsule`, such as Watch / Play). */
+:is(.bern-button.bern-control-capsule.bern-glass, .bern-glass .bern-button.bern-control-capsule):not(.bern-chip-button, .bern-button-prominent, .bern-destructive) {
+  padding: 0 16px;
+  border: 1px solid var(--bern-glass-border);
+  border-radius: 999px;
+  background: var(--bern-glass-bg);
+  box-shadow: var(--bern-glass-shadow);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+@media (hover: hover) {
+  :is(.bern-button.bern-control-capsule.bern-glass, .bern-glass .bern-button.bern-control-capsule):not(.bern-chip-button, .bern-button-prominent, .bern-destructive):hover:not(:disabled) {
+    background: var(--bern-glass-hover);
+  }
+}
+
+:is(.bern-button.bern-control-capsule.bern-glass, .bern-glass .bern-button.bern-control-capsule):not(.bern-chip-button, .bern-button-prominent, .bern-destructive):active:not(:disabled) {
+  background: var(--bern-glass-active);
+}
+
+/* Opt-in frosted-glass search palette dialog and popover panels. */
+.bern-search-palette.bern-glass,
+.bern-glass .bern-popover-panel {
+  border: 1px solid var(--bern-glass-border);
+  background: var(--bern-glass-panel-bg);
+  box-shadow: var(--bern-glass-panel-shadow);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+}
+
+.bern-search-palette.bern-glass::backdrop {
+  background: rgb(0 0 0 / 0.28);
+}

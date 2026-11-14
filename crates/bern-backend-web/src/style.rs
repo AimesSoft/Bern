@@ -41,6 +41,16 @@ pub const SUPPORT: &[StyleSupport] = &[
         states: &[],
     },
     StyleSupport {
+        component: "Sidebar",
+        base: &["background"],
+        states: &[],
+    },
+    StyleSupport {
+        component: "Detail",
+        base: &["background"],
+        states: &[],
+    },
+    StyleSupport {
         component: "Stack",
         base: &["background", "foreground", "border", "corner", "shadow"],
         states: &[],

@@ -1603,6 +1603,8 @@ fun BernSplitView(
     title: String,
     showingDetail: MutableState<Boolean>,
     sidebarWidth: Dp = 280.dp,
+    sidebarStyle: BernStyle? = null,
+    detailStyle: BernStyle? = null,
     header: (@Composable () -> Unit)? = null,
     sidebar: @Composable (showDetail: () -> Unit) -> Unit,
     footer: (@Composable ColumnScope.() -> Unit)? = null,
@@ -1610,6 +1612,9 @@ fun BernSplitView(
 ) {
     var showingDetail by showingDetail
     val rail = LocalBernWindow.current.rail
+    val palette = bernPalette()
+    val sidebarBg = sidebarStyle?.base?.background?.let { Modifier.background(palette.color(it)) } ?: Modifier
+    val detailBg = detailStyle?.base?.background?.let { Modifier.background(palette.color(it)) } ?: Modifier
     val side = if (rail) 8.dp else 16.dp
     // The sidebar's own top and bottom areas, such as the application's
     // name and the account, stay put while the destinations scroll.
@@ -1646,15 +1651,15 @@ fun BernSplitView(
             // A detail without a title leaves the bar out, and its room.
             BernChrome(title = title.ifEmpty { null })
             Row(Modifier.fillMaxSize()) {
-                Box(Modifier.width(if (rail) 96.dp else sidebarWidth).fillMaxHeight()) { list {} }
+                Box(Modifier.width(if (rail) 96.dp else sidebarWidth).fillMaxHeight().then(sidebarBg)) { list {} }
                 VerticalDivider()
-                Box(Modifier.weight(1f).fillMaxHeight()) { detail() }
+                Box(Modifier.weight(1f).fillMaxHeight().then(detailBg)) { detail() }
             }
         } else if (showingDetail) {
             BernChrome(title = title, back = { showingDetail = false })
-            Box(Modifier.fillMaxSize()) { detail() }
+            Box(Modifier.fillMaxSize().then(detailBg)) { detail() }
         } else {
-            Box(Modifier.fillMaxSize()) { list { showingDetail = true } }
+            Box(Modifier.fillMaxSize().then(sidebarBg)) { list { showingDetail = true } }
         }
     }
 }

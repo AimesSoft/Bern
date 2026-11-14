@@ -764,6 +764,8 @@ pub struct SplitSpec {
     /// While false, the detail's title bar leaves out the destination's
     /// name, for pages that show their own.
     pub titled: Option<Get>,
+    pub sidebar_style: Option<&'static crate::style::StyleDef>,
+    pub detail_style: Option<&'static crate::style::StyleDef>,
 }
 
 /// The sidebar and detail split of GNOME applications: a navigation
@@ -903,6 +905,9 @@ pub fn SplitView(p: &Parent, ctx: &Ctx, spec: SplitSpec, sidebar: Build, detail:
     sidebar_header.set_title_widget(Some(&app_title));
     sidebar_view.add_top_bar(&sidebar_header);
     sidebar_view.set_content(Some(&sidebar_box));
+    if let Some(style) = spec.sidebar_style {
+        crate::style::surface(style, &sidebar_view);
+    }
     ctx.win().chrome_view(&sidebar_view);
     let sidebar_page = adw::NavigationPage::new(&sidebar_view, "");
     let name_key = host().def.name;
@@ -951,6 +956,9 @@ pub fn SplitView(p: &Parent, ctx: &Ctx, spec: SplitSpec, sidebar: Build, detail:
     let detail_view = adw::ToolbarView::new();
     detail_view.add_top_bar(&header);
     detail_view.set_content(Some(&content));
+    if let Some(style) = spec.detail_style {
+        crate::style::surface(style, &detail_view);
+    }
     ctx.win().chrome_view(&detail_view);
     let detail_page = adw::NavigationPage::new(&detail_view, "");
     let titled = detail_page.clone();

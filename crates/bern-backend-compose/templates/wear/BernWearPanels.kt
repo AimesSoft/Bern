@@ -189,6 +189,7 @@ val LocalBernBarTop = compositionLocalOf<State<Float>?> { null }
 
 @Composable
 fun BernSplitView(title: String, showingDetail: MutableState<Boolean>, sidebarWidth: Dp = 280.dp,
+    sidebarStyle: BernStyle? = null, detailStyle: BernStyle? = null,
     header: (@Composable () -> Unit)? = null, sidebar: @Composable (showDetail: () -> Unit) -> Unit,
     footer: (@Composable ColumnScope.() -> Unit)? = null, detail: @Composable () -> Unit) {
     if (showingDetail.value) {

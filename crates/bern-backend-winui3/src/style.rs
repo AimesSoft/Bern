@@ -47,6 +47,16 @@ pub const SUPPORT: &[StyleSupport] = &[
         base: &["background", "foreground"],
         states: &[],
     },
+    StyleSupport {
+        component: "Sidebar",
+        base: &["background"],
+        states: &[],
+    },
+    StyleSupport {
+        component: "Detail",
+        base: &["background"],
+        states: &[],
+    },
     // A stack's surface: its background, the color of text and icons in
     // it, corners that clip its layers, and the shadow its texts, icons,
     // pictures and shapes cast.

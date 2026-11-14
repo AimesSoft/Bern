@@ -51,6 +51,14 @@ impl Generator<'_> {
                     "titled",
                     detail.expr("titled").map(|titled| self.getter(titled))
                 ),
+                (
+                    "sidebarStyle",
+                    self.style("Sidebar", sidebar.keyword("variant"))
+                ),
+                (
+                    "detailStyle",
+                    self.style("Detail", detail.keyword("variant"))
+                ),
             ])
         ));
         // A header that only names the window is left out: the title bar

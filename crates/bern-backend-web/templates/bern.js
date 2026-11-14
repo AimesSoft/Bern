@@ -1523,7 +1523,7 @@ export function child(ctx, comp) {
 
 export function page() {
   return {
-    titles: cell([]), backs: cell([]), toolCount: cell(0),
+    titles: cell([]), backs: cell([]), appearances: cell([]), toolCount: cell(0),
     tools: el("div", { class: "bern-tools", role: "toolbar" }),
     leadingTools: el("div", { class: "bern-tools bern-tools-leading", role: "toolbar" }),
   };
@@ -1546,6 +1546,7 @@ export function tools(ctx, build, { placement } = {}) {
   (placement === "leading" ? ctx.page.leadingTools : ctx.page.tools).append(holder);
   const count = ctx.page.toolCount;
   count.set(count.peek() + 1);
+  if (ctx.appearance) stackPush(ctx.page.appearances, ctx.appearance);
   onCleanup(() => {
     holder.remove();
     count.set(count.peek() - 1);
@@ -1568,6 +1569,10 @@ export function pageHeader(ctx, fallback, always) {
     title.textContent = text;
     const backs = ctx.page.backs.get();
     back.hidden = backs.length === 0;
+    const appearances = ctx.page.appearances.get();
+    const appearance = appearances[appearances.length - 1] ?? null;
+    header.classList.toggle("bern-appearance-dark", appearance === "dark");
+    header.classList.toggle("bern-appearance-light", appearance === "light");
     header.hidden = !always && !text && backs.length === 0 && ctx.page.toolCount.get() === 0;
   });
   return header;
@@ -1947,7 +1952,7 @@ export function contextMenu(node, ctx, label, items) {
 }
 
 export function IconButton(p, ctx, { id, icon: name, label, enabled, style, setFile, fileKinds, fontSize, prominence, diameter, defaultFocus, iconProgress, badgeIcon, badgeVisible }, action) {
-  const node = el("button", { class: `bern-icon-button${prominence === "prominent" ? " bern-icon-button-prominent" : ""}`, type: "button" }, icon(name, fontSize ?? 16));
+  const node = el("button", { class: `bern-icon-button${prominence === "prominent" ? " bern-icon-button-prominent" : prominence === "plain" ? " bern-icon-button-plain" : ""}`, type: "button" }, icon(name, fontSize ?? 16));
   if (fontSize != null) { node.firstElementChild.style.width = `${fontSize}px`; node.firstElementChild.style.height = `${fontSize}px`; }
   if (iconProgress != null || badgeIcon != null) {
     const base = node.firstElementChild;
@@ -2780,14 +2785,10 @@ function paddingOf(node, { padding, paddingX, paddingY }) {
 }
 
 function controlShape(node, shape, height) {
-  // The web has no capsule buttons: a capsule button, menu or picker is
-  // the standard control, at the standard height.
   if (shape === "capsule") {
     node.classList.add("bern-control-capsule");
     return;
   }
-  // A chip is the web's pill: outlined, filled with the text color when
-  // it stands for the choice made.
   if (shape === "chip") node.classList.add("bern-chip-button");
   length(node, "height", height);
 }
@@ -2808,6 +2809,7 @@ function backdropLayer(child) {
 export function layoutIntent(node, dimension) {
   if (node.nodeType !== 1 || node.tagName === "DIALOG" || node.hasAttribute("popover") || node.classList.contains(`bern-sized-${dimension}`)) return false;
   if (node.classList.contains(`bern-fill-${dimension}`) || node.classList.contains("bern-image-cover")) return true;
+  if (node.classList.contains("bern-split") || node.classList.contains("bern-tabs") || node.classList.contains("bern-nav-page") || node.classList.contains("bern-scale-box")) return true;
   // `Button(width: fill)` takes the row's or column's width.
   if (dimension === "width" && node.classList.contains("bern-button-fill")) return true;
   const children = layoutChildren(node);
@@ -4005,6 +4007,7 @@ function layoutFor(size, layouts) {
 
 export function Adaptive(p, ctx, { id, breakpoints, layouts }) {
   const node = el("div", { class: "bern-adaptive" });
+  trackLayout(node, "column");
   // Until it has measured the room it is given, the window's width stands
   // in: the room is no wider, so a layout built as a phone's window opens,
   // or inserted into it later, is the phone's from its first build.

@@ -196,6 +196,7 @@ fn check_motion(descriptor: &TargetDescriptor, app: &Application) -> Vec<Diagnos
                 if prop.name != "hero_key"
                     && prop.name != "reveal"
                     && prop.name != "appearance"
+                    && prop.name != "glass"
                     && prop.name != "tint"
                     && prop.name != "spin_period"
                     && prop.name != "glow_opacity"
