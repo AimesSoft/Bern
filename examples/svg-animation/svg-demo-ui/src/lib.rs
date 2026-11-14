@@ -6,7 +6,7 @@ pub fn app(app: svg_demo::Client, windows: AppWindows) -> impl View {
         WindowSet(handle: AppWindows, primary: main) {
             Window(id: main, title: tr! { "en" => "SVG Animation" }, initial: open, width: 560, height: 500) {
                 Column(gap: 18, padding: 24, align: center) {
-                    Text(content: tr! { "en" => "CSS · SMIL · JavaScript" }, style: title2)
+                    Text(content: tr! { "en" => "CSS · SMIL · Declarative" }, style: title2)
                     Svg(source: "animation.svg", width: 280, height: 280, label: tr! { "en" => "Animated orbit. Double-click to change its color." }, playing: app.playing, speed: app.speed, restart: app.revision)
                     Row(gap: 12) {
                         Button(id: toggle, label: tr! { "en" => "Play / Pause" }) => app.toggle()

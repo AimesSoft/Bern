@@ -20,6 +20,7 @@ pub mod picture;
 pub mod query;
 #[cfg(feature = "remote")]
 pub mod remote;
+pub mod svg;
 pub mod trace;
 
 use bern_command::resources::Resources;
@@ -47,6 +48,7 @@ pub use bern_media as media_contract;
 pub use bern_protocol as protocol;
 pub use bern_runtime as runtime;
 pub use bern_runtime::{SessionType, WindowKind};
+pub use bern_svg;
 
 /// Owned byte buffer returned to the frontend; free with [`bern_buffer_free`].
 #[repr(C)]

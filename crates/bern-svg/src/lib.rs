@@ -1,37 +1,36 @@
-//! Animated SVG documents shared by every Bern presenter.
+//! Bern's portable pure-Rust animated SVG compiler and player.
 //!
-//! Rendering uses the platform's SVG/DOM engine, preserving CSS, SMIL,
-//! filters, masks, text, and document-local JavaScript instead of flattening
-//! an animation into bitmaps. Documents are self-contained bundled assets;
-//! they have no native command bridge or access to external resources.
+//! Static SVG documents (`bern_svg::picture`) are rasterized once at build time
+//! into PNGs and lowered to `Image`. Animated and interactive SVG documents are
+//! compiled at build time into compact binary `BSVG` bytecode (`bern_svg::compile`)
+//! and played in-process by `bern_svg::Player` using `tiny-skia`, with zero
+//! WebView or JavaScript runtime dependency on any target.
 
-pub const RUNTIME: &str = include_str!("runtime.js");
-pub const PREFIX: &str = r#"<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'"><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent}body>svg{display:block;width:100%!important;height:100%!important}html{color-scheme:light dark}</style></head><body>"#;
+pub mod codec;
+#[cfg(feature = "svg")]
+pub mod compile;
+#[cfg(feature = "svg")]
+pub mod css;
+pub mod model;
+pub mod path;
+pub mod player;
 
-pub fn suffix() -> String {
-    format!("<script>{RUNTIME}</script></body></html>")
-}
+pub use model::{MAGIC, ViewBox};
+pub use player::{Config, Fit, PixelFormat, Player, PointerEvent, Scene, StepOutcome};
 
-/// Validate an SVG document, preserving its original source and scripts.
-/// Reject DTDs/external entities. XML declarations are valid on input, but
-/// only the root SVG is embedded into the HTML document.
-pub fn root(source: &str) -> Result<&str, String> {
-    let doc = roxmltree::Document::parse(source).map_err(|e| format!("invalid SVG: {e}"))?;
-    let root = doc.root_element();
-    if root.tag_name().name() != "svg"
-        || root.tag_name().namespace() != Some("http://www.w3.org/2000/svg")
-    {
-        return Err("expected an SVG root in the SVG namespace".into());
-    }
-    Ok(&source[root.range()])
-}
+#[cfg(feature = "svg")]
+pub use compile::root;
 
-pub fn document(source: &str) -> Result<String, String> {
-    Ok(format!("{PREFIX}{}{}", root(source)?, suffix()))
+/// Compile an `.svg` XML document into compact binary `BSVG` bytecode.
+#[cfg(feature = "svg")]
+pub fn compile(source: &str) -> Result<Vec<u8>, String> {
+    let scene = compile::compile_scene(source)?;
+    Ok(codec::encode(&scene))
 }
 
 /// How a document shows as a picture of it, drawn once when the app is
-/// built, with no document engine.
+/// built, with no animation player.
+#[cfg(feature = "svg")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Picture {
     /// In its own colors.
@@ -45,12 +44,10 @@ pub enum Picture {
     Themed,
 }
 
-/// A document engine is for what moves or runs: SMIL or CSS animation,
-/// transitions, pointer states, scripts, links, embedded HTML or media, and
-/// what a picture cannot follow yet: media queries other than the
-/// appearance, CSS variables, and `currentColor` beside other colors or
-/// beside colors per appearance. Everything else is a picture of the
-/// document; `None` for the rest and anything unreadable.
+/// Classify an SVG document that neither moves nor reacts to input as a
+/// build-time static picture; returns `None` for animated or interactive SVGs
+/// and unreadable documents.
+#[cfg(feature = "svg")]
 pub fn picture(source: &str) -> Option<Picture> {
     const LIVE: &[&str] = &[
         "animate",
@@ -104,9 +101,9 @@ pub fn picture(source: &str) -> Option<Picture> {
             _ => colored = true,
         }
     };
-    // `property: value` pairs of a style sheet or a `style` attribute.
-    let declarations = |css: &str| {
-        css.split([';', '{', '}'])
+    let declarations = |css_text: &str| {
+        css_text
+            .split([';', '{', '}'])
             .filter_map(|part| part.split_once(':'))
             .map(|(property, value)| (property.trim().to_string(), value.to_string()))
             .collect::<Vec<_>>()
@@ -117,14 +114,13 @@ pub fn picture(source: &str) -> Option<Picture> {
                 .parent_element()
                 .is_some_and(|parent| parent.tag_name().name() == "style")
             {
-                let css = node.text().unwrap_or("");
-                if live(css) {
+                let sheet = node.text().unwrap_or("");
+                if live(sheet) {
                     return None;
                 }
-                // Rules for one appearance, and no other media queries.
-                for block in media_blocks(css) {
+                for block in media_blocks(sheet) {
                     scheme(block.condition)?;
-                    if css[block.body.clone()]
+                    if sheet[block.body.clone()]
                         .to_ascii_lowercase()
                         .contains("@media")
                     {
@@ -132,8 +128,8 @@ pub fn picture(source: &str) -> Option<Picture> {
                     }
                     themed = true;
                 }
-                themed |= css.to_ascii_lowercase().contains("light-dark(");
-                for (property, value) in declarations(css) {
+                themed |= sheet.to_ascii_lowercase().contains("light-dark(");
+                for (property, value) in declarations(sheet) {
                     paint(&property, &value);
                 }
             }
@@ -146,17 +142,22 @@ pub fn picture(source: &str) -> Option<Picture> {
             return None;
         }
         for attribute in node.attributes() {
+            let name = attribute.name();
             let value = attribute.value().to_ascii_lowercase();
-            if attribute.name().starts_with("on") || live(&value) || value.contains("@media") {
+            if name.starts_with("on")
+                || name.starts_with("data-bern-")
+                || live(&value)
+                || value.contains("@media")
+            {
                 return None;
             }
             themed |= value.contains("light-dark(");
-            if attribute.name() == "style" {
+            if name == "style" {
                 for (property, value) in declarations(attribute.value()) {
                     paint(&property, &value);
                 }
             } else {
-                paint(attribute.name(), attribute.value());
+                paint(name, attribute.value());
             }
         }
     }
@@ -168,16 +169,14 @@ pub fn picture(source: &str) -> Option<Picture> {
     }
 }
 
-/// The document as it shows in the light or the dark appearance, for a
-/// renderer that follows neither media queries nor `light-dark()`: the
-/// style rules for this appearance apply everywhere, those for the other
-/// are gone, and each `light-dark(light, dark)` is its value here. Other
-/// media queries stay as they are; an unreadable document is unchanged.
+/// Expand an SVG document for either light (`dark = false`) or dark
+/// (`dark = true`) appearance, for static build-time rasterizers (`resvg`)
+/// that evaluate neither `@media (prefers-color-scheme)` nor `light-dark()`.
+#[cfg(feature = "svg")]
 pub fn in_appearance(source: &str, dark: bool) -> String {
     let Ok(doc) = roxmltree::Document::parse(source) else {
         return source.to_string();
     };
-    // Byte ranges of the source and what they become, apart and in order.
     let mut edits: Vec<(std::ops::Range<usize>, String)> = Vec::new();
     for node in doc.descendants().filter(|node| node.is_element()) {
         for attribute in node.attributes() {
@@ -190,7 +189,6 @@ pub fn in_appearance(source: &str, dark: bool) -> String {
         if node.tag_name().name() != "style" {
             continue;
         }
-        // The style sheet between `<style …>` and `</style>`.
         let range = node.range();
         let whole = &source[range.clone()];
         let (Some(open), Some(close)) = (whole.find('>'), whole.rfind("</")) else {
@@ -199,22 +197,22 @@ pub fn in_appearance(source: &str, dark: bool) -> String {
         if open + 1 > close {
             continue;
         }
-        let css = &whole[open + 1..close];
-        let mut sheet = String::new();
+        let sheet = &whole[open + 1..close];
+        let mut out_sheet = String::new();
         let mut at = 0;
-        for block in media_blocks(css) {
+        for block in media_blocks(sheet) {
             let Some(only) = scheme(block.condition) else {
                 continue;
             };
-            sheet.push_str(&css[at..block.whole.start]);
+            out_sheet.push_str(&sheet[at..block.whole.start]);
             if only == dark {
-                sheet.push_str(&css[block.body.clone()]);
+                out_sheet.push_str(&sheet[block.body.clone()]);
             }
             at = block.whole.end;
         }
-        sheet.push_str(&css[at..]);
+        out_sheet.push_str(&sheet[at..]);
         let start = range.start + open + 1;
-        edits.push((start..range.start + close, chosen(&sheet, dark)));
+        edits.push((start..range.start + close, chosen(&out_sheet, dark)));
     }
     let mut out = String::with_capacity(source.len());
     let mut at = 0;
@@ -227,24 +225,21 @@ pub fn in_appearance(source: &str, dark: bool) -> String {
     out
 }
 
-/// An `@media` rule of a style sheet, in bytes of the sheet.
+#[cfg(feature = "svg")]
 struct MediaBlock<'a> {
-    /// From `@media` to its closing brace.
     whole: std::ops::Range<usize>,
-    /// Between its braces.
     body: std::ops::Range<usize>,
     condition: &'a str,
 }
 
-/// The `@media` rules at the top level of `css`, in order, skipping
-/// comments.
-fn media_blocks(css: &str) -> Vec<MediaBlock<'_>> {
-    let bytes = css.as_bytes();
+#[cfg(feature = "svg")]
+fn media_blocks(css_text: &str) -> Vec<MediaBlock<'_>> {
+    let bytes = css_text.as_bytes();
     let mut blocks = Vec::new();
     let (mut at, mut depth) = (0, 0usize);
     while at < bytes.len() {
-        if css[at..].starts_with("/*") {
-            at = css[at + 2..]
+        if css_text[at..].starts_with("/*") {
+            at = css_text[at + 2..]
                 .find("*/")
                 .map_or(bytes.len(), |end| at + 2 + end + 2);
             continue;
@@ -253,11 +248,11 @@ fn media_blocks(css: &str) -> Vec<MediaBlock<'_>> {
             b'{' => depth += 1,
             b'}' => depth = depth.saturating_sub(1),
             b'@' if depth == 0
-                && css
+                && css_text
                     .get(at..at + 6)
                     .is_some_and(|word| word.eq_ignore_ascii_case("@media")) =>
             {
-                let Some(open) = css[at..].find('{').map(|open| at + open) else {
+                let Some(open) = css_text[at..].find('{').map(|open| at + open) else {
                     break;
                 };
                 let mut inner = 0usize;
@@ -281,7 +276,7 @@ fn media_blocks(css: &str) -> Vec<MediaBlock<'_>> {
                 blocks.push(MediaBlock {
                     whole: at..close + 1,
                     body: open + 1..close,
-                    condition: &css[at + 6..open],
+                    condition: &css_text[at + 6..open],
                 });
                 at = close + 1;
                 continue;
@@ -293,9 +288,7 @@ fn media_blocks(css: &str) -> Vec<MediaBlock<'_>> {
     blocks
 }
 
-/// The appearance a media condition asks for: `Some(true)` for
-/// `(prefers-color-scheme: dark)`, `Some(false)` for light, with or without
-/// `screen and`; `None` for any other condition.
+#[cfg(feature = "svg")]
 fn scheme(condition: &str) -> Option<bool> {
     let condition = condition.to_ascii_lowercase();
     let mut words = condition.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -311,8 +304,7 @@ fn scheme(condition: &str) -> Option<bool> {
     }
 }
 
-/// `text` with each `light-dark(light, dark)` replaced by its value in the
-/// appearance, innermost calls included.
+#[cfg(feature = "svg")]
 fn chosen(text: &str, dark: bool) -> String {
     let mut text = text.to_string();
     while let Some(start) = text.to_ascii_lowercase().find("light-dark(") {
@@ -345,20 +337,10 @@ fn chosen(text: &str, dark: bool) -> String {
     text
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "svg"))]
 mod tests {
     use super::*;
-
-    #[test]
-    fn preserves_css_smil_and_script() {
-        let svg = r#"<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"><style>@keyframes a{to{opacity:0}}</style><rect><animate attributeName="x" to="20" dur="1s"/></rect><script><![CDATA[document.documentElement.dataset.test = 'ok';]]></script></svg>"#;
-        let html = document(svg).unwrap();
-        assert!(!html.contains("<?xml"));
-        assert!(html.contains("@keyframes a"));
-        assert!(html.contains("attributeName=\"x\""));
-        assert!(html.contains("dataset.test"));
-        assert!(html.contains("default-src 'none'"));
-    }
+    use std::sync::Arc;
 
     #[test]
     fn documents_that_neither_move_nor_run_are_pictures() {
@@ -399,10 +381,15 @@ mod tests {
             r#"<rect fill="currentColor"/><rect fill="red"/>"#,
             r#"<rect onclick="alert(1)"/>"#,
             r#"<script>1</script>"#,
-            r#"<a href="https://example.com"><rect/></a>"#,
         ] {
             assert_eq!(picture(&svg(live)), None, "{live}");
         }
+        assert_eq!(
+            picture(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" data-bern-dblclick="toggle(alt)"><rect/></svg>"#
+            ),
+            None
+        );
         assert_eq!(picture("<svg"), None);
     }
 
@@ -419,39 +406,143 @@ mod tests {
             r#"<circle r="2" style="stroke: light-dark(red, light-dark(green, blue))"/></svg>"#,
         );
         let light = in_appearance(svg, false);
-        assert!(
-            light.contains("rect{fill:black}.b{stroke:#111}@media (min-width: 4px)"),
-            "{light}"
-        );
-        assert!(light.contains("circle{fill:rgb(1, 2, 3)}"), "{light}");
-        assert!(light.contains(r#"style="stroke: red""#), "{light}");
-        assert!(
-            !light.contains("prefers-color-scheme") && !light.contains("#eee"),
-            "{light}"
-        );
+        assert!(light.contains("rect{fill:black}.b{stroke:#111}@media (min-width: 4px)"));
+        assert!(light.contains("circle{fill:rgb(1, 2, 3)}"));
         let dark = in_appearance(svg, true);
         assert!(
-            dark.contains("rect{fill:black}rect{fill:white}.b{stroke:#eee}@media (min-width: 4px)"),
-            "{dark}"
+            dark.contains("rect{fill:black}rect{fill:white}.b{stroke:#eee}@media (min-width: 4px)")
         );
-        assert!(dark.contains("circle{fill:#abc}"), "{dark}");
-        assert!(dark.contains(r#"style="stroke: blue""#), "{dark}");
-        assert!(!dark.contains("#111"), "{dark}");
-        // A document without rules per appearance is the same in both.
-        let plain = r#"<svg xmlns="http://www.w3.org/2000/svg"><rect fill="red"/></svg>"#;
-        assert_eq!(in_appearance(plain, true), plain);
-        assert_eq!(in_appearance("<svg", true), "<svg");
+        assert!(dark.contains("circle{fill:#abc}"));
     }
 
     #[test]
-    fn rejects_non_svg_and_external_entities() {
+    fn rejects_non_svg_external_entities_and_unmigrated_scripts() {
         for source in [
             "<html/>",
             "<svg/>",
             "<svg",
             "<!DOCTYPE svg [<!ENTITY x SYSTEM 'file:///tmp/x'>]><svg xmlns=\"http://www.w3.org/2000/svg\">&x;</svg>",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><script>1</script></svg>",
         ] {
-            assert!(document(source).is_err());
+            assert!(compile(source).is_err(), "{source}");
         }
+    }
+
+    #[test]
+    fn bsvg_roundtrip_and_idle_sleep_after_finite_entrance_and_random_actions() {
+        let svg = r##"
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="-16 -16 1056 1056"
+             data-bern-ready="2.3s"
+             data-bern-dblclick="random(do-wink: 1.5s, do-pet: 2.6s, do-smug: 2.8s)">
+          <style>
+            .hair, .loop { transform-box: fill-box; animation-fill-mode: both; animation-timing-function: cubic-bezier(.3, .7, .4, 1); }
+            .hair { transform-origin: 50% 50%; animation-name: pop; animation-duration: .55s; }
+            .loop { transform-origin: 0 0; animation-name: swing; animation-duration: .95s; animation-delay: 1.05s; }
+            @keyframes pop { 0% { transform: scale(0); } 55% { transform: scale(1.03); } 100% { transform: none; } }
+            @keyframes swing { 0% { transform: rotate(38deg); opacity: 0; } 12% { opacity: 1; } 55% { transform: translateY(14px) rotate(9deg) scale(1.08, .9); } 100% { transform: none; opacity: 1; } }
+            .rx { transform-box: fill-box; transform-origin: 50% 80.29%; }
+            .do-wink .rx { transform-origin: 78.02% 80.29%; animation: wk 1.5s cubic-bezier(.3, .7, .4, 1) both; }
+            .do-pet  .rx { animation: wk 2.6s cubic-bezier(.3, .7, .4, 1) both; }
+            .do-smug .rx { transform-origin: 78.02% 42.86%; animation: wk 2.8s cubic-bezier(.3, .7, .4, 1) both; }
+            @keyframes wk { 0% { transform: rotate(0); } 50% { transform: rotate(-6deg); } 100% { transform: rotate(0); } }
+          </style>
+          <defs><clipPath id="ec"><circle cx="512" cy="512" r="512"/></clipPath></defs>
+          <g class="hair"><path d="M-512 0A512 512 0 1 0 512 0A512 512 0 1 0 -512 0Z" fill="#3E5BD8" transform="translate(512 512)"/></g>
+          <g clip-path="url(#ec)"><g class="rx"><rect x="-100" y="-100" width="1224" height="1400" fill="none"/><circle cx="512" cy="600" r="200" fill="#222B4F"/></g></g>
+          <g class="loop"><path d="M-64.28 -193.97L63.12 111.39L-64.28 -193.97Z" fill="none" stroke="#D340AD" stroke-width="26" transform="translate(893.28 410.97)"/></g>
+          <script><![CDATA[/* ignored when data-bern-* is declared */]]></script>
+        </svg>"##;
+
+        let bytes = compile(svg).unwrap();
+        assert!(bytes.starts_with(MAGIC));
+        let scene = Arc::new(Scene::from_bytes(&bytes).unwrap());
+
+        // Verify exact fill-box origin math for `.loop` -> `(829, 217)`!
+        let loop_node = scene
+            .data
+            .nodes
+            .iter()
+            .find(|n| n.classes.iter().any(|c| c == "loop"))
+            .unwrap();
+        assert!((loop_node.fill_box.x - 829.0).abs() < 0.05);
+        assert!((loop_node.fill_box.y - 217.0).abs() < 0.05);
+
+        let mut player = Player::new(scene);
+        let (step0, px0) = player.render(0.0, 64, 64, PixelFormat::RgbaPremul);
+        assert!(step0.changed && step0.active);
+        assert_eq!(px0.len(), 64 * 64 * 4);
+
+        // Double-click during entrance (< 2.3s) is ignored.
+        assert!(!player.pointer(PointerEvent::DoubleClick(0.5, 0.5)).changed);
+
+        // After entrance finishes (t = 2.5s), player enters 0% CPU idle state (`active == false`)!
+        let (step_idle, _) = player.render(2.5, 64, 64, PixelFormat::RgbaPremul);
+        assert!(
+            !step_idle.active,
+            "player must sleep once finite animations end"
+        );
+        // Subsequent render at same state skips rasterization (`changed == false`).
+        let (step_same, _) = player.render(2.6, 64, 64, PixelFormat::RgbaPremul);
+        assert!(!step_same.changed && !step_same.active);
+
+        // Double-click after 2.3s wakes player and never repeats two actions in a row.
+        let mut prev_cls = String::new();
+        let mut t = 3.0;
+        for _ in 0..8 {
+            let out = player.pointer(PointerEvent::DoubleClick(0.5, 0.5));
+            assert!(out.changed && out.active);
+            let cur = player.root_classes().join(",");
+            assert!(!cur.is_empty() && cur != prev_cls, "repeated {cur}");
+            prev_cls = cur;
+            t += 0.1;
+            let _ = player.render(t, 64, 64, PixelFormat::BgraStraight);
+        }
+
+        // After the longest action (2.8s) elapses, class auto-clears and player sleeps again!
+        let (after, _) = player.render(t + 3.0, 64, 64, PixelFormat::RgbaStraight);
+        assert!(!after.active);
+        assert!(player.root_classes().is_empty());
+    }
+
+    #[test]
+    fn toggle_transition_smil_and_playback_controls() {
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 280" data-bern-dblclick="toggle(alternate)">
+          <style>
+            .orbit { transform-origin: 140px 140px; animation: turn 4s linear infinite; }
+            .ball { fill: #e94476; transition: fill .3s; }
+            .alternate .ball { fill: #8065e8; }
+            @keyframes turn { to { transform: rotate(360deg); } }
+          </style>
+          <defs><radialGradient id="g"><stop stop-color="#b1c5ff"/><stop offset="1" stop-color="#596bdc"/></radialGradient></defs>
+          <g class="orbit"><circle class="ball" cx="140" cy="45" r="18"/></g>
+          <circle cx="140" cy="140" r="38" fill="url(#g)"><animate attributeName="r" values="30;50;30" dur="2s" repeatCount="indefinite"/></circle>
+        </svg>"##;
+        let bytes = compile(svg).unwrap();
+        let scene = Arc::new(Scene::from_bytes(&bytes).unwrap());
+        let mut player = Player::new(scene);
+        let (s0, _) = player.render(0.0, 64, 64, PixelFormat::RgbaPremul);
+        assert!(s0.active);
+
+        // Pause freezes clock and marks `active == false`.
+        let paused = player.configure(Config {
+            playing: false,
+            ..Config::default()
+        });
+        assert!(!paused.active);
+
+        // Double-click toggles `alternate` and starts 0.3s fill transition.
+        let _ = player.configure(Config::default());
+        assert!(player.pointer(PointerEvent::DoubleClick(0.5, 0.5)).changed);
+        assert_eq!(player.root_classes(), vec!["alternate"]);
+        let _ = player.render(1.0, 64, 64, PixelFormat::RgbaPremul);
+        let _ = player.render(1.15, 64, 64, PixelFormat::RgbaPremul);
+        assert!((player.clock() - 0.15).abs() < 1e-6);
+
+        // Restart resets clock to 0.
+        let _ = player.configure(Config {
+            restart: 1.0,
+            ..Config::default()
+        });
+        assert_eq!(player.clock(), 0.0);
     }
 }

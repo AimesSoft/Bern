@@ -500,10 +500,16 @@ impl Target for ComposeAndroid {
                 project::TV_BANNER,
             ));
         }
-        if !watch && bern_target_api::svg::used(app) {
+        if bern_target_api::svg::svg_used(app) {
             files.push(GeneratedFile::text(
                 sources.join("dev/bern/runtime/BernSvg.kt"),
-                bern_target_api::svg::template(include_str!("../templates/BernSvg.kt"), true),
+                include_str!("../templates/BernSvg.kt"),
+            ));
+        }
+        if !watch && bern_target_api::svg::webpage_used(app) {
+            files.push(GeneratedFile::text(
+                sources.join("dev/bern/runtime/BernWebPage.kt"),
+                include_str!("../templates/BernWebPage.kt"),
             ));
         }
         let lock = context.workspace_dir.join("Cargo.lock");
@@ -672,8 +678,12 @@ impl Target for ComposeAndroid {
                 .iter()
                 .map(|name| PathBuf::from(format!("dev/bern/runtime/{name}.kt")))
                 .chain(
-                    bern_target_api::svg::used(app)
+                    bern_target_api::svg::svg_used(app)
                         .then(|| PathBuf::from("dev/bern/runtime/BernSvg.kt")),
+                )
+                .chain(
+                    (!watch && bern_target_api::svg::webpage_used(app))
+                        .then(|| PathBuf::from("dev/bern/runtime/BernWebPage.kt")),
                 )
                 .chain([PathBuf::from(package.replace('.', "/")).join("BernGenerated.kt")])
                 .collect()

@@ -1,11 +1,18 @@
 [package]
 name = "bern-svg"
-description = "Bern's portable animated SVG document runtime"
+description = "Bern's portable pure-Rust animated SVG compiler and player"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 
+[features]
+default = ["svg"]
+# Compile `.svg` XML and CSS stylesheets into compact `BSVG` binary scenes.
+# Runtime-only targets disable default features and play precompiled scenes.
+svg = ["dep:roxmltree"]
+
 [dependencies]
-roxmltree = "0.21"
+roxmltree = { version = "0.21", optional = true }
+tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd"] }

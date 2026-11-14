@@ -253,8 +253,9 @@ pub(crate) fn icon_pictures(app: &Application, platform: &str) -> Vec<(String, S
     pictures
 }
 
-/// The application as this target builds it: without a WebView, every
-/// `Svg` is a picture drawn when the application is built.
+/// The application as this target builds it: GPUI has no WebView (`WebPage` is
+/// unavailable), while static SVGs lower to `Image` and animated SVGs compile
+/// to `BSVG` scenes played natively in Rust.
 fn prepared(app: &Application, config: &TargetConfig) -> Application {
     let config = TargetConfig {
         webview: Some(false),

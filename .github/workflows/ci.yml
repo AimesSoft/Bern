@@ -63,7 +63,7 @@ jobs:
       - name: Test JavaScript runtimes and browser hit testing
         env:
           PLAYWRIGHT_MODULE: ${{ runner.temp }}/bern-playwright/node_modules/playwright/index.mjs
-        run: node --test crates/bern-svg/tests/*.test.mjs crates/bern-backend-web/tests/*.test.mjs crates/bern-script/tests/*.test.mjs
+        run: node --test crates/bern-backend-web/tests/*.test.mjs crates/bern-script/tests/*.test.mjs
       - name: Test WebUI control bridge
         run: python3 crates/bern-backend-web/tests/control-bridge.test.py
 

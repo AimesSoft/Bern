@@ -18,7 +18,7 @@ fn fake_android_tools(dir: &Path) {
 }
 
 #[test]
-fn animated_svg_generates_for_every_presenter() {
+fn animated_svg_generates_for_every_presenter_without_webview() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .canonicalize()
@@ -27,48 +27,62 @@ fn animated_svg_generates_for_every_presenter() {
         bern_compiler::config::load(&root.join("examples/svg-animation/Bern.toml")).unwrap();
     let compiled = bern_compiler::compile(&config).unwrap();
     assert!(
-        bern_target_api::svg::used(&compiled.app),
-        "root-window SVGs must load the runtime too"
+        bern_target_api::svg::svg_used(&compiled.app)
+            && !bern_target_api::svg::webpage_used(&compiled.app),
+        "root-window SVGs must register the native SVG player without WebPage"
     );
-    let targets: Vec<(&str, Box<dyn Target>, &str, &str)> = vec![
+    type TargetCase = (
+        &'static str,
+        Box<dyn Target>,
+        &'static str,
+        &'static str,
+        &'static str,
+    );
+    let targets: Vec<TargetCase> = vec![
         (
             "macos",
             Box::new(bern_backend_swiftui::SwiftUiMacos),
             "Sources/BernRuntime.swift",
+            "bern_svg_render",
             "WKWebView",
         ),
         (
             "ios",
             Box::new(bern_backend_swiftui::SwiftUiIos),
             "Sources/BernRuntime.swift",
-            "UIViewRepresentable",
+            "bern_svg_render",
+            "WKWebView",
         ),
         (
             "web_app",
             Box::new(bern_backend_web::WebBrowser),
             "features.js",
-            "class: \"bern-svg\"",
+            "el(\"canvas\", { class: \"bern-svg\" })",
+            "allow-scripts",
         ),
         (
             "android",
             Box::new(bern_backend_compose::ComposeAndroid),
             "project/app/src/main/kotlin/dev/bern/runtime/BernSvg.kt",
-            "WebView(context)",
+            "BernNative.svgRender",
+            "WebView(",
         ),
         (
             "linux",
             Box::new(bern_backend_gtk::GtkLinux),
             "app/Cargo.toml",
-            "features = [\"svg\"]",
+            "bern-gtk",
+            "\"webpage\"",
         ),
         (
             "windows",
             Box::new(bern_backend_winui3::WinUi3Windows),
-            "app/runtime/bern_ui_svg.inl",
-            "CreateCoreWebView2EnvironmentWithOptions",
+            "app/runtime/bern_pch.h",
+            "#define BERN_WITH_SVG 1",
+            "#define BERN_WITH_WEBPAGE 1",
         ),
     ];
-    for (name, target, file, marker) in targets {
+    for (name, target, file, marker, forbidden) in targets {
         let mut context = BuildContext {
             project_dir: config.dir.clone(),
             workspace_dir: root.clone(),
@@ -92,12 +106,24 @@ fn animated_svg_generates_for_every_presenter() {
         let errors = target.check(&compiled.app, &context.target);
         assert!(!errors.iter().any(|e| e.is_error()), "{name}: {errors:?}");
         let files = target.generate(&compiled.app, &context).unwrap();
+        let bsvg = files
+            .iter()
+            .find(|f| f.path == Path::new("__bern_anim_svg/animation.svg.bsvg"))
+            .unwrap_or_else(|| panic!("{name}: missing compiled BSVG"));
+        assert!(
+            bsvg.contents.starts_with(bern_svg::MAGIC),
+            "{name}: invalid BSVG magic"
+        );
+
         let generated = files.iter().find(|f| f.path == *file).unwrap();
         let source = String::from_utf8_lossy(&generated.contents);
-        assert!(source.contains(marker), "{name}: presenter missing");
         assert!(
-            !source.contains("/*bern:svg-"),
-            "{name}: unresolved runtime template"
+            source.contains(marker),
+            "{name}: presenter missing `{marker}`"
+        );
+        assert!(
+            !source.contains(forbidden),
+            "{name}: must not pull in WebView (`{forbidden}`)"
         );
         if name == "android" {
             assert!(source.contains("assets.open(\"bern/resources/$source\")"));
@@ -120,7 +146,7 @@ fn animated_svg_generates_for_every_presenter() {
             .filter(|f| {
                 f.path
                     .extension()
-                    .is_some_and(|e| e != "png" && e != "icns")
+                    .is_some_and(|e| !matches!(e.to_str(), Some("png" | "icns" | "bsvg")))
             })
             .map(|f| String::from_utf8_lossy(&f.contents))
             .collect::<Vec<_>>()
@@ -147,24 +173,24 @@ fn animated_svg_generates_for_every_presenter() {
         if name != "web_app" {
             context.target.webview = Some(false);
             let plain = target.generate(&compiled.app, &context).unwrap();
-            let png = plain
-                .iter()
-                .find(|f| f.path.to_string_lossy().starts_with("__bern_static_svg/"))
-                .unwrap();
-            assert_eq!(&png.contents[..8], b"\x89PNG\r\n\x1a\n");
+            assert!(
+                plain
+                    .iter()
+                    .any(|f| f.path == Path::new("__bern_anim_svg/animation.svg.bsvg")),
+                "{name}: native SVG player works even with `webview = false`"
+            );
             let text = plain
                 .iter()
                 .filter(|f| {
                     f.path
                         .extension()
-                        .is_some_and(|e| e != "png" && e != "icns")
+                        .is_some_and(|e| !matches!(e.to_str(), Some("png" | "icns" | "bsvg")))
                 })
                 .map(|f| String::from_utf8_lossy(&f.contents))
                 .collect::<Vec<_>>()
                 .join("\n");
             assert!(text.contains("features = [\"boa\"]"));
             assert!(!text.contains("bernScriptDispatch"));
-            assert!(!text.contains("class BernSvg"));
             context.target.webview = None;
         }
         let files = scripted;
@@ -178,7 +204,7 @@ fn animated_svg_generates_for_every_presenter() {
 }
 
 #[test]
-fn tvos_compiles_svg_to_png_and_selects_boa() {
+fn tvos_and_gpui_play_animated_svg_natively_without_webkit() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .canonicalize()
@@ -186,7 +212,9 @@ fn tvos_compiles_svg_to_png_and_selects_boa() {
     let config =
         bern_compiler::config::load(&root.join("examples/svg-animation/Bern.toml")).unwrap();
     let compiled = bern_compiler::compile(&config).unwrap();
-    let context = BuildContext {
+
+    // tvOS
+    let tv_context = BuildContext {
         project_dir: config.dir.clone(),
         workspace_dir: root.clone(),
         output_dir: root.join("target/svg-generation-test/tvos"),
@@ -205,27 +233,49 @@ fn tvos_compiles_svg_to_png_and_selects_boa() {
         framework: Framework::Path(root.join("crates")),
         release: false,
     };
-    let target = bern_backend_swiftui::SwiftUiTvos;
-    let errors = target.check(&compiled.app, &context.target);
+    let tv_target = bern_backend_swiftui::SwiftUiTvos;
+    let errors = tv_target.check(&compiled.app, &tv_context.target);
     assert!(!errors.iter().any(|e| e.is_error()), "{errors:?}");
-    let files = target.generate(&compiled.app, &context).unwrap();
+    let files = tv_target.generate(&compiled.app, &tv_context).unwrap();
     let runtime = files
         .iter()
         .find(|f| f.path == Path::new("Sources/BernRuntime.swift"))
         .unwrap();
-    assert!(!String::from_utf8_lossy(&runtime.contents).contains("WebKit"));
+    let rt_text = String::from_utf8_lossy(&runtime.contents);
+    assert!(!rt_text.contains("WebKit"));
+    assert!(rt_text.contains("bern_svg_render"));
     assert!(
         files
             .iter()
-            .any(|f| f.path == Path::new("__bern_static_svg/animation.svg.png"))
+            .any(|f| f.path == Path::new("__bern_anim_svg/animation.svg.bsvg"))
     );
-    let plan = target.plan(&compiled.app, &context).unwrap();
-    assert!(plan.steps.iter().any(|s| matches!(s, bern_target_api::BuildStep::Mirror { files, .. } if files.iter().any(|(from, to)| from.starts_with(&context.output_dir) && to == Path::new("__bern_static_svg/animation.svg.png")))));
-    for file in files {
-        let path = context.output_dir.join(file.path);
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, file.contents).unwrap();
-    }
+    let plan = tv_target.plan(&compiled.app, &tv_context).unwrap();
+    assert!(plan.steps.iter().any(|s| matches!(s, bern_target_api::BuildStep::Mirror { files, .. } if files.iter().any(|(from, to)| from.starts_with(&tv_context.output_dir) && to == Path::new("__bern_anim_svg/animation.svg.bsvg")))));
+
+    // GPUI
+    let gpui_context = BuildContext {
+        output_dir: root.join("target/svg-generation-test/gpui"),
+        target: bern_target_api::TargetConfig {
+            ui: Some("gpui".into()),
+            platform: "macos".into(),
+            ..Default::default()
+        },
+        ..tv_context
+    };
+    let gpui_target = bern_backend_gpui::Gpui::MACOS;
+    let gpui_errors = gpui_target.check(&compiled.app, &gpui_context.target);
+    assert!(!gpui_errors.iter().any(|e| e.is_error()), "{gpui_errors:?}");
+    let gpui_files = gpui_target.generate(&compiled.app, &gpui_context).unwrap();
+    assert!(
+        gpui_files
+            .iter()
+            .any(|f| f.path == Path::new("__bern_anim_svg/animation.svg.bsvg"))
+    );
+    let gpui_ui = gpui_files
+        .iter()
+        .find(|f| f.path == Path::new("app/src/ui.rs"))
+        .unwrap();
+    assert!(String::from_utf8_lossy(&gpui_ui.contents).contains("b::svg(c, b::SvgProps"));
 }
 
 #[test]
@@ -242,7 +292,6 @@ fn svgs_that_neither_move_nor_run_are_pictures() {
         ..Default::default()
     };
     let platforms = ["windows", "macos", "android", "linux", "browser"];
-    // The example's document animates: it stays a document.
     assert!(
         compiled
             .app
@@ -252,10 +301,8 @@ fn svgs_that_neither_move_nor_run_are_pictures() {
     );
     for platform in platforms {
         let app = bern_target_api::svg::prepare(&compiled.app, &target(platform));
-        assert!(bern_target_api::svg::used(&app), "{platform}");
+        assert!(bern_target_api::svg::svg_used(&app), "{platform}");
     }
-    // A still one, one in the text's color, or one with colors per
-    // appearance is a picture of it everywhere: no document engine.
     for (picture, rendering, dark) in [
         (bern_ir::SvgPicture::Still, None, None),
         (bern_ir::SvgPicture::Tinted, Some("template"), None),
@@ -318,8 +365,6 @@ fn svgs_with_colors_per_appearance_are_drawn_in_each() {
     let config =
         bern_compiler::config::load(&root.join("examples/svg-animation/Bern.toml")).unwrap();
     let compiled = bern_compiler::compile(&config).unwrap();
-    // The example's resource, as a document black in the light appearance
-    // and white in the dark one.
     let dir = root.join("target/svg-generation-test/themed");
     std::fs::create_dir_all(&dir).unwrap();
     let svg = concat!(

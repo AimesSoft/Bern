@@ -5952,6 +5952,53 @@ export function dispatch(ctx, command, encode, completion) {
   host.dispatch(command, encode, ctx?.win ?? null, completion);
 }
 
+export function svgCached(key) {
+  if (!host.exports?.bern_svg_cached) return false;
+  const keyBytes = new TextEncoder().encode(key);
+  return host.withBytes(keyBytes, (kPtr, kLen) => host.exports.bern_svg_cached(kPtr, kLen) !== 0);
+}
+
+export function svgOpen(key, dataBytes) {
+  if (!host.exports?.bern_svg_open) return 0;
+  const keyBytes = new TextEncoder().encode(key);
+  return host.withBytes(keyBytes, (kPtr, kLen) => {
+    if (!dataBytes || dataBytes.length === 0) {
+      return host.exports.bern_svg_open(kPtr, kLen, 0, 0);
+    }
+    return host.withBytes(dataBytes, (dPtr, dLen) => host.exports.bern_svg_open(kPtr, kLen, dPtr, dLen));
+  });
+}
+
+export function svgFree(player) {
+  if (player && host.exports?.bern_svg_free) host.exports.bern_svg_free(player);
+}
+
+export function svgConfigure(player, playing, speed, restart, fit, interactive, dark, reducedMotion, textRgba) {
+  if (!player || !host.exports?.bern_svg_configure) return 0;
+  return host.exports.bern_svg_configure(
+    player, playing ? 1 : 0, speed, restart, fit, interactive ? 1 : 0, dark ? 1 : 0, reducedMotion ? 1 : 0, textRgba >>> 0,
+  );
+}
+
+export function svgPointer(player, kind, x, y) {
+  if (!player || !host.exports?.bern_svg_pointer) return 0;
+  return host.exports.bern_svg_pointer(player, kind, x, y);
+}
+
+export function svgRender(player, nowSecs, widthPx, heightPx) {
+  if (!player || !host.exports?.bern_svg_render) return { status: 0, pixels: null };
+  const status = host.exports.bern_svg_render(player, nowSecs, widthPx, heightPx, 2);
+  let pixels = null;
+  if ((status & 1) !== 0) {
+    const ptr = host.exports.bern_svg_pixels_ptr(player);
+    const len = host.exports.bern_svg_pixels_len(player);
+    if (ptr && len === widthPx * heightPx * 4) {
+      pixels = new Uint8ClampedArray(host.exports.memory.buffer, ptr, len).slice();
+    }
+  }
+  return { status, pixels };
+}
+
 
 export function ScaleBox(p, ctx, { width, height }, children) {
   const host = el("div", { class: "bern-scale-box bern-fill-width bern-fill-height" });

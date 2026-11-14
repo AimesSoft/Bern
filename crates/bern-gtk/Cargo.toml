@@ -14,11 +14,10 @@ repository = "https://github.com/AimesSoft/Bern"
 
 [features]
 script = ["dep:webkit6", "dep:bern-script"]
-svg = ["dep:bern-svg", "dep:webkit6"]
+webpage = ["dep:webkit6"]
 
 [dependencies]
 bern-script = { version = "=0.1.17", path = "../bern-script", optional = true }
-bern-svg = { version = "=0.1.17", path = "../bern-svg", optional = true }
 webkit6 = { version = "0.6.1", optional = true }
 serde_json = "1"
 bern-ffi = { version = "=0.1.17", path = "../bern-ffi" }

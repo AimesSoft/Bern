@@ -217,11 +217,13 @@ pub(crate) fn runtime_source(template: &str, engine_kinds: &str) -> String {
 }
 pub(crate) fn runtime_with_svg(app: &Application, source: &str) -> String {
     let mut source = runtime_source(source, &app.engine_kinds());
-    if bern_target_api::svg::used(app) {
-        source.push_str(&bern_target_api::svg::template(
-            include_str!("../templates/BernSvg.swift"),
-            false,
-        ));
+    if bern_target_api::svg::svg_used(app) {
+        source.push('\n');
+        source.push_str(include_str!("../templates/BernSvg.swift"));
+    }
+    if bern_target_api::svg::webpage_used(app) {
+        source.push('\n');
+        source.push_str(include_str!("../templates/BernWebPage.swift"));
     }
     source
 }

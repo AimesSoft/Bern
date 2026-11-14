@@ -1011,6 +1011,15 @@ object BernNative {
     external fun mediaView(app: Long, bytes: ByteArray)
     external fun mediaComplete(app: Long, bytes: ByteArray)
     external fun mediaEvent(app: Long, bytes: ByteArray)
+    external fun svgCached(key: ByteArray): Int
+    external fun svgOpen(key: ByteArray, data: ByteArray): Long
+    external fun svgFree(player: Long)
+    external fun svgConfigure(
+        player: Long, playing: Int, speed: Double, restart: Double,
+        fit: Int, interactive: Int, dark: Int, reducedMotion: Int, textRgba: Int,
+    ): Int
+    external fun svgPointer(player: Long, kind: Int, x: Double, y: Double): Int
+    external fun svgRender(player: Long, nowSecs: Double, widthPx: Int, heightPx: Int, directBuf: java.nio.ByteBuffer): Int
 }
 
 /// Callbacks of the Rust runtime. They arrive on engine and channel

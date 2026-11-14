@@ -8,6 +8,7 @@ rust-version.workspace = true
 repository.workspace = true
 
 [dependencies]
+bern-svg = { workspace = true, default-features = false }
 bern-script.workspace = true
 bern-protocol.workspace = true
 bern-command.workspace = true

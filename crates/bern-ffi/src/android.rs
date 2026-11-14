@@ -903,3 +903,79 @@ pub unsafe extern "system" fn Java_dev_bern_runtime_BernNative_scriptComplete(
         bern_script::host::complete(json);
     }
 }
+
+native!(Java_dev_bern_runtime_BernNative_svgCached(env, key: jbyteArray) -> jint {
+    let key = bytes_in(env, key);
+    crate::svg::bern_svg_cached(key.as_ptr(), key.len()) as jint
+});
+
+native!(Java_dev_bern_runtime_BernNative_svgOpen(
+    env, key: jbyteArray, data: jbyteArray
+) -> jlong {
+    let key = bytes_in(env, key);
+    let data = bytes_in(env, data);
+    crate::svg::bern_svg_open(key.as_ptr(), key.len(), data.as_ptr(), data.len()) as usize as jlong
+});
+
+native!(Java_dev_bern_runtime_BernNative_svgFree(_env, player: jlong) -> () {
+    crate::svg::bern_svg_free(player as usize as *mut crate::svg::BernSvgPlayer)
+});
+
+native!(Java_dev_bern_runtime_BernNative_svgConfigure(
+    _env,
+    player: jlong,
+    playing: jint,
+    speed: jdouble,
+    restart: jdouble,
+    fit: jint,
+    interactive: jint,
+    dark: jint,
+    reduced_motion: jint,
+    text_rgba: jint
+) -> jint {
+    crate::svg::bern_svg_configure(
+        player as usize as *mut crate::svg::BernSvgPlayer,
+        playing as u8,
+        speed,
+        restart,
+        fit as u8,
+        interactive as u8,
+        dark as u8,
+        reduced_motion as u8,
+        text_rgba as u32,
+    ) as jint
+});
+
+native!(Java_dev_bern_runtime_BernNative_svgPointer(
+    _env, player: jlong, kind: jint, x: jdouble, y: jdouble
+) -> jint {
+    crate::svg::bern_svg_pointer(
+        player as usize as *mut crate::svg::BernSvgPlayer,
+        kind as u8,
+        x as f32,
+        y as f32,
+    ) as jint
+});
+
+native!(Java_dev_bern_runtime_BernNative_svgRender(
+    env, player: jlong, now_secs: jdouble, width_px: jint, height_px: jint, direct_buf: jobject
+) -> jint {
+    let ptr = player as usize as *mut crate::svg::BernSvgPlayer;
+    let status = crate::svg::bern_svg_render(
+        ptr,
+        now_secs,
+        width_px.max(1) as u32,
+        height_px.max(1) as u32,
+        0,
+    );
+    if (status & 1) != 0 && !direct_buf.is_null() {
+        let dst = ((**env).v1_6.GetDirectBufferAddress)(env, direct_buf).cast::<u8>();
+        let cap = ((**env).v1_6.GetDirectBufferCapacity)(env, direct_buf);
+        let src = crate::svg::bern_svg_pixels_ptr(ptr);
+        let len = crate::svg::bern_svg_pixels_len(ptr);
+        if !dst.is_null() && !src.is_null() && cap >= 0 && (cap as usize) >= len && len > 0 {
+            std::ptr::copy_nonoverlapping(src, dst, len);
+        }
+    }
+    status as jint
+});

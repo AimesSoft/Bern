@@ -1,9 +1,134 @@
-// Animated SVG is an isolated, transparent document. WebKit is loaded
-// only by applications declaring Svg; no app command handlers are exposed.
-import WebKit
+// Native pure-Rust animated SVG presenter (`bern-svg` over C ABI).
+// Works across macOS, iOS, tvOS, and watchOS without any browser view.
+import CoreGraphics
 
-private let bernSvgPrefix = /*bern:svg-prefix*/
-private let bernSvgSuffix = /*bern:svg-suffix*/
+@MainActor
+private final class BernSvgController: ObservableObject {
+    nonisolated(unsafe) private var player: OpaquePointer?
+    private var loadedName: String = ""
+    private var image: CGImage?
+    private let colorSpace = CGColorSpaceCreateDeviceRGB()
+    @Published var active: Bool = true
+    @Published var revision: UInt64 = 0
+
+    deinit {
+        if let player { bern_svg_free(player) }
+    }
+
+    private func ensureLoaded(_ name: String) {
+        guard loadedName != name else { return }
+        if let player {
+            bern_svg_free(player)
+            self.player = nil
+        }
+        loadedName = name
+        image = nil
+        let keyBytes = Array(name.utf8)
+        let alreadyCached = keyBytes.withUnsafeBufferPointer { keyBuf in
+            bern_svg_cached(keyBuf.baseAddress, keyBuf.count) != 0
+        }
+        if alreadyCached {
+            player = keyBytes.withUnsafeBufferPointer { keyBuf in
+                bern_svg_open(keyBuf.baseAddress, keyBuf.count, nil, 0)
+            }
+            return
+        }
+        guard let root = Bundle.main.resourceURL,
+              let data = try? Data(contentsOf: root.appendingPathComponent(name)) else {
+            NSLog("Bern SVG: unable to load %@", name)
+            return
+        }
+        player = keyBytes.withUnsafeBufferPointer { keyBuf in
+            data.withUnsafeBytes { rawBuf in
+                let base = rawBuf.bindMemory(to: UInt8.self).baseAddress
+                return bern_svg_open(keyBuf.baseAddress, keyBuf.count, base, rawBuf.count)
+            }
+        }
+    }
+
+    func renderFrame(
+        name: String,
+        date: Date,
+        width: CGFloat,
+        height: CGFloat,
+        scale: CGFloat,
+        fit: String,
+        playing: Bool,
+        speed: Double,
+        restart: Double,
+        interactive: Bool,
+        dark: Bool,
+        reduceMotion: Bool
+    ) -> CGImage? {
+        ensureLoaded(name)
+        guard let player else { return nil }
+        let fitCode: UInt8 = switch fit {
+        case "cover": 1
+        case "fill": 2
+        default: 0
+        }
+        let textRgba: UInt32 = dark ? 0xFFFFFFFF : 0x000000FF
+        _ = bern_svg_configure(
+            player,
+            playing ? 1 : 0,
+            speed.isFinite && speed > 0 ? speed : 1,
+            restart.isFinite ? restart : 0,
+            fitCode,
+            interactive ? 1 : 0,
+            dark ? 1 : 0,
+            reduceMotion ? 1 : 0,
+            textRgba
+        )
+        let s = max(1.0, scale)
+        let wPx = UInt32(max(1, Int((max(1.0, width) * s).rounded())))
+        let hPx = UInt32(max(1, Int((max(1.0, height) * s).rounded())))
+        let status = bern_svg_render(player, date.timeIntervalSinceReferenceDate, wPx, hPx, 0)
+        let changed = (status & 1) != 0
+        let nowActive = (status & 2) != 0
+
+        if changed || image == nil {
+            let ptr = bern_svg_pixels_ptr(player)
+            let len = bern_svg_pixels_len(player)
+            if let ptr, len == Int(wPx) * Int(hPx) * 4 {
+                let copy = Data(bytes: ptr, count: len)
+                if let provider = CGDataProvider(data: copy as CFData) {
+                    let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+                    image = CGImage(
+                        width: Int(wPx),
+                        height: Int(hPx),
+                        bitsPerComponent: 8,
+                        bitsPerPixel: 32,
+                        bytesPerRow: Int(wPx) * 4,
+                        space: colorSpace,
+                        bitmapInfo: bitmapInfo,
+                        provider: provider,
+                        decode: nil,
+                        shouldInterpolate: true,
+                        intent: .defaultIntent
+                    )
+                }
+            }
+        }
+        if nowActive != active {
+            Task { @MainActor [weak self] in
+                guard let self, self.active != nowActive else { return }
+                self.active = nowActive
+            }
+        }
+        return image
+    }
+
+    func pointer(kind: UInt8, x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat) {
+        guard let player else { return }
+        let nx = Float(width > 0 ? x / width : 0.5)
+        let ny = Float(height > 0 ? y / height : 0.5)
+        let status = bern_svg_pointer(player, kind, nx, ny)
+        let changed = (status & 1) != 0
+        let nowActive = (status & 2) != 0
+        if active != nowActive { active = nowActive }
+        if changed || nowActive { revision &+= 1 }
+    }
+}
 
 struct BernSvg: View {
     let name: String
@@ -17,19 +142,50 @@ struct BernSvg: View {
     var interactive: Bool = true
     var data: String = ""
     var externalLinks: Bool = false
+
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.displayScale) private var displayScale
     @Environment(\.scenePhase) private var phase
-    @State private var visible = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @StateObject private var controller = BernSvgController()
+    @State private var visible = true
 
     var body: some View {
-        BernSvgDocument(name: name, state: [
-            "playing": playing, "visible": visible && phase == .active,
-            "speed": speed.isFinite && speed > 0 ? speed : 1,
-            "restart": restart.isFinite ? restart : 0,
-            "interactive": interactive, "fit": fit, "data": data, "externalLinks": externalLinks,
-            "scheme": scheme == .dark ? "dark" : "light"
-        ])
-        .frame(width: max(0, width), height: max(0, height))
+        let _ = controller.revision
+        #if os(macOS)
+        let sceneLive = true
+        #else
+        let sceneLive = phase != .background
+        #endif
+        let running = controller.active && playing && visible && sceneLive
+        let w = max(0, width)
+        let h = max(0, height)
+        TimelineView(.animation(minimumInterval: nil, paused: !running)) { timeline in
+            if let cgImage = controller.renderFrame(
+                name: name,
+                date: timeline.date,
+                width: w,
+                height: h,
+                scale: displayScale,
+                fit: fit,
+                playing: playing && visible && sceneLive,
+                speed: speed,
+                restart: restart,
+                interactive: interactive,
+                dark: scheme == .dark,
+                reduceMotion: reduceMotion
+            ) {
+                SwiftUI.Image(decorative: cgImage, scale: max(1.0, displayScale))
+                    .interpolation(.high)
+                    .resizable()
+                    .frame(width: w, height: h)
+            } else {
+                SwiftUI.Color.clear.frame(width: w, height: h)
+            }
+        }
+        .frame(width: w, height: h)
+        .contentShape(SwiftUI.Rectangle())
+        .modifier(BernSvgGestures(interactive: interactive, width: w, height: h, controller: controller))
         .clipped()
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label ?? "")
@@ -39,225 +195,48 @@ struct BernSvg: View {
     }
 }
 
-@MainActor
-private final class BernSvgCoordinator: NSObject, WKNavigationDelegate {
-    var name = ""
-    var state: [String: Any] = [:]
-    var loaded = false
-    var lastState: Data?
+private struct BernSvgGestures: ViewModifier {
+    let interactive: Bool
+    let width: CGFloat
+    let height: CGFloat
+    let controller: BernSvgController
 
-    func apply(_ view: WKWebView) {
-        guard loaded, let data = try? JSONSerialization.data(withJSONObject: state, options: [.sortedKeys]), data != lastState,
-              let json = String(data: data, encoding: .utf8) else { return }
-        lastState = data
-        view.evaluateJavaScript("window.bernSvg?.update(\(json))", completionHandler: nil)
-    }
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        loaded = true
-        apply(webView)
-    }
-    func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
-        if state["externalLinks"] as? Bool == true, action.navigationType == .linkActivated,
-           let url = action.request.url, url.scheme == "https", url.host != nil {
-            #if os(macOS)
-            NSWorkspace.shared.open(url)
+    func body(content: Content) -> some View {
+        if !interactive {
+            content
+        } else {
+            #if os(tvOS)
+            content
+                .focusable(true)
+                .onTapGesture {
+                    controller.pointer(kind: 1, x: width * 0.5, y: height * 0.5, width: width, height: height)
+                    controller.pointer(kind: 0, x: width * 0.5, y: height * 0.5, width: width, height: height)
+                }
+            #elseif os(watchOS)
+            content
+                .onTapGesture(count: 2) {
+                    controller.pointer(kind: 1, x: width * 0.5, y: height * 0.5, width: width, height: height)
+                }
+                .onTapGesture(count: 1) {
+                    controller.pointer(kind: 0, x: width * 0.5, y: height * 0.5, width: width, height: height)
+                }
             #else
-            // In this async method the plain call would be the async overload.
-            UIApplication.shared.open(url, options: [:], completionHandler: nil)
+            content
+                .onTapGesture(count: 2) {
+                    controller.pointer(kind: 1, x: width * 0.5, y: height * 0.5, width: width, height: height)
+                }
+                .onTapGesture(count: 1) {
+                    controller.pointer(kind: 0, x: width * 0.5, y: height * 0.5, width: width, height: height)
+                }
+                .onContinuousHover { hover in
+                    switch hover {
+                    case .active(let pt):
+                        controller.pointer(kind: 2, x: pt.x, y: pt.y, width: width, height: height)
+                    case .ended:
+                        controller.pointer(kind: 3, x: 0, y: 0, width: width, height: height)
+                    }
+                }
             #endif
         }
-        // The document itself never navigates away from the bundled source.
-        return !loaded && action.request.url?.absoluteString == "about:blank" ? .allow : .cancel
-    }
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        NSLog("Bern SVG %@: %@", name, error.localizedDescription)
     }
 }
-
-@MainActor
-private struct BernSvgDocument {
-    let name: String
-    let state: [String: Any]
-
-    func makeCoordinator() -> BernSvgCoordinator { BernSvgCoordinator() }
-    func makeView(_ coordinator: BernSvgCoordinator) -> WKWebView {
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .nonPersistent()
-        configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
-        let view = WKWebView(frame: .zero, configuration: configuration)
-        view.navigationDelegate = coordinator
-        #if os(macOS)
-        view.setValue(false, forKey: "drawsBackground")
-        #else
-        view.isOpaque = false
-        view.backgroundColor = .clear
-        view.scrollView.backgroundColor = .clear
-        view.scrollView.isScrollEnabled = false
-        #endif
-        return view
-    }
-    func update(_ view: WKWebView, _ coordinator: BernSvgCoordinator) {
-        coordinator.state = state
-        if coordinator.name != name {
-            coordinator.name = name
-            coordinator.loaded = false
-            coordinator.lastState = nil
-            guard let root = Bundle.main.resourceURL,
-                  let source = try? String(contentsOf: root.appendingPathComponent(name), encoding: .utf8) else {
-                NSLog("Bern SVG: unable to load %@", name)
-                return
-            }
-            view.loadHTMLString(bernSvgPrefix + source + bernSvgSuffix, baseURL: nil)
-        } else { coordinator.apply(view) }
-    }
-}
-
-#if os(macOS)
-extension BernSvgDocument: NSViewRepresentable {
-    func makeNSView(context: Context) -> WKWebView { makeView(context.coordinator) }
-    func updateNSView(_ view: WKWebView, context: Context) { update(view, context.coordinator) }
-    static func dismantleNSView(_ view: WKWebView, coordinator: BernSvgCoordinator) {
-        view.stopLoading()
-        view.navigationDelegate = nil
-        view.loadHTMLString("", baseURL: nil)
-    }
-}
-#else
-extension BernSvgDocument: UIViewRepresentable {
-    func makeUIView(context: Context) -> WKWebView { makeView(context.coordinator) }
-    func updateUIView(_ view: WKWebView, context: Context) { update(view, context.coordinator) }
-    static func dismantleUIView(_ view: WKWebView, coordinator: BernSvgCoordinator) {
-        view.stopLoading()
-        view.navigationDelegate = nil
-        view.loadHTMLString("", baseURL: nil)
-    }
-}
-#endif
-
-// MARK: - Web pages
-
-/// A preference for the browsing environment, independent of a custom UA.
-enum BernWebContentMode {
-    case auto, mobile, desktop
-}
-
-/// `WebPage`: a page of the web, signed in with the cookies of a file. Its
-/// session is its own and goes with it.
-struct BernWebPage: View {
-    let url: String
-    let cookiesFile: String
-    let cookieDomain: String
-    let userAgent: String
-    let contentMode: BernWebContentMode
-    let closeOn: String
-    let label: String?
-    let close: () -> Void
-
-    var body: some View {
-        BernWebPageView(url: url, cookiesFile: cookiesFile, cookieDomain: cookieDomain, userAgent: userAgent, contentMode: contentMode, closeOn: closeOn, close: close)
-            .accessibilityLabel(label ?? "")
-    }
-}
-
-/// Where a page's press on `close_on` comes back to the app.
-private let bernWebPageClose = "bern-web-page"
-
-/// What listens in the page for a press on `selector`, before the page's own
-/// handlers, which may do nothing outside their own app.
-private func bernWebCloseScript(_ selector: String) -> String {
-    let literal = String(data: (try? JSONEncoder().encode(selector)) ?? Data(), encoding: .utf8) ?? "\"\""
-    return "document.addEventListener('click',function(e){var t=e.target;if(t&&t.closest&&t.closest(\(literal))){e.stopPropagation();e.preventDefault();location.href='\(bernWebPageClose)://close'}},true);"
-}
-
-/// The cookies of the file: `name=value; name=value`, attributes left out.
-private func bernWebCookies(file: String, domain: String) -> [HTTPCookie] {
-    guard !file.isEmpty, !domain.isEmpty, let text = try? String(contentsOfFile: file, encoding: .utf8) else { return [] }
-    let attributes: Set<String> = ["path", "domain", "expires", "max-age", "secure", "httponly", "samesite"]
-    return text.split(separator: ";").compactMap { part in
-        let pair = part.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "=", maxSplits: 1).map(String.init)
-        guard pair.count == 2, !attributes.contains(pair[0].lowercased()) else { return nil }
-        return HTTPCookie(properties: [.name: pair[0], .value: pair[1], .domain: domain, .path: "/", .secure: "TRUE"])
-    }
-}
-
-@MainActor
-private final class BernWebPageCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate {
-    var url = ""
-    var close: () -> Void = {}
-
-    /// The page's own schemes are for its app: only the web and a press on
-    /// `close_on` go on.
-    func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
-        guard let scheme = action.request.url?.scheme else { return .allow }
-        if scheme == bernWebPageClose { close() }
-        return ["http", "https", "about", "blob", "data"].contains(scheme) ? .allow : .cancel
-    }
-
-    /// What opens a window of its own opens here.
-    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
-                 for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if action.targetFrame == nil { webView.load(action.request) }
-        return nil
-    }
-}
-
-@MainActor
-private struct BernWebPageView {
-    let url: String
-    let cookiesFile: String
-    let cookieDomain: String
-    let userAgent: String
-    let contentMode: BernWebContentMode
-    let closeOn: String
-    let close: () -> Void
-
-    func makeCoordinator() -> BernWebPageCoordinator { BernWebPageCoordinator() }
-    func makeView(_ coordinator: BernWebPageCoordinator) -> WKWebView {
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .nonPersistent()
-        #if os(iOS)
-        // A custom UA alone does not change iPad's desktop environment.
-        // Leave the recommended mode untouched unless explicitly requested.
-        switch contentMode {
-        case .auto: break
-        case .mobile: configuration.defaultWebpagePreferences.preferredContentMode = .mobile
-        case .desktop: configuration.defaultWebpagePreferences.preferredContentMode = .desktop
-        }
-        #endif
-        if !closeOn.isEmpty {
-            configuration.userContentController.addUserScript(WKUserScript(
-                source: bernWebCloseScript(closeOn), injectionTime: .atDocumentStart, forMainFrameOnly: true))
-        }
-        let view = WKWebView(frame: .zero, configuration: configuration)
-        if !userAgent.isEmpty { view.customUserAgent = userAgent }
-        view.uiDelegate = coordinator
-        view.navigationDelegate = coordinator
-        return view
-    }
-    func update(_ view: WKWebView, _ coordinator: BernWebPageCoordinator) {
-        coordinator.close = close
-        guard coordinator.url != url, let address = URL(string: url) else { return }
-        coordinator.url = url
-        let store = view.configuration.websiteDataStore.httpCookieStore
-        let group = DispatchGroup()
-        for cookie in bernWebCookies(file: cookiesFile, domain: cookieDomain) {
-            group.enter()
-            store.setCookie(cookie) { group.leave() }
-        }
-        group.notify(queue: .main) { view.load(URLRequest(url: address)) }
-    }
-}
-
-#if os(macOS)
-extension BernWebPageView: NSViewRepresentable {
-    func makeNSView(context: Context) -> WKWebView { makeView(context.coordinator) }
-    func updateNSView(_ view: WKWebView, context: Context) { update(view, context.coordinator) }
-    static func dismantleNSView(_ view: WKWebView, coordinator: BernWebPageCoordinator) { view.stopLoading() }
-}
-#else
-extension BernWebPageView: UIViewRepresentable {
-    func makeUIView(context: Context) -> WKWebView { makeView(context.coordinator) }
-    func updateUIView(_ view: WKWebView, context: Context) { update(view, context.coordinator) }
-    static func dismantleUIView(_ view: WKWebView, coordinator: BernWebPageCoordinator) { view.stopLoading() }
-}
-#endif

@@ -521,9 +521,9 @@ impl Target for WebBrowser {
                     "{}{}",
                     FEATURE_RUNTIME.replace("__BERN_VERSION__", &version),
                     if bern_target_api::svg::used(app) {
-                        bern_target_api::svg::template(include_str!("../templates/svg.js"), false)
+                        include_str!("../templates/svg.js")
                     } else {
-                        String::new()
+                        ""
                     }
                 ),
             ),
