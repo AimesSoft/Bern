@@ -210,6 +210,12 @@ impl Generator<'_> {
                 "suggest",
                 (element.keyword("suggest") == Some("true")).then(|| "true".into()),
             ),
+            (
+                "iconOnly",
+                (element.keyword("style") == Some("palette")
+                    && element.keyword("display") == Some("icon"))
+                .then(|| "true".into()),
+            ),
             // A palette grows out of its field on the hero spring, follows
             // its results on the bouncy one and goes back on the snappy one.
             (

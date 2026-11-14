@@ -223,6 +223,12 @@ const ICONS: &[(&str, &str, Fill)] = &[
         Fill::Shapes(&[0]),
     ),
     ("square.and.arrow.up", lucide!("share"), Fill::None),
+    ("square.and.pencil", lucide!("notebook-text"), Fill::None),
+    (
+        "bubble.left.and.bubble.right",
+        lucide!("message-square-quote"),
+        Fill::None,
+    ),
     ("star", lucide!("star"), Fill::None),
     ("star.fill", lucide!("star"), Fill::All),
     ("star.slash", lucide!("star-off"), Fill::None),

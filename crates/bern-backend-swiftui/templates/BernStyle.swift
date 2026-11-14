@@ -1232,11 +1232,14 @@ private struct BernSystemButtonLook: ViewModifier {
 
 extension View {
     /// iOS colors a plain button's label with the surrounding tint, the
-    /// application's accent under a tab bar; the design keeps the accent
-    /// to the main button (8.1), so it is the primary color, as on macOS.
+    /// application's accent under a tab bar; macOS 26 likewise tints `.glass`
+    /// buttons inside popovers when a window tint is active. Keep the accent
+    /// to prominent buttons (`8.1`) and leave secondary and icon buttons neutral.
     @ViewBuilder func bernPrimaryLabel() -> some View {
         #if os(iOS)
         tint(.primary)
+        #elseif os(macOS)
+        tint(nil as Color?)
         #else
         self
         #endif
@@ -5902,6 +5905,7 @@ struct BernSearchPalette<Results: View>: View {
     let width: CGFloat
     let height: CGFloat
     var shortcut: BernKeyboardShortcut? = nil
+    var iconOnly = false
     @ViewBuilder let results: () -> Results
     @Environment(BernPaletteState.self) private var palette
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
@@ -5923,30 +5927,46 @@ struct BernSearchPalette<Results: View>: View {
         palette.open()
     }
 
-    var body: some View {
-        Button(action: open) {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").font(.system(size: 14))
-                Text(verbatim: prompt).font(.system(size: 13)).lineLimit(1)
-                Spacer(minLength: 4)
-                #if !os(tvOS) && !os(watchOS)
-                if let shortcut { Text(verbatim: BernShortcuts.display(shortcut)).font(.system(size: 11.5, weight: .medium)) }
-                #endif
+    @ViewBuilder var body: some View {
+        if iconOnly {
+            Button(action: open) {
+                Label(prompt, systemImage: "magnifyingglass")
+                    .labelStyle(.iconOnly)
             }
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 12)
-            .frame(width: 250, height: 34)
-            .contentShape(Capsule())
+            .help(prompt)
+            .focused($focused)
+            .background(GeometryReader { geometry in
+                Color.clear.onChange(of: geometry.frame(in: .global), initial: true) { source = geometry.frame(in: .global) }
+            })
+            .bernHiddenShortcut(shortcut, action: open)
+            .bernControl(target, role: "search", label: prompt,
+                         actions: BernControlActions(activate: open, edit: { text.wrappedValue = $0 },
+                                                     submit: { palette.activate() }, value: { text.wrappedValue }, focus: open))
+        } else {
+            Button(action: open) {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass").font(.system(size: 14))
+                    Text(verbatim: prompt).font(.system(size: 13)).lineLimit(1)
+                    Spacer(minLength: 4)
+                    #if !os(tvOS) && !os(watchOS)
+                    if let shortcut { Text(verbatim: BernShortcuts.display(shortcut)).font(.system(size: 11.5, weight: .medium)) }
+                    #endif
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .frame(width: 250, height: 34)
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .focused($focused)
+            .background(GeometryReader { geometry in
+                Color.clear.onChange(of: geometry.frame(in: .global), initial: true) { source = geometry.frame(in: .global) }
+            })
+            .bernHiddenShortcut(shortcut, action: open)
+            .bernControl(target, role: "search", label: prompt,
+                         actions: BernControlActions(activate: open, edit: { text.wrappedValue = $0 },
+                                                     submit: { palette.activate() }, value: { text.wrappedValue }, focus: open))
         }
-        .buttonStyle(.plain)
-        .focused($focused)
-        .background(GeometryReader { geometry in
-            Color.clear.onChange(of: geometry.frame(in: .global), initial: true) { source = geometry.frame(in: .global) }
-        })
-        .bernHiddenShortcut(shortcut, action: open)
-        .bernControl(target, role: "search", label: prompt,
-                     actions: BernControlActions(activate: open, edit: { text.wrappedValue = $0 },
-                                                 submit: { palette.activate() }, value: { text.wrappedValue }, focus: open))
     }
 }
 

@@ -846,8 +846,12 @@ impl Generator<'_> {
         // form's row reads on the other platforms. iOS keeps its menu, but
         // its value stands in the capsule too, in the words' color rather
         // than the accent the system gives a picker's value.
+        let menu = matches!(
+            element.keyword("style"),
+            None | Some("automatic") | Some("menu")
+        );
         let row = matches!(self.platform, Platform::Tvos | Platform::Ios)
-            && element.keyword("style") == Some("menu")
+            && menu
             && element.keyword("shape") != Some("capsule")
             && element.keyword("label_hidden") != Some("true");
         let capsule = row || element.keyword("shape") == Some("capsule");
@@ -887,9 +891,9 @@ impl Generator<'_> {
             out.line(".labelsHidden()");
         }
         match element.keyword("style") {
-            Some("menu") if capsule => out.line(".pickerStyle(.inline)"),
-            Some("menu") => out.line(format!(".pickerStyle(.menu){}", menu_tint(self.platform))),
-            Some("segmented") => out.line(".pickerStyle(.segmented).bernAccentTint()"),
+            _ if menu && capsule => out.line(".pickerStyle(.inline)"),
+            _ if menu => out.line(format!(".pickerStyle(.menu){}", menu_tint(self.platform))),
+            Some("segmented") => out.line(".pickerStyle(.segmented).tint(nil as SwiftUI.Color?)"),
             // iOS lists the options with a checkmark instead of
             // radio buttons.
             Some("radio") if self.platform.uikit() => out.line(".pickerStyle(.inline)"),

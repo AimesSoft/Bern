@@ -2146,14 +2146,23 @@ function searchResults(box, input, field, ctx, results, suggest) {
 
 /// The search trigger and its keyboard-navigable, window-scoped palette.
 /// Results own their effects only while the palette is visible.
-export function SearchPalette(p, ctx, { id, field, prompt, panelPrompt, width, height, shortcut }, submit, results) {
-  const caption = el("span", { class: "bern-search-palette-prompt" });
-  bindText(caption, prompt ?? (() => ""));
-  const trigger = el("button", { class: "bern-search-palette-trigger", type: "button", "aria-haspopup": "dialog", "aria-expanded": "false" }, icon("magnifyingglass", 16), caption);
-  if (shortcut) {
-    const key = el("kbd", { class: "bern-search-palette-key", "aria-hidden": "true" });
-    bindText(key, () => shortcutText(typeof shortcut === "function" ? shortcut() : shortcut));
-    trigger.append(key);
+export function SearchPalette(p, ctx, { id, field, prompt, panelPrompt, width, height, shortcut, iconOnly }, submit, results) {
+  let trigger;
+  if (iconOnly) {
+    trigger = el("button", { class: "bern-icon-button", type: "button", "aria-haspopup": "dialog", "aria-expanded": "false" }, icon("magnifyingglass", 16));
+    if (prompt) {
+      bindAttr(trigger, "aria-label", prompt);
+      bindAttr(trigger, "title", prompt);
+    }
+  } else {
+    const caption = el("span", { class: "bern-search-palette-prompt" });
+    bindText(caption, prompt ?? (() => ""));
+    trigger = el("button", { class: "bern-search-palette-trigger", type: "button", "aria-haspopup": "dialog", "aria-expanded": "false" }, icon("magnifyingglass", 16), caption);
+    if (shortcut) {
+      const key = el("kbd", { class: "bern-search-palette-key", "aria-hidden": "true" });
+      bindText(key, () => shortcutText(typeof shortcut === "function" ? shortcut() : shortcut));
+      trigger.append(key);
+    }
   }
   const dialog = el("dialog", { class: "bern-search-palette" });
   const input = el("input", { class: "bern-search-palette-input", type: "search", autocomplete: "off", "aria-autocomplete": "list" });

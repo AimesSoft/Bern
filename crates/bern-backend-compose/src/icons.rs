@@ -27,6 +27,7 @@ pub const ICONS: &[(&str, &str)] = &[
     ("backward.fill", "fastRewind"),
     ("bell", "Icons.Filled.Notifications"),
     ("bell.fill", "Icons.Filled.Notifications"),
+    ("bubble.left.and.bubble.right", "chat"),
     ("calendar", "Icons.Filled.DateRange"),
     ("camera", "photoCamera"),
     ("captions.bubble", "subtitles"),

@@ -1566,6 +1566,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 FEATURE,
                 opt("shortcut", PropKind::Shortcut),
                 opt("style", PropKind::Keyword(&["automatic", "palette"])),
+                opt("display", PropKind::Keyword(&["automatic", "icon"])),
                 opt("panel_prompt", PropKind::DisplayText),
                 opt("width", PropKind::Number),
                 opt("height", PropKind::Number),

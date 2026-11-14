@@ -118,6 +118,15 @@ impl Checker<'_> {
         {
             self.error(element.span, "a `Tab` with `display: icon` needs an `icon`");
         }
+        if parts.kind == "Search"
+            && matches!(parts.props.get("display"), Some(ir::Prop::Keyword { value }) if value == "icon")
+            && !matches!(parts.props.get("style"), Some(ir::Prop::Keyword { value }) if value == "palette")
+        {
+            self.error(
+                element.span,
+                "`display: icon` is for `Search(style: palette)`, whose trigger is a button",
+            );
+        }
         let children = self.children(element, path, &parts.child_ctx, scope);
         if parts.kind == "Tabs" {
             self.tab_accessory(element, &children);

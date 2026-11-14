@@ -548,7 +548,12 @@ impl Generator<'_> {
             .shortcut(element)
             .map(|s| format!(", shortcut: {s}"))
             .unwrap_or_default();
-        out.open(format!("BernSearchPalette(text: {}, prompt: {prompt}, panelPrompt: {panel_prompt}, target: {}, width: {}, height: {}{shortcut}) {{",
+        let icon_only = if element.keyword("display") == Some("icon") {
+            ", iconOnly: true"
+        } else {
+            ""
+        };
+        out.open(format!("BernSearchPalette(text: {}, prompt: {prompt}, panelPrompt: {panel_prompt}, target: {}, width: {}, height: {}{shortcut}{icon_only}) {{",
             self.binding_of(&field), self.target(element, ctx), double(element.number("width").unwrap_or(640.0)), double(element.number("height").unwrap_or(480.0))));
         self.nodes(
             out,

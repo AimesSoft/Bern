@@ -10,6 +10,7 @@ use bern_ir::{Application, Node, Prop};
 /// The names every target draws, sorted.
 pub const NAMES: &[&str] = &[
     "archivebox",
+    "arrow.clockwise",
     "arrow.down",
     "arrow.down.circle",
     "arrow.down.right.and.arrow.up.left",
@@ -20,6 +21,7 @@ pub const NAMES: &[&str] = &[
     "arrow.up.left.and.arrow.down.right",
     "arrow.up.right.square",
     "backward.end.fill",
+    "bubble.left.and.bubble.right",
     "calendar",
     "camera",
     "captions.bubble",
@@ -57,6 +59,7 @@ pub const NAMES: &[&str] = &[
     "keyboard",
     "line.3.horizontal.decrease",
     "link",
+    "list.bullet",
     "list.bullet.rectangle",
     "magnifyingglass",
     "minus",
@@ -90,6 +93,7 @@ pub const NAMES: &[&str] = &[
     "speedometer",
     "square",
     "square.and.arrow.up",
+    "square.and.pencil",
     "square.grid.2x2",
     "square.grid.3x3",
     "square.on.square",
