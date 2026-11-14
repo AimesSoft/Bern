@@ -5749,12 +5749,18 @@ struct BernSearchPaletteHost<Content: View>: View {
                 GeometryReader { geometry in
                     if palette.presented {
                         ZStack(alignment: .topLeading) {
-                            Color.black.opacity(palette.expanded ? (scheme == .dark ? 0.32 : 0.2) : 0)
-                                .accessibilityHidden(true)
-                                #if !os(macOS)
-                                .contentShape(Rectangle())
-                                .onTapGesture { palette.close() }
-                                #endif
+                            Group {
+                                if #available(macOS 26.0, iOS 26.0, tvOS 26.0, watchOS 26.0, *) {
+                                    Color.clear
+                                } else {
+                                    Color.black.opacity(palette.expanded ? (scheme == .dark ? 0.32 : 0.2) : 0)
+                                }
+                            }
+                            .accessibilityHidden(true)
+                            #if !os(macOS)
+                            .contentShape(Rectangle())
+                            .onTapGesture { palette.close() }
+                            #endif
                             panel(in: geometry)
                         }
                         .frame(width: geometry.size.width, height: geometry.size.height)
@@ -5828,15 +5834,7 @@ struct BernSearchPaletteHost<Content: View>: View {
         }
         .opacity(palette.expanded ? 1 : 0)
         .frame(width: expanded ? panelWidth : max(1, source.width), height: expanded ? panelHeight : max(1, source.height), alignment: .top)
-        // The platform's overlay material, untinted.
-        .background {
-            RoundedRectangle(cornerRadius: expanded ? 22 : 17)
-                .fill(.regularMaterial)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: expanded ? 22 : 17))
-        .contentShape(RoundedRectangle(cornerRadius: expanded ? 22 : 17))
-        .overlay { RoundedRectangle(cornerRadius: expanded ? 22 : 17).strokeBorder(.primary.opacity(scheme == .dark ? 0.14 : 0.09), lineWidth: 0.5) }
-        .shadow(color: .black.opacity(scheme == .dark ? 0.45 : 0.16), radius: 18, x: 0, y: 14)
+        .modifier(BernPaletteGlassSurface(cornerRadius: expanded ? 22 : 17))
         .position(x: expanded ? bounds.midX : source.midX, y: expanded ? bounds.midY : source.midY)
         .onPreferenceChange(BernPaletteHeight.self) { height in
             guard height > 0 else { return }
@@ -5850,6 +5848,31 @@ struct BernSearchPaletteHost<Content: View>: View {
         #if os(macOS)
         .onExitCommand { palette.close() }
         #endif
+    }
+}
+
+/// Native Liquid Glass container for the search palette on 26+, falling back
+/// to the regular material platter on earlier OS releases.
+private struct BernPaletteGlassSurface: ViewModifier {
+    let cornerRadius: CGFloat
+    @Environment(\.colorScheme) private var scheme
+
+    @ViewBuilder func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        if #available(macOS 26.0, iOS 26.0, tvOS 26.0, watchOS 26.0, *) {
+            content
+                .clipShape(shape)
+                .contentShape(shape)
+                .glassEffect(.regular, in: shape)
+                .shadow(color: .black.opacity(scheme == .dark ? 0.28 : 0.12), radius: 24, x: 0, y: 12)
+        } else {
+            content
+                .background { shape.fill(.regularMaterial) }
+                .clipShape(shape)
+                .contentShape(shape)
+                .overlay { shape.strokeBorder(.primary.opacity(scheme == .dark ? 0.14 : 0.09), lineWidth: 0.5) }
+                .shadow(color: .black.opacity(scheme == .dark ? 0.45 : 0.16), radius: 18, x: 0, y: 14)
+        }
     }
 }
 
@@ -6524,7 +6547,15 @@ private struct BernModalLayer<Content: View>: View {
         // area, whose insets the stage is given.
         GeometryReader { proxy in
         BernModalStage(width: width, height: height, scale: scale, insets: proxy.safeAreaInsets) {
-            Color.black.opacity(0.24).contentShape(Rectangle()).onTapGesture { }
+            Group {
+                if #available(macOS 26.0, iOS 26.0, tvOS 26.0, watchOS 26.0, *) {
+                    Color.black.opacity(0.08)
+                } else {
+                    Color.black.opacity(0.24)
+                }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture { }
             // One card whatever the modal holds, a `Shortcut` beside its
             // content too: the stage places the backdrop and one card.
             presentation(AnyView(ZStack(alignment: .topLeading) { content }
@@ -6538,20 +6569,19 @@ private struct BernModalLayer<Content: View>: View {
 }
 
 /// The surface of a floating modal's card, the system's own for what it
-/// presents over a window: on iOS 26 and later the glass its alerts are
-/// made of; before that the elevated background, which in dark mode is
-/// lighter than the page under it, where the page's own color made the
-/// card pure black. A Mac card keeps the window's background.
+/// presents over a window: on 26 and later the system Liquid Glass container;
+/// before that the elevated background on UIKit and window background on macOS.
 private struct BernModalSurface: ViewModifier {
-    private let shape = RoundedRectangle(cornerRadius: 24)
+    private let shape = RoundedRectangle(cornerRadius: 24, style: .continuous)
 
     @ViewBuilder func body(content: Content) -> some View {
-        #if os(iOS)
-        if #available(iOS 26.0, *) {
+        if #available(macOS 26.0, iOS 26.0, tvOS 26.0, watchOS 26.0, *) {
             content
                 .clipShape(shape)
                 .glassEffect(.regular, in: shape)
+                .shadow(color: .black.opacity(0.28), radius: 32, y: 16)
         } else {
+            #if os(iOS)
             drawn(content) {
                 shape.fill(Color(uiColor: UIColor { traits in
                     UIColor.systemBackground.resolvedColor(with: UITraitCollection(traitsFrom: [
@@ -6559,10 +6589,10 @@ private struct BernModalSurface: ViewModifier {
                     ]))
                 }))
             }
+            #else
+            drawn(content) { shape.fill(.background) }
+            #endif
         }
-        #else
-        drawn(content) { shape.fill(.background) }
-        #endif
     }
 
     /// A card drawn over `fill`, with a shadow and a hairline edge.
