@@ -492,12 +492,8 @@ impl TargetConfig {
 
     pub fn javascript_backend(&self) -> Option<&'static str> {
         self.javascript.then(|| {
-            if self.has_webview() {
-                if self.platform == "browser" {
-                    "browser"
-                } else {
-                    "webview"
-                }
+            if self.platform == "browser" {
+                "browser"
             } else {
                 "boa"
             }

@@ -246,9 +246,14 @@ mod boa {
                     .runtime_limits_mut()
                     .set_loop_iteration_limit(1_000_000);
                 context.runtime_limits_mut().set_recursion_limit(512);
+                let mut runs: u32 = 0;
                 for (source, state) in rx {
                     let result = evaluate(&source, &mut context).map_err(Error);
                     finish(&state, result);
+                    runs = runs.wrapping_add(1);
+                    if runs.is_multiple_of(64) {
+                        boa_gc::force_collect();
+                    }
                 }
             })
             .map_err(|e| Error(e.to_string()))?;

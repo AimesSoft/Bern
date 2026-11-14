@@ -22,8 +22,12 @@ extension View {
     func bernGlow(_ radius: Double, opacity: Double, corner: Double) -> some View {
         modifier(BernGlow(radius: radius, opacity: opacity, corner: corner))
     }
-    func bernBlur(_ radius: Double, corner: Double) -> some View {
-        blur(radius: radius).clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+    @ViewBuilder func bernBlur(_ radius: Double, corner: Double) -> some View {
+        if radius > 0.01 {
+            blur(radius: radius).clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+        } else {
+            self
+        }
     }
 }
 "#;

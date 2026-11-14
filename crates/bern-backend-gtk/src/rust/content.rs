@@ -73,8 +73,11 @@ impl Generator<'_> {
     }
 
     pub(super) fn image(&self, out: &mut Out, element: &Element) {
+        let decode_max = bern_target_api::svg::decode_max_side(self.app, element)
+            .map(|cap| format!("Some({cap:.1})"))
+            .unwrap_or_else(|| "None".into());
         let shared = format!(
-            "label: {}, width: {}, height: {}, fit: {}, animate: {}, corner: {}, template: {}, aspect: {}",
+            "label: {}, width: {}, height: {}, fit: {}, animate: {}, corner: {}, template: {}, aspect: {}, decode_max: {decode_max}",
             some(self.text_prop(element, "label")),
             some(self.num(element, "width")),
             some(self.num(element, "height")),

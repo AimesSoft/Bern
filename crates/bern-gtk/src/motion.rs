@@ -393,7 +393,7 @@ mod imp {
                 if light.is_some() {
                     snapshot.push_blend(gtk::gsk::BlendMode::Screen);
                 }
-                let blur = self.blur.get().zip(bounds);
+                let blur = self.blur.get().filter(|(radius, _)| *radius > 0.01).zip(bounds);
                 if let Some(((radius, corner), bounds)) = blur {
                     snapshot.push_rounded_clip(&rounded(bounds, corner));
                     // A blur node's radius is twice the standard deviation

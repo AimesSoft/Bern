@@ -1435,12 +1435,18 @@ private:
 /// inside its bounds and `corner`. A sprite over the element blurs what
 /// lies beneath it, the element and whatever shows through it, so near its
 /// edges the blur takes in a little of what lies around it.
-inline composition::CompositionEffectBrush Blur(xaml::UIElement const& element, double radius, double corner) {
+struct BlurLayer {
+    composition::CompositionEffectBrush brush{nullptr};
+    composition::SpriteVisual sprite{nullptr};
+};
+
+inline BlurLayer Blur(xaml::UIElement const& element, double radius, double corner) {
     auto compositor = xaml::Hosting::ElementCompositionPreview::GetElementVisual(element).Compositor();
-    auto brush = compositor.CreateEffectFactory(winrt::make<GaussianBlurEffect>(float(radius)), {L"Blur.Deviation"}).CreateBrush();
+    auto brush = compositor.CreateEffectFactory(winrt::make<GaussianBlurEffect>(float((std::max)(0.0, radius))), {L"Blur.Deviation"}).CreateBrush();
     brush.SetSourceParameter(L"backdrop", compositor.CreateBackdropBrush());
     auto sprite = compositor.CreateSpriteVisual();
     sprite.Brush(brush);
+    sprite.IsVisible(radius > 0.01);
     auto shape = compositor.CreateRoundedRectangleGeometry();
     shape.CornerRadius(float2{float(corner), float(corner)});
     sprite.Clip(compositor.CreateGeometricClip(shape));
@@ -1450,13 +1456,17 @@ inline composition::CompositionEffectBrush Blur(xaml::UIElement const& element, 
         sprite.Size(size);
         shape.Size(size);
     });
-    return brush;
+    return {brush, sprite};
 }
 
 /// A blur's radius that follows state, springing to each new value with
-/// the element's motion.
-inline void FollowBlur(composition::CompositionEffectBrush const& brush, Ctx const& ctx, Len const& radius, Motion const* motion) {
-    BindLen(ctx, radius, motion, [brush](double now) { brush.Properties().InsertScalar(L"Blur.Deviation", float(std::max(0.0, now))); });
+/// the element's motion; hidden at zero so unblurred rows capture no backdrop.
+inline void FollowBlur(BlurLayer const& layer, Ctx const& ctx, Len const& radius, Motion const* motion) {
+    BindLen(ctx, radius, motion, [layer](double now) {
+        bool active = now > 0.01;
+        layer.sprite.IsVisible(active);
+        if (active) layer.brush.Properties().InsertScalar(L"Blur.Deviation", float(now));
+    });
 }
 
 /// `glow` on an element: its light, a sprite over it, and whether the

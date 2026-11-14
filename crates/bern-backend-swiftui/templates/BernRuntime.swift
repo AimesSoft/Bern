@@ -2156,6 +2156,9 @@ struct BernImage: View {
     var oneSize = false
     /// Without a size, it covers the room its container gives, cropped.
     var covers = false
+    /// Upper bound in points on the longer side needed when decoded, such as
+    /// a heavily blurred backdrop or an aspect card inside a bounded grid.
+    var decodeMax: CGFloat? = nil
     /// The picture loaded last, with what it was loaded for: once the
     /// source changes it is no longer shown, so the old picture does not
     /// stand in for the new one while that loads.
@@ -2174,8 +2177,9 @@ struct BernImage: View {
 
     @MainActor static func picture(_ name: String) -> Picture? {
         if let picture = loaded[name] { return picture }
+        let noCache = [kCGImageSourceShouldCache: false] as CFDictionary
         guard let url = Bundle.main.resourceURL?.appendingPathComponent(name),
-              let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let source = CGImageSourceCreateWithURL(url as CFURL, noCache),
               let picture = decode(source) else { return nil }
         loaded[name] = picture
         return picture
@@ -2185,8 +2189,9 @@ struct BernImage: View {
     /// for a side that follows the picture) on a display of `scale` pixels
     /// per point: decoded at twice the pixels it covers when it has more.
     @MainActor static func picture(_ name: String, width: CGFloat?, height: CGFloat?, fit: BernImageFit, scale: CGFloat) -> Picture? {
+        let noCache = [kCGImageSourceShouldCache: false] as CFDictionary
         guard let url = Bundle.main.resourceURL?.appendingPathComponent(name),
-              let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let source = CGImageSourceCreateWithURL(url as CFURL, noCache),
               let pixels = sampledPixels(source, width: width, height: height, fit: fit, scale: scale) else { return picture(name) }
         let key = "\(name)@\(pixels)"
         if let sampled = loaded[key] { return sampled }
@@ -2236,11 +2241,21 @@ struct BernImage: View {
     nonisolated static func decode(_ source: CGImageSource, pixels: Int? = nil) -> Picture? {
         let create = { (options: [CFString: Any]) -> CGImage? in
             var options = options
+            options[kCGImageSourceShouldCache] = false
             options[kCGImageSourceShouldCacheImmediately] = true
             guard let pixels else { return CGImageSourceCreateImageAtIndex(source, 0, options as CFDictionary) }
             options[kCGImageSourceCreateThumbnailFromImageAlways] = true
             options[kCGImageSourceThumbnailMaxPixelSize] = pixels
-            return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+            guard let thumb = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+            // Detach the small thumbnail from ImageIO's source provider so
+            // ImageIO releases any full-resolution decode slab immediately.
+            let space = thumb.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!
+            let info = CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+            guard thumb.bitsPerComponent <= 8,
+                  let ctx = CGContext(data: nil, width: thumb.width, height: thumb.height, bitsPerComponent: 8, bytesPerRow: thumb.width * 4, space: space, bitmapInfo: info)
+            else { return thumb }
+            ctx.draw(thumb, in: CGRect(x: 0, y: 0, width: thumb.width, height: thumb.height))
+            return ctx.makeImage() ?? thumb
         }
         var decoded: CGImage?
         // The iOS simulator decodes gain maps to HDR as black, and cannot
@@ -2271,13 +2286,26 @@ struct BernImage: View {
 
     var body: some View {
         let resource = scheme == .dark ? darkName ?? name : name
-        let declared = resource.flatMap {
-            oneSize ? Self.picture($0, width: width, height: height, fit: fit, scale: displayScale) : Self.picture($0)
+        let samples = oneSize || decodeMax != nil
+        let decodeWidth: CGFloat? = switch (width, decodeMax) {
+        case let (w?, m?): min(w, m)
+        case let (w?, nil): oneSize ? w : nil
+        case let (nil, m?): m
+        case (nil, nil): nil
         }
-        // A picture from a URL with sides that never change is decoded at
-        // its size, as a declared one is.
+        let decodeHeight: CGFloat? = switch (height, decodeMax) {
+        case let (h?, m?): min(h, m)
+        case let (h?, nil): oneSize ? h : nil
+        case let (nil, m?): m
+        case (nil, nil): nil
+        }
+        let declared = resource.flatMap {
+            samples ? Self.picture($0, width: decodeWidth, height: decodeHeight, fit: fit, scale: displayScale) : Self.picture($0)
+        }
+        // A picture from a URL with sides that never change (or a known blur /
+        // grid bound) is decoded at its size, as a declared one is.
         let request = url.map {
-            BernPictures.Request(url: $0, width: oneSize ? width : nil, height: oneSize ? height : nil, fit: fit, scale: oneSize ? displayScale : 0)
+            BernPictures.Request(url: $0, width: decodeWidth, height: decodeHeight, fit: fit, scale: samples ? displayScale : 0)
         }
         let picture = declared
             ?? request.flatMap { BernPictures.shared.cached($0) }
@@ -2389,7 +2417,11 @@ final class BernPictures {
         case absent
     }
 
+    /// Decoded pixel cache cap (64 MiB), evicting least-recently-used entries.
+    private static let maxPictureBytes = 64 * 1024 * 1024
     @ObservationIgnored private var pictures: [Request: BernImage.Picture] = [:]
+    @ObservationIgnored private var pictureOrder: [Request] = []
+    @ObservationIgnored private var pictureBytes = 0
     @ObservationIgnored private var loading: [Request: Task<Reading, Never>] = [:]
     @ObservationIgnored private var session = BernPictures.newSession()
     /// Addresses the server refused on this network.
@@ -2422,6 +2454,26 @@ final class BernPictures {
         }
     }
 
+    private static func bytesOf(_ picture: BernImage.Picture) -> Int {
+        max(1, picture.image.bytesPerRow * picture.image.height)
+    }
+
+    private func remember(_ request: Request, _ picture: BernImage.Picture) {
+        if let existing = pictures.removeValue(forKey: request) {
+            pictureBytes -= Self.bytesOf(existing)
+            pictureOrder.removeAll { $0 == request }
+        }
+        pictures[request] = picture
+        pictureOrder.append(request)
+        pictureBytes += Self.bytesOf(picture)
+        while pictureBytes > Self.maxPictureBytes && pictureOrder.count > 1 {
+            let oldest = pictureOrder.removeFirst()
+            if let evicted = pictures.removeValue(forKey: oldest) {
+                pictureBytes -= Self.bytesOf(evicted)
+            }
+        }
+    }
+
     func cached(_ request: Request) -> BernImage.Picture? { pictures[request] }
 
     /// A picture from a file on this device of no more than 2 MB, read and
@@ -2429,13 +2481,13 @@ final class BernPictures {
     /// pictures from the network and larger files load in the background.
     func local(_ request: Request) -> BernImage.Picture? {
         if let picture = pictures[request] { return picture }
+        let noCache = [kCGImageSourceShouldCache: false] as CFDictionary
         guard let location = URL(string: request.url), location.isFileURL,
               let size = (try? location.resourceValues(forKeys: [.fileSizeKey]))?.fileSize, size <= 2_000_000,
-              let data = try? Data(contentsOf: location),
-              let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+              let source = CGImageSourceCreateWithURL(location as CFURL, noCache) else { return nil }
         let pixels = BernImage.sampledPixels(source, width: request.width, height: request.height, fit: request.fit, scale: request.scale)
         guard let picture = BernImage.decode(source, pixels: pixels) else { return nil }
-        pictures[request] = picture
+        remember(request, picture)
         return picture
     }
 
@@ -2461,7 +2513,7 @@ final class BernPictures {
             loading[request] = nil
             switch reading {
             case let .picture(picture):
-                pictures[request] = picture
+                remember(request, picture)
                 if averages[request.url] == nil {
                     averages[request.url] = Self.average(picture.image)
                 }
@@ -2491,6 +2543,7 @@ final class BernPictures {
     private static func newSession() -> URLSession {
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = silence
+        configuration.urlCache = nil
         return URLSession(configuration: configuration)
     }
 
@@ -2515,14 +2568,15 @@ final class BernPictures {
 
     /// One try at `request`'s picture, off the interface thread.
     private nonisolated static func read(_ request: Request, through session: URLSession) async -> Reading {
-        let data: Data
+        let noCache = [kCGImageSourceShouldCache: false] as CFDictionary
+        let source: CGImageSource?
         var remote = false
         if served(request.url) {
             guard let contents = await stream(request.url) else { return .absent }
-            data = contents
+            source = CGImageSourceCreateWithData(contents as CFData, noCache)
         } else if let location = URL(string: request.url), location.isFileURL {
-            guard let contents = try? Data(contentsOf: location) else { return .absent }
-            data = contents
+            guard FileManager.default.fileExists(atPath: location.path) else { return .absent }
+            source = CGImageSourceCreateWithURL(location as CFURL, noCache)
         } else {
             guard let location = URL(string: request.url) else { return .absent }
             remote = true
@@ -2531,7 +2585,7 @@ final class BernPictures {
                 if let status = (response as? HTTPURLResponse)?.statusCode, !(200..<300).contains(status) {
                     return status == 408 || status == 429 || status >= 500 ? .unreachable : .refused
                 }
-                data = contents
+                source = CGImageSourceCreateWithData(contents as CFData, noCache)
             } catch let error as URLError where lasting.contains(error.code) {
                 return .refused
             } catch let error as URLError where error.code == .timedOut {
@@ -2540,7 +2594,7 @@ final class BernPictures {
                 return .unreachable
             }
         }
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+        guard let source,
               let picture = BernImage.decode(source, pixels: BernImage.sampledPixels(
                 source, width: request.width, height: request.height, fit: request.fit, scale: request.scale))
         else { return remote ? .refused : .absent }

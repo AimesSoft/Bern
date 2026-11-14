@@ -1144,28 +1144,34 @@ fun BernImageURL(
     ratio: Float? = null,
     twice: Boolean = false,
     covers: Boolean = false,
+    maxSide: Dp? = null,
 ) {
     // A frame that fills its container's width is read at the width it
-    // was laid out at.
-    val fills = width == null && height == null
+    // was laid out at, unless `maxSide` already bounds what is needed.
+    val fills = width == null && height == null && maxSide == null
     var laid by remember { mutableIntStateOf(0) }
     // The pixels it is drawn at; a side that follows the picture's own
     // proportion does not count (0).
     val density = LocalDensity.current
     val px = { length: Dp -> with(density) { maxOf(1, length.roundToPx()) } }
-    val wide = when {
+    val cap = maxSide?.let(px)
+    val clampSide = { v: Int -> if (cap != null && v > cap) cap else v }
+    val wide = clampSide(when {
         width != null -> px(width)
+        maxSide != null && height == null -> cap ?: 0
         height == null -> laid
         aspect != null -> px(height * aspect)
         else -> 0
-    }
-    val tall = when {
+    })
+    val tall = clampSide(when {
         height != null -> px(height)
+        maxSide != null && width == null -> if (aspect != null && wide > 0) maxOf(1, (wide / aspect).roundToInt()) else (cap ?: 0)
         aspect != null && wide > 0 -> maxOf(1, (wide / aspect).roundToInt())
         else -> 0
-    }
+    })
+    val doubleSample = twice || maxSide != null
     // Double-sampled (`twice`), it is read for the size it is drawn at.
-    val key = if (twice && url != null) BernPictures.twiceKey(url, wide, tall) else url
+    val key = if (doubleSample && url != null) BernPictures.twiceKey(url, wide, tall) else url
     var picture by remember(key) { mutableStateOf(key?.let(BernPictures::cached)) }
     val proportion = aspect ?: picture?.ratio ?: ratio ?: url?.let(BernPictures::known)
     val frame = bernPictureFrame(width, height, proportion, corner, covers)
@@ -1174,7 +1180,7 @@ fun BernImageURL(
         val context = LocalContext.current
         LaunchedEffect(url, wide, tall) {
             if (fills && wide == 0) return@LaunchedEffect
-            if (twice) {
+            if (doubleSample) {
                 BernPictures.twice(context, url, wide, tall, fit)?.let { picture = it }
                 return@LaunchedEffect
             }
@@ -2105,7 +2111,7 @@ fun Modifier.bernGlow(radius: Float, opacity: Float, corner: Float): Modifier {
 /// bounds and `corner`. Android draws blur from 12 (API 31) on; before
 /// that the element stays sharp.
 fun Modifier.bernBlur(radius: Dp, corner: Float): Modifier =
-    if (radius <= 0.dp) this
+    if (radius <= 0.01.dp) this
     else clip(androidx.compose.foundation.shape.RoundedCornerShape(corner.dp))
         .blur(radius, androidx.compose.ui.draw.BlurredEdgeTreatment.Unbounded)
 

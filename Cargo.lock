@@ -465,6 +465,7 @@ name = "bern-script"
 version = "0.1.17"
 dependencies = [
  "boa_engine",
+ "boa_gc",
  "serde",
  "serde_json",
 ]

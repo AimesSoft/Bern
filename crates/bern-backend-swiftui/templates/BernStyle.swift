@@ -3362,9 +3362,14 @@ extension View {
     }
 
     /// The view's picture blurred with `radius` points, kept inside its
-    /// bounds and `corner`.
-    func bernBlur(_ radius: Double, corner: Double) -> some View {
-        blur(radius: radius).clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+    /// bounds and `corner`; bypassed at zero so sharp rows allocate no
+    /// offscreen rasterization layer.
+    @ViewBuilder func bernBlur(_ radius: Double, corner: Double) -> some View {
+        if radius > 0.01 {
+            blur(radius: radius).clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+        } else {
+            self
+        }
     }
 
     /// While the person scrolls the view by hand `browsing` holds, until

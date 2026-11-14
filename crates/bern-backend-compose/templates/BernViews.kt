@@ -1351,6 +1351,7 @@ fun BernImage(
     dark: String? = null,
     oneSize: Boolean = false,
     covers: Boolean = false,
+    maxSide: Dp? = null,
 ) {
     val shown = if (dark != null && bernDark()) dark else name
     val url = remember(shown) { BernPictures.resource(shown) }
@@ -1359,7 +1360,7 @@ fun BernImage(
     } else {
         null
     }
-    BernImageURL(url, label, width, height, fit, corner, template, aspect, ratio, twice = oneSize, covers = covers)
+    BernImageURL(url, label, width, height, fit, corner, template, aspect, ratio, twice = oneSize, covers = covers, maxSide = maxSide)
 }
 
 /// The frame of a picture: its declared sizes, the other side by `ratio`
