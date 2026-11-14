@@ -238,6 +238,12 @@ platform = "macos"
             icon_palette.contains("iconOnly: true"),
             "icon palette should request icon-only trigger: {icon_palette}"
         );
+        if platform == Platform::Macos {
+            assert!(
+                icon_palette.contains("SwiftUI.ControlGroup {"),
+                "macOS icon palette group should join items in ControlGroup: {icon_palette}"
+            );
+        }
         let default_picker = body("default_picker");
         if platform == Platform::Macos {
             assert!(

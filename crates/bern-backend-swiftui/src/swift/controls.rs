@@ -893,7 +893,7 @@ impl Generator<'_> {
         match element.keyword("style") {
             _ if menu && capsule => out.line(".pickerStyle(.inline)"),
             _ if menu => out.line(format!(".pickerStyle(.menu){}", menu_tint(self.platform))),
-            Some("segmented") => out.line(".pickerStyle(.segmented).tint(nil as SwiftUI.Color?)"),
+            Some("segmented") => out.line(".pickerStyle(.segmented).tint(SwiftUI.Color.secondary)"),
             // iOS lists the options with a checkmark instead of
             // radio buttons.
             Some("radio") if self.platform.uikit() => out.line(".pickerStyle(.inline)"),
