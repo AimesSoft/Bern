@@ -2960,6 +2960,8 @@ struct PictureProps {
     bool fills = false;
     /// Its sides never change: it is decoded at the size it shows.
     bool fixed = false;
+    /// Upper bound in DIPs on the longer side needed when decoded.
+    std::optional<double> decodeMax;
     /// The display's pixels per DIP where it shows.
     double scale = 1;
 };
@@ -2967,14 +2969,19 @@ struct PictureProps {
 /// The size in DIPs a picture of `width` × `height` pixels shows at.
 inline std::pair<double, double> ShownSize(PictureProps const& props, double width, double height) {
     std::string_view fit = props.fit ? props.fit : "contain";
-    if (props.width && props.height) {
-        if (fit == "fill") return {*props.width, *props.height};
-        double fx = *props.width / width, fy = *props.height / height;
+    auto cap = [&](std::optional<double> side) -> std::optional<double> {
+        if (side && props.decodeMax) return (std::min)(*side, *props.decodeMax);
+        return side ? side : props.decodeMax;
+    };
+    auto bw = cap(props.width), bh = cap(props.height);
+    if (bw && bh) {
+        if (fit == "fill") return {*bw, *bh};
+        double fx = *bw / width, fy = *bh / height;
         double scale = fit == "cover" ? (std::max)(fx, fy) : (std::min)(fx, fy);
         return {width * scale, height * scale};
     }
-    if (props.width) return {*props.width, height * *props.width / width};
-    if (props.height) return {width * *props.height / height, *props.height};
+    if (bw) return {*bw, height * *bw / width};
+    if (bh) return {width * *bh / height, *bh};
     return {0, 0};
 }
 
@@ -3067,7 +3074,7 @@ inline controls::Image SdrImage(PictureProps const& props, std::vector<uint8_t> 
         image.HorizontalAlignment(xaml::HorizontalAlignment::Left);
         image.VerticalAlignment(xaml::VerticalAlignment::Top);
     }
-    if (props.fixed && !bytes.empty()) {
+    if ((props.fixed || props.decodeMax) && !bytes.empty()) {
         DecodePicture(winrt::make_weak(image), std::move(bytes), props.source, props);
     } else {
         media::Imaging::BitmapImage bitmap;
@@ -3485,6 +3492,8 @@ struct ImageProps {
     bool flies = false;
     /// Without a size, it covers the room its container gives, cropped.
     bool covers = false;
+    /// Upper bound in DIPs on the longer side needed when decoded.
+    std::optional<double> decodeMax;
 };
 
 /// A frame as wide as its container and `aspect` as tall.
@@ -3549,10 +3558,10 @@ inline std::shared_ptr<std::vector<uint8_t>> Find(std::wstring const& key) {
     return nullptr;
 }
 inline void Keep(std::wstring const& key, std::shared_ptr<std::vector<uint8_t>> const& bytes) {
-    if (bytes->empty() || bytes->size() > (16u << 20) || Find(key)) return;
+    if (bytes->empty() || bytes->size() > (8u << 20) || Find(key)) return;
     kept.emplace_back(key, bytes);
     size += bytes->size();
-    while (size > (64u << 20) && !kept.empty()) {
+    while (size > (24u << 20) && !kept.empty()) {
         size -= kept.front().second->size();
         kept.erase(kept.begin());
     }
@@ -3570,7 +3579,7 @@ inline winrt::fire_and_forget ShowLater(winrt::weak_ref<controls::Grid> weak, Ct
     co_await winrt::resume_background();
     auto bytes = std::make_shared<std::vector<uint8_t>>(read());
     co_await ui;
-    Recent::Keep(key, bytes);
+    if (key.starts_with(L"url:") || key.starts_with(L"served:")) Recent::Keep(key, bytes);
     auto frame = weak.get();
     if (!frame || owner->disposed) co_return;
     if (bytes->empty()) Report("image " + label + ": the picture cannot be read");
@@ -3637,10 +3646,10 @@ inline void Image(Parent const& p, Ctx const& ctx, ImageProps props) {
     }
     props.width = width;
     props.height = height;
-    // A picture whose sides are numbers, and that does not fly, shows at
-    // one size.
-    picture.fixed = !props.flies && !picture.fills && (picture.width || picture.height)
-        && (!props.width.Given() || props.width.fixed) && (!props.height.Given() || props.height.fixed);
+    // A picture that sets width or height without animating them, and does
+    // not fly, decodes at the size it shows (including conditional widths).
+    picture.fixed = !props.flies && !props.animate && !picture.fills && (picture.width || picture.height);
+    if (!props.flies) picture.decodeMax = props.decodeMax;
     picture.scale = ctx.win ? ctx.win->Scale() : 1.0;
     // A template: the alpha of a declared picture in the text's color.
     if (props.templated && props.source) {

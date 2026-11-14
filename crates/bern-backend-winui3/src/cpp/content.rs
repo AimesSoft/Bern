@@ -135,6 +135,11 @@ impl Generator<'_> {
                         .all(|name| element.prop(name).is_none())
                         .then(|| "true".to_string())
                 ),
+                (
+                    "decodeMax",
+                    bern_target_api::svg::decode_max_side(self.app, element)
+                        .map(|cap| format!("{cap:.1}"))
+                ),
             ])
         ));
     }

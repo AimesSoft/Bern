@@ -2479,6 +2479,8 @@ pub struct ImageProps {
     pub template: bool,
     /// Width over height, in place of the picture's own.
     pub aspect: Option<f64>,
+    /// Upper bound in points on the longer side needed when decoded.
+    pub decode_max: Option<f64>,
 }
 
 /// The content fit of `fit`.
@@ -2609,9 +2611,14 @@ pub fn Image(p: &Parent, ctx: &Ctx, props: ImageProps) {
         }
         None => picture.update_state(&[gtk::accessible::State::Hidden(true)]),
     }
-    if dark.is_some() || props.one_size {
-        let sides = props.one_size.then(|| {
-            let side = |num: &Option<Num>| num.as_ref().map(|num| num.peek(ctx));
+    if dark.is_some() || props.one_size || props.decode_max.is_some() {
+        let sides = (props.one_size || props.decode_max.is_some()).then(|| {
+            let side = |num: &Option<Num>| match (num.as_ref().map(|n| n.peek(ctx)), props.decode_max) {
+                (Some(s), Some(m)) => Some(s.min(m)),
+                (Some(s), None) if props.one_size => Some(s),
+                (None, Some(m)) => Some(m),
+                _ => None,
+            };
             (side(&props.width), side(&props.height))
         });
         follow_picture(&picture, path, light, dark, sides, fit);

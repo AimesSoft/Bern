@@ -127,17 +127,22 @@ fn animated_svg_generates_for_every_presenter() {
             .join("\n");
         assert!(text.contains("bern-script ="), "{name}: script dependency");
         assert!(
-            !text.contains("features = [\"boa\"]"),
-            "{name}: must not link Boa"
-        );
-        assert!(
             !text.contains("/*bern:script-"),
             "{name}: unexpanded script template"
         );
-        match name {
-            "linux" => assert!(text.contains("\"script\"")),
-            "web_app" => assert!(text.contains("new Worker(url)")),
-            _ => assert!(text.contains("bernScriptDispatch")),
+        if name == "web_app" {
+            assert!(
+                !text.contains("features = [\"boa\"]"),
+                "{name}: browser uses Worker"
+            );
+            assert!(text.contains("new Worker(url)"));
+        } else {
+            assert!(
+                text.contains("features = [\"boa\"]"),
+                "{name}: native targets must use Boa"
+            );
+            assert!(!text.contains("bernScriptDispatch"));
+            assert!(!text.contains("\"script\""));
         }
         if name != "web_app" {
             context.target.webview = Some(false);
@@ -367,5 +372,125 @@ fn svgs_with_colors_per_appearance_are_drawn_in_each() {
     assert_eq!(
         first_pixel("__bern_static_svg/animation.svg.dark.png"),
         [255, 255, 255, 255]
+    );
+}
+
+#[test]
+fn decode_max_side_bounds_blurred_backdrops_and_transitive_grids() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .unwrap();
+    let config =
+        bern_compiler::config::load(&root.join("examples/svg-animation/Bern.toml")).unwrap();
+    let mut app = bern_compiler::compile(&config).unwrap().app;
+
+    let cond = |lo: i64, hi: i64| bern_ir::Prop::Expr {
+        expr: bern_ir::Expr {
+            kind: bern_ir::ExprKind::If {
+                cond: Box::new(bern_ir::Expr {
+                    kind: bern_ir::ExprKind::Literal {
+                        value: bern_protocol::Value::Bool(true),
+                    },
+                    ty: bern_protocol::Type::Bool,
+                }),
+                then: Box::new(bern_ir::Expr {
+                    kind: bern_ir::ExprKind::Literal {
+                        value: bern_protocol::Value::Int(lo),
+                    },
+                    ty: bern_protocol::Type::Int,
+                }),
+                otherwise: Box::new(bern_ir::Expr {
+                    kind: bern_ir::ExprKind::Literal {
+                        value: bern_protocol::Value::Int(hi),
+                    },
+                    ty: bern_protocol::Type::Int,
+                }),
+            },
+            ty: bern_protocol::Type::Int,
+        },
+    };
+    let elem = |kind: &str, props: Vec<(&str, bern_ir::Prop)>| bern_ir::Element {
+        kind: kind.into(),
+        id: None,
+        path: kind.into(),
+        props: props.into_iter().map(|(k, v)| (k.into(), v)).collect(),
+        template: None,
+        children: Vec::new(),
+        action: None,
+        source: bern_ir::SourceLocation::default(),
+    };
+
+    app.components = vec![bern_ir::ComponentDef {
+        name: "card".into(),
+        module: Vec::new(),
+        params: Vec::new(),
+        body: bern_ir::Node::Element(elem(
+            "Image",
+            vec![("aspect", bern_ir::Prop::Number { value: 1.0 })],
+        )),
+        source: bern_ir::SourceLocation::default(),
+    }];
+
+    let mut grid_a = elem(
+        "Grid",
+        vec![("min_width", cond(96, 130)), ("gap", cond(14, 22))],
+    );
+    grid_a
+        .children
+        .push(bern_ir::Node::Component(bern_ir::ComponentRef {
+            component: "card".into(),
+            args: Vec::new(),
+            source: bern_ir::SourceLocation::default(),
+        }));
+    let mut grid_b = elem(
+        "Grid",
+        vec![
+            ("min_width", bern_ir::Prop::Number { value: 150.0 }),
+            ("gap", bern_ir::Prop::Number { value: 22.0 }),
+        ],
+    );
+    grid_b
+        .children
+        .push(bern_ir::Node::Component(bern_ir::ComponentRef {
+            component: "card".into(),
+            args: Vec::new(),
+            source: bern_ir::SourceLocation::default(),
+        }));
+    let backdrop = elem("Image", vec![("blur", cond(50, 90))]);
+
+    let mut column = elem("Column", Vec::new());
+    column.children.push(bern_ir::Node::If(bern_ir::IfNode {
+        branches: vec![(
+            bern_ir::Expr {
+                kind: bern_ir::ExprKind::Literal {
+                    value: bern_protocol::Value::Bool(false),
+                },
+                ty: bern_protocol::Type::Bool,
+            },
+            vec![bern_ir::Node::Element(grid_a)],
+        )],
+        otherwise: vec![bern_ir::Node::Element(grid_b)],
+    }));
+    column.children.push(bern_ir::Node::Element(backdrop));
+    app.windows.windows[0].content = bern_ir::Node::Element(column);
+
+    let bern_ir::Node::Element(card_el) = &app.components[0].body else {
+        panic!();
+    };
+    assert_eq!(
+        bern_target_api::svg::decode_max_side(&app, card_el),
+        Some(322.0)
+    );
+
+    let bern_ir::Node::Element(root_el) = &app.windows.windows[0].content else {
+        panic!();
+    };
+    let bern_ir::Node::Element(backdrop_el) = &root_el.children[1] else {
+        panic!();
+    };
+    assert_eq!(
+        bern_target_api::svg::decode_max_side(&app, backdrop_el),
+        Some(32.0)
     );
 }

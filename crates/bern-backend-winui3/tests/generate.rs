@@ -1003,7 +1003,7 @@ fn layout_features_generate_for_winui3() {
         "B::Flow(p, c, {.gap = B::Len(4.0)}, ",
         ".iconOnly = true}",
         ".rowGap = B::Len(6.0), .cellRatio = 0.667, .cellExtra = B::Len(20.0)}",
-        ".corner = B::Len(8.0), .templated = true, .aspect = 1.5}",
+        ".corner = B::Len(8.0), .templated = true, .aspect = 1.5, .decodeMax = 168.0}",
         "B::Image(p, c, {.source = \"images/bern.png\", .darkSource = \"images/bern-dark.png\", .width = B::Len(24.0), .height = B::Len(24.0)});",
         "B::Image(p, c, {.source = \"images/bern.png\", .width = B::Len(48.0), .height = B::Len(27.0), .flies = true});",
         ".align = \"baseline\"",

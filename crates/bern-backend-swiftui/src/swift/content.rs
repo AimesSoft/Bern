@@ -284,8 +284,11 @@ impl Generator<'_> {
         } else {
             ""
         };
+        let decode_max = bern_target_api::svg::decode_max_side(self.app, element)
+            .map(|cap| format!(", decodeMax: {}", double(cap)))
+            .unwrap_or_default();
         out.line(format!(
-            "BernImage({source}, label: {}, width: {}, height: {}, fit: {fit}{}, aspect: {}{hero}{one_size}{covers})",
+            "BernImage({source}, label: {}, width: {}, height: {}, fit: {fit}{}, aspect: {}{hero}{one_size}{covers}{decode_max})",
             self.text_prop(element, "label")
                 .unwrap_or_else(|| "nil".into()),
             length("width"),

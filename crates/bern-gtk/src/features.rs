@@ -2057,7 +2057,14 @@ struct DecodeBox {
 }
 
 impl DecodeBox {
-    fn new(width: &Option<Num>, height: &Option<Num>, fit: gtk::ContentFit) -> Self {
+    fn new(
+        ctx: &Ctx,
+        width: &Option<Num>,
+        height: &Option<Num>,
+        animated: bool,
+        decode_max: Option<f64>,
+        fit: gtk::ContentFit,
+    ) -> Self {
         let scale = gtk::gdk::Display::default()
             .map(|display| {
                 let monitors = display.monitors();
@@ -2067,9 +2074,19 @@ impl DecodeBox {
                     .fold(1.0, f64::max)
             })
             .unwrap_or(1.0);
-        let pixels = |side: &Option<Num>| match side {
-            Some(Num::Fixed(points)) if *points > 0.0 => Some((points * scale * 2.0).ceil()),
-            _ => None,
+        let pixels = |side: &Option<Num>| {
+            let base = match side {
+                Some(Num::Fixed(points)) if *points > 0.0 => Some(*points),
+                Some(num) if !animated => Some(num.peek(ctx)).filter(|points| *points > 0.0),
+                _ => None,
+            };
+            let capped = match (base, decode_max) {
+                (Some(s), Some(m)) => Some(s.min(m)),
+                (Some(s), None) => Some(s),
+                (None, Some(m)) => Some(m),
+                (None, None) => None,
+            };
+            capped.map(|points| (points * scale * 2.0).ceil())
         };
         Self {
             width: pixels(width),
@@ -2225,6 +2242,7 @@ pub struct RuntimeImageProps {
     pub corner: Option<Num>,
     pub template: bool,
     pub aspect: Option<f64>,
+    pub decode_max: Option<f64>,
 }
 
 /// A picture from a `MediaSource` in state: a file the user chose or an
@@ -2233,7 +2251,14 @@ pub struct RuntimeImageProps {
 #[allow(non_snake_case)]
 pub fn RuntimeImage(p: &Parent, ctx: &Ctx, props: RuntimeImageProps) {
     let fit = crate::widgets::content_fit(props.fit);
-    let decoded_at = DecodeBox::new(&props.width, &props.height, fit);
+    let decoded_at = DecodeBox::new(
+        ctx,
+        &props.width,
+        &props.height,
+        props.animate.is_some(),
+        props.decode_max,
+        fit,
+    );
     // What shows the texture: a picture, or a template drawn in the
     // foreground color.
     let (picture, show): (gtk::Widget, ShowTexture) = if props.template {

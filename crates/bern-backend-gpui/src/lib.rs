@@ -794,6 +794,7 @@ impl Target for Gpui {
             GeneratedFile::text("app/src/cli.rs", glue::cli_rs(context, app)),
             GeneratedFile::text("app/src/mcp.rs", glue::mcp_rs(context, app)),
         ];
+        bern_target_api::script::configure(&mut files, context);
         // The workspace's versions of the shared crates, so the application
         // builds against what Bern was tested with.
         let lock = context.workspace_dir.join("Cargo.lock");

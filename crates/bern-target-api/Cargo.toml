@@ -14,7 +14,7 @@ serde_json.workspace = true
 bern-ir.workspace = true
 bern-theme.workspace = true
 bern-protocol.workspace = true
-# The JavaScript runtime the WebView hosts load (no engine features).
+# The JavaScript runtime the browser Web Worker host loads (no engine features).
 bern-script.workspace = true
 serde.workspace = true
 toml.workspace = true

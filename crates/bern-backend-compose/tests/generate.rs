@@ -682,7 +682,7 @@ fn layout_features_generate_for_compose() {
         "BernFlow(4f.dp) {",
         "bernTextStyle(\"body\"), iconOnly = true)",
         "BernGrid(minWidth = 80f.dp, gap = 8.dp, rowGap = 6f.dp, cellRatio = 0.667f, cellExtra = 20f.dp) {",
-        ", corner = 8f.dp, template = true, aspect = 1.5f)",
+        ", corner = 8f.dp, template = true, aspect = 1.5f, maxSide = 168f.dp)",
         "BernImage(\"images/bern.png\", null, 24f.dp, 24f.dp, ContentScale.Fit, dark = \"images/bern-dark.png\", oneSize = true)",
         "Box(Modifier.alignByBaseline()) {",
         "iconOnly = true, shape = BernShape(true, 30f.dp)) { dismiss ->",

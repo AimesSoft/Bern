@@ -133,8 +133,14 @@ impl Generator<'_> {
         {
             extra.push_str(", covers = true");
         }
+        if let Some(cap) = bern_target_api::svg::decode_max_side(self.app, element) {
+            extra.push_str(&format!(", maxSide = {}.dp", float(cap)));
+        }
         // A picture the engine gives, read at run time.
         if let Some(source) = element.expr("source") {
+            if bern_target_api::svg::one_size(element) {
+                extra.push_str(", twice = true");
+            }
             let url = if matches!(source.ty, Type::Optional { .. }) {
                 format!("({})?.url", self.expr(source))
             } else {
