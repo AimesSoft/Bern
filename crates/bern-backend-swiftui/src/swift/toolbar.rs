@@ -262,6 +262,13 @@ impl Generator<'_> {
                 shared: group.len() > 1,
                 ..ctx.clone()
             };
+            let wide_palette = group.iter().any(|node| {
+                matches!(
+                    node,
+                    Node::Element(element)
+                        if element.kind == "Search" && element.keyword("display") != Some("icon")
+                )
+            });
             if self.platform == Platform::Ios {
                 // iOS draws a bar's buttons in the label color, as its own
                 // way back is; the accent the window gives its controls
@@ -270,6 +277,12 @@ impl Generator<'_> {
                 self.nodes(out, group, &group_ctx);
                 out.close("}");
                 out.line(".tint(nil as SwiftUI.Color?)");
+            } else if self.platform == Platform::Macos && group.len() > 1 && !wide_palette {
+                // Custom wrapper views and conditionals inside a toolbar group
+                // split into separate circles unless joined by `ControlGroup`.
+                out.open("SwiftUI.ControlGroup {");
+                self.nodes(out, group, &group_ctx);
+                out.close("}");
             } else {
                 self.nodes(out, group, &group_ctx);
             }

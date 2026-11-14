@@ -5932,16 +5932,16 @@ struct BernSearchPalette<Results: View>: View {
             Button(action: open) {
                 Label(prompt, systemImage: "magnifyingglass")
                     .labelStyle(.iconOnly)
+                    .background(GeometryReader { geometry in
+                        Color.clear.onChange(of: geometry.frame(in: .global), initial: true) { source = geometry.frame(in: .global) }
+                    })
+                    .bernHiddenShortcut(shortcut, action: open)
+                    .bernControl(target, role: "search", label: prompt,
+                                 actions: BernControlActions(activate: open, edit: { text.wrappedValue = $0 },
+                                                             submit: { palette.activate() }, value: { text.wrappedValue }, focus: open))
             }
             .help(prompt)
             .focused($focused)
-            .background(GeometryReader { geometry in
-                Color.clear.onChange(of: geometry.frame(in: .global), initial: true) { source = geometry.frame(in: .global) }
-            })
-            .bernHiddenShortcut(shortcut, action: open)
-            .bernControl(target, role: "search", label: prompt,
-                         actions: BernControlActions(activate: open, edit: { text.wrappedValue = $0 },
-                                                     submit: { palette.activate() }, value: { text.wrappedValue }, focus: open))
         } else {
             Button(action: open) {
                 HStack(spacing: 8) {
@@ -6527,8 +6527,8 @@ private struct BernModalLayer<Content: View>: View {
             Color.black.opacity(0.24).contentShape(Rectangle()).onTapGesture { }
             // One card whatever the modal holds, a `Shortcut` beside its
             // content too: the stage places the backdrop and one card.
-            presentation(AnyView(ZStack { content }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            presentation(AnyView(ZStack(alignment: .topLeading) { content }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .modifier(BernModalSurface())
                 .accessibilityAddTraits(.isModal)
                 .scaleEffect(scale)))
