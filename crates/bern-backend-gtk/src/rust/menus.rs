@@ -62,7 +62,7 @@ impl Generator<'_> {
 
     pub(super) fn search_props(&self, element: &Element) -> String {
         format!(
-            "b::SearchProps {{ id: {}, field: {}, prompt: {}, panel_prompt: {}, width: {}, height: {}, font_size: {}, suggest: {} }}",
+            "b::SearchProps {{ id: {}, field: {}, prompt: {}, panel_prompt: {}, width: {}, height: {}, font_size: {}, suggest: {}, icon_only: {} }}",
             self.id(element),
             some(self.field(element, "value")),
             some(self.text_prop(element, "prompt")),
@@ -71,6 +71,7 @@ impl Generator<'_> {
             Self::number(element, "height"),
             Self::number(element, "font_size"),
             element.keyword("suggest") == Some("true"),
+            element.keyword("display") == Some("icon"),
         )
     }
 

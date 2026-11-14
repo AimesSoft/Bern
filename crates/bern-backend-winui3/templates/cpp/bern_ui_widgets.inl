@@ -1882,6 +1882,8 @@ struct SearchProps {
     std::optional<double> fontSize;
     /// The results show on focus, before anything is typed.
     bool suggest = false;
+    /// Show only the search icon on a palette trigger.
+    bool iconOnly = false;
     /// A palette's springs: growing out of its field, following its
     /// results' height, going back into the field.
     Motion const* grow = nullptr;

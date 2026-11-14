@@ -25,6 +25,10 @@ impl Generator<'_> {
                 "suggest",
                 (element.keyword("suggest") == Some("true")).then(|| "true".into()),
             ),
+            (
+                "iconOnly",
+                (palette && element.keyword("display") == Some("icon")).then(|| "true".into()),
+            ),
         ]);
         let submit = self.action_fn(element);
         let function = if palette {

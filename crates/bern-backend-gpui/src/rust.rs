@@ -353,6 +353,7 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "prompt",
             "shortcut",
             "style",
+            "display",
             "panel_prompt",
             "width",
             "height",
@@ -2506,12 +2507,13 @@ pub fn app() -> b::AppDef {{
                     None => "None".into(),
                 };
                 format!(
-                    "b::search(c, {}, {}, b::SearchProps {{ prompt: {}, panel_prompt: {}, palette: {}, width: {}, height: {}, font_size: {}, suggest: {}, shortcut: {} }}, {}, {})",
+                    "b::search(c, {}, {}, b::SearchProps {{ prompt: {}, panel_prompt: {}, palette: {}, icon_only: {}, width: {}, height: {}, font_size: {}, suggest: {}, shortcut: {} }}, {}, {})",
                     id(),
                     field_ref(self.session_index(&field.session), field.field),
                     text("prompt"),
                     optional_text("panel_prompt"),
                     element.keyword("style") == Some("palette"),
+                    element.keyword("display") == Some("icon"),
                     number("width"),
                     number("height"),
                     number("font_size"),

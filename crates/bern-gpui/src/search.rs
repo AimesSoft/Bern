@@ -24,6 +24,8 @@ pub struct SearchProps {
     pub panel_prompt: Option<String>,
     /// `style: palette`.
     pub palette: bool,
+    /// `display: icon` on a palette trigger.
+    pub icon_only: bool,
     pub width: Option<f32>,
     pub height: Option<f32>,
     pub font_size: Option<f32>,
@@ -284,37 +286,47 @@ fn palette(
         controls::register_shortcut(c, props.shortcut.as_deref(), &open);
     }
     let secondary = c.color("text.secondary");
+    let primary = c.color("text.primary");
     let trigger = {
         let open = Rc::clone(&open);
-        div()
+        let base = div()
             .id(c.element_id(id))
             .flex()
             .flex_row()
             .flex_none()
             .items_center()
-            .gap(px(6.0))
-            .w(px(260.0))
-            .h(px(32.0))
-            .px(px(10.0))
-            .rounded(px(16.0))
-            .border_1()
-            .border_color(c.slot("field", "rest", "border"))
-            .bg(c.slot("field", "rest", "background"))
-            .text_size(px(13.0))
-            .text_color(secondary)
-            .when(is_open, |trigger| trigger.invisible())
-            .child(icons::icon("magnifyingglass", 14.0, secondary))
-            .child(div().flex_1().overflow_hidden().child(props.prompt.clone()))
-            .children(props.shortcut.as_deref().map(|shortcut| {
-                div()
-                    .flex_none()
-                    .px(px(5.0))
-                    .rounded(px(4.0))
-                    .border_1()
-                    .border_color(c.color("separator"))
-                    .text_size(px(11.0))
-                    .child(shortcut_text(shortcut))
-            }))
+            .when(is_open, |trigger| trigger.invisible());
+        let styled = if props.icon_only {
+            base.justify_center()
+                .w(px(32.0))
+                .h(px(32.0))
+                .rounded(px(16.0))
+                .child(icons::icon("magnifyingglass", 16.0, primary))
+        } else {
+            base.gap(px(6.0))
+                .w(px(260.0))
+                .h(px(32.0))
+                .px(px(10.0))
+                .rounded(px(16.0))
+                .border_1()
+                .border_color(c.slot("field", "rest", "border"))
+                .bg(c.slot("field", "rest", "background"))
+                .text_size(px(13.0))
+                .text_color(secondary)
+                .child(icons::icon("magnifyingglass", 14.0, secondary))
+                .child(div().flex_1().overflow_hidden().child(props.prompt.clone()))
+                .children(props.shortcut.as_deref().map(|shortcut| {
+                    div()
+                        .flex_none()
+                        .px(px(5.0))
+                        .rounded(px(4.0))
+                        .border_1()
+                        .border_color(c.color("separator"))
+                        .text_size(px(11.0))
+                        .child(shortcut_text(shortcut))
+                }))
+        };
+        styled
             .when(!enabled, |trigger| trigger.opacity(0.5))
             .when(enabled, |trigger| {
                 trigger.on_click(move |_, _, cx| {

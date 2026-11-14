@@ -4,8 +4,15 @@ use std::{fs, path::Path};
 
 const UI: &str = r#"
 use bern::prelude::*;
+#[bern::value]
+pub enum Mode {
+    #[label(tr! { "en" => "All" })]
+    All,
+    #[label(tr! { "en" => "Recent" })]
+    Recent,
+}
 #[bern::session]
-pub struct Draft { pub query: String, pub detail: bool }
+pub struct Draft { pub query: String, pub detail: bool, pub mode: Mode }
 
 #[component]
 pub fn app(app: probe::Client, windows: AppWindows) -> impl View {
@@ -31,6 +38,10 @@ pub fn page(app: probe::Client, #[session] draft: Draft) -> impl View {
                 palette(app: app, title: app.title)
                 Text(content: tr! { "en" => "List content" })
                 nested(app: app)
+                Stack {
+                    icon_palette(app: app)
+                    default_picker()
+                }
             }
         }
     }
@@ -73,6 +84,26 @@ pub fn field(app: probe::Client, #[session] draft: Draft) -> impl View {
         Toolbar {
             Search(id: field, value: draft.query, prompt: tr! { "en" => "Find" })
             Button(id: add, label: tr! { "en" => "Add" }) => app.add()
+        }
+    }
+}
+
+#[component]
+pub fn icon_palette(app: probe::Client, #[session] draft: Draft) -> impl View {
+    ui! {
+        Toolbar {
+            Spacer
+            Search(id: search_icon, value: draft.query, style: palette, display: icon, prompt: tr! { "en" => "Search" })
+            IconButton(id: open, icon: "folder", label: tr! { "en" => "Open" }) => app.add()
+        }
+    }
+}
+
+#[component]
+pub fn default_picker(#[session] draft: Draft) -> impl View {
+    ui! {
+        Column {
+            Picker(id: kind, label: tr! { "en" => "Kind" }, value: draft.mode)
         }
     }
 }
@@ -202,6 +233,24 @@ platform = "macos"
         let nested = body("nested");
         assert!(nested.contains(": View {"), "{nested}");
         assert!(nested.contains(".modifier(AppView_field())"), "{nested}");
+        let icon_palette = body("icon_palette");
+        assert!(
+            icon_palette.contains("iconOnly: true"),
+            "icon palette should request icon-only trigger: {icon_palette}"
+        );
+        let default_picker = body("default_picker");
+        if platform == Platform::Macos {
+            assert!(
+                default_picker.contains(".pickerStyle(.menu).tint(nil as SwiftUI.Color?)"),
+                "default picker must drop accent tint on macOS: {default_picker}"
+            );
+        } else {
+            assert!(
+                default_picker.contains("SwiftUI.Menu {")
+                    && default_picker.contains(".pickerStyle(.inline)"),
+                "default picker on UIKit uses a neutral inline menu row: {default_picker}"
+            );
+        }
     }
     let _ = fs::remove_dir_all(&dir);
 }

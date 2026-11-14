@@ -1416,6 +1416,8 @@ pub struct SearchProps {
     pub font_size: Option<f64>,
     /// The results show on focus, before anything is typed.
     pub suggest: bool,
+    /// Show only the magnifying glass icon on a palette trigger.
+    pub icon_only: bool,
 }
 
 /// A search field. Its children are results shown below it while it has

@@ -143,24 +143,36 @@ pub fn SearchPalette(
         .map(|prompt| bound_text(ctx, prompt))
         .or_else(|| prompt.clone());
     let trigger = gtk::Button::new();
-    trigger.add_css_class("bern-palette-trigger");
     if ctx.in_toolbar() {
         trigger.add_css_class("flat");
     }
     trigger.set_valign(gtk::Align::Center);
-    let content = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    content.append(&icons::image("magnifyingglass"));
-    let caption = gtk::Label::new(None);
-    caption.add_css_class("dim-label");
-    content.append(&caption);
-    trigger.set_child(Some(&content));
-    if let Some(prompt) = prompt.clone() {
-        let (shown, named) = (caption.clone(), trigger.clone());
-        effect(move || {
-            let text = prompt();
-            shown.set_label(&text);
-            named.update_property(&[gtk::accessible::Property::Label(&text)]);
-        });
+    if props.icon_only {
+        trigger.set_child(Some(&icons::image("magnifyingglass")));
+        if let Some(prompt) = prompt.clone() {
+            let named = trigger.clone();
+            effect(move || {
+                let text = prompt();
+                named.set_tooltip_text(Some(&text));
+                named.update_property(&[gtk::accessible::Property::Label(&text)]);
+            });
+        }
+    } else {
+        trigger.add_css_class("bern-palette-trigger");
+        let content = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        content.append(&icons::image("magnifyingglass"));
+        let caption = gtk::Label::new(None);
+        caption.add_css_class("dim-label");
+        content.append(&caption);
+        trigger.set_child(Some(&content));
+        if let Some(prompt) = prompt.clone() {
+            let (shown, named) = (caption.clone(), trigger.clone());
+            effect(move || {
+                let text = prompt();
+                shown.set_label(&text);
+                named.update_property(&[gtk::accessible::Property::Label(&text)]);
+            });
+        }
     }
     let submit = bound_action(ctx, &submit);
     let open_palette: OpenPalette = Rc::new(RefCell::new(None));

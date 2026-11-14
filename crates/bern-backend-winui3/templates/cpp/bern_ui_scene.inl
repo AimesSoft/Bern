@@ -867,17 +867,33 @@ inline void SearchPalette(Parent const& p, Ctx const& ctx, SearchProps props, Bu
     auto field = *props.field;
     auto prompt = Bound(ctx, props.prompt);
     auto panelPrompt = props.panelPrompt ? Bound(ctx, props.panelPrompt) : prompt;
-    // The system's search box where it stands; the palette opens over it
-    // and grows down from it, as the design's search box expands in place.
-    controls::AutoSuggestBox entry;
-    entry.QueryIcon(controls::SymbolIcon(controls::Symbol::Find));
-    entry.Width(ctx.toolbar ? 240 : 280);
-    if (prompt)
-        Reactive::Run([entry, prompt] {
-            auto name = prompt();
-            entry.PlaceholderText(name);
-            xaml::Automation::AutomationProperties::SetName(entry, name);
-        });
+    // The system's search box where it stands, or an icon button when
+    // `display: icon` is set; the palette opens over it and grows down.
+    controls::AutoSuggestBox suggestEntry{nullptr};
+    controls::Button iconEntry{nullptr};
+    xaml::FrameworkElement entry{nullptr};
+    if (props.iconOnly) {
+        iconEntry = controls::Button();
+        iconEntry.Content(controls::SymbolIcon(controls::Symbol::Find));
+        if (prompt)
+            Reactive::Run([iconEntry, prompt] {
+                auto name = prompt();
+                controls::ToolTipService::SetToolTip(iconEntry, winrt::box_value(name));
+                xaml::Automation::AutomationProperties::SetName(iconEntry, name);
+            });
+        entry = iconEntry;
+    } else {
+        suggestEntry = controls::AutoSuggestBox();
+        suggestEntry.QueryIcon(controls::SymbolIcon(controls::Symbol::Find));
+        suggestEntry.Width(ctx.toolbar ? 240 : 280);
+        if (prompt)
+            Reactive::Run([suggestEntry, prompt] {
+                auto name = prompt();
+                suggestEntry.PlaceholderText(name);
+                xaml::Automation::AutomationProperties::SetName(suggestEntry, name);
+            });
+        entry = suggestEntry;
+    }
     double width = props.width.value_or(640), height = props.height.value_or(480);
     auto submit = Run(ctx, props.submit);
     auto grow = props.grow, follow = props.follow ? props.follow : props.grow, shrink = props.shrink ? props.shrink : props.grow;
@@ -1146,17 +1162,21 @@ inline void SearchPalette(Parent const& p, Ctx const& ctx, SearchProps props, Bu
         });
         host.Children().Append(layer);
     };
-    // Pointing at the box, its search button or typing in it opens the
-    // palette with the text. The box's own text field marks the tap handled,
-    // so the handler asks for handled taps too.
-    entry.AddHandler(xaml::UIElement::TappedEvent(), winrt::box_value(xaml::Input::TappedEventHandler([show](auto&&, auto&&) { show(); })), true);
-    entry.QuerySubmitted([show](auto&&, auto&&) { show(); });
-    entry.TextChanged([show, ctx, field](controls::AutoSuggestBox const& sender, controls::AutoSuggestBoxTextChangedEventArgs const& args) {
-        if (args.Reason() != controls::AutoSuggestionBoxTextChangeReason::UserInput || sender.Text().empty()) return;
-        SetDraft(ctx, field, Value::Text(Utf8(sender.Text())));
-        sender.Text(L"");
-        show();
-    });
+    if (iconEntry) {
+        iconEntry.Click([show](auto&&, auto&&) { show(); });
+    } else if (suggestEntry) {
+        // Pointing at the box, its search button or typing in it opens the
+        // palette with the text. The box's own text field marks the tap handled,
+        // so the handler asks for handled taps too.
+        suggestEntry.AddHandler(xaml::UIElement::TappedEvent(), winrt::box_value(xaml::Input::TappedEventHandler([show](auto&&, auto&&) { show(); })), true);
+        suggestEntry.QuerySubmitted([show](auto&&, auto&&) { show(); });
+        suggestEntry.TextChanged([show, ctx, field](controls::AutoSuggestBox const& sender, controls::AutoSuggestBoxTextChangedEventArgs const& args) {
+            if (args.Reason() != controls::AutoSuggestionBoxTextChangeReason::UserInput || sender.Text().empty()) return;
+            SetDraft(ctx, field, Value::Text(Utf8(sender.Text())));
+            sender.Text(L"");
+            show();
+        });
+    }
     Reactive::OnCleanup([close] { (*close)(); });
     Controls::Register(ctx, props.id, "search", prompt ? prompt : TextFn([] { return winrt::hstring(); }), nullptr,
         Actions{.activate = show,
