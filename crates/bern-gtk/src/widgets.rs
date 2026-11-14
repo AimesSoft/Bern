@@ -2613,12 +2613,13 @@ pub fn Image(p: &Parent, ctx: &Ctx, props: ImageProps) {
     }
     if dark.is_some() || props.one_size || props.decode_max.is_some() {
         let sides = (props.one_size || props.decode_max.is_some()).then(|| {
-            let side = |num: &Option<Num>| match (num.as_ref().map(|n| n.peek(ctx)), props.decode_max) {
-                (Some(s), Some(m)) => Some(s.min(m)),
-                (Some(s), None) if props.one_size => Some(s),
-                (None, Some(m)) => Some(m),
-                _ => None,
-            };
+            let side =
+                |num: &Option<Num>| match (num.as_ref().map(|n| n.peek(ctx)), props.decode_max) {
+                    (Some(s), Some(m)) => Some(s.min(m)),
+                    (Some(s), None) if props.one_size => Some(s),
+                    (None, Some(m)) => Some(m),
+                    _ => None,
+                };
             (side(&props.width), side(&props.height))
         });
         follow_picture(&picture, path, light, dark, sides, fit);
