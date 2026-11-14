@@ -224,8 +224,9 @@ pub mod probe {
 "#;
     let ui = r#"
 use bern::prelude::*;
+use probe_protocol::probe::{self, Tab};
 #[bern::session]
-pub struct Draft { pub tab: probe::Tab }
+pub struct Draft { pub tab: Tab }
 
 #[component]
 pub fn app(app: probe::Client, #[session] draft: Draft) -> impl View {
@@ -236,8 +237,8 @@ pub fn app(app: probe::Client, #[session] draft: Draft) -> impl View {
                     Stack(enabled: !app.covering) {
                         SplitView {
                             Sidebar(id: nav, selection: draft.tab) {
-                                SidebarItem(value: probe::Tab::Home, label: tr! { "en" => "Home" }, icon: "house")
-                                SidebarItem(value: probe::Tab::Archive, label: tr! { "en" => "Archive" }, icon: "archivebox")
+                                SidebarItem(value: Tab::Home, label: tr! { "en" => "Home" }, icon: "house")
+                                SidebarItem(value: Tab::Archive, label: tr! { "en" => "Archive" }, icon: "archivebox")
                             }
                             Detail(titled: false) {
                                 Toolbar {
