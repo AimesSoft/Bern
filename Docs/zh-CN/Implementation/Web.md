@@ -132,9 +132,9 @@ v0.2 视觉规范下，生成的 `app.js` 为每个窗口种类写明呈现方�
 ## 控件（v0.3）
 
 - **按钮**：高 32 px，左右内边距 20 px，最小宽度 80 px；输入框与下拉菜单同为 32 px，同一行中的控件对齐。
-- **图标按钮**：默认及 plain 样式用图标颜色反馈悬停、按下与选中；显式 prominent 绘制强调容器，ControlGroup 提供组内共享胶囊。尺寸和样式以当前声明为准。
+- **图标按钮**：默认及 `plain` 样式保持中性 Web 控件风格（悬停与按下叠加底色），显式 `prominent` 绘制强调色容器；当控件或上层容器声明 `glass: true` 时，独立图标按钮渲染为圆形毛玻璃按钮（普通模糊、半透明底、1 px 描边与投影），`ControlGroup` 渲染为共享毛玻璃胶囊，`shape: capsule` 按钮渲染为独立毛玻璃胶囊，`Search(style: palette)` 弹窗与气泡面板使用毛玻璃浮层。尺寸和样式以当前声明为准。
 - **页签**：选中项文字与图标为 `accent.text`，下划线为 `accent`。
-- **侧边栏与竖排导航**：默认选中项填满 `accent`，文字与图标为 `on_accent`，选中且悬停为 `button.prominent.hover`；不带左侧竖线。声明覆盖背景时按对应语义角色重新配对前景色，显式前景色优先，选中图标继承文字颜色。浮动窗口切换条的当前项同样填满强调色。
+- **侧边栏与竖排导航**：`Sidebar` 与 `Detail` 支持 `background` 样式覆盖（与 SwiftUI、GPUI、Compose、GTK、WinUI 3 一致）；默认选中项填满 `accent`，文字与图标为 `on_accent`，选中且悬停为 `button.prominent.hover`；不带左侧竖线。声明覆盖背景时按对应语义角色重新配对前景色，显式前景色优先，选中图标继承文字颜色。浮动窗口切换条的当前项同样填满强调色。
 - **开关**：40 × 20 的轨道，关闭时为 `control.border` 边框加同色圆钮，开启时轨道填满 `accent`、圆钮为 `on_accent`；悬停时关闭态的边框与圆钮变为 `text.secondary`，开启态变为 `button.prominent.hover`。
 - **滑块**：仍是原生 `<input type="range">`，圆钮改为 4 px `control.thumb` 白环包住 `accent` 圆心并加 1 px 轮廓，悬停、拖动时圆心为 hover、pressed 变体。
 - **下拉菜单**：`automatic`、`menu` 样式不再用 `<select>`。触发器是 `role="combobox"` 的按钮，列表是 Popover API 的 `popover="auto"` 元素（顶层，不受卡片、对话框与滚动容器裁切；外部点按自动关闭），在 `beforetoggle` 中按触发器位置同步定位（下方不足 160 px 且上方更宽时向上），最高 328 px。焦点留在触发器上，活动项用 `aria-activedescendant`；键盘按 APG 只选组合框；Esc 在触发器上处理并阻止默认动作，所以对话框不会一起关闭；滚动页面或改变窗口大小时关闭。选择调用与外部入口相同的 `select` 闭包。
@@ -151,7 +151,7 @@ v0.2 视觉规范下，生成的 `app.js` 为每个窗口种类写明呈现方�
 
 ## 阶段四：自适应布局、菜单与语言
 
-- **`Adaptive`**：生成 `B.Adaptive(p, ctx, { id, breakpoint, layouts: { compact, expanded } })`，断点来自 `[layouts]`。运行时用 `ResizeObserver` 量容器宽度，尺寸变化时只重建布局区域；切换前聚焦的控件按 `data-bern-target` 在新布局中找回焦点，目标在未打开的菜单里时聚焦菜单按钮。
+- **`Adaptive`**：生成 `B.Adaptive(p, ctx, { id, breakpoint, layouts: { compact, expanded } })`，断点来自 `[layouts]`。运行时用 `ResizeObserver` 量容器宽度，并通过 `trackLayout` 追踪当前子布局的纵向伸展意图，使列容器内的自适应顶栏保持自身内容高度而不撑开空白，尺寸变化时只重建布局区域；切换前聚焦的控件按 `data-bern-target` 在新布局中找回焦点，目标在未打开的菜单里时聚焦菜单按钮。当 `Stack(under_bars: true)` 作为通顶背景层与前景层并列时，浮于顶部的页面头会为非 `under_bars` 前景层预留顶栏高度避让，并同步该背景层的明暗外观。
 - **`Menu` / `MenuItem`**：菜单按钮加 Popover API 弹出菜单，键盘按 APG Menu Button；与下拉菜单共用定位（`placePopover`）。每个菜单项按 `id` 登记，外部入口可在菜单关闭时执行。
 - **语言**：当前语言与字符串表是响应式单元，`tr()` 读取它们，所有文本绑定在切换时一次更新；`<html lang>` 与页面标题由同一效果更新。`ui.language`、`ui.set_language` 在会话请求中处理（命令序号 18、19）。`LanguagePicker` 复用自绘下拉菜单，选项名用 `Intl.DisplayNames` 取语言自称。
 - **功能契约报告**：`bern build` 为每个目标把报告写入产物目录的 `features.json`。

@@ -194,8 +194,16 @@ impl Generator<'_> {
             .length(sidebar, "width")
             .map(|width| format!("sidebarWidth = {width}, "))
             .unwrap_or_default();
+        let sidebar_style = self
+            .style_of(sidebar)
+            .map(|style| format!("sidebarStyle = BernStyles.{}, ", style.name))
+            .unwrap_or_default();
+        let detail_style = self
+            .style_of(detail)
+            .map(|style| format!("detailStyle = BernStyles.{}, ", style.name))
+            .unwrap_or_default();
         out.open(format!(
-            "BernSplitView({title}, bernShowing, {width}header = "
+            "BernSplitView({title}, bernShowing, {width}{sidebar_style}{detail_style}header = "
         ));
         match header {
             Some(header) => {

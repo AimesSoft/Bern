@@ -61,6 +61,11 @@ impl Generator<'_> {
         }
         out.line(format!("width: {},", Self::number(sidebar, "width")));
         out.line(format!("titled: {},", self.value(detail, "titled")));
+        out.line(format!(
+            "sidebar_style: {},",
+            self.style("Sidebar", sidebar)
+        ));
+        out.line(format!("detail_style: {},", self.style("Detail", detail)));
         out.close("},");
         out.indent += 1;
         self.in_sidebar.set(true);

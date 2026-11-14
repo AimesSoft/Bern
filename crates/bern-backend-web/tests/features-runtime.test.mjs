@@ -921,6 +921,48 @@ test("a search field without a width is as wide as its column, and a toolbar's k
   assert.doesNotMatch(css.match(/\n\.bern-search \{[^}]*\}/)[0], /width/, "the box takes its width from its place");
 });
 
+test("Adaptive keeps its content height for a header row and grows for a scroll view", () => {
+  const { B, Element } = runtime();
+  const root = new Element("root");
+  const scope = new B.Scope();
+  B.within(scope, () => B.Stack(root, { comp: "demo", win: { width: 1280 } }, { axis: "column" }, (col, ctx) => {
+    B.Adaptive(col, ctx, {
+      breakpoints: { compact: 600, medium: 1024, expanded: 1440 },
+      layouts: { expanded: (p, ctx) => B.Stack(p, ctx, { axis: "row" }, () => {}) },
+    });
+    B.Adaptive(col, ctx, {
+      breakpoints: { compact: 600, medium: 1024, expanded: 1440 },
+      layouts: { expanded: (p, ctx) => B.ScrollView(p, ctx, {}, () => {}) },
+    });
+  }));
+  const [column] = root.children;
+  const [headerAdaptive, scrollAdaptive] = column.children;
+  assert.ok(!headerAdaptive.classes.has("bern-layout-height"));
+  assert.ok(scrollAdaptive.classes.has("bern-layout-height"));
+  scope.dispose();
+});
+
+test("opt-in glass marks controls and search palette dialogs while leaving triggers neutral", () => {
+  const { B, F, Element } = runtime();
+  const root = new Element("root");
+  const scope = new B.Scope();
+  const glass = B.cell(true);
+  B.within(scope, () => {
+    F.Decorate(root, { comp: "demo" }, { glass: () => glass.get() }, (p, ctx) => {
+      B.IconButton(p, ctx, { id: "back", icon: "chevron.left", label: () => "Back" }, () => {});
+      B.SearchPalette(p, ctx, { id: "search", field: B.cell("") }, null, () => {});
+    });
+  });
+  const [iconBtn, trigger, dialog] = root.children;
+  assert.ok(iconBtn.classes.has("bern-glass"));
+  assert.ok(!trigger.classes.has("bern-glass"));
+  assert.ok(dialog.classes.has("bern-glass"));
+  glass.set(false);
+  assert.ok(!iconBtn.classes.has("bern-glass"));
+  assert.ok(!dialog.classes.has("bern-glass"));
+  scope.dispose();
+});
+
 test("a scroll view in a split button's or popover button's panel leaves the button its size", () => {
   const { B, F, Element, mutationObservers } = runtime();
   const root = new Element("root");

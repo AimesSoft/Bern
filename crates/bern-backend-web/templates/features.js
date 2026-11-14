@@ -920,12 +920,13 @@ let sidebarSequence = 0;
 /// of no declared width has a Window Splitter over its edge that drags or
 /// steps it between `SIDEBAR_WIDTHS`; a declared width stays fixed.
 export function SplitView(p, ctx, spec, sidebarContent, detail) {
-  const { selection, fallback, search, footer, header: sidebarHeader, width, titled, id } = spec;
+  const { selection, fallback, search, footer, header: sidebarHeader, width, titled, id, sidebarStyle, detailStyle } = spec;
   const showingDetail = cell(false);
   const collapsed = cell(false);
   const list = el("div", { class: "bern-sidebar-list", role: "listbox", tabindex: "0" });
   const sidebarId = `bern-sidebar-${++sidebarSequence}`;
   const sidebar = el("nav", { class: "bern-sidebar", id: sidebarId });
+  if (sidebarStyle?.base?.background) sidebar.style.background = cssColor(sidebarStyle.base.background);
   const dragged = cell(SIDEBAR_WIDTHS.initial);
   effect(() => sidebar.style.setProperty("--bern-sidebar-width", `${width === undefined ? dragged.get() : Number(typeof width === "function" ? width() : width)}px`));
   if (sidebarHeader) {
@@ -1012,6 +1013,7 @@ export function SplitView(p, ctx, spec, sidebarContent, detail) {
   header.prepend(back);
   const body = el("div", { class: "bern-detail-body" });
   const column = el("div", { class: "bern-detail" }, header, body);
+  if (detailStyle?.base?.background) column.style.background = cssColor(detailStyle.base.background);
   detail(body, inner);
   const node = el("div", { class: "bern-split" }, sidebar);
   if (width === undefined) node.append(splitter(node, sidebarId, dragged));
@@ -1421,10 +1423,14 @@ export function Decorate(p, ctx, spec, build) {
   // container's clock is only for its direct children.
   const animated = B.isEntering();
   const turns = clock;
-  B.structural(false, () => withClock(null, () => build(fragment, ctx)));
+  const inner = spec.appearance ? { ...ctx, appearance: spec.appearance } : ctx;
+  B.structural(false, () => withClock(null, () => build(fragment, inner)));
   const nodes = [...fragment.childNodes].filter((node) => node.nodeType === Node.ELEMENT_NODE);
   for (const node of nodes) {
     if (spec.appearance) node.classList.add(`bern-appearance-${spec.appearance}`);
+    if (spec.glass && !node.classList.contains("bern-search-palette-trigger")) {
+      effect(() => node.classList.toggle("bern-glass", Boolean(spec.glass())));
+    }
     if (spec.tint) {
       const tint = `var(--bern-${spec.tint.replace(/[._]/g, "-")})`;
       node.style.setProperty("--bern-accent", tint);
@@ -2001,7 +2007,6 @@ export function ContentButton(p, ctx, { id, label, enabled, style, shape, height
   });
   if (style) applyStyle(node, style, {});
   B.contextMenu(node, ctx, label, menu);
-  // The web has no capsule buttons: a capsule is the standard button.
   if (shape === "capsule") node.classList.add("bern-control-capsule");
   else bindLength(node, "height", height);
   p.append(node);
@@ -2960,8 +2965,9 @@ export function Place(p, ctx, { at, from, to, motion }, build) {
 export function PopoverButton(p, ctx, { id, label, icon: glyph, prominence, fontSize, presented, windowTheme = false, style }, content) {
   const panelId = `bern-popover-${Math.random().toString(36).slice(2)}`;
   const iconOnly = Boolean(glyph);
+  const iconKind = prominence === "prominent" ? " bern-icon-button-prominent" : prominence === "plain" ? " bern-icon-button-plain" : "";
   const trigger = el("button", {
-    class: iconOnly ? "bern-icon-button bern-popover-button" : `bern-button bern-button-${prominence ?? "standard"} bern-popover-button`,
+    class: iconOnly ? `bern-icon-button${iconKind} bern-popover-button` : `bern-button bern-button-${prominence ?? "standard"} bern-popover-button`,
     type: "button", "aria-haspopup": "dialog", "aria-expanded": "false", popovertarget: panelId,
   }, glyph ? B.icon(glyph, fontSize ?? 16) : null);
   if (glyph && fontSize != null) Object.assign(trigger.firstElementChild.style, { width: `${fontSize}px`, height: `${fontSize}px` });

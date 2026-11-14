@@ -30,6 +30,7 @@ use std::collections::BTreeSet;
 const COMMON: &[&str] = &[
     "feature",
     "appearance",
+    "glass",
     "appear",
     "appear_delay",
     "disappear",

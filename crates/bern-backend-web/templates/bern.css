@@ -614,7 +614,9 @@ button:disabled {
   gap: 8px;
 }
 
-.bern-tools:empty {
+.bern-tools:empty,
+.bern-tool-group:empty,
+.bern-tool-group:not(:has(> :not([hidden]))) {
   display: none;
 }
 
@@ -1014,42 +1016,74 @@ button:disabled {
 }
 
 /* `under_bars`: while such a layer is shown, the page header stands over
-   the window's content, without its rule, so the content starts at the
-   window's top edge; the layer fills it. */
+   the window's content, without its rule, so `under_bars` backdrops reach
+   the window's top edge while sibling foreground layers keep the top bar's
+   safe-area inset, just as on macOS. */
 .bern-window-body:has(.bern-under-bars) > .bern-page-header {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
-  z-index: 1;
+  z-index: 2;
   border-bottom-color: transparent;
+}
+
+.bern-window-body:has(> .bern-page-header:not([hidden])):has(.bern-under-bars) {
+  --bern-bars-top: 56px;
 }
 
 .bern-layers.bern-under-bars {
   width: 100%;
   height: 100%;
   max-width: none;
+  --bern-bars-top: 0px;
+}
+
+.bern-layers:has(> .bern-under-bars) > :not(.bern-under-bars) .bern-scroll:not(.bern-scroll-horizontal),
+.bern-layers:has(> .bern-under-bars) > .bern-scroll:not(.bern-scroll-horizontal, .bern-under-bars) {
+  padding-top: var(--bern-bars-top, 0px);
+}
+
+.bern-layers:has(> .bern-under-bars) > :not(.bern-under-bars) .bern-scroll:not(.bern-scroll-horizontal) > *,
+.bern-layers:has(> .bern-under-bars) > .bern-scroll:not(.bern-scroll-horizontal, .bern-under-bars) > * {
+  --bern-bars-top: 0px;
+}
+
+.bern-layers:has(> .bern-under-bars) > :not(.bern-under-bars):not(.bern-scroll):not(:has(.bern-scroll:not(.bern-scroll-horizontal))) {
+  padding-top: var(--bern-bars-top, 0px);
+}
+
+.bern-layers:has(> .bern-under-bars) > :not(.bern-under-bars):not(.bern-scroll):not(:has(.bern-scroll:not(.bern-scroll-horizontal))) > * {
+  --bern-bars-top: 0px;
 }
 
 /* In the page's own window the content reaches the top of the page, as an
-   immersive window's does: the app bar stands over it too, without its
-   rule, and the page header under the app bar. */
+   immersive window's does: when an app bar is present, it stands over the
+   window too, without its rule, and the page header sits under the app bar. */
 .bern-host:has(.bern-window-page .bern-under-bars) {
   position: relative;
 }
 
-.bern-host:has(.bern-window-page .bern-under-bars) > .bern-appbar {
+.bern-host:has(> .bern-appbar:not([hidden])):has(.bern-window-page .bern-under-bars) > .bern-appbar {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
-  z-index: 2;
+  z-index: 3;
   background: transparent;
   border-bottom-color: transparent;
 }
 
-.bern-host:has(.bern-window-page .bern-under-bars) .bern-window-page > .bern-window-body > .bern-page-header {
+.bern-host:has(> .bern-appbar:not([hidden])):has(.bern-window-page .bern-under-bars) .bern-window-page > .bern-window-body > .bern-page-header {
   top: 48px;
+}
+
+.bern-host:has(> .bern-appbar:not([hidden])):has(.bern-window-page .bern-under-bars) .bern-window-page > .bern-window-body {
+  --bern-bars-top: 48px;
+}
+
+.bern-host:has(> .bern-appbar:not([hidden])):has(.bern-window-page .bern-under-bars) .bern-window-page > .bern-window-body:has(> .bern-page-header:not([hidden])) {
+  --bern-bars-top: 104px;
 }
 
 .bern-image {
@@ -2476,11 +2510,12 @@ button.bern-menu-item:disabled .bern-icon {
 
 /* MARK: Adaptive layouts */
 
-/* Fills the available width it judges the layout size by. */
+/* Fills the available width it judges the layout size by; grows down only
+   when its active layout holds height-filling content (`trackLayout`). */
 .bern-adaptive {
   display: flex;
   flex-direction: column;
-  flex: 1 1 auto;
+  flex: none;
   align-self: stretch;
   min-width: 0;
 }

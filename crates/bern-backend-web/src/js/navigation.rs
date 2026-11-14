@@ -39,6 +39,15 @@ impl Generator<'_> {
         if let Some(titled) = self.value_prop(detail, "titled") {
             out.line(format!("titled: {titled},"));
         }
+        if let Some(style) =
+            crate::style::reference(self.app, "Sidebar", sidebar.keyword("variant"))
+        {
+            out.line(format!("sidebarStyle: {style},"));
+        }
+        if let Some(style) = crate::style::reference(self.app, "Detail", detail.keyword("variant"))
+        {
+            out.line(format!("detailStyle: {style},"));
+        }
         if let Some(fallback) = sidebar.expr("fallback") {
             out.line(format!("fallback: {},", self.expr(fallback)));
         }

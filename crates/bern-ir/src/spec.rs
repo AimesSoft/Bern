@@ -333,6 +333,7 @@ pub const MOTION_PROPS: &[PropSpec] = &[
     opt("reveal", PropKind::Keyword(&["hover"])),
     opt("animate", PropKind::MotionToken),
     opt("appearance", PropKind::Keyword(&["light", "dark"])),
+    opt("glass", PropKind::Bool),
     opt("tint", PropKind::ColorRole),
     opt("scroll_scale", PropKind::Number),
     opt("scroll_opacity", PropKind::Number),
