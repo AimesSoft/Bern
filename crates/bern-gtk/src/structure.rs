@@ -906,7 +906,7 @@ pub fn SplitView(p: &Parent, ctx: &Ctx, spec: SplitSpec, sidebar: Build, detail:
     sidebar_view.add_top_bar(&sidebar_header);
     sidebar_view.set_content(Some(&sidebar_box));
     if let Some(style) = spec.sidebar_style {
-        crate::style::surface(style, &sidebar_view);
+        crate::style::pane_surface(style, &sidebar_view);
     }
     ctx.win().chrome_view(&sidebar_view);
     let sidebar_page = adw::NavigationPage::new(&sidebar_view, "");
@@ -957,7 +957,7 @@ pub fn SplitView(p: &Parent, ctx: &Ctx, spec: SplitSpec, sidebar: Build, detail:
     detail_view.add_top_bar(&header);
     detail_view.set_content(Some(&content));
     if let Some(style) = spec.detail_style {
-        crate::style::surface(style, &detail_view);
+        crate::style::pane_surface(style, &detail_view);
     }
     ctx.win().chrome_view(&detail_view);
     let detail_page = adw::NavigationPage::new(&detail_view, "");
