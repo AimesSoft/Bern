@@ -470,7 +470,19 @@ impl Generator<'_> {
 
     pub(super) fn form(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         out.open("SwiftUI.Form {");
-        self.nodes(out, &element.children, ctx);
+        if self.platform == Platform::Watchos {
+            for node in &element.children {
+                self.nodes(out, std::slice::from_ref(node), ctx);
+                if matches!(node, Node::Element(child) if child.kind == "Text") {
+                    out.line(".listRowBackground(SwiftUI.Color.clear)");
+                    out.line(
+                        ".listRowInsets(SwiftUI.EdgeInsets(top: 2, leading: 6, bottom: 2, trailing: 6))",
+                    );
+                }
+            }
+        } else {
+            self.nodes(out, &element.children, ctx);
+        }
         out.close("}");
         out.line(".formStyle(.grouped)");
         // Its fields are rows of the form, without boxes of their own.

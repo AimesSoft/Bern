@@ -383,6 +383,30 @@ struct BernWatchMenu<LabelContent: View, Items: View>: View {
     }
 }
 
+/// A long-press action menu on watchOS, where `View.contextMenu` was
+/// deprecated with Force Touch in watchOS 7.
+struct BernWatchContextMenu<Items: View>: ViewModifier {
+    let title: String
+    @ViewBuilder let items: (@escaping () -> Void) -> Items
+    @State private var presented = false
+
+    func body(content: Content) -> some View {
+        content
+            .simultaneousGesture(
+                LongPressGesture(minimumDuration: 0.5).onEnded { _ in presented = true }
+            )
+            .sheet(isPresented: $presented) {
+                NavigationStack {
+                    List {
+                        items { presented = false }
+                    }
+                    .navigationTitle(title)
+                    .navigationBarTitleDisplayMode(.inline)
+                }
+            }
+    }
+}
+
 /// A choice control on watchOS where `.menu` and `.segmented` picker styles
 /// do not exist: shows the current option and opens a Crown-scrollable sheet
 /// of options when tapped.
@@ -505,19 +529,35 @@ extension View {
     func bernIdleArea(_ seconds: Double) -> some View { self }
 
     @ViewBuilder func bernTabAccessory(_ shown: Bool, _ accessory: AnyView) -> some View {
-        self
+        overlay {
+            if shown {
+                ZStack(alignment: .bottom) {
+                    Color.clear.allowsHitTesting(false)
+                    let bar = accessory
+                        .environment(\.bernOnBar, true)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .frame(minHeight: 32)
+                        .frame(maxWidth: .infinity)
+                    if #available(watchOS 26.0, *) {
+                        bar.glassEffect(.regular, in: Capsule())
+                            .padding(.horizontal, 8)
+                            .padding(.bottom, 14)
+                    } else {
+                        bar.background(.regularMaterial, in: Capsule())
+                            .padding(.horizontal, 8)
+                            .padding(.bottom, 14)
+                    }
+                }
+                .ignoresSafeArea(.container, edges: .bottom)
+            }
+        }
     }
 
     @ViewBuilder func bernTabAccessoryInset(_ shown: Bool, _ accessory: AnyView) -> some View {
-        safeAreaInset(edge: .bottom) {
+        safeAreaInset(edge: .bottom, spacing: 0) {
             if shown {
-                accessory
-                    .environment(\.bernOnBar, true)
-                    .frame(minHeight: 34)
-                    .frame(maxWidth: .infinity)
-                    .background(.regularMaterial, in: Capsule())
-                    .padding(.horizontal, 6)
-                    .padding(.bottom, 2)
+                Color.clear.frame(height: 22).allowsHitTesting(false)
             }
         }
     }
