@@ -253,7 +253,7 @@ impl Generator<'_> {
             .map(|expr| format!("() => {}", self.expr(expr)))
     }
 
-    fn action(&self, action: &Action) -> String {
+    pub(super) fn action(&self, action: &Action) -> String {
         match action {
             Action::Session { field, op } => {
                 let session = self.app.session(&field.session).expect("session");

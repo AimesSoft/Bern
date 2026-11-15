@@ -685,16 +685,19 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         Children::Any,
         "A layer positioned from the top leading corner of its containing coordinate space; with `bleed`, a layer of a `ScaleBox` scene continues past each scene edge it reaches, to the edge of the box",
     ),
-    spec(
-        "Modal",
-        &[
-            opt("width", PropKind::Length),
-            opt("height", PropKind::Length),
-            opt("cover", PropKind::Keyword(&["compact"])),
-        ],
-        Children::Any,
-        "Centered modal content, constrained to the hosting window, above a dimmed input-blocking backdrop; without `height` it is as tall as its content, a scroll view in it as tall as what it scrolls, until the window is too short; with `cover: compact` it covers the whole window where the window is compact, as a phone's full-screen flow",
-    ),
+    ComponentSpec {
+        action: ActionRule::Optional,
+        ..spec(
+            "Modal",
+            &[
+                opt("width", PropKind::Length),
+                opt("height", PropKind::Length),
+                opt("cover", PropKind::Keyword(&["compact"])),
+            ],
+            Children::Any,
+            "Centered modal content, constrained to the hosting window, above a dimmed input-blocking backdrop; without `height` it is as tall as its content, a scroll view in it as tall as what it scrolls, until the window is too short; with `cover: compact` it covers the whole window where the window is compact, as a phone's full-screen flow; an optional action runs when the user clicks outside or presses Escape",
+        )
+    },
     spec(
         "Flow",
         &[

@@ -3013,7 +3013,7 @@ export function Watch(p, ctx, { value }, action) {
 
 /// A view-owned blocking overlay, distinct from an application window.
 /// Its lifetime is controlled by the declarative branch containing it.
-export function Modal(p, ctx, { width, height, cover }, children) {
+export function Modal(p, ctx, { width, height, cover, onClose }, children) {
   const dialog = el("dialog", { class: "bern-modal", tabindex: "-1" });
   bindAttr(dialog, "aria-label", () => tr("app.name"));
   length(dialog, "width", width ?? 960);
@@ -3024,10 +3024,17 @@ export function Modal(p, ctx, { width, height, cover }, children) {
   const content = el("div", { class: "bern-modal-content" });
   children(content, { ...ctx, inToolbar: false, inGroup: false });
   dialog.append(content);
-  dialog.addEventListener("cancel", (event) => event.preventDefault());
+  dialog.addEventListener("cancel", (event) => { event.preventDefault(); if (onClose) onClose(); });
   dialog.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") event.preventDefault();
+    if (event.key === "Escape") { event.preventDefault(); if (onClose) onClose(); }
   });
+  if (onClose) {
+    dialog.addEventListener("click", (event) => {
+      if (event.target !== dialog) return;
+      const rect = dialog.getBoundingClientRect();
+      if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) onClose();
+    });
+  }
   p.append(dialog);
   let disposed = false;
   const returnFocus = document.activeElement;

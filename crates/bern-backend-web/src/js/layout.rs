@@ -314,6 +314,13 @@ impl Generator<'_> {
             ("animate", self.animate(element)),
             ("cover", Self::keyword(element, "cover")),
             ("align", Self::keyword(element, "align")),
+            (
+                "onClose",
+                element
+                    .action
+                    .as_ref()
+                    .map(|action| format!("() => {{ {} }}", self.action(action))),
+            ),
         ]);
         self.children(
             out,

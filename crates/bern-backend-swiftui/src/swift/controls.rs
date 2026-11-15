@@ -119,13 +119,15 @@ impl Generator<'_> {
                 // A capsule is the platform's button around the content,
                 // as it is around a label.
                 Some(style)
-                    if element.keyword("shape") == Some("capsule") && !style.draws_look() =>
+                    if element.keyword("shape") == Some("capsule") && !style.draws_base_look() =>
                 {
-                    self.capsule_control(out, element);
-                    out.line(format!(".bernFeedback(BernStyles.{})", style.name));
+                    self.capsule_control(out, element, Some(&style.name));
+                    if !style.draws_look() {
+                        out.line(format!(".bernFeedback(BernStyles.{})", style.name));
+                    }
                 }
                 None if element.keyword("shape") == Some("capsule") => {
-                    self.capsule_control(out, element);
+                    self.capsule_control(out, element, None);
                 }
                 _ => out.line(format!(
                     ".buttonStyle(BernContentButtonStyle(style: {}))",
@@ -218,6 +220,23 @@ impl Generator<'_> {
         out.close("}");
         let style = self.style_of(element);
         match &style {
+            Some(style)
+                if element.kind == "Button"
+                    && !ctx.toolbar
+                    && element.keyword("shape") == Some("capsule")
+                    && !style.draws_base_look() =>
+            {
+                self.capsule_control(out, element, Some(&style.name));
+                if let Some(size) = style.size() {
+                    out.line(format!(
+                        ".bernControlSize({})",
+                        crate::style::control_size(size)
+                    ));
+                }
+                if !style.draws_look() {
+                    out.line(format!(".bernFeedback(BernStyles.{})", style.name));
+                }
+            }
             // The style draws the button; its transforms follow the
             // button's own pressed state.
             Some(style) if style.draws_look() => {
@@ -256,7 +275,7 @@ impl Generator<'_> {
                     out.line(format!(".help({label})"));
                 } else if !ctx.toolbar {
                     if element.keyword("shape") == Some("capsule") {
-                        self.capsule_control(out, element);
+                        self.capsule_control(out, element, style.as_ref().map(|s| s.name.as_str()));
                     } else {
                         match element.keyword("prominence") {
                             Some("prominent") => out.line(".bernButtonLook(.prominent)"),
@@ -307,9 +326,12 @@ impl Generator<'_> {
     }
 
     /// The platform's capsule button, `height` tall.
-    fn capsule_control(&self, out: &mut Out, element: &Element) {
+    fn capsule_control(&self, out: &mut Out, element: &Element, style: Option<&str>) {
+        let style_arg = style
+            .map(|name| format!(", style: BernStyles.{name}"))
+            .unwrap_or_default();
         out.line(format!(
-            ".bernCapsuleControl(height: {}, prominent: {})",
+            ".bernCapsuleControl(height: {}, prominent: {}{style_arg})",
             self.length(element, "height")
                 .unwrap_or_else(|| "32.0".into()),
             element.keyword("prominence") == Some("prominent")

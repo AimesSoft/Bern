@@ -62,6 +62,20 @@ impl Resolved {
                 .any(|(_, effects)| effects.iter().any(look))
     }
 
+    /// Whether the style's resting state draws its own background, border, or geometry.
+    pub fn draws_base_look(&self) -> bool {
+        self.base.iter().any(|effect| {
+            matches!(
+                effect,
+                StyleEffect::Background { .. }
+                    | StyleEffect::Foreground { .. }
+                    | StyleEffect::Border { .. }
+                    | StyleEffect::Corner { .. }
+                    | StyleEffect::Padding { .. }
+            )
+        })
+    }
+
     pub fn size(&self) -> Option<ControlSize> {
         self.base.iter().find_map(|effect| match effect {
             StyleEffect::Size { size } => Some(*size),
