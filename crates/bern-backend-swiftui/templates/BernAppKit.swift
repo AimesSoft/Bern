@@ -1192,6 +1192,47 @@ extension View {
 /// A window's chrome, immersion and idleness: `unified` lays the content
 /// under a transparent title bar; `immersive` hides the title bar, its
 /// controls and the toolbar, and the pointer once it rests; `idleAfter`
+/// Drag region for custom-chrome windows on macOS: drags the window on pointer
+/// move and zooms/minimizes on double-click per system settings, while letting
+/// interactive SwiftUI controls placed above it receive clicks normally.
+struct BernWindowDragStrip: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { DragView() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    private final class DragView: NSView {
+        override var mouseDownCanMoveWindow: Bool { true }
+        override func mouseDown(with event: NSEvent) {
+            if event.clickCount == 2 {
+                let action = UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") ?? "Maximize"
+                if action == "Minimize" {
+                    window?.performMiniaturize(nil)
+                } else if action != "None" {
+                    window?.performZoom(nil)
+                }
+                return
+            }
+            window?.performDrag(with: event)
+        }
+    }
+}
+
+private struct BernUnifiedToolbarSuppression: ViewModifier {
+    let enabled: Bool
+    @ViewBuilder func body(content: Content) -> some View {
+        if enabled {
+            if #available(macOS 15.0, *) {
+                content
+                    .bernScrollEdgeEffectHidden()
+                    .toolbar(removing: .title)
+            } else {
+                content.bernScrollEdgeEffectHidden()
+            }
+        } else {
+            content
+        }
+    }
+}
+
 /// turns `idle` on after that many seconds without input in the window.
 struct BernWindowBehavior: ViewModifier {
     let context: BernWindowContext
@@ -1205,7 +1246,9 @@ struct BernWindowBehavior: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .ignoresSafeArea(.container, edges: immersive ? .top : [])
+            .environment(\.bernUnifiedChrome, unified)
+            .modifier(BernUnifiedToolbarSuppression(enabled: unified))
+            .ignoresSafeArea(.container, edges: (unified || immersive) ? .top : [])
             .onAppear {
                 apply(attempts: 20)
                 if let idleAfter, idleEnabled {
@@ -1214,6 +1257,7 @@ struct BernWindowBehavior: ViewModifier {
             }
             .onDisappear { monitor.stop() }
             .onChange(of: immersive) { apply(attempts: 20) }
+            .onChange(of: context.fullscreen) { apply(attempts: 5) }
             .onChange(of: idleEnabled) {
                 monitor.stop()
                 context.idle = false
@@ -1244,7 +1288,13 @@ struct BernWindowBehavior: ViewModifier {
         }
         window.titlebarAppearsTransparent = underTitle
         window.titleVisibility = underTitle ? .hidden : .visible
-        window.toolbar?.isVisible = !immersive
+        window.titlebarSeparatorStyle = underTitle ? .none : .automatic
+        if unified {
+            window.toolbar?.isVisible = false
+            window.toolbar = nil
+        } else {
+            window.toolbar?.isVisible = !immersive
+        }
         for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
             window.standardWindowButton(kind)?.isHidden = immersive && context.idle
         }
