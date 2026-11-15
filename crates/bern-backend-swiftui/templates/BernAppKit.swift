@@ -1868,15 +1868,58 @@ struct BernAppearanceRegion: NSViewRepresentable {
 
 // MARK: - Window-level image heroes
 
+struct BernHeroScopeExitProbe: NSViewRepresentable {
+    let scope: UUID
+    let exiting: Bool
+
+    func makeNSView(context: Context) -> ProbeView {
+        let view = ProbeView()
+        view.scope = scope
+        view.exiting = exiting
+        return view
+    }
+
+    func updateNSView(_ view: ProbeView, context: Context) {
+        view.scope = scope
+        view.exiting = exiting
+        view.fireIfNeeded()
+    }
+
+    @MainActor final class ProbeView: NSView {
+        var scope = UUID()
+        var exiting = false
+        private var fired = false
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            fireIfNeeded()
+        }
+
+        func fireIfNeeded() {
+            guard exiting, !fired, let window else { return }
+            fired = true
+            let scope = self.scope
+            DispatchQueue.main.async { [weak window] in
+                guard let window else { return }
+                BernWindowImageHeroes.forWindow(window).exitScope(scope)
+            }
+        }
+    }
+}
+
 /// A geometry probe leaves the SwiftUI image's layout and accessibility
 /// intact. Only its pixels move to the window overlay during a flight.
 struct BernPictureHeroProbe: NSViewRepresentable {
     let id: String
+    var scopes: Set<UUID> = []
     let picture: BernImage.Picture?
     let fit: BernImageFit
     let corner: CGFloat
     let motion: BernMotion
     let reduced: Bool
+    var exiting = false
     /// Fly what the window shows where the element is, for elements other
     /// than images.
     var capturesView = false
@@ -1888,7 +1931,8 @@ struct BernPictureHeroProbe: NSViewRepresentable {
     func updateNSView(_ view: BernPictureHeroAnchor, context: Context) {
         if view.key != id { view.detach() }
         view.key = id
-        view.picture = picture
+        view.scopes = scopes
+        if let picture { view.picture = picture }
         view.capturesView = capturesView
         view.fit = fit
         view.corner = corner
@@ -1896,7 +1940,12 @@ struct BernPictureHeroProbe: NSViewRepresentable {
         view.reduced = reduced
         view.visibility = visibility
         view.entered = entered
-        view.schedule()
+        if exiting {
+            view.exiting = true
+            view.detach()
+        } else if !view.exiting {
+            view.schedule()
+        }
     }
     static func dismantleNSView(_ view: BernPictureHeroAnchor, coordinator: ()) { view.detach() }
 }
@@ -1904,11 +1953,13 @@ struct BernPictureHeroProbe: NSViewRepresentable {
 @MainActor
 final class BernPictureHeroAnchor: NSView {
     var key = ""
+    var scopes: Set<UUID> = []
     var picture: BernImage.Picture?
     var fit = BernImageFit.cover
     var corner: CGFloat = 0
     var motion = BernMotion(period: 0.48, damping: 0.86)
     var reduced = false
+    var exiting = false
     var capturesView = false
     var visibility: ((Bool) -> Void)?
     var entered: (() -> Void)?
@@ -1928,14 +1979,17 @@ final class BernPictureHeroAnchor: NSView {
     override func layout() { super.layout(); schedule() }
 
     func schedule() {
-        guard !scheduled else { return }
+        guard !exiting, !scheduled else { return }
         scheduled = true
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
+            guard let self, !self.exiting else { return }
             self.scheduled = false
-            guard let window = self.window, self.bounds.width > 0, self.bounds.height > 0,
-                  self.picture != nil || self.capturesView else { return }
+            guard let window = self.window, self.bounds.width > 0, self.bounds.height > 0 else { return }
             let heroes = BernWindowImageHeroes.forWindow(window)
+            if self.picture == nil && !self.capturesView {
+                self.picture = heroes.existingPicture(for: self.key)
+            }
+            guard self.picture != nil || self.capturesView else { return }
             self.heroes = heroes
             self.lastRect = heroes.rect(of: self)
             if self.reduced { heroes.finish(self.key) }
@@ -2133,6 +2187,30 @@ final class BernWindowImageHeroes {
         }
     }
 
+    func existingPicture(for key: String) -> BernImage.Picture? {
+        entries[key]?.last(where: { $0.anchor?.picture != nil })?.anchor?.picture
+    }
+
+    func hasUnderlying(_ key: String) -> Bool {
+        let live = entries[key]?.filter { $0.anchor?.attached == true }.count ?? 0
+        return live >= 2
+    }
+
+    func exitScope(_ scope: UUID) {
+        var matching: [BernPictureHeroAnchor] = []
+        for list in entries.values {
+            for entry in list {
+                if let anchor = entry.anchor, anchor.scopes.contains(scope), anchor.attached {
+                    matching.append(anchor)
+                }
+            }
+        }
+        for anchor in matching {
+            anchor.exiting = true
+            anchor.detach()
+        }
+    }
+
     /// Whether an element with `key` that mounts now will fly in: another
     /// one with the key is on screen, or left it a moment ago. The new
     /// element stays hidden from its first frame until its flight begins,
@@ -2156,10 +2234,48 @@ final class BernWindowImageHeroes {
         // An element whose container has already left the window no longer
         // converts to it; it departs from where it was last laid out.
         let connected = anchor.window?.contentView.map { anchor.isDescendant(of: $0) } == true
-        if entries[key]?.last?.anchor === anchor,
-           let from = connected ? rect(of: anchor) : anchor.lastRect,
-           var picture = anchor.snapshot(in: overlay) {
+        let wasTop = entries[key]?.last?.anchor === anchor
+        var fromPicture: BernHeroPicture?
+        if let active = flights[key], active.destination === anchor {
+            fromPicture = BernHeroPicture(rect: active.view.frame, image: active.to.image, corner: active.view.corner)
+            finish(key)
+        } else if wasTop,
+                  let from = (anchor.exiting ? anchor.lastRect : nil) ?? (connected ? rect(of: anchor) : anchor.lastRect),
+                  var picture = anchor.snapshot(in: overlay) {
             picture.rect = from
+            fromPicture = picture
+        }
+        entries[key]?.removeAll { $0.anchor == nil || $0.anchor === anchor }
+        if entries[key]?.isEmpty == true { entries.removeValue(forKey: key) }
+
+        // When an upper overlay hero leaves in a `disappear:` transition while
+        // an underlying anchor of the same key remains mounted below it, fly
+        // back into that anchor at once.
+        if anchor.exiting,
+           wasTop,
+           let underlying = entries[key]?.last?.anchor,
+           underlying.attached,
+           !anchor.reduced && !underlying.reduced,
+           prepareOverlay(),
+           let from = fromPicture,
+           let to = underlying.snapshot(in: overlay),
+           from.rect != to.rect {
+            let flight = Flight(from: from, to: to, source: anchor, destination: underlying)
+            flights[key] = flight
+            anchor.visibility?(true)
+            underlying.visibility?(true)
+            overlay.addSubview(flight.view)
+            if timer == nil {
+                let clock = Timer(timeInterval: 1 / 120.0, repeats: true) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.tick() }
+                }
+                timer = clock
+                RunLoop.main.add(clock, forMode: .common)
+            }
+            return
+        }
+
+        if let picture = fromPicture {
             departed[key] = Departure(picture: picture, time: ProcessInfo.processInfo.systemUptime)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
                 guard let self, let record = self.departed[key],
@@ -2167,8 +2283,6 @@ final class BernWindowImageHeroes {
                 self.departed.removeValue(forKey: key)
             }
         }
-        entries[key]?.removeAll { $0.anchor == nil || $0.anchor === anchor }
-        if entries[key]?.isEmpty == true { entries.removeValue(forKey: key) }
         // A replacement may mount later in this layout pass. Let it
         // retarget before retiring a flight whose destination was removed.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in

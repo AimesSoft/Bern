@@ -78,6 +78,17 @@ enum BernImage {
         closing.removeFromSuperview()
         spin(0.08)
         precondition(ghosts().isEmpty && !sourceHidden, "removing the destination cancels and cleans up")
+        let overlayCard = anchor(right, CGRect(x: 20, y: 160, width: 540, height: 303.75))
+        var overlayHidden = false
+        overlayCard.visibility = { overlayHidden = $0 }
+        spin(1.3)
+        overlayCard.exiting = true
+        overlayCard.detach()
+        spin(0.08)
+        precondition(ghosts().count == 1 && sourceHidden && overlayHidden, "exiting overlay hero flies back to underlying source")
+        spin(1.3)
+        precondition(ghosts().isEmpty && !sourceHidden, "reverse overlay flight settles cleanly")
+        overlayCard.removeFromSuperview()
         // Other elements fly what the window draws where they are.
         let tile = NSView(frame: CGRect(x: 0, y: 0, width: 220, height: 600))
         tile.wantsLayer = true; tile.layer?.backgroundColor = NSColor.blue.cgColor
