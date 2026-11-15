@@ -89,6 +89,7 @@ pub struct WindowsWindowState {
     pub invalidate_devices: Arc<AtomicBool>,
     /// Shared with [`WindowsPlatformState::draw_coordinator`] and every other window.
     pub(crate) draw_coordinator: Rc<DrawCoordinator>,
+    pub(crate) in_size_move_loop: Cell<bool>,
     fullscreen: Cell<Option<StyleAndBounds>>,
     initial_placement: Cell<Option<WindowOpenStatus>>,
     hwnd: HWND,
@@ -195,6 +196,7 @@ impl WindowsWindowState {
             hwnd,
             invalidate_devices,
             draw_coordinator,
+            in_size_move_loop: Cell::new(false),
             direct_manipulation,
             a11y: RefCell::new(None),
         })

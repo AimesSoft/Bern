@@ -350,23 +350,24 @@ inline void Marquee(Parent const& p, Ctx const& ctx, MarqueeProps props, Build c
     // Each frame while running moves the content.
     auto running = std::make_shared<bool>(false);
     auto token = std::make_shared<winrt::event_token>();
-    auto last = std::make_shared<std::optional<int64_t>>();
+    auto last = std::make_shared<std::optional<std::chrono::steady_clock::time_point>>();
     auto keep = winrt::make_weak(panel);
     auto stop = [running, token] {
         if (!*running) return;
         *running = false;
         media::CompositionTarget::Rendering(*token);
+        bern::CompositorClock::Release();
     };
     auto start = [running, token, last, marquee, keep] {
         if (*running) return;
         *running = true;
+        bern::CompositorClock::Acquire();
         last->reset();
-        *token = media::CompositionTarget::Rendering([last, marquee, keep](auto&&, IInspectable const& args) {
+        *token = media::CompositionTarget::Rendering([last, marquee, keep](auto&&, IInspectable const&) {
             auto panel = keep.get();
             if (!panel) return;
-            int64_t now = 0;
-            if (auto rendering = args.try_as<media::RenderingEventArgs>()) now = rendering.RenderingTime().count();
-            if (*last) marquee->elapsed += (std::min)(0.1, (now - **last) / 1e7);
+            auto now = std::chrono::steady_clock::now();
+            if (*last) marquee->elapsed += (std::clamp)(std::chrono::duration<double>(now - **last).count(), 0.0, 0.1);
             *last = now;
             panel.InvalidateArrange();
         });

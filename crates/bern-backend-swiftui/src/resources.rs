@@ -575,6 +575,8 @@ pub fn info_plist_ios(app: &Application, executable: &str, minimum_ios: &str) ->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <key>CADisableMinimumFrameDurationOnPhone</key>
+    <true/>
     <key>CFBundleDevelopmentRegion</key>
     <string>{region}</string>
     <key>CFBundleDisplayName</key>
@@ -1024,6 +1026,10 @@ mod tests {
             "{mac}"
         );
         let ios = info_plist_ios(&hello, "Hello", "17.0");
+        assert!(
+            ios.contains("<key>CADisableMinimumFrameDurationOnPhone</key>\n    <true/>"),
+            "{ios}"
+        );
         assert!(ios.contains("<key>CFBundleDocumentTypes</key>"), "{ios}");
         assert!(!ios.contains("NSServices"), "{ios}");
         let menus = services_menu_files(&hello);

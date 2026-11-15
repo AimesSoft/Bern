@@ -47,7 +47,7 @@ struct Spring;
 /// Springs being driven, stepped together once per rendered frame.
 namespace Frames {
 inline std::vector<std::shared_ptr<Spring>> running;
-inline std::optional<int64_t> last;
+inline std::optional<std::chrono::steady_clock::time_point> last;
 inline bool subscribed = false;
 inline winrt::event_token token;
 inline void Start(std::shared_ptr<Spring> const& spring);
@@ -205,7 +205,7 @@ struct Spring : std::enable_shared_from_this<Spring> {
         }
         double left = elapsed;
         while (left > 0) {
-            double h = (std::min)(left, 1.0 / 240);
+            double h = (std::min)(left, 1.0 / 480);
             double force = -stiffness * (value - target) - damping * velocity;
             velocity += force * h;
             value += velocity * h;
@@ -227,19 +227,19 @@ inline void Frames::Start(std::shared_ptr<Spring> const& spring) {
     running.push_back(spring);
     if (subscribed) return;
     subscribed = true;
+    bern::CompositorClock::Acquire();
     last.reset();
     if (Logging()) {
         Watch();
         run = Run{std::chrono::steady_clock::now(), std::chrono::steady_clock::now()};
     }
-    token = media::CompositionTarget::Rendering([](auto&&, IInspectable const& args) {
-        int64_t now = 0;
-        if (auto rendering = args.try_as<media::RenderingEventArgs>()) now = rendering.RenderingTime().count();
-        double elapsed = last ? (std::min)(0.064, (now - *last) / 1e7) : 1.0 / 60;
-        if (elapsed <= 0) elapsed = 1.0 / 60;
-        last = now;
-        bool logging = Logging();
+    token = media::CompositionTarget::Rendering([](auto&&, IInspectable const&) {
         auto began = std::chrono::steady_clock::now();
+        double fallback = bern::CompositorClock::RefreshPeriod();
+        double elapsed = last ? (std::min)(0.064, std::chrono::duration<double>(began - *last).count()) : fallback;
+        if (elapsed <= 0) elapsed = fallback;
+        last = began;
+        bool logging = Logging();
         if (logging) {
             double gap = Since(run.previous);
             if (run.frames == 0) run.first = gap;
@@ -267,6 +267,7 @@ inline void Frames::Start(std::shared_ptr<Spring> const& spring) {
         if (running.empty() && subscribed) {
             subscribed = false;
             media::CompositionTarget::Rendering(token);
+            bern::CompositorClock::Release();
             if (logging) {
                 char line[384];
                 std::snprintf(line, sizeof line,
@@ -1590,6 +1591,7 @@ inline void Spin(xaml::UIElement const& element, Ctx const& ctx, Get when, doubl
     auto stop = [state] {
         if (!state->running) return;
         media::CompositionTarget::Rendering(state->rendering);
+        bern::CompositorClock::Release();
         state->running = false;
         state->last.reset();
     };
@@ -1598,6 +1600,7 @@ inline void Spin(xaml::UIElement const& element, Ctx const& ctx, Get when, doubl
         if (!on) return stop();
         if (state->running) return;
         state->running = true;
+        bern::CompositorClock::Acquire();
         state->rendering = media::CompositionTarget::Rendering([state, period, weak](auto&&, auto&&) {
             auto now = std::chrono::steady_clock::now();
             if (state->last) {

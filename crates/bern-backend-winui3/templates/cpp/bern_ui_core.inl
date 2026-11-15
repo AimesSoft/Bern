@@ -1464,6 +1464,10 @@ struct Win {
     controls::ContentDialog dialog{nullptr};
     std::string dialogConfirmation;
     bool reportQueued = false;
+    bool movingOrSizing = false;
+    bool presenterDirty = true;
+    HMONITOR dragMonitor = nullptr;
+    UINT dragDpi = 0;
     bool closed = false;
     bool focused = false;
     int failuresShown = 0;

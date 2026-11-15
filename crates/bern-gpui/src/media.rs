@@ -634,8 +634,19 @@ mod clock {
     static TOKENS: Mutex<Vec<String>> = Mutex::new(Vec::new());
     static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     static APP: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    #[cfg(target_os = "macos")]
+    static REFRESH_HZ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(120);
 
     pub(super) fn start(token: &str) {
+        #[cfg(target_os = "macos")]
+        if let Some(mtm) = objc2::MainThreadMarker::new() {
+            let hz = objc2_app_kit::NSScreen::screens(mtm)
+                .iter()
+                .map(|screen| screen.maximumFramesPerSecond().max(60) as u32)
+                .max()
+                .unwrap_or(120);
+            REFRESH_HZ.store(hz, std::sync::atomic::Ordering::Relaxed);
+        }
         APP.store(
             super::host().app() as usize,
             std::sync::atomic::Ordering::SeqCst,
@@ -689,10 +700,191 @@ mod clock {
         }
     }
 
+    fn refresh_interval() -> f64 {
+        #[cfg(target_os = "macos")]
+        {
+            1.0 / f64::from(
+                REFRESH_HZ
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                    .max(60),
+            )
+        }
+        #[cfg(target_os = "windows")]
+        {
+            #[repr(C)]
+            struct DevModeW {
+                device_name: [u16; 32],
+                spec_version: u16,
+                driver_version: u16,
+                size: u16,
+                driver_extra: u16,
+                fields: u32,
+                position_union: [u8; 16],
+                printer_shorts: [i16; 5],
+                form_name: [u16; 32],
+                log_pixels: u16,
+                bits_per_pel: u32,
+                pels_width: u32,
+                pels_height: u32,
+                display_flags: u32,
+                display_frequency: u32,
+                tail: [u32; 8],
+            }
+            const _: () = assert!(
+                std::mem::size_of::<DevModeW>() == 220
+                    && std::mem::offset_of!(DevModeW, display_frequency) == 184
+            );
+            #[link(name = "user32")]
+            unsafe extern "system" {
+                fn EnumDisplaySettingsW(
+                    device: *const u16,
+                    mode_num: u32,
+                    dev_mode: *mut DevModeW,
+                ) -> i32;
+            }
+            // SAFETY: zeroed 220-byte `DEVMODEW` buffer with `dmSize` initialized.
+            unsafe {
+                let mut mode: DevModeW = std::mem::zeroed();
+                mode.size = std::mem::size_of::<DevModeW>() as u16;
+                if EnumDisplaySettingsW(std::ptr::null(), u32::MAX, &mut mode) != 0
+                    && mode.display_frequency > 1
+                {
+                    return 1.0 / f64::from(mode.display_frequency);
+                }
+            }
+            1.0 / 60.0
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        {
+            1.0 / 120.0
+        }
+    }
+
     fn run() {
-        let interval = 1.0 / 60.0;
+        #[cfg(target_os = "windows")]
+        let (dcomp_boost, dcomp_wait, timer) = {
+            use std::ffi::c_void;
+            type BoostFn = unsafe extern "system" fn(i32) -> i32;
+            type WaitFn = unsafe extern "system" fn(u32, *const *mut c_void, u32) -> i32;
+            #[link(name = "kernel32")]
+            unsafe extern "system" {
+                fn LoadLibraryA(name: *const u8) -> *mut c_void;
+                fn GetProcAddress(module: *mut c_void, name: *const u8) -> *const c_void;
+                fn CreateWaitableTimerExW(
+                    attrs: *const c_void,
+                    name: *const u16,
+                    flags: u32,
+                    access: u32,
+                ) -> *mut c_void;
+            }
+            // SAFETY: null-terminated ASCII module/export names and standard Win32 waitable timer creation.
+            unsafe {
+                let module = LoadLibraryA(b"dcomp.dll\0".as_ptr());
+                let boost = if module.is_null() {
+                    None
+                } else {
+                    let p = GetProcAddress(module, b"DCompositionBoostCompositorClock\0".as_ptr());
+                    (!p.is_null()).then(|| std::mem::transmute::<*const c_void, BoostFn>(p))
+                };
+                let wait = if module.is_null() {
+                    None
+                } else {
+                    let p =
+                        GetProcAddress(module, b"DCompositionWaitForCompositorClock\0".as_ptr());
+                    (!p.is_null()).then(|| std::mem::transmute::<*const c_void, WaitFn>(p))
+                };
+                let timer = CreateWaitableTimerExW(
+                    std::ptr::null(),
+                    std::ptr::null(),
+                    0x0000_0002,
+                    0x001F_0003,
+                );
+                (boost, wait, timer)
+            }
+        };
+        #[cfg(target_os = "windows")]
+        let mut boosted = false;
+        #[cfg(target_os = "windows")]
+        let mut short_waits = 0u32;
+
         loop {
-            std::thread::sleep(std::time::Duration::from_secs_f64(interval));
+            let active_count = TOKENS.lock().map(|t| t.len()).unwrap_or(0);
+            if active_count == 0 {
+                #[cfg(target_os = "windows")]
+                if boosted {
+                    if let Some(boost) = dcomp_boost {
+                        // SAFETY: disables this thread's previous boost.
+                        unsafe {
+                            let _ = boost(0);
+                        }
+                    }
+                    boosted = false;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(16));
+                continue;
+            }
+            let interval = refresh_interval();
+            #[cfg(target_os = "windows")]
+            {
+                if !boosted {
+                    if let Some(boost) = dcomp_boost {
+                        // SAFETY: requests high-refresh compositor clock while surfaces are active.
+                        unsafe {
+                            let _ = boost(1);
+                        }
+                    }
+                    boosted = true;
+                }
+                let start = now();
+                let synced = dcomp_wait
+                    .map(|wait| unsafe { wait(0, std::ptr::null(), 80) >= 0 })
+                    .unwrap_or(false);
+                let elapsed = now() - start;
+                if synced && elapsed >= 0.0001 {
+                    short_waits = 0;
+                } else if !synced || {
+                    short_waits += 1;
+                    short_waits >= 4
+                } {
+                    #[link(name = "kernel32")]
+                    unsafe extern "system" {
+                        fn SetWaitableTimer(
+                            timer: *mut std::ffi::c_void,
+                            due: *const i64,
+                            period: i32,
+                            routine: *const std::ffi::c_void,
+                            arg: *const std::ffi::c_void,
+                            resume: i32,
+                        ) -> i32;
+                        fn WaitForSingleObject(handle: *mut std::ffi::c_void, ms: u32) -> u32;
+                    }
+                    if !timer.is_null() {
+                        let due = -((interval * 1e7) as i64).max(1);
+                        // SAFETY: valid waitable timer handle created above.
+                        unsafe {
+                            if SetWaitableTimer(
+                                timer,
+                                &due,
+                                0,
+                                std::ptr::null(),
+                                std::ptr::null(),
+                                0,
+                            ) != 0
+                            {
+                                let _ = WaitForSingleObject(timer, 100);
+                            } else {
+                                std::thread::sleep(std::time::Duration::from_secs_f64(interval));
+                            }
+                        }
+                    } else {
+                        std::thread::sleep(std::time::Duration::from_secs_f64(interval));
+                    }
+                }
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                std::thread::sleep(std::time::Duration::from_secs_f64(interval));
+            }
             let app = APP.load(std::sync::atomic::Ordering::SeqCst) as *mut bern_ffi::BernApp;
             let Ok(tokens) = TOKENS.lock() else { return };
             let now = now();

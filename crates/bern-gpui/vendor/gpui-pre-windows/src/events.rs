@@ -398,13 +398,12 @@ impl WindowsWindowInner {
     }
 
     fn handle_size_move_loop(&self, handle: HWND) -> Option<isize> {
+        if !self.state.in_size_move_loop.replace(true) {
+            compositor_clock_acquire();
+        }
+        let interval_ms = (current_vsync_interval().as_millis() as u32).max(1);
         unsafe {
-            let ret = SetTimer(
-                Some(handle),
-                SIZE_MOVE_LOOP_TIMER_ID,
-                USER_TIMER_MINIMUM,
-                None,
-            );
+            let ret = SetTimer(Some(handle), SIZE_MOVE_LOOP_TIMER_ID, interval_ms, None);
             if ret == 0 {
                 log::error!(
                     "unable to create timer: {}",
@@ -416,6 +415,9 @@ impl WindowsWindowInner {
     }
 
     fn handle_size_move_loop_exit(&self, handle: HWND) -> Option<isize> {
+        if self.state.in_size_move_loop.replace(false) {
+            compositor_clock_release();
+        }
         unsafe {
             KillTimer(Some(handle), SIZE_MOVE_LOOP_TIMER_ID).log_err();
         }
@@ -446,6 +448,9 @@ impl WindowsWindowInner {
     }
 
     fn handle_destroy_msg(&self, handle: HWND) -> Option<isize> {
+        if self.state.in_size_move_loop.replace(false) {
+            compositor_clock_release();
+        }
         self.cancel_touches();
         let callback = { self.state.callbacks.close.take() };
         // Re-enable parent window if this was a modal dialog

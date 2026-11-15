@@ -647,6 +647,18 @@ inline std::unordered_map<uint64_t, std::function<void(Bytes const&)>> queries;
 inline std::string engineId;
 }
 
+/// Display refresh pacing and Windows 11 compositor clock boosting.
+/// `dwmcorei` waits on `DCompositionWaitForCompositorClock` without boosting
+/// it outside `InteractionTracker`, which leaves dynamic refresh rate displays
+/// and unboosted composition loops at 60 Hz during window moves, springs,
+/// marquees, spins, SVG animations and custom media frame pacing.
+namespace CompositorClock {
+void Acquire();
+void Release();
+bool Wait(DWORD timeoutMs = 80);
+double RefreshPeriod(HWND hwnd = nullptr);
+}
+
 // ---------------------------------------------------------------------------
 // The media executor: a Media Foundation media engine per player and
 // source, reporting what it does as observations, never as commands. When

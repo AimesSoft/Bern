@@ -2635,7 +2635,7 @@ struct BernRubyText<Plain: View>: View, Animatable {
             let route = BernLitRoute(number >= 0 ? path() : "")
             let clock = clock(), since = since()
             BernRubyLayout(document: document) {
-                TimelineView(.animation(minimumInterval: 1.0 / 60, paused: route.isEmpty || since <= 0)) { timeline in
+                TimelineView(.animation(paused: route.isEmpty || since <= 0)) { timeline in
                     let place = route.isEmpty ? number : route.place(at: clock + (since > 0 ? timeline.date.timeIntervalSince1970 - since : 0))
                     #if os(macOS) || os(watchOS)
                     Canvas { graphics, size in
@@ -3085,7 +3085,7 @@ struct BernLitText: View {
                     }
             } else {
                 let (clock, since) = (clock(), since())
-                TimelineView(.animation(minimumInterval: 1.0 / 30, paused: since <= 0)) { timeline in
+                TimelineView(.animation(paused: since <= 0)) { timeline in
                     bernLit(text, route.place(at: clock + (since > 0 ? timeline.date.timeIntervalSince1970 - since : 0)))
                 }
             }

@@ -1023,6 +1023,8 @@ struct BernKernelVideoSurface: NSViewRepresentable {
         let frames = BernKernelFrames(token: token)
         // The view's display link follows the window to other screens.
         let link = view.displayLink(target: frames, selector: #selector(BernKernelFrames.step(_:)))
+        let maximum = Float(max(60, (view.window?.screen ?? NSScreen.main)?.maximumFramesPerSecond ?? 120))
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: min(60, maximum), maximum: maximum, preferred: maximum)
         view.resized = { size in BernMedia.shared.resizeKernel(token: token, size: size) }
         BernMedia.shared.attachKernel(
             view.metalLayer, size: view.size, fit: fit, token: token, player: playerID, window: window,
