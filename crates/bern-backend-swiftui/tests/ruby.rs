@@ -175,7 +175,7 @@ fn assert_generated(output: &Path, sources: &str) {
     let runtime = std::fs::read_to_string(output.join(sources).join("BernStyle.swift")).unwrap();
     for expected in [
         "import CoreText",
-        "CTRubyAnnotationCreateWithAttributes",
+        "CTFontCreateCopyWithAttributes",
         "return font as CTFont",
         "CTTypesetterSuggestLineBreak",
         "CTLineGetOffsetForStringIndex",
@@ -252,7 +252,7 @@ private extension BernRubyText {
         let wide = document.layout(width: 1000)
         let narrow = document.layout(width: 90)
         precondition(wide.rows.count == 1)
-        let ink = CTLineGetImageBounds(wide.rows[0].line, nil)
+        let ink = wide.rows[0].imageBounds
         precondition(ink.maxY > CTFontGetAscent(font), "ruby ink must stand above the base glyphs")
         precondition(narrow.rows.count > 1)
         precondition(narrow.size.height >= CGFloat(narrow.rows.count) * 50)
@@ -336,6 +336,114 @@ private extension BernRubyText {
         precondition(CFEqual(CTFontCopyFontDescriptor(animated.testNativeFont),
                              CTFontCopyFontDescriptor(systemFont)),
                      "ruby must retain the actual system font descriptor and fallback cascade")
+        // Multi-run font-fallback spans (e.g. iteration mark 々 in .CJKSymbolsFallbackSC,
+        // mixed scripts, or Japanese fallback into Hiragino Sans) must keep identical
+        // base glyph advances with no gap and center the reading over the entire word.
+        let cascadeFont: CTFont = {
+            let hiragino = CTFontDescriptorCreateWithNameAndSize("HiraginoSans-W3" as CFString, 28)
+            let baseDesc = CTFontDescriptorCreateWithAttributes([
+                kCTFontNameAttribute as String: "PingFangSC-Medium",
+                kCTFontCascadeListAttribute as String: [hiragino]
+            ] as CFDictionary)
+            return CTFontCreateWithFontDescriptor(baseDesc, 28, nil)
+        }()
+        for testFont in [animated.testNativeFont, cascadeFont] {
+            for (word, json, checkGap) in [
+                ("重々承知", #"[[0,4,"じゅうじゅうしょうち"]]"#, true),
+                ("前途洋々", #"[[0,4,"ぜんとようよう"]]"#, true),
+                ("柔軟", #"[[0,2,"じゅうなん"]]"#, true),
+                ("3月9日", #"[[0,4,"さんがつここのか"]]"#, true),
+                ("本能に従順忠実 翻弄も重々承知",
+                 #"[[0,2,"ほんのう"],[3,5,"じゅうじゅん"],[5,7,"ちゅうじつ"],[8,10,"ほんろう"],[11,15,"じゅうじゅうしょうち"]]"#,
+                 false),
+            ] {
+                let white = CGColor(red: 1, green: 1, blue: 1, alpha: 1)
+                let parsed = BernRubySpan.parse(json, text: word)
+                let doc = BernRubyDocument(text: word, spans: parsed, font: testFont, lineHeight: nil, limit: nil)
+                let laidOut = doc.layout(width: 1000, color: white)
+                precondition(laidOut.rows.count == 1)
+                let rubyRow = laidOut.rows[0]
+                let plainLine = CTLineCreateWithAttributedString(NSAttributedString(string: word, attributes: [
+                    NSAttributedString.Key(kCTFontAttributeName as String): testFont,
+                    NSAttributedString.Key(kCTForegroundColorAttributeName as String): white]))
+                let rubyRuns = CTLineGetGlyphRuns(rubyRow.line) as! [CTRun]
+                let plainRuns = CTLineGetGlyphRuns(plainLine) as! [CTRun]
+                precondition(rubyRuns.count == plainRuns.count, "base fallback run count must not change")
+                for (rRun, pRun) in zip(rubyRuns, plainRuns) {
+                    let rFont = (CTRunGetAttributes(rRun) as NSDictionary)[kCTFontAttributeName as String] as! CTFont
+                    let pFont = (CTRunGetAttributes(pRun) as NSDictionary)[kCTFontAttributeName as String] as! CTFont
+                    precondition(CTFontCopyPostScriptName(rFont) == CTFontCopyPostScriptName(pFont),
+                                 "resolved fallback font per run must match plain text")
+                }
+                for i in 0..<laidOut.offsets.count {
+                    let rx = CTLineGetOffsetForStringIndex(rubyRow.line, laidOut.offsets[i], nil)
+                    let px = CTLineGetOffsetForStringIndex(plainLine, laidOut.offsets[i], nil)
+                    precondition(abs(rx - px) < 0.01, "scalar offset \(i) in \(word) shifted: \(rx) vs \(px)")
+                }
+                if word == "重々承知" {
+                    let firstStep = CTLineGetOffsetForStringIndex(rubyRow.line, laidOut.offsets[1], nil)
+                        - CTLineGetOffsetForStringIndex(rubyRow.line, laidOut.offsets[0], nil)
+                    for i in 0..<4 {
+                        let step = CTLineGetOffsetForStringIndex(rubyRow.line, laidOut.offsets[i + 1], nil)
+                            - CTLineGetOffsetForStringIndex(rubyRow.line, laidOut.offsets[i], nil)
+                        precondition(step > 20 && abs(step - firstStep) < 2,
+                                     "重々承知 character \(i) advance must stay ~1em without gap: \(step)")
+                    }
+                }
+                let canvasW = 500, canvasH = 120
+                let bmp = CGContext(data: nil, width: canvasW, height: canvasH, bitsPerComponent: 8,
+                                    bytesPerRow: canvasW * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+                bmp.translateBy(x: 0, y: CGFloat(canvasH))
+                bmp.scaleBy(x: 1, y: -1)
+                laidOut.draw(in: bmp, mark: nil, lit: -1)
+                let raw = bmp.data!.assumingMemoryBound(to: UInt8.self)
+                let splitY = Int(floor(rubyRow.baseline - CTFontGetAscent(testFont)))
+                for span in parsed {
+                    let spanLeft = Int(floor(CTLineGetOffsetForStringIndex(rubyRow.line, span.range.location, nil)))
+                    let spanRight = Int(ceil(CTLineGetOffsetForStringIndex(rubyRow.line, NSMaxRange(span.range), nil)))
+                    var rubyMinX = canvasW, rubyMaxX = -1, baseMinX = canvasW, baseMaxX = -1
+                    var baseCols = [Bool](repeating: false, count: canvasW)
+                    for y in 0..<canvasH {
+                        for x in max(0, spanLeft - 2)..<min(canvasW, spanRight + 2) where raw[(y * canvasW + x) * 4 + 3] > 20 {
+                            if y < splitY {
+                                rubyMinX = min(rubyMinX, x); rubyMaxX = max(rubyMaxX, x)
+                            } else {
+                                baseMinX = min(baseMinX, x); baseMaxX = max(baseMaxX, x)
+                                baseCols[x] = true
+                            }
+                        }
+                    }
+                    precondition(rubyMinX < rubyMaxX && baseMinX < baseMaxX, "missing ruby or base ink for \(word)")
+                    let rubyMid = Double(rubyMinX + rubyMaxX) / 2.0
+                    let baseMid = Double(baseMinX + baseMaxX) / 2.0
+                    precondition(abs(rubyMid - baseMid) <= 4.0,
+                                 "ruby must center over whole span in \(word): rubyMid=\(rubyMid), baseMid=\(baseMid)")
+                    if checkGap {
+                        var x = baseMinX
+                        while x <= baseMaxX {
+                            if !baseCols[x] {
+                                let g0 = x
+                                while x <= baseMaxX && !baseCols[x] { x += 1 }
+                                precondition(x - g0 <= 10,
+                                             "unexpected horizontal blank gap \(g0)..<\(x) inside \(word)")
+                            } else {
+                                x += 1
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Wrapped multi-run fallback span splits its reading proportionally across lines.
+        let wrappedFallback = BernRubyDocument(
+            text: "重々承知",
+            spans: BernRubySpan.parse(#"[[0,4,"じゅうじゅうしょうち"]]"#, text: "重々承知"),
+            font: animated.testNativeFont, lineHeight: nil, limit: nil
+        ).layout(width: 65)
+        precondition(wrappedFallback.rows.count == 2, "重々承知 at 65pt should wrap into 2 rows")
+        precondition(wrappedFallback.rows[0].readings.count == 1 && wrappedFallback.rows[1].readings.count == 1,
+                     "each wrapped half of 重々承知 must carry its proportional reading")
         for scheme in [ColorScheme.light, .dark] {
             let subject = BernRubyText(text: "東京", ruby: #"[[0,2,"とうきょう"]]"#, size: 32,
                 style: "body", weight: "regular", bold: false, color: .primary,
@@ -436,9 +544,10 @@ private struct RubyProbeContent: View {
     static let background = Color(.sRGB, white: 0.4, opacity: 1)
     private func row(_ name: String, color: Color, mark: Color? = nil,
                      text: String = "東京", reading: String = "とうきょう",
+                     spanEnd: Int = 2,
                      width: CGFloat = 300, lines: Int? = nil, height: CGFloat = 78) -> some View {
         HStack(spacing: 20) {
-            BernRubyText(text: text, ruby: "[[0,2,\"\(reading)\"]]", size: 32,
+            BernRubyText(text: text, ruby: "[[0,\(spanEnd),\"\(reading)\"]]", size: 32,
                 style: "body", weight: "regular", bold: false, color: color,
                 lineHeight: nil, lines: lines, mark: mark,
                 lit: { state.lit }, path: { "" }, clock: { 0 }, since: { 0 }) {
@@ -464,6 +573,7 @@ private struct RubyProbeContent: View {
             row("explicit", color: (state.alternate ? Color.blue : Color.red).opacity(0.65))
             row("mark", color: .primary, mark: .secondary.opacity(0.7))
             row("emoji", color: .primary, text: "東京😀", reading: "とう😀きょう")
+            row("fallback", color: .primary, text: "重々承知", reading: "じゅうじゅうしょうち", spanEnd: 4, height: 64)
             row("wrapped", color: .primary, text: "東京へ行く。東京へ行く。東京へ行く。",
                 width: 110, lines: 2, height: 150)
         }
@@ -619,7 +729,7 @@ private struct RubyProbePixels {
         let pixels = RubyProbePixels(host.view)
         let background = pixels.pixel(5, 5)
         if state.lit < 0 {
-            for name in ["primary", "secondary", "opacity", "explicit", "mark"] {
+            for name in ["primary", "secondary", "opacity", "explicit", "mark", "fallback"] {
                 let view = ink(name)
                 let drawing = view.document!.layout(width: view.bounds.width)
                 let frame = region(name)
@@ -649,6 +759,22 @@ private struct RubyProbePixels {
                          "ruby color emoji retain their palette")
             precondition(pixels.coloredCount(CGRect(x: emojiFrame.minX, y: emojiFrame.minY + boundary,
                          width: emojiFrame.width, height: emojiFrame.height - boundary)) > 40, "base color emoji retain their palette")
+            let fallbackView = ink("fallback")
+            let fallbackDrawing = fallbackView.document!.layout(width: fallbackView.bounds.width)
+            let fallbackRow = fallbackDrawing.rows[0]
+            let firstStep = CTLineGetOffsetForStringIndex(fallbackRow.line, fallbackDrawing.offsets[1], nil)
+                - CTLineGetOffsetForStringIndex(fallbackRow.line, fallbackDrawing.offsets[0], nil)
+            for i in 0..<4 {
+                let step = CTLineGetOffsetForStringIndex(fallbackRow.line, fallbackDrawing.offsets[i + 1], nil)
+                    - CTLineGetOffsetForStringIndex(fallbackRow.line, fallbackDrawing.offsets[i], nil)
+                precondition(step > 24 && abs(step - firstStep) < 2, "iOS 重々承知 step \(i): \(step)")
+            }
+            precondition(fallbackRow.readings.count == 1)
+            let fallbackReading = fallbackRow.readings[0]
+            let fallbackReadingWidth = CGFloat(CTLineGetTypographicBounds(fallbackReading.line, nil, nil, nil)) * fallbackReading.scale
+            let fallbackSpanEnd = CTLineGetOffsetForStringIndex(fallbackRow.line, fallbackDrawing.offsets[4], nil)
+            precondition(abs((fallbackReading.x + fallbackReadingWidth / 2) - fallbackSpanEnd / 2) < 0.5,
+                         "iOS 重々承知 reading must center over the full 4-character span")
             let wrapped = ink("wrapped")
             let drawing = wrapped.document!.layout(width: wrapped.bounds.width)
             precondition(drawing.rows.count == 2, "wrapping and line limit")

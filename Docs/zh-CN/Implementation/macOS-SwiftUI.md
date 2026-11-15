@@ -691,3 +691,7 @@ macOS 上 `NavigationSplitView` 的工具栏安全区受以下做法影响，出
 ## 空闲区域变化不是输入
 
 `idle_area` 的注册、移除与悬停变化只更新计时条件，不算用户操作。布局或自绘重绘引起的变化既不能唤醒已经空闲的窗口，也不能延后尚未空闲窗口的输入截止时间；计时使用单调时钟。真实鼠标、键盘或滚轮输入仍会立即唤醒窗口。弹出菜单、表单编辑等交互仍保持窗口清醒。
+
+## 跨字体回退的注音排版
+
+`BernRubyDocument` 直接以 `CTTypesetter` 排版正文段落而不挂载 `kCTRubyAnnotationAttributeName`，再将每行可见区间内的各段注音单独排版为 Core Text `CTLine`（通过 `CTFontCreateCopyWithAttributes` 取正文字号的 `0.45` 倍，超宽时按实测横跨宽度等比缩小，水平居中于整段底字上方并置于 `max(lineAscent, CTFontGetAscent(font))` 之上）。Core Text 会先按回退字体（例如落在 `.CJKSymbolsFallbackSC` 的叠字符 `々`、拉丁与中日韩混排，或回退到 `Hiragino Sans` 的字形）切分 `CTRun` 再解析 `CTRubyAnnotation`，把跨多个 `CTRun` 的整段注音单独挂在其中一个回退 `CTRun` 上，此前会导致字间距被异常撑开且注音偏离整词中心。直接排版正文行在 macOS、iOS、tvOS 与 watchOS 上完整保留与未启用注音一致的系统字体描述符、回退链、字重与字形步进。

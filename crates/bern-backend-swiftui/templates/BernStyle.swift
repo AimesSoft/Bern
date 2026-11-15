@@ -2546,6 +2546,7 @@ enum BernDraw {
 /// Reject malformed, overlapping and out-of-bounds ranges before Core Text sees them.
 struct BernRubySpan: Sendable {
     var range: NSRange
+    var scalars: Range<Int>
     var reading: String
 
     static func parse(_ json: String, text: String) -> [BernRubySpan] {
@@ -2562,11 +2563,12 @@ struct BernRubySpan: Sendable {
                   end.doubleValue.rounded() == end.doubleValue,
                   start.doubleValue >= 0, end.doubleValue < Double(offsets.count),
                   start.doubleValue < end.doubleValue, !reading.isEmpty else { continue }
-            let a = offsets[start.intValue], b = offsets[end.intValue]
+            let s = start.intValue, e = end.intValue
+            let a = offsets[s], b = offsets[e]
             let range = NSRange(location: a, length: b - a)
             guard !result.contains(where: { NSIntersectionRange($0.range, range).length > 0 }),
                   !(text as NSString).substring(with: range).contains(where: { $0.isNewline }) else { continue }
-            result.append(BernRubySpan(range: range, reading: reading))
+            result.append(BernRubySpan(range: range, scalars: s..<e, reading: reading))
         }
         return result.sorted { $0.range.location < $1.range.location }
     }
@@ -2763,18 +2765,17 @@ struct BernRubyDocument: @unchecked Sendable {
 
     func layout(width proposed: CGFloat, color: CGColor = CGColor(gray: 0, alpha: 1)) -> BernRubyDrawing {
         let width = proposed.isFinite ? max(1, proposed) : 1_000_000
-        let attributed = NSMutableAttributedString(string: text, attributes: [
+        // Shape the base paragraph directly without CTRubyAnnotation: Core Text
+        // splits fallback fonts into separate CTRuns before resolving ruby
+        // attributes and attaches a multi-run annotation to a single fallback
+        // run, inflating inter-glyph advances and miscentering the reading.
+        let attributed = NSAttributedString(string: text, attributes: [
             NSAttributedString.Key(kCTFontAttributeName as String): font,
             NSAttributedString.Key(kCTForegroundColorAttributeName as String): color])
-        for span in spans {
-            let attributes: [String: Any] = [
-                kCTRubyAnnotationSizeFactorAttributeName as String: 0.45,
-                kCTForegroundColorAttributeName as String: color]
-            let annotation = CTRubyAnnotationCreateWithAttributes(
-                .auto, .none, .before, span.reading as CFString, attributes as CFDictionary)
-            attributed.addAttribute(NSAttributedString.Key(kCTRubyAnnotationAttributeName as String), value: annotation, range: span.range)
-        }
         let typesetter = CTTypesetterCreateWithAttributedString(attributed)
+        let rubyPointSize = max(1, CTFontGetSize(font) * 0.45)
+        let defaultRubyFont = CTFontCreateCopyWithAttributes(font, rubyPointSize, nil, nil)
+        let defaultRubyDescent = CTFontGetDescent(defaultRubyFont)
         var rows: [BernRubyDrawing.Row] = []
         var start = 0
         var y: CGFloat = 0
@@ -2787,8 +2788,8 @@ struct BernRubyDocument: @unchecked Sendable {
             var line = CTTypesetterCreateLine(typesetter, CFRange(location: start, length: end - start))
             var visibleEnd = end
             if rows.count + 1 == limit && end < attributed.length {
-                // Build the remaining text, then let Core Text retain annotation attributes
-                // while truncating it. The ellipsis never acquires a source character index.
+                // Build the remaining text and truncate it with a tagged ellipsis
+                // token so the ellipsis never acquires a source character index.
                 let remaining = CTTypesetterCreateLine(typesetter, CFRange(location: start, length: attributed.length - start))
                 let token = CTLineCreateWithAttributedString(NSAttributedString(string: "…", attributes: [
                     NSAttributedString.Key(kCTFontAttributeName as String): font,
@@ -2801,20 +2802,61 @@ struct BernRubyDocument: @unchecked Sendable {
             }
             var ascent: CGFloat = 0, descent: CGFloat = 0, leading: CGFloat = 0
             let advance = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
+            let baseAscent = max(ascent, CTFontGetAscent(font))
             let range = NSRange(location: start, length: visibleEnd - start)
+            let visible: [NSRange] = (CTLineGetGlyphRuns(line) as! [CTRun]).compactMap { run in
+                let attributes = CTRunGetAttributes(run) as NSDictionary
+                guard attributes["BernRubyTruncation"] == nil else { return nil }
+                let runRange = CTRunGetStringRange(run)
+                return NSRange(location: runRange.location, length: runRange.length)
+            }
+            var readings: [BernRubyDrawing.Reading] = []
+            for span in spans where NSIntersectionRange(span.range, range).length > 0 {
+                let slice = span.scalars.filter { index in
+                    visible.contains(where: { NSLocationInRange(offsets[index], $0) })
+                }
+                guard let first = slice.first, let last = slice.last else { continue }
+                let readingScalars = Array(span.reading.unicodeScalars)
+                let rStart = readingScalars.count * (first - span.scalars.lowerBound) / span.scalars.count
+                let rEnd = readingScalars.count * (last + 1 - span.scalars.lowerBound) / span.scalars.count
+                guard rStart < rEnd else { continue }
+                let sliceText = String(String.UnicodeScalarView(readingScalars[rStart..<rEnd]))
+                var left = CGFloat.infinity, right = -CGFloat.infinity
+                for index in slice {
+                    let a = CTLineGetOffsetForStringIndex(line, offsets[index], nil)
+                    let b = CTLineGetOffsetForStringIndex(line, offsets[index + 1], nil)
+                    left = min(left, min(a, b))
+                    right = max(right, max(a, b))
+                }
+                let spanWidth = right - left
+                guard spanWidth > 0, left.isFinite, right.isFinite else { continue }
+                func shapeReading(_ pointSize: CGFloat, font candidate: CTFont? = nil) -> (CTLine, CGFloat, CGFloat, CGFloat) {
+                    let rFont = candidate ?? CTFontCreateCopyWithAttributes(font, pointSize, nil, nil)
+                    let rLine = CTLineCreateWithAttributedString(NSAttributedString(string: sliceText, attributes: [
+                        NSAttributedString.Key(kCTFontAttributeName as String): rFont,
+                        NSAttributedString.Key(kCTForegroundColorAttributeName as String): color]))
+                    var rAscent: CGFloat = 0, rDescent: CGFloat = 0
+                    let rWidth = CGFloat(CTLineGetTypographicBounds(rLine, &rAscent, &rDescent, nil))
+                    return (rLine, rWidth, rAscent, rDescent)
+                }
+                var (rLine, rWidth, rAscent, rDescent) = shapeReading(rubyPointSize, font: defaultRubyFont)
+                if rWidth > spanWidth {
+                    (rLine, rWidth, rAscent, rDescent) = shapeReading(max(1, rubyPointSize * spanWidth / rWidth))
+                }
+                guard rWidth > 0 else { continue }
+                let scale = min(1, spanWidth / rWidth)
+                let drawnWidth = rWidth * scale
+                let rubyY = baseAscent + max(defaultRubyDescent, rDescent)
+                ascent = max(ascent, rubyY + rAscent, CTFontGetAscent(font) + rubyPointSize + 1)
+                readings.append(.init(line: rLine, x: left + (spanWidth - drawnWidth) / 2, y: rubyY, scale: scale))
+            }
             if spans.contains(where: { NSIntersectionRange($0.range, range).length > 0 }) {
-                ascent = max(ascent, CTFontGetAscent(font) + CTFontGetSize(font) * 0.45 + 1)
+                ascent = max(ascent, CTFontGetAscent(font) + rubyPointSize + 1)
             }
             let natural = ascent + descent + leading
             let height = max(natural, lineHeight ?? natural)
-            rows.append(.init(line: line, baseline: y + (height - natural) / 2 + ascent,
-                              top: y, height: height, range: range, width: advance,
-                              visible: (CTLineGetGlyphRuns(line) as! [CTRun]).compactMap { run in
-                                  let attributes = CTRunGetAttributes(run) as NSDictionary
-                                  guard attributes["BernRubyTruncation"] == nil else { return nil }
-                                  let range = CTRunGetStringRange(run)
-                                  return NSRange(location: range.location, length: range.length)
-                              }))
+            rows.append(.init(line: line, readings: readings, baseline: y + (height - natural) / 2 + ascent,
+                              top: y, height: height, range: range, width: advance, visible: visible))
             measuredWidth = max(measuredWidth, advance)
             y += height
             start = end
@@ -2825,14 +2867,32 @@ struct BernRubyDocument: @unchecked Sendable {
 }
 
 struct BernRubyDrawing {
+    struct Reading {
+        var line: CTLine
+        var x: CGFloat
+        var y: CGFloat
+        var scale: CGFloat
+    }
     struct Row {
         var line: CTLine
+        var readings: [Reading]
         var baseline: CGFloat
         var top: CGFloat
         var height: CGFloat
         var range: NSRange
         var width: CGFloat
         var visible: [NSRange]
+
+        var imageBounds: CGRect {
+            var bounds = CTLineGetImageBounds(line, nil)
+            for reading in readings {
+                let ink = CTLineGetImageBounds(reading.line, nil)
+                    .applying(CGAffineTransform(scaleX: reading.scale, y: 1))
+                    .offsetBy(dx: reading.x, dy: reading.y)
+                bounds = bounds.union(ink)
+            }
+            return bounds
+        }
     }
     var rows: [Row]
     var offsets: [Int]
@@ -2862,6 +2922,14 @@ struct BernRubyDrawing {
                 context.scaleBy(x: 1, y: -1)
                 context.textPosition = .zero
                 CTLineDraw(row.line, context)
+                for reading in row.readings {
+                    context.saveGState()
+                    context.translateBy(x: reading.x, y: reading.y)
+                    context.scaleBy(x: reading.scale, y: 1)
+                    context.textPosition = .zero
+                    CTLineDraw(reading.line, context)
+                    context.restoreGState()
+                }
                 context.restoreGState()
             }
             guard lit >= 0 else { drawLine(alpha: 1); continue }
