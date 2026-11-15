@@ -5802,8 +5802,17 @@ struct BernPopoverButton<Content: View>: View {
         let showing = isPresented
         let isOpen = showing.wrappedValue
         let panelScheme = windowTheme ? (windowScheme ?? scheme) : scheme
-        let openFill = scheme == .dark ? SwiftUI.Color.white : SwiftUI.Color.black
-        let openFg = scheme == .dark ? SwiftUI.Color.black : SwiftUI.Color.white
+        let openFg = scheme == .dark ? SwiftUI.Color.white : SwiftUI.Color.black
+        let hasFill: Bool = {
+            guard let systemImage, !systemImage.hasSuffix(".fill") else { return true }
+            #if canImport(AppKit)
+            return NSImage(systemSymbolName: systemImage + ".fill", accessibilityDescription: nil) != nil
+            #elseif canImport(UIKit)
+            return UIImage(systemName: systemImage + ".fill") != nil
+            #else
+            return true
+            #endif
+        }()
         SwiftUI.Button {
             showing.wrappedValue.toggle()
         } label: {
@@ -5818,16 +5827,9 @@ struct BernPopoverButton<Content: View>: View {
                 }
             }
             .symbolVariant(isOpen ? .fill : .none)
-            .fontWeight(isOpen ? .bold : nil)
+            .fontWeight(isOpen && !hasFill ? .bold : nil)
             .foregroundStyle(isOpen ? openFg : SwiftUI.Color.primary)
             .frame(minWidth: groupHeight, minHeight: groupHeight)
-            .background {
-                if isOpen {
-                    SwiftUI.Capsule()
-                        .fill(openFill)
-                        .padding(groupHeight != nil ? 3 : 0)
-                }
-            }
             .animation(.snappy(duration: 0.18), value: isOpen)
         }
         .help(label)
