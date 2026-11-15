@@ -4260,6 +4260,7 @@ struct BernSplitView<Sidebar: View, Detail: View>: View {
     @Environment(\.bernInert) private var inert
     @State private var visibility: NavigationSplitViewVisibility = .all
     @State private var savedVisibility: NavigationSplitViewVisibility = .all
+    @State private var collapsed = false
     @State private var sidebarWidth: CGFloat = 216
     @State private var dragStartWidth: CGFloat? = nil
     private var covered: Bool { windowCovered || inert }
@@ -4279,14 +4280,19 @@ struct BernSplitView<Sidebar: View, Detail: View>: View {
 
     #if os(macOS)
     private var unifiedBody: some View {
-        HStack(spacing: 0) {
-            unifiedSidebarColumn
-                .disabled(covered)
-                .accessibilityHidden(covered)
+        let showSidebar = !collapsed
+        let collapsedBinding: Binding<Bool>? = (collapsed && !covered) ? $collapsed : nil
+        return HStack(spacing: 0) {
+            if showSidebar {
+                unifiedSidebarColumn
+                    .disabled(covered)
+                    .accessibilityHidden(covered)
+            }
             ZStack(alignment: .top) {
                 detail()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .environment(\.bernSplitSidebarOpen, true)
+                    .environment(\.bernSplitSidebarOpen, showSidebar)
+                    .environment(\.bernSidebarCollapsed, collapsedBinding)
                 if !bernWindow.fullscreen {
                     BernWindowDragStrip()
                         .frame(height: 12)
@@ -4297,7 +4303,7 @@ struct BernSplitView<Sidebar: View, Detail: View>: View {
     }
 
     private var unifiedSidebarColumn: some View {
-        ZStack(alignment: .top) {
+        ZStack(alignment: .topTrailing) {
             sidebar()
                 .listStyle(.sidebar)
                 .safeAreaInset(edge: .top, spacing: 0) {
@@ -4306,7 +4312,20 @@ struct BernSplitView<Sidebar: View, Detail: View>: View {
             if !bernWindow.fullscreen {
                 BernWindowDragStrip()
                     .frame(height: 44)
+                    .frame(maxWidth: .infinity)
             }
+            Button(action: {
+                withAnimation(.snappy(duration: 0.22)) { collapsed = true }
+            }) {
+                Image(systemName: "sidebar.leading")
+                    .font(.system(size: 14, weight: .regular))
+                    .frame(width: 28, height: 28)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .padding(.top, bernWindow.fullscreen ? 10 : 12)
+            .padding(.trailing, 10)
         }
         .frame(width: sidebarWidth)
         .frame(maxHeight: .infinity)
@@ -4447,6 +4466,7 @@ struct BernUnifiedTopBar<Leading: View, Center: View, Trailing: View>: View {
     @ViewBuilder let trailing: () -> Trailing
     @Environment(BernWindowContext.self) private var bernWindow
     @Environment(\.bernSplitSidebarOpen) private var sidebarOpen
+    @Environment(\.bernSidebarCollapsed) private var sidebarCollapsed
 
     var body: some View {
         let leadingPad: CGFloat = (sidebarOpen || bernWindow.fullscreen) ? 16 : 80
@@ -4456,6 +4476,20 @@ struct BernUnifiedTopBar<Leading: View, Center: View, Trailing: View>: View {
                 BernWindowDragStrip()
             }
             HStack(spacing: 8) {
+                if let sidebarCollapsed {
+                    BernUnifiedToolbarGroup {
+                        Button(action: {
+                            withAnimation(.snappy(duration: 0.22)) {
+                                sidebarCollapsed.wrappedValue = false
+                            }
+                        }) {
+                            Image(systemName: "sidebar.leading")
+                                .font(.system(size: 15, weight: .regular))
+                                .frame(minWidth: 36, minHeight: 36)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
                 leading()
                 Spacer(minLength: 8)
                 center()
