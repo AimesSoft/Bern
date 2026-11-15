@@ -691,3 +691,7 @@ Verification: `tests/menu_bar.rs` adds both roles and checks the generated `.app
 ## Idle-area changes are not input
 
 Registration, removal and hover changes of an `idle_area` only update timer eligibility. Layout or drawing updates neither wake an idle window nor postpone an awake window’s input deadline, measured with the monotonic clock. Real pointer, keyboard and wheel input still wake the window immediately; popovers and text editing continue to keep it awake.
+
+## Ruby readings across font-fallback runs
+
+`BernRubyDocument` shapes the base paragraph directly with `CTTypesetter` without attaching `kCTRubyAnnotationAttributeName`, and lays out each visible reading slice on a row as its own Core Text `CTLine` (`CTFontCreateCopyWithAttributes` at `0.45` of the base point size, scaled down into the measured horizontal span when wider, centered over the span and above `max(lineAscent, CTFontGetAscent(font))`). Core Text splits fallback fonts (such as iteration marks `々` in `.CJKSymbolsFallbackSC`, mixed Latin/CJK runs, or characters falling back to `Hiragino Sans`) into separate `CTRun`s before resolving `CTRubyAnnotation` and attaches a multi-run annotation to a single fallback run, which previously inflated inter-character spacing and shifted the reading off center. Shaping the base line directly preserves the exact system font descriptor, fallback cascade, weight and glyph advances of unannotated text across macOS, iOS, tvOS and watchOS.
