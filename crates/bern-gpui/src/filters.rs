@@ -310,7 +310,7 @@ fn corners_of(corners: [f32; 4]) -> Corners<Pixels> {
 
 /// Offsets, in points, spread as a Gaussian of `sigma` points: a spiral
 /// with each turn a golden angle on from the last.
-fn taps(sigma: f32, scale: f32) -> Vec<Point<Pixels>> {
+pub(crate) fn taps(sigma: f32, scale: f32) -> Vec<Point<Pixels>> {
     let count = (8.0 + sigma * scale * 3.0).round().clamp(8.0, 40.0) as usize;
     let golden = std::f32::consts::PI * (3.0 - 5.0f32.sqrt());
     (0..count)
@@ -339,7 +339,7 @@ fn erf(x: f32) -> f32 {
 /// How opaque each of `count` copies is, so that the middle of a stroke
 /// `stroke` points wide comes out as strong as a Gaussian of `sigma` makes
 /// it: copies overlap by the share of them the stroke covers there.
-fn tap_alpha(sigma: f32, stroke: f32, count: usize) -> f32 {
+pub(crate) fn tap_alpha(sigma: f32, stroke: f32, count: usize) -> f32 {
     let peak = erf(stroke / (2.0 * std::f32::consts::SQRT_2 * sigma.max(0.01))).clamp(0.01, 0.999);
     let together = 1.0 - (1.0 - peak).powf(1.0 / peak);
     1.0 - (1.0 - together).powf(1.0 / count as f32)

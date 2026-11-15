@@ -30,6 +30,23 @@ fn ruby_layout_reaches_a_fixed_point() {
         .split_once('\n')
         .unwrap()
         .0;
+    let draw = widgets
+        .split_once("inline bool DrawRuby(")
+        .unwrap()
+        .1
+        .split_once("    for (auto const& range : ranges)")
+        .unwrap()
+        .0;
+    let content_start = draw
+        .find("block.ContentStart()")
+        .expect("DrawRuby must initialize the TextBlock text view via ContentStart");
+    let inlines = draw
+        .find("block.Inlines()")
+        .expect("DrawRuby inspects block.Inlines()");
+    assert!(
+        content_start < inlines,
+        "block.ContentStart() must precede block.Inlines() so plain Text() blocks initialize their text view"
+    );
     let code = r#"
 #include <algorithm>
 #include <cassert>
@@ -47,6 +64,7 @@ struct FontWeight { uint16_t Weight = 400; };
 struct State {
     std::string text = "plain", annotations;
     double size = 26, height = 0, width = 400, actualHeight = 32;
+    uint16_t weight = 400;
     xaml::Thickness margin{1, 2, 3, 4};
     xaml::LineStackingStrategy strategy = xaml::LineStackingStrategy::MaxHeight;
     int writes = 0, draws = 0, unready = 0;
@@ -58,7 +76,7 @@ struct Block {
     explicit operator bool() const { return state->mounted; }
     auto Text() const { return state->text; }
     double FontSize() const { return state->size; }
-    auto FontWeight() const -> ::FontWeight { return {}; }
+    auto FontWeight() const -> ::FontWeight { return {state->weight}; }
     double ActualWidth() const { return state->width; }
     double ActualHeight() const { return state->actualHeight; }
     auto LineStackingStrategy() const { return state->strategy; }
@@ -148,6 +166,16 @@ void check(bool nativeFloats) {
     state.width = 240;
     settle();
     assert(state.draws == draws + 1);
+    assert(retry->draw());
+    // A font-weight change likewise retires an earlier retry.
+    state.unready = 1;
+    state.text = "weighted";
+    settle();
+    draws = state.draws;
+    state.weight = 700;
+    settle();
+    assert(state.draws == draws + 1);
+    assert(retry->draw());
     retry->draw = nullptr;
     *minimum = 80;
     state.annotations = "reading";
