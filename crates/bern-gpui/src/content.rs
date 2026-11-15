@@ -168,15 +168,17 @@ pub fn text(c: &Ctx, content: String, props: TextProps) -> El {
         TextStyle::Code => div().font_family(MONOSPACE),
         _ => div(),
     };
+    let color = match (props.color, props.emphasis) {
+        (Some(role), _) => c.color(role),
+        (None, Emphasis::Primary) => c.foreground(),
+        (None, emphasis) => c.color(emphasis.role()),
+    };
+    let blur = c.blur();
     let element = element
         .text_size(px(size))
         .line_height(px(line))
         .font_weight(weight)
-        .text_color(match (props.color, props.emphasis) {
-            (Some(role), _) => c.color(role),
-            (None, Emphasis::Primary) => c.foreground(),
-            (None, emphasis) => c.color(emphasis.role()),
-        });
+        .text_color(color);
     // Never wider than its container: narrower than its single line, it
     // wraps, or with a number of lines ends in an ellipsis.
     let element = element.min_w(px(0.0)).max_w(gpui::relative(1.0));
@@ -197,19 +199,14 @@ pub fn text(c: &Ctx, content: String, props: TextProps) -> El {
             inline
                 .as_ref()
                 .map_or_else(Vec::new, |inline| inline.marks.clone()),
-            c.color("accent.text"),
+            (color, c.color("accent.text")),
+            blur,
             px(line),
             props.lines,
         ))
     };
     // Blurred, the text keeps its place but is drawn as spread copies.
-    let blur = c.blur();
     if blur > 0.05 {
-        let color = match (props.color, props.emphasis) {
-            (Some(role), _) => c.color(role),
-            (None, Emphasis::Primary) => c.foreground(),
-            (None, emphasis) => c.color(emphasis.role()),
-        };
         return element
             .relative()
             .text_color(gpui::transparent_black())
@@ -306,15 +303,26 @@ fn ruby_ink(
     content: String,
     ranges: Vec<(std::ops::Range<usize>, String)>,
     marks: Vec<(std::ops::Range<usize>, crate::markdown::Mark)>,
-    accent: gpui::Rgba,
+    (color, accent): (gpui::Rgba, gpui::Rgba),
+    blur: f32,
     line: gpui::Pixels,
     lines: Option<usize>,
 ) -> El {
     gpui::canvas(
         |_, _, _| {},
         move |bounds, (), window, cx| {
-            let style = window.text_style();
+            let mut style = window.text_style();
             let size = style.font_size.to_pixels(window.rem_size());
+            let offsets = if blur > 0.05 {
+                let taps = crate::filters::taps(blur, window.scale_factor());
+                let stroke = f32::from(size) * 0.5 * (0.06 + 0.06 * (style.font_weight.0 / 700.0));
+                let alpha = crate::filters::tap_alpha(blur, stroke, taps.len()) * color.a;
+                style.color = gpui::Rgba { a: alpha, ..color }.into();
+                taps
+            } else {
+                style.color = color.into();
+                vec![point(px(0.0), px(0.0))]
+            };
             let mut boundaries = vec![0, content.len()];
             for (range, _) in &marks {
                 boundaries.extend([range.start, range.end]);
@@ -400,14 +408,14 @@ fn ruby_ink(
                         let mut ink = window.text_system().shape_line(
                             reading.clone().into(),
                             size * 0.5,
-                            &[reading_run.clone()],
+                            std::slice::from_ref(&reading_run),
                             None,
                         );
                         if ink.width > width {
                             ink = window.text_system().shape_line(
                                 reading.into(),
                                 size * (0.5 * f32::from(width) / f32::from(ink.width)),
-                                &[reading_run],
+                                std::slice::from_ref(&reading_run),
                                 None,
                             );
                         }
@@ -416,14 +424,16 @@ fn ruby_ink(
                                 + (width - ink.width) / 2.0,
                             bounds.origin.y + line * row as f32 + (line - size) / 2.0 - size * 0.55,
                         );
-                        let _ = ink.paint(
-                            origin,
-                            size * 0.55,
-                            gpui::TextAlign::Left,
-                            Some(width),
-                            window,
-                            cx,
-                        );
+                        for offset in &offsets {
+                            let _ = ink.paint(
+                                origin + *offset,
+                                size * 0.55,
+                                gpui::TextAlign::Left,
+                                Some(width),
+                                window,
+                                cx,
+                            );
+                        }
                     }
                     start = end;
                     row += 1;

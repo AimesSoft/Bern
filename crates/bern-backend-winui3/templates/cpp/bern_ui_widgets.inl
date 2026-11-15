@@ -656,6 +656,11 @@ inline bool DrawRuby(controls::TextBlock const& block, controls::Canvas const& l
     bool ready = block.ActualWidth() > 0 && block.ActualHeight() > 0;
     size_t placed = 0;
     winrt::Windows::Foundation::Rect seen{};
+    // Reading `Inlines()` on a `TextBlock` set through `Text()` builds an
+    // `InlineCollection` without initializing the block's text view, leaving
+    // `Run.ContentStart()` character rectangles empty until `block.ContentStart()`
+    // initializes that view.
+    (void)block.ContentStart();
     auto first = block.Inlines().Size() ? block.Inlines().GetAt(0).ContentStart() : block.ContentStart();
     if (!first) ready = false;
     for (auto const& range : ranges) {
@@ -856,7 +861,8 @@ inline xaml::FrameworkElement WithRuby(xaml::FrameworkElement const& shown, cont
         DrawRubyAfterFrames(retry, [weak, layer, ranges, stamp, play, drawn = *stamp] {
             auto text = weak.get();
             if (!text || stamp->text != drawn.text || stamp->width != drawn.width || stamp->height != drawn.height
-                || stamp->size != drawn.size || stamp->line != drawn.line || stamp->revision != drawn.revision) return true;
+                || stamp->size != drawn.size || stamp->line != drawn.line || stamp->weight != drawn.weight
+                || stamp->revision != drawn.revision) return true;
             return DrawRuby(text, layer, *ranges, play);
         });
     });
