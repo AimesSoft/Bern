@@ -1222,13 +1222,7 @@ private struct BernUnifiedToolbarSuppression: ViewModifier {
     let enabled: Bool
     @ViewBuilder func body(content: Content) -> some View {
         if enabled {
-            if #available(macOS 15.0, *) {
-                content
-                    .bernScrollEdgeEffectHidden()
-                    .toolbar(removing: .title)
-            } else {
-                content.bernScrollEdgeEffectHidden()
-            }
+            content.bernScrollEdgeEffectHidden()
         } else {
             content
         }
@@ -1238,18 +1232,36 @@ private struct BernUnifiedToolbarSuppression: ViewModifier {
 /// Centers standard macOS traffic-light buttons at the vertical axis of
 /// `BernUnifiedTopBar` (`8pt` top inset + `36pt` capsule / 2 = `26pt` from top)
 /// while in windowed `chrome: unified` mode, keeping AppKit's rollover tracking
-/// rect in sync across resizes and full-screen transitions.
+/// rect in sync across resizes, subview changes, and full-screen transitions.
 @MainActor
 final class BernUnifiedTrafficLights {
     private static let centerFromTop: CGFloat = 26
+    private static let windows = NSMapTable<NSWindow, BernUnifiedTrafficLights>.weakToStrongObjects()
+
+    static func forWindow(_ window: NSWindow) -> BernUnifiedTrafficLights {
+        if let existing = windows.object(forKey: window) {
+            return existing
+        }
+        let instance = BernUnifiedTrafficLights()
+        windows.setObject(instance, forKey: window)
+        return instance
+    }
+
     private weak var window: NSWindow?
     private weak var observedContainer: NSView?
+    private weak var observedThemeFrame: NSView?
     private var observers: [NSObjectProtocol] = []
+    private var enabled = false
     private var adjusting = false
 
-    func attach(to window: NSWindow, enabled: Bool) {
+    func configure(window: NSWindow, enabled: Bool) {
+        self.enabled = enabled
+        guard enabled else {
+            teardownObservers()
+            return
+        }
         if self.window !== window {
-            stop()
+            teardownObservers()
             self.window = window
             let nc = NotificationCenter.default
             for name: Notification.Name in [
@@ -1257,22 +1269,25 @@ final class BernUnifiedTrafficLights {
                 NSWindow.didEndLiveResizeNotification,
                 NSWindow.didExitFullScreenNotification,
                 NSWindow.didDeminiaturizeNotification,
+                NSWindow.didBecomeKeyNotification,
+                NSWindow.didResignKeyNotification,
+                NSWindow.didUpdateNotification,
             ] {
                 observers.append(nc.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
                     MainActor.assumeIsolated { self?.sync() }
                 })
             }
         }
-        if enabled {
-            sync()
-        } else {
-            stop()
-        }
+        sync()
     }
 
     func sync() {
-        guard !adjusting, let window, !window.styleMask.contains(.fullScreen),
-              let close = window.standardWindowButton(.closeButton),
+        guard enabled, !adjusting, let window, !window.styleMask.contains(.fullScreen) else { return }
+        if window.toolbar != nil {
+            window.toolbar?.isVisible = false
+            window.toolbar = nil
+        }
+        guard let close = window.standardWindowButton(.closeButton),
               let titlebar = close.superview,
               let container = titlebar.superview,
               let themeFrame = container.superview
@@ -1282,6 +1297,15 @@ final class BernUnifiedTrafficLights {
             container.postsFrameChangedNotifications = true
             observers.append(NotificationCenter.default.addObserver(
                 forName: NSView.frameDidChangeNotification, object: container, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.sync() }
+            })
+        }
+        if observedThemeFrame !== themeFrame {
+            observedThemeFrame = themeFrame
+            themeFrame.postsFrameChangedNotifications = true
+            observers.append(NotificationCenter.default.addObserver(
+                forName: NSView.frameDidChangeNotification, object: themeFrame, queue: .main
             ) { [weak self] _ in
                 MainActor.assumeIsolated { self?.sync() }
             })
@@ -1306,12 +1330,13 @@ final class BernUnifiedTrafficLights {
         }
     }
 
-    func stop() {
+    private func teardownObservers() {
         for observer in observers {
             NotificationCenter.default.removeObserver(observer)
         }
         observers.removeAll()
         observedContainer = nil
+        observedThemeFrame = nil
         window = nil
     }
 }
@@ -1326,7 +1351,6 @@ struct BernWindowBehavior: ViewModifier {
     /// A phone's orientation; a Mac's window has none to turn.
     var landscape: Bool? = nil
     @State private var monitor = BernEventMonitor()
-    @State private var trafficLights = BernUnifiedTrafficLights()
 
     func body(content: Content) -> some View {
         content
@@ -1341,7 +1365,6 @@ struct BernWindowBehavior: ViewModifier {
             }
             .onDisappear {
                 monitor.stop()
-                trafficLights.stop()
             }
             .onChange(of: immersive) { apply(attempts: 20) }
             .onChange(of: context.fullscreen) { apply(attempts: 5) }
@@ -1385,7 +1408,7 @@ struct BernWindowBehavior: ViewModifier {
         for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
             window.standardWindowButton(kind)?.isHidden = immersive && context.idle
         }
-        trafficLights.attach(to: window, enabled: unified)
+        BernUnifiedTrafficLights.forWindow(window).configure(window: window, enabled: unified)
     }
 }
 
