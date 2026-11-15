@@ -1235,6 +1235,87 @@ private struct BernUnifiedToolbarSuppression: ViewModifier {
     }
 }
 
+/// Centers standard macOS traffic-light buttons at the vertical axis of
+/// `BernUnifiedTopBar` (`8pt` top inset + `36pt` capsule / 2 = `26pt` from top)
+/// while in windowed `chrome: unified` mode, keeping AppKit's rollover tracking
+/// rect in sync across resizes and full-screen transitions.
+@MainActor
+final class BernUnifiedTrafficLights {
+    private static let centerFromTop: CGFloat = 26
+    private weak var window: NSWindow?
+    private weak var observedContainer: NSView?
+    private var observers: [NSObjectProtocol] = []
+    private var adjusting = false
+
+    func attach(to window: NSWindow, enabled: Bool) {
+        if self.window !== window {
+            stop()
+            self.window = window
+            let nc = NotificationCenter.default
+            for name: Notification.Name in [
+                NSWindow.didResizeNotification,
+                NSWindow.didEndLiveResizeNotification,
+                NSWindow.didExitFullScreenNotification,
+                NSWindow.didDeminiaturizeNotification,
+            ] {
+                observers.append(nc.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.sync() }
+                })
+            }
+        }
+        if enabled {
+            sync()
+        } else {
+            stop()
+        }
+    }
+
+    func sync() {
+        guard !adjusting, let window, !window.styleMask.contains(.fullScreen),
+              let close = window.standardWindowButton(.closeButton),
+              let titlebar = close.superview,
+              let container = titlebar.superview,
+              let themeFrame = container.superview
+        else { return }
+        if observedContainer !== container {
+            observedContainer = container
+            container.postsFrameChangedNotifications = true
+            observers.append(NotificationCenter.default.addObserver(
+                forName: NSView.frameDidChangeNotification, object: container, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.sync() }
+            })
+        }
+        let barHeight = container.frame.height
+        let topGap = max(0, Self.centerFromTop - (barHeight - close.frame.midY))
+        let wantedFrame = NSRect(
+            x: 0,
+            y: themeFrame.bounds.height - barHeight - topGap,
+            width: themeFrame.bounds.width,
+            height: barHeight
+        )
+        guard abs(container.frame.origin.y - wantedFrame.origin.y) > 0.5
+           || abs(container.frame.width - wantedFrame.width) > 0.5
+        else { return }
+        adjusting = true
+        defer { adjusting = false }
+        container.frame = wantedFrame
+        if !themeFrame.inLiveResize {
+            themeFrame.viewWillStartLiveResize()
+            themeFrame.viewDidEndLiveResize()
+        }
+    }
+
+    func stop() {
+        for observer in observers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        observers.removeAll()
+        observedContainer = nil
+        window = nil
+    }
+}
+
 /// turns `idle` on after that many seconds without input in the window.
 struct BernWindowBehavior: ViewModifier {
     let context: BernWindowContext
@@ -1245,6 +1326,7 @@ struct BernWindowBehavior: ViewModifier {
     /// A phone's orientation; a Mac's window has none to turn.
     var landscape: Bool? = nil
     @State private var monitor = BernEventMonitor()
+    @State private var trafficLights = BernUnifiedTrafficLights()
 
     func body(content: Content) -> some View {
         content
@@ -1257,7 +1339,10 @@ struct BernWindowBehavior: ViewModifier {
                     monitor.start(context: context, after: idleAfter)
                 }
             }
-            .onDisappear { monitor.stop() }
+            .onDisappear {
+                monitor.stop()
+                trafficLights.stop()
+            }
             .onChange(of: immersive) { apply(attempts: 20) }
             .onChange(of: context.fullscreen) { apply(attempts: 5) }
             .onChange(of: idleEnabled) {
@@ -1300,6 +1385,7 @@ struct BernWindowBehavior: ViewModifier {
         for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
             window.standardWindowButton(kind)?.isHidden = immersive && context.idle
         }
+        trafficLights.attach(to: window, enabled: unified)
     }
 }
 
