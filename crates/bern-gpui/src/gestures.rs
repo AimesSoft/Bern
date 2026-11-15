@@ -30,9 +30,11 @@ fn double_click_interval() -> Duration {
     }
     #[cfg(target_os = "windows")]
     {
-        return Duration::from_millis(unsafe {
-            win32::Win32::UI::WindowsAndMessaging::GetDoubleClickTime()
-        } as u64);
+        #[link(name = "user32")]
+        unsafe extern "system" {
+            fn GetDoubleClickTime() -> u32;
+        }
+        return Duration::from_millis(u64::from(unsafe { GetDoubleClickTime() }));
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     // Matches gpui-pre-linux 0.3.10 (Wayland and X11).

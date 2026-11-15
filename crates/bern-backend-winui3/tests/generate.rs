@@ -1877,7 +1877,13 @@ fn content_in_a_window_starts_at_its_top_leading_corner() {
             .map(|file| String::from_utf8_lossy(&file.contents).into_owned())
             .unwrap_or_else(|| panic!("no `{name}`"))
     };
-    assert!(text("bern_ui_windows.inl").contains("def.render(Parent::Window(content), ctx);"));
+    let windows = text("bern_ui_windows.inl");
+    assert!(windows.contains("def.render(Parent::Window(content), ctx);"));
+    assert!(windows.contains("ReplyMessage(0);"));
+    assert!(windows.contains("case WM_ENTERSIZEMOVE:"));
+    assert!(text("bern_base.cpp").contains("DCompositionBoostCompositorClock"));
+    assert!(!text("bern_ui_motion.inl").contains("RenderingTime()"));
+    assert!(!text("bern_ui_scene.inl").contains("RenderingTime()"));
     let widgets = text("bern_ui_widgets.inl");
     assert!(
         widgets.contains(

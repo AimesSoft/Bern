@@ -148,7 +148,10 @@ inline Facts Win::CurrentFacts() {
 inline void Win::Report() {
     if (closed || !Host::handle || !hwnd) return;
 #if BERN_WINUI
-    fullscreen.Set(window.AppWindow().Presenter().Kind() == winrt::Microsoft::UI::Windowing::AppWindowPresenterKind::FullScreen);
+    if (presenterDirty) {
+        presenterDirty = false;
+        fullscreen.Set(window.AppWindow().Presenter().Kind() == winrt::Microsoft::UI::Windowing::AppWindowPresenterKind::FullScreen);
+    }
 #endif
     auto facts = CurrentFacts();
     bern_window_facts(Host::handle, static_cast<uint32_t>(kind), generation, command ? 0 : 1, facts.visibility, facts.size, facts.x, facts.y,
@@ -254,11 +257,32 @@ inline bool Handle(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam, LRESUL
             bern::pictures::TryAgain();
         }
         return false;
-    case WM_SIZE:
-    case WM_MOVE:
-    case WM_SHOWWINDOW:
-    case WM_WINDOWPOSCHANGED:
+    case WM_ENTERSIZEMOVE:
+        if (!win->movingOrSizing) {
+            win->movingOrSizing = true;
+            win->dragMonitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+            win->dragDpi = GetDpiForWindow(hwnd);
+            bern::CompositorClock::Acquire();
+        }
+        return false;
+    case WM_EXITSIZEMOVE:
+        if (win->movingOrSizing) {
+            win->movingOrSizing = false;
+            bern::CompositorClock::Release();
+        }
+        win->presenterDirty = true;
         win->ScheduleReport();
+        return false;
+    case WM_STYLECHANGED:
+    case WM_DISPLAYCHANGE:
+    case WM_SIZE:
+    case WM_SHOWWINDOW:
+        win->presenterDirty = true;
+        if (!win->movingOrSizing || !win->waits.empty()) win->ScheduleReport();
+        return false;
+    case WM_MOVE:
+    case WM_WINDOWPOSCHANGED:
+        if (!win->movingOrSizing || !win->waits.empty()) win->ScheduleReport();
         return false;
     case WM_DESTROY:
         Ended(win);
@@ -281,7 +305,46 @@ inline LRESULT CALLBACK Subclass(HWND hwnd, UINT message, WPARAM wparam, LPARAM 
         Handle(hwnd, message, wparam, lparam, result);
         return result;
     }
+    if (message == WM_SYSCOMMAND && ((wparam & 0xFFF0) == SC_MOVE || (wparam & 0xFFF0) == SC_SIZE)) {
+        // `InputNonClientPointerSource` sends `SC_MOVE` and `SC_SIZE`
+        // synchronously from WinUI's dedicated input thread; replying before
+        // `DefWindowProcW` enters the modal tracking loop keeps the input
+        // thread unblocked for high-polling-rate mice and detaches its
+        // per-message move/size hooks.
+        ReplyMessage(0);
+    }
     if (message == WM_NCDESTROY) originals.erase(hwnd);
+    if (auto win = OfHwnd(hwnd); win && win->movingOrSizing) {
+        if (message == WM_WINDOWPOSCHANGED && lparam) {
+            auto const* pos = reinterpret_cast<WINDOWPOS const*>(lparam);
+            constexpr UINT kStateChange = SWP_SHOWWINDOW | SWP_HIDEWINDOW | SWP_FRAMECHANGED;
+            HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+            UINT dpi = GetDpiForWindow(hwnd);
+            if ((pos->flags & SWP_NOSIZE) != 0 && (pos->flags & kStateChange) == 0
+                && monitor == win->dragMonitor && dpi == win->dragDpi && !IsIconic(hwnd) && !IsZoomed(hwnd)) {
+                // WinUI's `WM_WINDOWPOSCHANGED` handler synchronously stalls
+                // ~5–8 ms per move step even when size, monitor and scale are
+                // unchanged; DWM moves child targets with `hwnd`, and
+                // `WM_EXITSIZEMOVE` flushes the final screen position once.
+                if (win->waits.empty()) return DefWindowProcW(hwnd, message, wparam, lparam);
+            } else {
+                win->dragMonitor = monitor;
+                win->dragDpi = dpi;
+            }
+        } else if (message == WM_MOVE && win->waits.empty()) {
+            return DefWindowProcW(hwnd, message, wparam, lparam);
+        }
+    }
+    if (message == WM_EXITSIZEMOVE) {
+        // Flush the final screen position to WinUI's coordinate converter
+        // before finishing the modal move/size loop.
+        RECT rect{};
+        if (GetWindowRect(hwnd, &rect)) {
+            WINDOWPOS pos{hwnd, nullptr, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top,
+                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER};
+            CallWindowProcW(original, hwnd, WM_WINDOWPOSCHANGED, 0, reinterpret_cast<LPARAM>(&pos));
+        }
+    }
     if (Handle(hwnd, message, wparam, lparam, result)) return result;
     return CallWindowProcW(original, hwnd, message, wparam, lparam);
 }
@@ -1398,6 +1461,10 @@ inline void ExitIfDone() {
 inline void Ended(std::shared_ptr<Win> const& win) {
     if (win->closed) return;
     win->closed = true;
+    if (win->movingOrSizing) {
+        win->movingOrSizing = false;
+        bern::CompositorClock::Release();
+    }
     std::erase(all, win);
     // Dialog windows over this one end with it.
     std::vector<std::shared_ptr<Win>> sheets;

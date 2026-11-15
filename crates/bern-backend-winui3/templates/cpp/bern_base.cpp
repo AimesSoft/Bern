@@ -35,6 +35,74 @@ bool OnWindows11() {
     return newer;
 }
 
+#ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
+#define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
+#endif
+
+namespace CompositorClock {
+
+using BoostFn = HRESULT(WINAPI*)(BOOL);
+using WaitFn = HRESULT(WINAPI*)(UINT, HANDLE const*, DWORD);
+
+struct Api {
+    HMODULE module = LoadLibraryW(L"dcomp.dll");
+    BoostFn boost = module ? reinterpret_cast<BoostFn>(GetProcAddress(module, "DCompositionBoostCompositorClock")) : nullptr;
+    WaitFn wait = module ? reinterpret_cast<WaitFn>(GetProcAddress(module, "DCompositionWaitForCompositorClock")) : nullptr;
+};
+
+static Api const& Load() {
+    static Api const api;
+    return api;
+}
+
+static std::mutex boostLock;
+static int boostCount = 0;
+
+void Acquire() {
+    auto const& api = Load();
+    if (!api.boost) return;
+    std::lock_guard guard(boostLock);
+    if (++boostCount == 1) api.boost(TRUE);
+}
+
+void Release() {
+    auto const& api = Load();
+    if (!api.boost) return;
+    std::lock_guard guard(boostLock);
+    if (boostCount > 0 && --boostCount == 0) api.boost(FALSE);
+}
+
+bool Wait(DWORD timeoutMs) {
+    auto const& api = Load();
+    return api.wait && SUCCEEDED(api.wait(0, nullptr, timeoutMs));
+}
+
+double RefreshPeriod(HWND hwnd) {
+    HMONITOR monitor = hwnd ? MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)
+                            : MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
+    MONITORINFOEXW info{};
+    info.cbSize = sizeof(info);
+    if (monitor && GetMonitorInfoW(monitor, &info)) {
+        DEVMODEW mode{};
+        mode.dmSize = sizeof(mode);
+        if (EnumDisplaySettingsW(info.szDevice, ENUM_CURRENT_SETTINGS, &mode) && mode.dmDisplayFrequency > 1)
+            return 1.0 / static_cast<double>(mode.dmDisplayFrequency);
+    }
+    DWM_TIMING_INFO timing{};
+    timing.cbSize = sizeof(timing);
+    if (SUCCEEDED(DwmGetCompositionTimingInfo(nullptr, &timing)) && timing.qpcRefreshPeriod > 0) {
+        LARGE_INTEGER frequency{};
+        QueryPerformanceFrequency(&frequency);
+        if (frequency.QuadPart > 0) {
+            double seconds = static_cast<double>(timing.qpcRefreshPeriod) / static_cast<double>(frequency.QuadPart);
+            if (seconds >= 0.0005 && seconds <= 0.1) return seconds;
+        }
+    }
+    return 1.0 / 60.0;
+}
+
+}
+
 void Report(std::string_view message) {
     std::fprintf(stderr, "bern: %.*s\n", static_cast<int>(message.size()), message.data());
     std::fflush(stderr);
@@ -1842,35 +1910,76 @@ static double Now() {
 
 static winrt::com_ptr<IDXGIOutput> PrimaryOutput() {
     winrt::com_ptr<IDXGIFactory1> factory;
-    winrt::com_ptr<IDXGIAdapter1> adapter;
-    winrt::com_ptr<IDXGIOutput> output;
     if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(factory.put())))) return nullptr;
-    if (FAILED(factory->EnumAdapters1(0, adapter.put()))) return nullptr;
-    if (FAILED(adapter->EnumOutputs(0, output.put()))) return nullptr;
-    return output;
+    HMONITOR primary = MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
+    winrt::com_ptr<IDXGIOutput> fallback;
+    for (UINT a = 0;; ++a) {
+        winrt::com_ptr<IDXGIAdapter1> adapter;
+        if (factory->EnumAdapters1(a, adapter.put()) != S_OK) break;
+        for (UINT o = 0;; ++o) {
+            winrt::com_ptr<IDXGIOutput> output;
+            if (adapter->EnumOutputs(o, output.put()) != S_OK) break;
+            if (!fallback) fallback = output;
+            DXGI_OUTPUT_DESC desc{};
+            if (SUCCEEDED(output->GetDesc(&desc)) && desc.Monitor == primary) return output;
+        }
+    }
+    return fallback;
 }
 
 static void Run() {
     SetThreadDescription(GetCurrentThread(), L"Bern media frames");
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+    HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+    if (!timer) timer = CreateWaitableTimerW(nullptr, TRUE, nullptr);
     auto output = PrimaryOutput();
     double last = Now();
+    bool boosted = false;
+    int shortWaits = 0;
     for (;;) {
         {
             std::unique_lock guard(lock);
+            if (!stopping && surfaces.empty() && boosted) {
+                CompositorClock::Release();
+                boosted = false;
+            }
             wake.wait(guard, [] { return stopping || !surfaces.empty(); });
-            if (stopping) return;
+            if (stopping) {
+                if (boosted) CompositorClock::Release();
+                if (timer) CloseHandle(timer);
+                return;
+            }
+            if (!boosted) {
+                CompositorClock::Acquire();
+                boosted = true;
+            }
         }
-        double period = 1.0 / 60;
-        DWM_TIMING_INFO timing{};
-        timing.cbSize = sizeof timing;
-        if (SUCCEEDED(DwmGetCompositionTimingInfo(nullptr, &timing)) && timing.qpcRefreshPeriod > 0)
-            period = Seconds(static_cast<int64_t>(timing.qpcRefreshPeriod));
-        if (!output || FAILED(output->WaitForVBlank())) output = nullptr;
-        // Never faster than the display; where no blank is waited for, a
-        // refresh period after the last frame.
-        double early = last + period * (output ? 0.75 : 1.0) - Now();
-        if (early > 0) Sleep(static_cast<DWORD>(early * 1000) + 1);
+        double period = CompositorClock::RefreshPeriod();
+        double waitBegan = Now();
+        bool synced = CompositorClock::Wait(80);
+        if (!synced) {
+            if (output && SUCCEEDED(output->WaitForVBlank())) synced = true;
+            else output = nullptr;
+        }
+        double waited = Now() - waitBegan;
+        if (synced && waited >= 0.0002) {
+            shortWaits = 0;
+        } else if (!synced || ++shortWaits >= 4) {
+            // Fall back to high-resolution pacing only when no compositor or
+            // output blank is available, or when the display is asleep and
+            // blank waits return immediately several times in a row.
+            double remaining = last + period - Now();
+            if (remaining > 0) {
+                if (timer) {
+                    LARGE_INTEGER due{};
+                    due.QuadPart = -static_cast<LONGLONG>(remaining * 1e7);
+                    if (SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE))
+                        WaitForSingleObject(timer, 100);
+                } else {
+                    Sleep((std::max)(DWORD(1), static_cast<DWORD>(remaining * 1000)));
+                }
+            }
+        }
         double now = Now();
         last = now;
         std::lock_guard guard(lock);

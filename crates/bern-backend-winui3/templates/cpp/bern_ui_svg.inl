@@ -81,6 +81,7 @@ struct NativeSvgState : std::enable_shared_from_this<NativeSvgState> {
     void SyncLoop() {
         bool want = !disposed && loaded && playing && active;
         if (want && !renderToken.value) {
+            bern::CompositorClock::Acquire();
             std::weak_ptr<NativeSvgState> weak = shared_from_this();
             renderToken = media::CompositionTarget::Rendering([weak](auto&&, auto&&) {
                 if (auto s = weak.lock()) s->RenderNow();
@@ -88,6 +89,7 @@ struct NativeSvgState : std::enable_shared_from_this<NativeSvgState> {
         } else if (!want && renderToken.value) {
             media::CompositionTarget::Rendering(renderToken);
             renderToken = {};
+            bern::CompositorClock::Release();
         }
     }
 
@@ -105,6 +107,7 @@ struct NativeSvgState : std::enable_shared_from_this<NativeSvgState> {
         if (renderToken.value) {
             media::CompositionTarget::Rendering(renderToken);
             renderToken = {};
+            bern::CompositorClock::Release();
         }
         if (themeToken.value) {
             frame.ActualThemeChanged(themeToken);
@@ -319,6 +322,7 @@ struct WebPageView : std::enable_shared_from_this<WebPageView> {
     void Follow() {
         still = 0;
         if (renderToken.value) return;
+        bern::CompositorClock::Acquire();
         std::weak_ptr<WebPageView> weak = shared_from_this();
         renderToken = media::CompositionTarget::Rendering([weak](auto&&, auto&&) {
             auto view = weak.lock();
@@ -332,6 +336,7 @@ struct WebPageView : std::enable_shared_from_this<WebPageView> {
         if (!renderToken.value) return;
         media::CompositionTarget::Rendering(renderToken);
         renderToken = {};
+        bern::CompositorClock::Release();
     }
 
     void Start(Ctx const& ctx) {
