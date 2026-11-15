@@ -4160,7 +4160,7 @@ struct BernSplitView<Sidebar: View, Detail: View>: View {
             VStack(spacing: 0) {
                 if !bernWindow.fullscreen {
                     BernWindowDragStrip()
-                        .frame(height: 32)
+                        .frame(height: 44)
                 } else {
                     Color.clear.frame(height: 6)
                 }
@@ -4177,7 +4177,7 @@ struct BernSplitView<Sidebar: View, Detail: View>: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
-            .padding(.top, bernWindow.fullscreen ? 10 : 4)
+            .padding(.top, bernWindow.fullscreen ? 10 : 12)
             .padding(.trailing, 10)
         }
         .frame(width: sidebarWidth)
