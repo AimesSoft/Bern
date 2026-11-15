@@ -64,8 +64,13 @@ impl Generator<'_> {
         // window's toolbar and palette frame without unmounting its own body.
         if self.platform == Platform::Macos && !items.is_empty() {
             out.open(".safeAreaInset(edge: .top, spacing: 0) {");
-            out.open("if !bernInert && bernUnifiedChrome {");
+            out.open("if bernUnifiedChrome {");
+            out.open("if !bernInert {");
             self.unified_toolbar_bar(out, &items, ctx);
+            out.close("} else {");
+            out.indent += 1;
+            out.line("BernUnifiedTopBarSpace()");
+            out.close("}");
             out.close("}");
             out.close("}");
         }

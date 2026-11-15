@@ -2219,6 +2219,51 @@ extension AnyTransition {
     }
 }
 
+private struct BernHeroScopesKey: EnvironmentKey {
+    static let defaultValue: Set<UUID> = []
+}
+
+private struct BernTransitionExitingKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var bernHeroScopes: Set<UUID> {
+        get { self[BernHeroScopesKey.self] }
+        set { self[BernHeroScopesKey.self] = newValue }
+    }
+
+    var bernTransitionExiting: Bool {
+        get { self[BernTransitionExitingKey.self] }
+        set { self[BernTransitionExitingKey.self] = newValue }
+    }
+}
+
+@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
+private struct BernHeroScopeModifier: ViewModifier {
+    let scope: UUID
+    let exiting: Bool
+    @Environment(\.bernHeroScopes) private var parentScopes
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.bernHeroScopes, parentScopes.union([scope]))
+            .environment(\.bernTransitionExiting, exiting)
+            #if os(macOS)
+            .background(BernHeroScopeExitProbe(scope: scope, exiting: exiting))
+            #endif
+    }
+}
+
+@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
+private struct BernRemovalExitSignal: Transition {
+    let scope = UUID()
+
+    func body(content: Content, phase: TransitionPhase) -> some View {
+        content.modifier(BernHeroScopeModifier(scope: scope, exiting: phase == .didDisappear))
+    }
+}
+
 private struct BernTransitionModifier: ViewModifier {
     let insertion: AnyTransition?
     let insertionMotion: BernMotion?
@@ -2231,19 +2276,27 @@ private struct BernTransitionModifier: ViewModifier {
     @BernReducedMotion private var reduce
     @Environment(\.bernStagger) private var stagger
 
+    private func tracked(_ base: AnyTransition) -> AnyTransition {
+        guard removal != nil else { return base }
+        if #available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *) {
+            return AnyTransition(BernRemovalExitSignal()).combined(with: base)
+        }
+        return base
+    }
+
     func body(content: Content) -> some View {
         if let appear, stagger != nil || delay != nil || appear.entersItself {
             content
                 .modifier(BernEntrance(appear: appear, motion: insertionMotion, clock: stagger, delay: delay, whole: whole))
-                .transition(.asymmetric(
+                .transition(tracked(.asymmetric(
                     insertion: .identity,
-                    removal: (removal ?? .identity).animation(removalMotion?.animation)))
+                    removal: (removal ?? .identity).animation(removalMotion?.animation))))
         } else if reduce || bernForcedReduceMotion {
-            content.transition(.opacity.animation(.easeInOut(duration: 0.15)))
+            content.transition(tracked(.opacity.animation(.easeInOut(duration: 0.15))))
         } else {
-            content.transition(.asymmetric(
+            content.transition(tracked(.asymmetric(
                 insertion: (insertion ?? .identity).animation(insertionMotion?.animation),
-                removal: (removal ?? .identity).animation(removalMotion?.animation)))
+                removal: (removal ?? .identity).animation(removalMotion?.animation))))
         }
     }
 }
@@ -2253,6 +2306,7 @@ private struct BernTransitionModifier: ViewModifier {
 @MainActor
 final class BernHeroFrames {
     var last: [String: CGRect] = [:]
+    var stack: [String: [CGRect]] = [:]
     /// How many elements of each id are on screen, and when the last one
     /// of an id went away.
     var mounted: [String: Int] = [:]
@@ -2300,9 +2354,11 @@ private struct BernHero: ViewModifier {
     let id: String
     let motion: BernMotion
     @Environment(\.bernHeroFrames) private var frames
+    @Environment(\.bernTransitionExiting) private var exiting
     @BernReducedMotion private var reduce
     @State private var scale = CGSize(width: 1, height: 1)
     @State private var offset = CGSize.zero
+    @State private var ownFrame = CGRect.zero
     @State private var measured = false
     @State private var shown = false
 
@@ -2318,9 +2374,23 @@ private struct BernHero: ViewModifier {
                 .offset(offset)
                 .opacity(waiting ? 0 : 1)
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { grow(to: $0) }
+                .onChange(of: exiting) { _, isExiting in
+                    guard isExiting, measured, ownFrame.width > 0, ownFrame.height > 0,
+                          let list = frames.stack[id], list.count >= 2
+                    else { return }
+                    let target = list[list.count - 2]
+                    withAnimation(motion.animation) {
+                        scale = CGSize(width: target.width / ownFrame.width, height: target.height / ownFrame.height)
+                        offset = CGSize(width: target.midX - ownFrame.midX, height: target.midY - ownFrame.midY)
+                    }
+                }
                 .onDisappear {
                     guard measured else { return }
                     frames.mounted[id, default: 1] -= 1
+                    frames.stack[id]?.removeAll { $0 == ownFrame }
+                    if let remaining = frames.stack[id]?.last {
+                        frames.last[id] = remaining
+                    }
                     frames.departed[id] = Date()
                 }
         } else {
@@ -2334,10 +2404,12 @@ private struct BernHero: ViewModifier {
     private func grow(to frame: CGRect) {
         guard let frames else { return }
         let previous = measured ? nil : frames.replaced(id)
+        ownFrame = frame
         frames.last[id] = frame
         guard !measured else { return }
         measured = true
         frames.mounted[id, default: 0] += 1
+        frames.stack[id, default: []].append(frame)
         guard let previous, frame.width > 0, frame.height > 0, previous != frame else {
             shown = true
             return
@@ -2370,6 +2442,8 @@ struct BernPictureHero: ViewModifier {
     let motion: BernMotion
     @BernReducedMotion private var reduce
     @Environment(BernWindowContext.self) private var window
+    @Environment(\.bernHeroScopes) private var heroScopes
+    @Environment(\.bernTransitionExiting) private var exiting
     @State private var flying = false
     @State private var entered = false
 
@@ -2382,10 +2456,13 @@ struct BernPictureHero: ViewModifier {
             let awaiting = !entered && !reduced && window.platform.nsWindow.map {
                 BernWindowImageHeroes.forWindow($0).expects(id)
             } == true
+            let willFlyBack = exiting && !reduced && window.platform.nsWindow.map {
+                BernWindowImageHeroes.forWindow($0).hasUnderlying(id)
+            } == true
             content
-                .opacity(flying || awaiting ? 0 : 1)
-                .background(BernPictureHeroProbe(id: id, picture: picture, fit: fit,
-                    corner: corner, motion: motion, reduced: reduced,
+                .opacity(flying || awaiting || willFlyBack ? 0 : 1)
+                .background(BernPictureHeroProbe(id: id, scopes: heroScopes, picture: picture, fit: fit,
+                    corner: corner, motion: motion, reduced: reduced, exiting: exiting,
                     visibility: { hidden in
                         var transaction = Transaction()
                         transaction.disablesAnimations = true
@@ -4203,11 +4280,13 @@ struct BernSplitView<Sidebar: View, Detail: View>: View {
 
     #if os(macOS)
     private var unifiedBody: some View {
-        let showSidebar = !collapsed && !covered
+        let showSidebar = !collapsed
         let collapsedBinding: Binding<Bool>? = (collapsed && !covered) ? $collapsed : nil
         return HStack(spacing: 0) {
             if showSidebar {
                 unifiedSidebarColumn
+                    .disabled(covered)
+                    .accessibilityHidden(covered)
             }
             ZStack(alignment: .top) {
                 detail()
@@ -4422,6 +4501,16 @@ struct BernUnifiedTopBar<Leading: View, Center: View, Trailing: View>: View {
             .padding(.bottom, 2)
         }
         .frame(height: topPad + 38)
+    }
+}
+
+struct BernUnifiedTopBarSpace: View {
+    @Environment(BernWindowContext.self) private var bernWindow
+    var body: some View {
+        Color.clear
+            .frame(height: (bernWindow.fullscreen ? 10 : 8) + 38)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 #endif
