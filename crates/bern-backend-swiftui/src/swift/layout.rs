@@ -457,8 +457,13 @@ impl Generator<'_> {
     }
 
     pub(super) fn modal(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let dismiss = element
+            .action
+            .as_ref()
+            .map(|action| format!(", dismiss: {{ {} }}", self.action(action)))
+            .unwrap_or_default();
         out.open(format!(
-            "BernModal(width: {}, height: {}{}) {{",
+            "BernModal(width: {}, height: {}{}{dismiss}) {{",
             self.length(element, "width")
                 .unwrap_or_else(|| "960.0".into()),
             // Without a height, as tall as its content.

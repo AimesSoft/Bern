@@ -4357,11 +4357,12 @@ fn style_rules_take_base_properties_states_and_platforms() {
         ]
     );
 
+    let (stack_sheet, stack_diagnostics) = lower_style("Stack { hover: scale(1.03, snappy) }");
+    assert!(stack_diagnostics.is_empty(), "{stack_diagnostics:?}");
+    assert_eq!(stack_sheet.rules[0].states.len(), 1);
+
     for (body, expected) in [
-        (
-            "Stack { hover: scale(1.1) }",
-            "`Stack` has no `hover` state",
-        ),
+        ("Form { hover: scale(1.1) }", "`Form` has no `hover` state"),
         ("Button { corner: round }", "corner `round` is not declared"),
         ("Button { corner: \"8\" }", "`corner` is a number"),
         ("Button { padding: wide }", "`padding` is a number"),

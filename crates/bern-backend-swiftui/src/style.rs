@@ -47,7 +47,18 @@ pub const SUPPORT: &[StyleSupport] = &[
     StyleSupport {
         component: "Stack",
         base: &["background", "foreground", "corner", "shadow"],
-        states: &[],
+        states: &[(
+            StyleState::Hover,
+            &[
+                "background",
+                "foreground",
+                "scale",
+                "offset",
+                "opacity",
+                "shadow",
+                "none",
+            ],
+        )],
     },
     // A form's background is its rows'.
     StyleSupport {

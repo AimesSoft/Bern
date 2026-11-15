@@ -898,8 +898,8 @@ extension View {
     /// A real system glass capsule around a native button or pull-down.
     /// Explicit height keeps neighboring actions the same size regardless
     /// of the different default AppKit button and menu bezels.
-    func bernCapsuleControl(height: CGFloat, prominent: Bool = false, filled: Bool = false) -> some View {
-        modifier(BernCapsuleControl(height: height, prominent: prominent, filled: filled))
+    func bernCapsuleControl(height: CGFloat, prominent: Bool = false, filled: Bool = false, style: BernStyle? = nil) -> some View {
+        modifier(BernCapsuleControl(height: height, prominent: prominent, filled: filled, style: style))
     }
 
     func bernButtonLook(_ look: BernButtonLook) -> some View {
@@ -3600,6 +3600,23 @@ private struct BernSnapBehavior: ScrollTargetBehavior {
     }
 }
 
+private struct BernSnapTailKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 0
+}
+private struct BernSnapHorizontalKey: EnvironmentKey {
+    static let defaultValue = true
+}
+extension EnvironmentValues {
+    var bernSnapTail: CGFloat {
+        get { self[BernSnapTailKey.self] }
+        set { self[BernSnapTailKey.self] = newValue }
+    }
+    var bernSnapHorizontal: Bool {
+        get { self[BernSnapHorizontalKey.self] }
+        set { self[BernSnapHorizontalKey.self] = newValue }
+    }
+}
+
 private struct BernSnap: ViewModifier {
     let center: Bool
     let axis: Axis
@@ -3616,16 +3633,18 @@ private struct BernSnap: ViewModifier {
         let tail = center ? margin : (last > 0 ? max(0, viewport - last) : 0)
         content
             .environment(\.bernSnapItems, items)
+            .environment(\.bernSnapTail, center ? 0 : tail)
+            .environment(\.bernSnapHorizontal, horizontal)
             .scrollTargetBehavior(BernSnapBehavior(items: items, center: center, axis: axis))
             .contentMargins(horizontal ? .leading : .top, margin, for: .scrollContent)
-            .contentMargins(horizontal ? .trailing : .bottom, tail, for: .scrollContent)
+            .contentMargins(horizontal ? .trailing : .bottom, center ? margin : 0, for: .scrollContent)
             .onGeometryChange(for: CGFloat.self) { horizontal ? $0.size.width : $0.size.height } action: { length in
                 // A scroll view as long as its content grows with its own
                 // margins: growth that only echoes a change of the margin
                 // is not more room, and following it would grow the scroll
                 // view forever.
                 let grown = length - viewport
-                let total = margin + tail
+                let total = center ? (margin * 2) : margin
                 if grown > 0, abs(grown - (total - measuredWith)) < 1 { return }
                 viewport = length
                 measuredWith = total
@@ -3647,11 +3666,21 @@ private struct BernSnapItem: ViewModifier {
     }
 }
 
+private struct BernSnapContentPadding: ViewModifier {
+    @Environment(\.bernSnapTail) private var tail
+    @Environment(\.bernSnapHorizontal) private var horizontal
+    func body(content: Content) -> some View {
+        content
+            .padding(horizontal ? .trailing : .bottom, tail)
+            .coordinateSpace(.named(bernSnapSpace))
+    }
+}
+
 extension View {
     /// The content of a scroll view that comes to rest on its items: the
     /// space their frames are measured in.
     func bernSnapContent() -> some View {
-        coordinateSpace(.named(bernSnapSpace))
+        modifier(BernSnapContentPadding())
     }
 }
 
@@ -4850,7 +4879,7 @@ private struct BernGlow: ViewModifier {
 
     func body(content: Content) -> some View {
         content.overlay {
-            if let pointer {
+            if radius > 0, opacity > 0, let pointer {
                 BernGlowTracking(pointer: pointer, radius: radius, opacity: opacity)
                     .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
                     .blendMode(.plusLighter)
@@ -5762,6 +5791,7 @@ struct BernPopoverButton<Content: View>: View {
     @ViewBuilder let content: () -> Content
     @Environment(\.colorScheme) private var scheme
     @Environment(\.bernWindowScheme) private var windowScheme
+    @Environment(\.bernControlGroupHeight) private var groupHeight
     @State private var local = false
 
     private var isPresented: Binding<Bool> {
@@ -5770,18 +5800,35 @@ struct BernPopoverButton<Content: View>: View {
 
     var body: some View {
         let showing = isPresented
+        let isOpen = showing.wrappedValue
         let panelScheme = windowTheme ? (windowScheme ?? scheme) : scheme
-        Button {
+        let openFill = scheme == .dark ? SwiftUI.Color.white : SwiftUI.Color.black
+        let openFg = scheme == .dark ? SwiftUI.Color.black : SwiftUI.Color.white
+        SwiftUI.Button {
             showing.wrappedValue.toggle()
         } label: {
-            if let systemImage, let iconSize {
-                Label(label, systemImage: systemImage).labelStyle(.iconOnly)
-                    .font(.system(size: iconSize))
-            } else if let systemImage {
-                Label(label, systemImage: systemImage).labelStyle(.iconOnly)
-            } else {
-                Text(verbatim: label)
+            SwiftUI.Group {
+                if let systemImage, let iconSize {
+                    SwiftUI.Label(label, systemImage: systemImage).labelStyle(.iconOnly)
+                        .font(.system(size: iconSize))
+                } else if let systemImage {
+                    SwiftUI.Label(label, systemImage: systemImage).labelStyle(.iconOnly)
+                } else {
+                    SwiftUI.Text(verbatim: label)
+                }
             }
+            .symbolVariant(isOpen ? .fill : .none)
+            .fontWeight(isOpen ? .bold : nil)
+            .foregroundStyle(isOpen ? openFg : SwiftUI.Color.primary)
+            .frame(minWidth: groupHeight, minHeight: groupHeight)
+            .background {
+                if isOpen {
+                    SwiftUI.Capsule()
+                        .fill(openFill)
+                        .padding(groupHeight != nil ? 3 : 0)
+                }
+            }
+            .animation(.snappy(duration: 0.18), value: isOpen)
         }
         .help(label)
         .bernPopover(isPresented: showing) {
@@ -5836,6 +5883,7 @@ struct BernPopoverButton<Content: View>: View {
     var restoreFocus: (() -> Void)?
     var reduceMotion = false
     var closing = false
+    var colorScheme: ColorScheme? = nil
     /// The results of a search field in the page, not an overlay: choosing
     /// one runs it at once.
     var inline = false
@@ -5990,6 +6038,7 @@ struct BernSearchPaletteHost<Content: View>: View {
         let panelHeight = bounds.height
         let source = palette.source.offsetBy(dx: -global.minX, dy: -global.minY)
         let expanded = palette.expanded || reduceMotion
+        let activeScheme = palette.colorScheme ?? scheme
         return VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass").font(.system(size: 18)).foregroundStyle(.secondary)
@@ -6030,6 +6079,7 @@ struct BernSearchPaletteHost<Content: View>: View {
         .opacity(palette.expanded ? 1 : 0)
         .frame(width: expanded ? panelWidth : max(1, source.width), height: expanded ? panelHeight : max(1, source.height), alignment: .top)
         .modifier(BernPaletteGlassSurface(cornerRadius: expanded ? 22 : 17))
+        .environment(\.colorScheme, activeScheme)
         .position(x: expanded ? bounds.midX : source.midX, y: expanded ? bounds.midY : source.midY)
         .onPreferenceChange(BernPaletteHeight.self) { height in
             guard height > 0 else { return }
@@ -6116,6 +6166,11 @@ private struct BernPaletteOutsideClicks: NSViewRepresentable {
 #endif
 
 struct BernSearchPalette<Results: View>: View {
+    @MainActor final class Live {
+        var scheme: ColorScheme = .light
+        var source = CGRect.zero
+    }
+
     let text: Binding<String>
     let prompt: String
     let panelPrompt: String
@@ -6126,34 +6181,37 @@ struct BernSearchPalette<Results: View>: View {
     var iconOnly = false
     @ViewBuilder let results: () -> Results
     @Environment(BernPaletteState.self) private var palette
+    @Environment(\.colorScheme) private var scheme
     @Environment(\.bernControlGroupHeight) private var groupHeight
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @Environment(\.bernReduceMotion) private var appReduceMotion
-    @State private var source = CGRect.zero
+    @State private var live = Live()
     @FocusState private var focused: Bool
 
     private func open() {
         guard !palette.presented else { return }
         palette.reduceMotion = systemReduceMotion || appReduceMotion
+        palette.colorScheme = live.scheme
         palette.text = text
         palette.prompt = panelPrompt
         palette.target = target
         palette.width = width
         palette.height = height
-        palette.source = source
+        palette.source = live.source
         palette.results = AnyView(results())
         palette.restoreFocus = { focused = true }
         palette.open()
     }
 
     @ViewBuilder var body: some View {
+        Group {
         if iconOnly {
             if let groupHeight {
                 Button(action: open) {
                     Label(prompt, systemImage: "magnifyingglass")
                         .labelStyle(.iconOnly)
                         .background(GeometryReader { geometry in
-                            Color.clear.onChange(of: geometry.frame(in: .global), initial: true) { source = geometry.frame(in: .global) }
+                            Color.clear.onChange(of: geometry.frame(in: .global), initial: true) { live.source = geometry.frame(in: .global) }
                         })
                         .bernHiddenShortcut(shortcut, action: open)
                         .bernControl(target, role: "search", label: prompt,
@@ -6169,7 +6227,7 @@ struct BernSearchPalette<Results: View>: View {
                     Label(prompt, systemImage: "magnifyingglass")
                         .labelStyle(.iconOnly)
                         .background(GeometryReader { geometry in
-                            Color.clear.onChange(of: geometry.frame(in: .global), initial: true) { source = geometry.frame(in: .global) }
+                            Color.clear.onChange(of: geometry.frame(in: .global), initial: true) { live.source = geometry.frame(in: .global) }
                         })
                         .bernHiddenShortcut(shortcut, action: open)
                         .bernControl(target, role: "search", label: prompt,
@@ -6197,13 +6255,15 @@ struct BernSearchPalette<Results: View>: View {
             .buttonStyle(.plain)
             .focused($focused)
             .background(GeometryReader { geometry in
-                Color.clear.onChange(of: geometry.frame(in: .global), initial: true) { source = geometry.frame(in: .global) }
+                Color.clear.onChange(of: geometry.frame(in: .global), initial: true) { live.source = geometry.frame(in: .global) }
             })
             .bernHiddenShortcut(shortcut, action: open)
             .bernControl(target, role: "search", label: prompt,
                          actions: BernControlActions(activate: open, edit: { text.wrappedValue = $0 },
                                                      submit: { palette.activate() }, value: { text.wrappedValue }, focus: open))
         }
+        }
+        .onChange(of: scheme, initial: true) { live.scheme = scheme }
     }
 }
 
@@ -6472,25 +6532,36 @@ struct BernPaletteInput: View {
 /// A decorative surface keeps its children as native controls.
 struct BernSurface: ViewModifier {
     let style: BernStyle
+    @BernReducedMotion private var reduce
+    @State private var hover = false
+
     func body(content: Content) -> some View {
-        let shadow = style.base.shadow ?? BernShadow(radius: 0, y: 0, opacity: 0)
-        surface(content)
-            .shadow(color: .black.opacity(shadow.opacity), radius: shadow.radius, y: shadow.y)
+        let (look, motion) = style.look(selected: false, hover: hover, pressed: false, enabled: true)
+        if style.hover != nil {
+            surface(content, look: look)
+                .contentShape(RoundedRectangle(cornerRadius: style.corner ?? 0, style: .continuous))
+                .bernTransform(look, motion, key: bernStateKey(false, hover, false, true), reduce: reduce)
+                .bernHover { hover = $0 }
+        } else {
+            let shadow = style.base.shadow ?? BernShadow(radius: 0, y: 0, opacity: 0)
+            surface(content, look: style.base)
+                .shadow(color: .black.opacity(shadow.opacity), radius: shadow.radius, y: shadow.y)
+        }
     }
 
     @ViewBuilder
-    private func surface(_ content: Content) -> some View {
+    private func surface(_ content: Content, look: BernLook) -> some View {
         if let corner = style.corner {
             content
-                .bernForeground(style.base.foreground?.color)
-                .background(RoundedRectangle(cornerRadius: corner, style: .continuous).fill(style.base.background?.color ?? Color.clear))
+                .bernForeground(look.foreground?.color)
+                .background(RoundedRectangle(cornerRadius: corner, style: .continuous).fill(look.background?.color ?? Color.clear))
                 .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
         } else {
             // A square surface, such as a page's, also fills the safe areas
             // around it: under the status bar and the bars of the window.
             content
-                .bernForeground(style.base.foreground?.color)
-                .background(style.base.background?.color ?? Color.clear)
+                .bernForeground(look.foreground?.color)
+                .background(look.background?.color ?? Color.clear)
         }
     }
 }
@@ -6643,12 +6714,18 @@ private struct BernFocusShape: View {
 
 private struct BernCapsuleControl: ViewModifier {
     @Environment(\.bernAccent) private var accent
+    @Environment(\.isEnabled) private var enabled
+    @BernReducedMotion private var reduce
+    @State private var hover = false
+    @State private var pressed = false
     let height: CGFloat
     let prominent: Bool
     /// In a form's row, on the row's own surface: a capsule of the
     /// system's fill, as a list's buttons are, where glass would cast its
     /// shadow across the row.
     var filled = false
+    var style: BernStyle? = nil
+
     @ViewBuilder func body(content: Content) -> some View {
         #if os(tvOS)
         content
@@ -6657,36 +6734,50 @@ private struct BernCapsuleControl: ViewModifier {
                 padding: height >= 40 ? 22 : height <= 30 ? 13 : 14))
             .font(height >= 40 ? .system(size: 15, weight: .semibold) : .system(size: 13, weight: .medium))
         #else
-        // The design's button sizes (6.3): a main action of 42 points or
-        // more is set in 15-point semibold, 22 from its ends; the others in
-        // 13-point medium, 14 from their ends, or 13 on a 30-point chip.
-        // A pull-down's label takes the tint, not the foreground: a
-        // secondary capsule's menu is in the words' color, not the accent.
+        let resolved = style?.look(selected: false, hover: hover, pressed: pressed, enabled: enabled)
+        let customBg = resolved?.0.background?.color
+        let customFg = resolved?.0.foreground?.color
+        let defaultFg = prominent ? BernColor.role("on_accent").color : SwiftUI.Color.primary
+        let defaultTint = prominent ? accent ?? .accentColor : SwiftUI.Color.primary
         let control = content.buttonStyle(.plain)
             .font(filled ? .system(size: 15) : height >= 40 ? .system(size: 15, weight: .semibold) : .system(size: 13, weight: .medium))
-            .foregroundStyle(prominent ? BernColor.role("on_accent").color : Color.primary)
-            .tint(prominent ? accent ?? .accentColor : Color.primary)
+            .foregroundStyle(customFg ?? defaultFg)
+            .tint(customFg ?? defaultTint)
             .padding(.horizontal, height >= 40 ? 22 : height <= 30 ? 13 : 14).frame(height: height)
-            .contentShape(Capsule())
-        if filled {
-            control.background(.fill.tertiary, in: Capsule())
-        } else if #available(macOS 26.0, iOS 26.0, tvOS 26.0, watchOS 26.0, *) {
-            if prominent {
-                // Keep the accent legible when the window's native glass
-                // desaturates; the glass still supplies the interactive surface.
-                control
-                    .background(accent ?? .accentColor, in: Capsule())
-                    .glassEffect(.regular.tint(accent ?? .accentColor).interactive(), in: Capsule())
-            } else {
-                control.glassEffect(.regular.interactive(), in: Capsule())
-            }
-        } else if prominent {
-            control.background(accent ?? .accentColor, in: Capsule())
+            .contentShape(SwiftUI.Capsule())
+        let surfaced = capsuleSurface(control, customBg: customBg)
+        if style != nil, let (look, motion) = resolved {
+            surfaced
+                .bernTransform(look, motion, key: bernStateKey(false, hover, pressed, enabled), reduce: reduce)
+                .bernHover { hover = $0 }
+                .bernPressWatch { pressed = $0 }
         } else {
-            control.background(.regularMaterial, in: Capsule())
+            surfaced
         }
         #endif
     }
+
+    #if !os(tvOS)
+    @ViewBuilder private func capsuleSurface(_ control: some View, customBg: SwiftUI.Color?) -> some View {
+        if let customBg {
+            control.background(customBg, in: SwiftUI.Capsule())
+        } else if filled {
+            control.background(.fill.tertiary, in: SwiftUI.Capsule())
+        } else if #available(macOS 26.0, iOS 26.0, tvOS 26.0, watchOS 26.0, *) {
+            if prominent {
+                control
+                    .background(accent ?? .accentColor, in: SwiftUI.Capsule())
+                    .glassEffect(.regular.tint(accent ?? .accentColor).interactive(), in: SwiftUI.Capsule())
+            } else {
+                control.glassEffect(.regular.interactive(), in: SwiftUI.Capsule())
+            }
+        } else if prominent {
+            control.background(accent ?? .accentColor, in: SwiftUI.Capsule())
+        } else {
+            control.background(.regularMaterial, in: SwiftUI.Capsule())
+        }
+    }
+    #endif
 }
 
 /// Same-window modal: preserves the hero coordinate space and constrains
@@ -6694,6 +6785,7 @@ private struct BernCapsuleControl: ViewModifier {
 struct BernModal<Content: View>: View {
     @BernReducedMotion private var reduce
     @Environment(BernWindowContext.self) private var window: BernWindowContext?
+    @Environment(\.colorScheme) private var scheme
     /// A modal declared in a scaled scene shows at the scene's scale.
     @Environment(\.bernSceneScale) private var scale
     let width: CGFloat
@@ -6701,6 +6793,7 @@ struct BernModal<Content: View>: View {
     let height: CGFloat?
     /// Covers the whole window where the window is compact.
     var cover = false
+    var dismiss: (() -> Void)? = nil
     @ViewBuilder var content: Content
     var presentation: (AnyView) -> AnyView = { $0 }
     var body: some View {
@@ -6709,10 +6802,11 @@ struct BernModal<Content: View>: View {
         #else
         let fullScreen = cover && window?.compact == true
         #endif
-        Color.clear.frame(width: 0, height: 0)
+        SwiftUI.Color.clear.frame(width: 0, height: 0)
             .preference(key: BernModalContent.self, value: AnyView(
                 BernModalLayer(width: width, height: height, covers: fullScreen,
-                               scale: scale, content: content, presentation: presentation)
+                               scale: scale, modalScheme: scheme, dismiss: dismiss,
+                               content: content, presentation: presentation)
                     .environment(\.bernReduceMotion, reduce)
                     .environment(\.bernSceneScaled, scale != 1)))
     }
@@ -6734,8 +6828,27 @@ private struct BernModalLayer<Content: View>: View {
     var covers = false
     /// The scale of the scene the modal was declared in.
     var scale: CGFloat = 1
+    var modalScheme: ColorScheme = .dark
+    var dismiss: (() -> Void)? = nil
     let content: Content
     let presentation: (AnyView) -> AnyView
+    @Environment(\.bernReduceMotion) private var reduceMotion
+    @State private var expanded = false
+    @State private var closing = false
+    @State private var cardRect = CGRect.zero
+
+    private func triggerDismiss() {
+        guard let dismiss, !closing else { return }
+        closing = true
+        withAnimation(reduceMotion ? .easeOut(duration: 0.1) : .spring(response: 0.22, dampingFraction: 0.85)) {
+            expanded = false
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + (reduceMotion ? 0.1 : 0.22)) {
+            closing = false
+            dismiss()
+        }
+    }
+
     var body: some View {
         if covers {
             // Its background reaches the edges; its content keeps to the
@@ -6743,11 +6856,12 @@ private struct BernModalLayer<Content: View>: View {
             // in it goes under the status bar and the home indicator.
             presentation(AnyView(content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .environment(\.colorScheme, modalScheme)
                 .background {
                     #if os(watchOS)
-                    Rectangle().fill(Color.black).ignoresSafeArea()
+                    SwiftUI.Rectangle().fill(SwiftUI.Color.black).ignoresSafeArea()
                     #else
-                    Rectangle().fill(.background).ignoresSafeArea()
+                    SwiftUI.Rectangle().fill(.background).environment(\.colorScheme, modalScheme).ignoresSafeArea()
                     #endif
                 }
                 .accessibilityAddTraits(.isModal)))
@@ -6757,27 +6871,59 @@ private struct BernModalLayer<Content: View>: View {
     }
 
     private var floating: some View {
-        // The backdrop covers the whole screen; the card keeps to the safe
-        // area, whose insets the stage is given.
-        GeometryReader { proxy in
-        BernModalStage(width: width, height: height, scale: scale, insets: proxy.safeAreaInsets) {
-            Group {
-                if #available(macOS 26.0, iOS 26.0, tvOS 26.0, watchOS 26.0, *) {
-                    Color.black.opacity(0.08)
-                } else {
-                    Color.black.opacity(0.24)
+        let shown = expanded || (reduceMotion && !closing)
+        return GeometryReader { proxy in
+            BernModalStage(width: width, height: height, scale: scale, insets: proxy.safeAreaInsets) {
+                SwiftUI.Group {
+                    if #available(macOS 26.0, iOS 26.0, tvOS 26.0, watchOS 26.0, *) {
+                        SwiftUI.Color.clear
+                    } else {
+                        SwiftUI.Color.black.opacity(shown ? (modalScheme == .dark ? 0.32 : 0.2) : 0)
+                    }
+                }
+                .accessibilityHidden(true)
+                #if !os(macOS)
+                .contentShape(SwiftUI.Rectangle())
+                .onTapGesture {
+                    triggerDismiss()
+                }
+                #endif
+                presentation(AnyView(SwiftUI.ZStack(alignment: .topLeading) { content }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .modifier(BernPaletteGlassSurface(cornerRadius: 22))
+                    .environment(\.colorScheme, modalScheme)
+                    .onGeometryChange(for: CGRect.self) {
+                        $0.frame(in: .named("bern-modal-space"))
+                    } action: {
+                        cardRect = $0
+                    }
+                    .opacity(shown ? 1 : 0)
+                    .scaleEffect((shown ? 1.0 : 0.92) * scale)
+                    .offset(y: shown ? 0 : -12)
+                    .accessibilityAddTraits(.isModal)
+                    #if os(macOS)
+                    .onExitCommand { triggerDismiss() }
+                    #endif
+                ))
+            }
+            .coordinateSpace(name: "bern-modal-space")
+            #if os(macOS)
+            .background {
+                if dismiss != nil {
+                    BernPaletteOutsideClicks(panel: cardRect) { triggerDismiss() }
                 }
             }
-            .contentShape(Rectangle())
-            .onTapGesture { }
-            // One card whatever the modal holds, a `Shortcut` beside its
-            // content too: the stage places the backdrop and one card.
-            presentation(AnyView(ZStack(alignment: .topLeading) { content }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .modifier(BernModalSurface())
-                .accessibilityAddTraits(.isModal)
-                .scaleEffect(scale)))
-        }.ignoresSafeArea()
+            #endif
+            .ignoresSafeArea()
+            .onAppear {
+                closing = false
+                expanded = false
+                DispatchQueue.main.async {
+                    withAnimation(reduceMotion ? .easeOut(duration: 0.1) : .spring(response: 0.48, dampingFraction: 0.86)) {
+                        expanded = true
+                    }
+                }
+            }
         }
     }
 }
