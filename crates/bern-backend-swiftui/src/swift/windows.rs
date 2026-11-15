@@ -72,6 +72,9 @@ impl Generator<'_> {
         }
         out.line("@Environment(BernWindowContext.self) private var bernWindow");
         out.line("@Environment(\\.bernInert) private var bernInert");
+        if self.platform == Platform::Macos {
+            out.line("@Environment(\\.bernUnifiedChrome) private var bernUnifiedChrome");
+        }
         out.line("");
         out.open(if toolbar {
             "func body(content bernContent: Content) -> some View {"
@@ -109,6 +112,9 @@ impl Generator<'_> {
         ));
         out.line("@Environment(BernEngine.self) private var bernEngine");
         out.line("@Environment(\\.bernInert) private var bernInert");
+        if self.platform == Platform::Macos {
+            out.line("@Environment(\\.bernUnifiedChrome) private var bernUnifiedChrome");
+        }
         // Content written inline in the window sees the same names as a
         // component body: the window and its sessions.
         out.line("private var bernWindow: BernWindowContext { context }");
@@ -136,6 +142,9 @@ impl Generator<'_> {
         }
         self.node(out, &window.content, &ctx);
         out.close("}");
+        if self.platform == Platform::Macos && window.chrome == bern_ir::WindowChrome::Unified {
+            out.line(".environment(\\.bernUnifiedChrome, true)");
+        }
         out.close("}");
         if window.chrome == bern_ir::WindowChrome::Unified
             || window.immersive.is_some()
