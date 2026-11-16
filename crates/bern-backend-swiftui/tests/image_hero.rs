@@ -89,6 +89,30 @@ enum BernImage {
         spin(1.3)
         precondition(ghosts().isEmpty && !sourceHidden, "reverse overlay flight settles cleanly")
         overlayCard.removeFromSuperview()
+        // Collapsing a split view moves the underlying column while inert; both
+        // opening and closing flights must use the visible pre-cover coordinates.
+        let detailCard = anchor(right, CGRect(x: 40, y: 80, width: 120, height: 160), key: "split_card")
+        spin(0.05)
+        detailCard.inert = true
+        let originalRight = right.frame
+        right.frame = CGRect(x: 0, y: 0, width: 800, height: 600)
+        spin(0.02)
+        let collapsedOpen = anchor(right, CGRect(x: 300, y: 120, width: 220, height: 300), key: "split_card")
+        spin(0.03)
+        precondition(ghosts().count == 1, "opening while inert starts a flight")
+        precondition(abs(ghosts()[0].frame.minX - 260) < 40, "opening flight starts near the pre-collapse column (x=260), not at x=40")
+        spin(1.3)
+        collapsedOpen.exiting = true
+        collapsedOpen.detach()
+        right.frame = originalRight
+        detailCard.inert = false
+        spin(0.04)
+        precondition(ghosts().count == 1, "closing while uncovering starts a reverse flight")
+        precondition(abs(ghosts()[0].frame.minX - 300) < 40, "closing flight starts at the open card, not jumped left")
+        spin(1.3)
+        precondition(ghosts().isEmpty, "reverse flight after split expansion settles cleanly")
+        collapsedOpen.removeFromSuperview()
+        detailCard.removeFromSuperview()
         // Other elements fly what the window draws where they are.
         let tile = NSView(frame: CGRect(x: 0, y: 0, width: 220, height: 600))
         tile.wantsLayer = true; tile.layer?.backgroundColor = NSColor.blue.cgColor

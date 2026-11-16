@@ -187,7 +187,7 @@ impl Generator<'_> {
                 ".frame(maxWidth: .infinity, maxHeight: .infinity, alignment: {alignment})"
             ));
             out.line(match self.platform {
-                Platform::Macos => ".ignoresSafeArea(.container, edges: .top)",
+                Platform::Macos => ".ignoresSafeArea(.all, edges: .top)",
                 Platform::Ios | Platform::Tvos | Platform::Watchos => {
                     ".ignoresSafeArea(.container)"
                 }
