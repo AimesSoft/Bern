@@ -2457,7 +2457,7 @@ struct BernPictureHero: ViewModifier {
                 BernWindowImageHeroes.forWindow($0).expects(id)
             } == true
             let willFlyBack = exiting && !reduced && window.platform.nsWindow.map {
-                BernWindowImageHeroes.forWindow($0).hasUnderlying(id)
+                BernWindowImageHeroes.forWindow($0).isFlyingOrLayered(id)
             } == true
             content
                 .opacity(flying || awaiting || willFlyBack ? 0 : 1)
@@ -6013,6 +6013,9 @@ struct BernPopoverButton<Content: View>: View {
                 .foregroundStyle(style?.base.foreground?.color ?? Color.primary)
                 .environment(\.colorScheme, panelScheme)
                 .environment(\.bernControlGroupHeight, nil)
+                #if os(macOS)
+                .background(BernPopoverWindowAppearance(dark: panelScheme == .dark))
+                #endif
             #endif
         }
         .bernControl(
@@ -6622,6 +6625,7 @@ struct BernPaletteInput: NSViewRepresentable {
         field.drawsBackground = false
         field.focusRingType = .none
         field.font = .systemFont(ofSize: 16)
+        field.appearance = NSAppearance(named: context.environment.colorScheme == .dark ? .darkAqua : .aqua)
         field.textColor = .labelColor
         field.placeholderString = prompt
         field.stringValue = text.wrappedValue
@@ -6633,6 +6637,7 @@ struct BernPaletteInput: NSViewRepresentable {
     }
     func updateNSView(_ field: NSTextField, context: Context) {
         context.coordinator.owner = self
+        field.appearance = NSAppearance(named: context.environment.colorScheme == .dark ? .darkAqua : .aqua)
         field.placeholderString = prompt
         if field.stringValue != text.wrappedValue && !((field.currentEditor() as? NSTextView)?.hasMarkedText() ?? false) {
             field.stringValue = text.wrappedValue
