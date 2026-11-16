@@ -538,4 +538,48 @@ fn decode_max_side_bounds_blurred_backdrops_and_transitive_grids() {
         bern_target_api::svg::decode_max_side(&app, backdrop_el),
         Some(32.0)
     );
+
+    let mut fixed_col = elem(
+        "Column",
+        vec![("width", bern_ir::Prop::Number { value: 280.0 })],
+    );
+    fixed_col.children.push(bern_ir::Node::Element(elem(
+        "Image",
+        vec![("aspect", bern_ir::Prop::Number { value: 0.5 })],
+    )));
+    let mut h_scroll = elem(
+        "ScrollView",
+        vec![(
+            "axis",
+            bern_ir::Prop::Keyword {
+                value: "horizontal".into(),
+            },
+        )],
+    );
+    h_scroll.children.push(bern_ir::Node::Element(elem(
+        "Image",
+        vec![("aspect", bern_ir::Prop::Number { value: 1.0 })],
+    )));
+    fixed_col.children.push(bern_ir::Node::Element(h_scroll));
+    app.windows.windows[0].content = bern_ir::Node::Element(fixed_col);
+    let bern_ir::Node::Element(fixed_root) = &app.windows.windows[0].content else {
+        panic!();
+    };
+    let bern_ir::Node::Element(aspect_el) = &fixed_root.children[0] else {
+        panic!();
+    };
+    assert_eq!(
+        bern_target_api::svg::decode_max_side(&app, aspect_el),
+        Some(560.0)
+    );
+    let bern_ir::Node::Element(scroll_el) = &fixed_root.children[1] else {
+        panic!();
+    };
+    let bern_ir::Node::Element(unbounded_el) = &scroll_el.children[0] else {
+        panic!();
+    };
+    assert_eq!(
+        bern_target_api::svg::decode_max_side(&app, unbounded_el),
+        None
+    );
 }

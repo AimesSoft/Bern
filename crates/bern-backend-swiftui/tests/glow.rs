@@ -15,22 +15,24 @@ fn a_glow_follows_the_pointer_and_a_blur_stays_inside() {
         .find("private struct BernSpin: ViewModifier {")
         .unwrap();
     let runtime = &style[start..end];
-    let prelude = r#"
+    let blur_start = style.find("@ViewBuilder func bernBlur(").unwrap();
+    let blur_end = style[blur_start..]
+        .find("/// While the person scrolls")
+        .unwrap()
+        + blur_start;
+    let bern_blur = &style[blur_start..blur_end];
+    let prelude = format!(
+        r#"
 import AppKit
 import SwiftUI
-extension View {
-    func bernGlow(_ radius: Double, opacity: Double, corner: Double) -> some View {
+extension View {{
+    func bernGlow(_ radius: Double, opacity: Double, corner: Double) -> some View {{
         modifier(BernGlow(radius: radius, opacity: opacity, corner: corner))
-    }
-    @ViewBuilder func bernBlur(_ radius: Double, corner: Double) -> some View {
-        if radius > 0.01 {
-            blur(radius: radius).clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
-        } else {
-            self
-        }
-    }
-}
-"#;
+    }}
+    {bern_blur}
+}}
+"#
+    );
     let tests = r#"
 struct Glowing: View {
     let pointer: BernPointer

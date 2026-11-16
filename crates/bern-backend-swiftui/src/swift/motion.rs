@@ -107,7 +107,7 @@ impl Generator<'_> {
                 Some((swift, motion)) => (format!("AnyTransition{swift}"), motion.clone()),
                 None => ("nil".into(), "nil".into()),
             };
-            let (insertion, insertion_motion) = part(&appear);
+            let (mut insertion, insertion_motion) = part(&appear);
             let (mut removal, removal_motion) = part(&disappear);
             let manual = element
                 .keyword("appear")
@@ -123,9 +123,9 @@ impl Generator<'_> {
                 .unwrap_or_default();
             // A page moving across an iPhone's window, as a sheet comes up,
             // fills the window under its bars while it moves (see
-            // `BernWholeWindow`), stops at the edge coming in and goes out
-            // past it (`BernMoveIn`, `BernMoveOut`). A layer under the bars
-            // fills the window already.
+            // `BernWholeWindow`), uses a render-time `Transition` so Core
+            // Animation composites it at 120Hz without shifting safe areas,
+            // stops at the edge coming in, and exits past the far edge.
             let edge = |key: &str| {
                 element
                     .keyword(key)
@@ -142,8 +142,11 @@ impl Generator<'_> {
             } else {
                 ("", "")
             };
+            if let Some(edge) = edge("appear").filter(|_| page) {
+                insertion = format!("AnyTransition.bernWholeMoveIn(edge: {edge})");
+            }
             if let Some(edge) = edge("disappear").filter(|_| page) {
-                removal = format!("AnyTransition.bernMoveOut(edge: {edge})");
+                removal = format!("AnyTransition.bernWholeMoveOut(edge: {edge})");
             }
             return Some(format!(
                 "{whole}.bernTransition(insertion: {insertion}, insertionMotion: {insertion_motion}, removal: {removal}, removalMotion: {removal_motion}{manual}{delay}{whole_arg})"
@@ -219,9 +222,12 @@ impl Generator<'_> {
             ));
         }
         // Blurred first, so the light on top stays sharp; both inside the
-        // element's corner.
+        // element's corner. Static large-radius images pre-blur their small
+        // decoded bitmap directly in `BernImage`.
         let corner = || self.length(element, "corner").unwrap_or_else(|| "0".into());
-        if let Some(radius) = self.length(element, "blur") {
+        if let Some(radius) = self.length(element, "blur")
+            && !bern_target_api::svg::static_preblur(element)
+        {
             out.line(format!(".bernBlur({radius}, corner: {})", corner()));
             // A blur that follows state changes with `animate`'s motion.
             if let (Some(token), Some(_)) = (element.keyword("animate"), element.expr("blur")) {
