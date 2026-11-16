@@ -166,6 +166,8 @@ final class BernWindowPlatform {
     var visibility: NSKeyValueObservation?
     /// The frame `window.maximize` left, for `window.restore`.
     var restoreFrame: NSRect?
+    /// Whether the pointer is currently hidden for an idle, immersive window.
+    var pointerHidden = false
 }
 
 /// SwiftUI's window actions, which the host opens windows with, and the
@@ -1352,19 +1354,24 @@ struct BernWindowBehavior: ViewModifier {
     var landscape: Bool? = nil
     @State private var monitor = BernEventMonitor()
 
+    private var hidePointer: Bool { immersive && context.idle }
+
     func body(content: Content) -> some View {
         content
             .environment(\.bernUnifiedChrome, unified)
             .modifier(BernUnifiedToolbarSuppression(enabled: unified))
             .ignoresSafeArea(.container, edges: (unified || immersive) ? .top : [])
+            .modifier(BernPointerVisibility(hidden: hidePointer))
             .onAppear {
                 apply(attempts: 20)
+                syncPointerVisibility(hidePointer)
                 if let idleAfter, idleEnabled {
                     monitor.start(context: context, after: idleAfter)
                 }
             }
             .onDisappear {
                 monitor.stop()
+                syncPointerVisibility(false)
             }
             .onChange(of: immersive) { apply(attempts: 20) }
             .onChange(of: context.fullscreen) { apply(attempts: 5) }
@@ -1374,12 +1381,27 @@ struct BernWindowBehavior: ViewModifier {
                 if idleEnabled, let idleAfter { monitor.start(context: context, after: idleAfter) }
                 apply(attempts: 20)
             }
-            .onChange(of: context.idle) { _, idle in
+            .onChange(of: context.idle) { _, _ in
                 apply(attempts: 20)
-                if idle && immersive {
+            }
+            .onChange(of: hidePointer) { _, hidden in
+                syncPointerVisibility(hidden)
+            }
+    }
+
+    private func syncPointerVisibility(_ hidden: Bool) {
+        context.platform.pointerHidden = hidden
+        NSCursor.setHiddenUntilMouseMoves(hidden)
+        guard hidden else { return }
+        // On macOS 14, disappearing controls can tear down cursor rects after
+        // the change fires; re-hide once exit transitions settle if still idle.
+        if #unavailable(macOS 15.0) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                if context.platform.pointerHidden && context.idle {
                     NSCursor.setHiddenUntilMouseMoves(true)
                 }
             }
+        }
     }
 
     /// Set the window up once SwiftUI has created it.
@@ -1412,6 +1434,18 @@ struct BernWindowBehavior: ViewModifier {
     }
 }
 
+private struct BernPointerVisibility: ViewModifier {
+    let hidden: Bool
+
+    func body(content: Content) -> some View {
+        if #available(macOS 15.0, *) {
+            content.pointerVisibility(hidden ? .hidden : .automatic)
+        } else {
+            content
+        }
+    }
+}
+
 /// Watches input in one window and turns its `idle` on after a quiet spell.
 @MainActor
 final class BernEventMonitor {
@@ -1419,10 +1453,12 @@ final class BernEventMonitor {
     private var timer: Timer?
     private weak var context: BernWindowContext?
     private var lastActivity = ProcessInfo.processInfo.systemUptime
+    private var lastMouseLocation: NSPoint?
 
     func start(context: BernWindowContext, after seconds: Double) {
         stop()
         self.context = context
+        lastMouseLocation = NSEvent.mouseLocation
         context.platform.nsWindow?.acceptsMouseMovedEvents = true
         let events: NSEvent.EventTypeMask = [
             .mouseMoved, .leftMouseDown, .rightMouseDown, .otherMouseDown,
@@ -1430,7 +1466,24 @@ final class BernEventMonitor {
         ]
         monitor = NSEvent.addLocalMonitorForEvents(matching: events) { [weak self, weak context] event in
             if let context, event.window === context.platform.nsWindow {
-                MainActor.assumeIsolated { self?.activity(after: seconds) }
+                let mouseLocation = event.type == .mouseMoved ? NSEvent.mouseLocation : nil
+                let deltaX = event.type == .mouseMoved ? event.deltaX : 0
+                let deltaY = event.type == .mouseMoved ? event.deltaY : 0
+                MainActor.assumeIsolated {
+                    if let mouseLocation,
+                       let self,
+                       let last = self.lastMouseLocation,
+                       abs(mouseLocation.x - last.x) < 0.5,
+                       abs(mouseLocation.y - last.y) < 0.5,
+                       deltaX == 0,
+                       deltaY == 0 {
+                        return
+                    }
+                    if let mouseLocation {
+                        self?.lastMouseLocation = mouseLocation
+                    }
+                    self?.activity(after: seconds)
+                }
             }
             return event
         }
@@ -1448,6 +1501,7 @@ final class BernEventMonitor {
             NSEvent.removeMonitor(monitor)
         }
         monitor = nil
+        lastMouseLocation = nil
         // A change of the areas does not start counting again while off.
         context?.idleAreasChanged = nil
         context = nil

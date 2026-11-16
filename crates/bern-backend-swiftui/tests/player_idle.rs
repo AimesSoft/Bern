@@ -106,3 +106,17 @@ fn idle_ignores_fullscreen_helpers_but_keeps_popovers_awake() {
         String::from_utf8_lossy(&ran.stderr)
     );
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+fn pointer_hides_and_restores_with_immersive_idle() {
+    let appkit = include_str!("../templates/BernAppKit.swift");
+    assert!(appkit.contains("private var hidePointer: Bool { immersive && context.idle }"));
+    assert!(appkit.contains(".pointerVisibility(hidden ? .hidden : .automatic)"));
+    assert!(appkit.contains("NSCursor.setHiddenUntilMouseMoves(hidden)"));
+    assert!(appkit.contains("lastMouseLocation"));
+
+    let uikit = include_str!("../templates/BernUIKit.swift");
+    assert!(uikit.contains("BernPointerHider"));
+    assert!(uikit.contains("UIPointerStyle.hidden()"));
+}
