@@ -157,7 +157,7 @@ impl Generator<'_> {
         inner.key = Some(row_key.clone());
         for column in &columns {
             out.open(format!(
-                "Row({}, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {{",
+                "BernRow({}, gap = 8.dp, verticalAlignment = Alignment.CenterVertically) {{",
                 width(column)
             ));
             self.nodes(out, &column.children, &inner.within(Scope::Row));

@@ -58,7 +58,7 @@ fun BernButton(label: String, icon: ImageVector?, prominence: BernProminence, de
     }
     val content: @Composable RowScope.() -> Unit = {
         if (icon != null) { Icon(icon, null, Modifier.size(20.dp)); Spacer(Modifier.width(6.dp)) }
-        Text(label, style = textStyle)
+        Text(label, style = textStyle, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
     }
     val error = MaterialTheme.colorScheme.error
     val material: @Composable (Modifier, MutableInteractionSource?) -> Unit = { m, interaction ->

@@ -696,22 +696,45 @@ struct FlexPanel : controls::PanelT<FlexPanel> {
         }
         float gaps = static_cast<float>(spacing) * (std::max)(0, visible - 1);
         // Too wide for its room: text gives way, as a stack's text wraps or
-        // truncates on the other targets, so controls keep their size.
+        // truncates on the other targets, so controls keep their size; with
+        // one spacer, yielding words before it give way before what trails it.
         if (horizontal && !std::isinf(space) && used + gaps > space) {
-            float yielding = 0;
-            for (auto child : Children())
-                if (child.Visibility() == xaml::Visibility::Visible && !Fills(child) && Yields(child)) yielding += Main(child.DesiredSize());
+            int spacerCount = 0, spacerAt = -1, index = 0;
+            for (auto child : Children()) {
+                if (child.Visibility() == xaml::Visibility::Visible && RoleOf(Unwrapped(child)) == L"bern-spacer") {
+                    ++spacerCount;
+                    spacerAt = index;
+                }
+                ++index;
+            }
+            float leadingYielding = 0, trailingYielding = 0;
+            index = 0;
+            for (auto child : Children()) {
+                if (child.Visibility() == xaml::Visibility::Visible && !Fills(child) && Yields(child)) {
+                    if (spacerCount == 1 && index < spacerAt) leadingYielding += Main(child.DesiredSize());
+                    else trailingYielding += Main(child.DesiredSize());
+                }
+                ++index;
+            }
             float over = used + gaps - space;
-            if (yielding > 0) {
+            if (leadingYielding + trailingYielding > 0) {
+                float leadingCut = leadingYielding > 0 ? (std::min)(over, leadingYielding) : 0.0f;
+                float trailingCut = leadingYielding > 0 ? (std::max)(0.0f, over - leadingYielding) : over;
                 used = 0;
+                index = 0;
                 for (auto child : Children()) {
-                    if (child.Visibility() != xaml::Visibility::Visible || Fills(child)) continue;
+                    if (child.Visibility() != xaml::Visibility::Visible || Fills(child)) { ++index; continue; }
                     if (Yields(child)) {
                         float own = Main(child.DesiredSize());
-                        child.Measure(Make((std::max)(0.0f, own - over * own / yielding), Across(child, cross).second));
+                        bool before = leadingYielding > 0 && index < spacerAt;
+                        float pool = before ? leadingYielding : trailingYielding;
+                        float cut = before ? leadingCut : trailingCut;
+                        if (pool > 0 && cut > 0)
+                            child.Measure(Make((std::max)(0.0f, own - cut * own / pool), Across(child, cross).second));
                     }
                     used += Main(child.DesiredSize());
                     thickness = (std::max)(thickness, (std::min)(Cross(child.DesiredSize()), cross));
+                    ++index;
                 }
             }
         }

@@ -2861,12 +2861,20 @@ function yieldsWidth(node) {
   return node.tagName !== "BUTTON" && [...node.children].some(yieldsWidth);
 }
 
-/// Whether `node`, a stack of controls in a row, keeps its width when the
-/// row is too narrow: its controls would be cut off or run into their
-/// neighbours, as stacks otherwise shrink to nothing.
+/// Whether `node` keeps its width when its row is too narrow: a stack of
+/// controls (whose buttons would otherwise be cut off), or a trailing item
+/// after a single spacer when leading words before the spacer can give way.
 export function firmWidth(node) {
   const row = node.parentElement;
-  return !!row && row.bernLayoutAxis === "row" && !!node.bernLayoutAxis && !layoutIntent(node, "width") && !yieldsWidth(node);
+  if (!row || row.bernLayoutAxis !== "row" || layoutIntent(node, "width")) return false;
+  if (!!node.bernLayoutAxis && !yieldsWidth(node)) return true;
+  const children = [...row.children];
+  const spacers = children.filter(isSpacer);
+  if (spacers.length === 1) {
+    const at = children.indexOf(spacers[0]);
+    if (children.indexOf(node) > at && children.slice(0, at).some(yieldsWidth)) return true;
+  }
+  return false;
 }
 
 /// Whether a stack's layers, rails and backdrops aside, all have a fixed

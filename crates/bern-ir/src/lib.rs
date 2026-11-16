@@ -1402,16 +1402,126 @@ pub fn can_fold_row_spacer(nodes: &[Node]) -> bool {
 }
 
 /// Whether `node`, followed in a row by `next`, is the words that lead the
-/// row: a text, or a column standing at its leading edge, before a spacer.
-/// It takes the spacer's room itself, so the controls after it keep their
-/// width and the words wrap in what is left, as a list row's label does.
+/// row: a text, a column standing at its leading edge, a spacer-free row of
+/// words, or an exhaustive condition whose branches each show one such item,
+/// before a spacer. It takes the spacer's room itself, so the controls after
+/// it keep their width and the words wrap in what is left, as a list row's
+/// label does.
 pub fn leads_row(node: &Node, next: Option<&Node>) -> bool {
-    let words = matches!(node, Node::Element(element)
-        if element.prop("width").is_none()
-            && (element.kind == "Text"
-                || (element.kind == "Column"
-                    && matches!(element.keyword("align"), None | Some("leading")))));
-    words && matches!(next, Some(Node::Element(spacer)) if spacer.kind == "Spacer")
+    is_leading_words(node) && matches!(next, Some(Node::Element(spacer)) if spacer.kind == "Spacer")
+}
+
+fn has_spacer(node: &Node) -> bool {
+    match node {
+        Node::Element(element) if element.kind == "Spacer" => true,
+        Node::Element(element)
+            if matches!(
+                element.kind.as_str(),
+                "Row" | "Column" | "Stack" | "ForEach"
+            ) =>
+        {
+            element.children.iter().any(has_spacer)
+        }
+        Node::If(node) => node
+            .branches
+            .iter()
+            .flat_map(|(_, body)| body)
+            .chain(&node.otherwise)
+            .any(has_spacer),
+        Node::IfLet(node) => node.then.iter().chain(&node.otherwise).any(has_spacer),
+        Node::Match(node) => node.arms.iter().flat_map(|arm| &arm.body).any(has_spacer),
+        _ => false,
+    }
+}
+
+fn contains_words(node: &Node) -> bool {
+    match node {
+        Node::Element(element) => match element.kind.as_str() {
+            "Text" => true,
+            "Label" => element.keyword("display") != Some("icon"),
+            "Column" | "Row" | "Stack" | "ForEach" => element.children.iter().any(contains_words),
+            _ => false,
+        },
+        Node::If(node) => node
+            .branches
+            .iter()
+            .flat_map(|(_, body)| body)
+            .chain(&node.otherwise)
+            .any(contains_words),
+        Node::IfLet(node) => node.then.iter().chain(&node.otherwise).any(contains_words),
+        Node::Match(node) => node
+            .arms
+            .iter()
+            .flat_map(|arm| &arm.body)
+            .any(contains_words),
+        Node::Component(_) => false,
+    }
+}
+
+fn holds_only_words(node: &Node) -> bool {
+    match node {
+        Node::Element(element) => match element.kind.as_str() {
+            "Text" | "Label" | "Image" => true,
+            "Column" | "Row" | "Stack" | "ForEach" => element.children.iter().all(holds_only_words),
+            _ => false,
+        },
+        Node::If(node) => node
+            .branches
+            .iter()
+            .flat_map(|(_, body)| body)
+            .chain(&node.otherwise)
+            .all(holds_only_words),
+        Node::IfLet(node) => node
+            .then
+            .iter()
+            .chain(&node.otherwise)
+            .all(holds_only_words),
+        Node::Match(node) => node
+            .arms
+            .iter()
+            .flat_map(|arm| &arm.body)
+            .all(holds_only_words),
+        Node::Component(_) => false,
+    }
+}
+
+fn exhaustive_branches_lead_row(branches: &[&[Node]]) -> bool {
+    !branches.is_empty()
+        && branches
+            .iter()
+            .all(|body| matches!(body, [only] if is_leading_words(only)))
+}
+
+fn is_leading_words(node: &Node) -> bool {
+    match node {
+        Node::Element(element) if element.prop("width").is_none() => match element.kind.as_str() {
+            "Text" => true,
+            "Column" => matches!(element.keyword("align"), None | Some("leading")),
+            "Row" => {
+                !element.children.iter().any(has_spacer)
+                    && element.children.iter().any(contains_words)
+                    && element.children.iter().all(holds_only_words)
+            }
+            _ => false,
+        },
+        Node::If(node) => {
+            let branches: Vec<&[Node]> = node
+                .branches
+                .iter()
+                .map(|(_, body)| body.as_slice())
+                .chain(std::iter::once(node.otherwise.as_slice()))
+                .collect();
+            exhaustive_branches_lead_row(&branches)
+        }
+        Node::IfLet(node) => {
+            exhaustive_branches_lead_row(&[node.then.as_slice(), node.otherwise.as_slice()])
+        }
+        Node::Match(node) => {
+            let branches: Vec<&[Node]> = node.arms.iter().map(|arm| arm.body.as_slice()).collect();
+            exhaustive_branches_lead_row(&branches)
+        }
+        _ => false,
+    }
 }
 
 /// The `ForEach` of a grid that, standing in a vertical scroll view, builds
@@ -1786,6 +1896,44 @@ mod tests {
             element("Column", vec![text(), spacer()]),
             spacer()
         ]));
+        // Leading words include a spacer-free row of words and an exhaustive
+        // condition of leading words, but not a row of buttons or a one-sided
+        // condition whose empty branch still needs the spacer.
+        let spacer_node = spacer();
+        assert!(leads_row(
+            &element("Row", vec![text(), text()]),
+            Some(&spacer_node)
+        ));
+        assert!(!leads_row(
+            &element("Row", vec![element("Button", vec![])]),
+            Some(&spacer_node)
+        ));
+        let exhaustive = Node::IfLet(IfLetNode {
+            var: "item".into(),
+            inner: Type::Int,
+            value: Expr {
+                ty: Type::Int,
+                kind: ExprKind::Literal {
+                    value: Value::Int(1),
+                },
+            },
+            then: vec![element("Row", vec![text(), text()])],
+            otherwise: vec![text()],
+        });
+        assert!(leads_row(&exhaustive, Some(&spacer_node)));
+        let one_sided = Node::If(IfNode {
+            branches: vec![(
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Literal {
+                        value: Value::Bool(true),
+                    },
+                },
+                vec![text()],
+            )],
+            otherwise: vec![],
+        });
+        assert!(!leads_row(&one_sided, Some(&spacer_node)));
     }
 
     fn keyed_rows() -> Node {

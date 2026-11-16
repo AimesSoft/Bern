@@ -7271,19 +7271,30 @@ struct BernRow: Layout {
         } else {
             // Too narrow: the others shrink by their part of what is
             // missing, weighed by their width, never below their least.
+            // With one spacer, what leads it gives way before what trails it.
             var missing = used - room
-            var open = items.indices.filter { !items[$0].grows && items[$0].ideal > items[$0].least }
-            while missing > 0.01, !open.isEmpty {
-                let total = open.reduce(0) { $0 + items[$1].ideal }
-                guard total > 0 else { break }
-                if let index = open.first(where: { offered[$0] - missing * items[$0].ideal / total < items[$0].least }) {
-                    missing -= offered[index] - items[index].least
-                    offered[index] = items[index].least
-                    open.removeAll { $0 == index }
-                    continue
+            let spacers = items.indices.filter { items[$0].spacer }
+            let shrinkable = items.indices.filter { !items[$0].grows && items[$0].ideal > items[$0].least }
+            let pools: [[Int]]
+            if spacers.count == 1, let at = spacers.first, shrinkable.contains(where: { $0 < at }) {
+                pools = [shrinkable.filter { $0 < at }, shrinkable.filter { $0 > at }]
+            } else {
+                pools = [shrinkable]
+            }
+            for pool in pools {
+                var open = pool
+                while missing > 0.01, !open.isEmpty {
+                    let total = open.reduce(0) { $0 + items[$1].ideal }
+                    guard total > 0 else { break }
+                    if let index = open.first(where: { offered[$0] - missing * items[$0].ideal / total < items[$0].least }) {
+                        missing -= offered[index] - items[index].least
+                        offered[index] = items[index].least
+                        open.removeAll { $0 == index }
+                        continue
+                    }
+                    for index in open { offered[index] -= missing * items[index].ideal / total }
+                    missing = 0
                 }
-                for index in open { offered[index] -= missing * items[index].ideal / total }
-                missing = 0
             }
         }
         return offered

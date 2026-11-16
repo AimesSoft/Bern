@@ -162,7 +162,7 @@ impl Generator<'_> {
                 out.close("}");
             } else if body.len() > 1 {
                 let row = ctx.scope == Scope::Row;
-                out.open(if row { "Row {" } else { "Column {" });
+                out.open(if row { "BernRow {" } else { "Column {" });
                 self.nodes(
                     out,
                     body,

@@ -66,6 +66,184 @@ impl Generator<'_> {
         })
     }
 
+    /// Whether `nodes` stretch horizontally across the room a row gives them:
+    /// fields, sliders, scroll views, tables, horizontal rails, filling
+    /// buttons, rows with a spacer, and containers or components holding them.
+    pub(super) fn fills_width(&self, nodes: &[Node], seen: &mut HashSet<String>) -> bool {
+        nodes.iter().any(|node| match node {
+            Node::Element(element) => self.element_fills_width(element, seen),
+            Node::Component(reference) => {
+                seen.insert(reference.component.clone())
+                    && self
+                        .app
+                        .component(&reference.component)
+                        .is_some_and(|component| {
+                            self.fills_width(std::slice::from_ref(&component.body), seen)
+                        })
+            }
+            Node::If(branch) => {
+                branch
+                    .branches
+                    .iter()
+                    .any(|(_, nodes)| self.fills_width(nodes, seen))
+                    || self.fills_width(&branch.otherwise, seen)
+            }
+            Node::IfLet(branch) => {
+                self.fills_width(&branch.then, seen) || self.fills_width(&branch.otherwise, seen)
+            }
+            Node::Match(choice) => choice
+                .arms
+                .iter()
+                .any(|arm| self.fills_width(&arm.body, seen)),
+        })
+    }
+
+    pub(super) fn element_fills_width(
+        &self,
+        element: &Element,
+        seen: &mut HashSet<String>,
+    ) -> bool {
+        if element.prop("width").is_some() && element.keyword("width") != Some("fill") {
+            return false;
+        }
+        if element.keyword("width") == Some("fill") {
+            return true;
+        }
+        match element.kind.as_str() {
+            "TextInput" | "Search" | "Slider" | "ScrollView" | "Table" | "ShortcutInput" => true,
+            "Picker" => element.keyword("style") == Some("segmented"),
+            "Rail" => element.keyword("axis") != Some("vertical"),
+            "Video" => element.keyword("sizing") == Some("fill"),
+            "Row" => has_row_spacer(&element.children) || self.fills_width(&element.children, seen),
+            "Column" | "ForEach" => self.fills_width(&element.children, seen),
+            "Stack" => {
+                let non_backdrop: Vec<&Node> = element
+                    .children
+                    .iter()
+                    .filter(|node| !is_backdrop_layer(node))
+                    .collect();
+                if non_backdrop.is_empty() {
+                    false
+                } else {
+                    non_backdrop
+                        .into_iter()
+                        .any(|node| self.fills_width(std::slice::from_ref(node), seen))
+                }
+            }
+            "Button" => self.fills_width(&element.children, seen),
+            _ => false,
+        }
+    }
+
+    /// Whether `element` is weighted directly on a `BernRow` when emitted in
+    /// `Scope::Row`.
+    pub(super) fn element_weighted_in_row(&self, element: &Element) -> bool {
+        element.kind == "Spacer" || self.element_fills_width(element, &mut HashSet::new())
+    }
+
+    /// Whether `nodes` give up horizontal width in a narrow row: text,
+    /// text-showing labels, and unweighted containers or components holding
+    /// them, but never interactive controls or explicitly sized boxes.
+    pub(super) fn yields_width(&self, nodes: &[Node], seen: &mut HashSet<String>) -> bool {
+        nodes.iter().any(|node| match node {
+            Node::Element(element) => self.element_yields_width(element, seen),
+            Node::Component(reference) => {
+                seen.insert(reference.component.clone())
+                    && self
+                        .app
+                        .component(&reference.component)
+                        .is_some_and(|component| {
+                            !self.fills_width(
+                                std::slice::from_ref(&component.body),
+                                &mut HashSet::new(),
+                            ) && self.yields_width(std::slice::from_ref(&component.body), seen)
+                        })
+            }
+            Node::If(branch) => {
+                branch
+                    .branches
+                    .iter()
+                    .any(|(_, nodes)| self.yields_width(nodes, seen))
+                    || self.yields_width(&branch.otherwise, seen)
+            }
+            Node::IfLet(branch) => {
+                self.yields_width(&branch.then, seen) || self.yields_width(&branch.otherwise, seen)
+            }
+            Node::Match(choice) => choice
+                .arms
+                .iter()
+                .any(|arm| self.yields_width(&arm.body, seen)),
+        })
+    }
+
+    pub(super) fn element_yields_width(
+        &self,
+        element: &Element,
+        seen: &mut HashSet<String>,
+    ) -> bool {
+        if element.prop("width").is_some() || self.element_weighted_in_row(element) {
+            return false;
+        }
+        match element.kind.as_str() {
+            "Text" => true,
+            "Label" => element.keyword("display") != Some("icon"),
+            "Column" | "Row" | "Stack" | "ForEach" => self.yields_width(&element.children, seen),
+            _ => false,
+        }
+    }
+
+    /// Whether a yielding `Row` child declares `lines` truncation (directly or
+    /// in its content), so it gives way before unclamped short tags do.
+    pub(super) fn ellipsizes_width(&self, nodes: &[Node], seen: &mut HashSet<String>) -> bool {
+        nodes.iter().any(|node| match node {
+            Node::Element(element) => self.element_ellipsizes_width(element, seen),
+            Node::Component(reference) => {
+                seen.insert(reference.component.clone())
+                    && self
+                        .app
+                        .component(&reference.component)
+                        .is_some_and(|component| {
+                            !self.fills_width(
+                                std::slice::from_ref(&component.body),
+                                &mut HashSet::new(),
+                            ) && self.ellipsizes_width(std::slice::from_ref(&component.body), seen)
+                        })
+            }
+            Node::If(branch) => {
+                branch
+                    .branches
+                    .iter()
+                    .any(|(_, nodes)| self.ellipsizes_width(nodes, seen))
+                    || self.ellipsizes_width(&branch.otherwise, seen)
+            }
+            Node::IfLet(branch) => {
+                self.ellipsizes_width(&branch.then, seen)
+                    || self.ellipsizes_width(&branch.otherwise, seen)
+            }
+            Node::Match(choice) => choice
+                .arms
+                .iter()
+                .any(|arm| self.ellipsizes_width(&arm.body, seen)),
+        })
+    }
+
+    pub(super) fn element_ellipsizes_width(
+        &self,
+        element: &Element,
+        seen: &mut HashSet<String>,
+    ) -> bool {
+        if element.prop("width").is_some() || self.element_weighted_in_row(element) {
+            return false;
+        }
+        match element.kind.as_str() {
+            "Text" => element.number("lines").is_some(),
+            "Column" | "Row" | "Stack" | "ForEach" => {
+                self.ellipsizes_width(&element.children, seen)
+            }
+            _ => false,
+        }
+    }
+
     fn padding(&self, element: &Element) -> String {
         let all = self.length(element, "padding");
         let x = self.length(element, "padding_x");
@@ -98,10 +276,7 @@ impl Generator<'_> {
 
     pub(super) fn column_or_row(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         let column = element.kind == "Column";
-        let gap = self
-            .length(element, "gap")
-            .map(|gap| format!("Arrangement.spacedBy({gap})"))
-            .unwrap_or_else(|| "Arrangement.spacedBy(8.dp)".into());
+        let gap_dp = self.length(element, "gap").unwrap_or_else(|| "8.dp".into());
         // A column in a column (a row in a row) holding a spacer takes the
         // room its siblings leave, as on the other targets, instead of all
         // of it: a foot after it stays on screen.
@@ -115,17 +290,18 @@ impl Generator<'_> {
                 .any(|node| matches!(node, Node::Element(child) if child.kind == "Spacer"));
         // The root of a component does so in the column or row the
         // component is called in.
-        // So does a row in a row around a slider or a field: they take all
-        // they are given, and what follows the row would get nothing.
-        let spaced = spaced
-            || (!column
-                && ctx.scope == Scope::Row
-                && element.prop("width").is_none()
-                && takes_room(&element.children));
-        let along = match (spaced, column, ctx.scope) {
-            (true, true, Scope::Column) | (true, false, Scope::Row) => ".weight(1f)",
-            (true, true, Scope::Other) => ".bernFlexible(row = false)",
-            (true, false, Scope::Other) => ".bernFlexible(column = false)",
+        // So does a column or row in a row around a slider, a field or a
+        // spaced row: they take all they are given, and what follows would
+        // get nothing.
+        let fills_row = ctx.scope == Scope::Row
+            && element.prop("width").is_none()
+            && self.element_fills_width(element, &mut HashSet::new());
+        let along = match (spaced, fills_row, column, ctx.scope) {
+            (true, _, true, Scope::Column)
+            | (_, true, _, Scope::Row)
+            | (true, _, false, Scope::Row) => ".weight(1f)",
+            (true, _, true, Scope::Other) => ".bernFlexible(row = false)",
+            (true, _, false, Scope::Other) => ".bernFlexible(column = false)",
             _ => "",
         };
         let modifier = format!(
@@ -142,7 +318,7 @@ impl Generator<'_> {
                 _ => "Alignment.Start",
             };
             out.open(format!(
-                "Column({modifier}, verticalArrangement = {gap}, horizontalAlignment = {alignment}) {{"
+                "Column({modifier}, verticalArrangement = Arrangement.spacedBy({gap_dp}), horizontalAlignment = {alignment}) {{"
             ));
             self.children(out, element, &ctx.within(Scope::Column));
         } else {
@@ -152,7 +328,7 @@ impl Generator<'_> {
                 _ => "Alignment.CenterVertically",
             };
             out.open(format!(
-                "Row({modifier}, horizontalArrangement = {gap}, verticalAlignment = {alignment}) {{"
+                "BernRow({modifier}, gap = {gap_dp}, verticalAlignment = {alignment}) {{"
             ));
             let row = Ctx {
                 baseline: element.keyword("align") == Some("baseline"),
@@ -241,7 +417,7 @@ impl Generator<'_> {
         // stack would get nothing.
         let under_bars = if (ctx.scope == Scope::Row
             && element.prop("width").is_none()
-            && takes_room(&element.children))
+            && self.element_fills_width(element, &mut HashSet::new()))
             || (ctx.scope == Scope::Column
                 && !ctx.scroll_content
                 && element.prop("height").is_none()
@@ -880,7 +1056,9 @@ impl Generator<'_> {
                 Scope::Column => "Modifier",
                 Scope::Other | Scope::Flow => "Modifier.bernFlexible(column = false)",
             };
-            out.open(format!("Row({flexible}.horizontalScroll({state}), horizontalArrangement = Arrangement.spacedBy(8.dp)) {{"));
+            out.open(format!(
+                "BernRow({flexible}.horizontalScroll({state}), gap = 8.dp) {{"
+            ));
             self.nodes(out, &element.children, &ctx.within(Scope::Row));
         } else {
             // In a stack it takes the stack's height, as a scroll view
@@ -1143,27 +1321,31 @@ impl Generator<'_> {
     }
 }
 
-/// Where a stack aligns its layers.
-/// Whether content takes the room it is given along a row: a text field or
-/// a slider, also inside columns, stacks and conditions.
-fn takes_room(nodes: &[Node]) -> bool {
+/// Whether `nodes`, the children of a row, hold a `Spacer`, directly or
+/// through conditions and repetitions.
+fn has_row_spacer(nodes: &[Node]) -> bool {
     nodes.iter().any(|node| match node {
-        Node::Element(element) => match element.kind.as_str() {
-            "TextInput" | "Search" | "Slider" => true,
-            "Column" | "Stack" => takes_room(&element.children),
-            // A spacer spreads the row across all it is given.
-            "Row" => element
-                .children
-                .iter()
-                .any(|node| matches!(node, Node::Element(child) if child.kind == "Spacer")),
-            _ => false,
-        },
+        Node::Element(child) if child.kind == "Spacer" => true,
+        Node::Element(child) if child.kind == "ForEach" => has_row_spacer(&child.children),
         Node::If(branch) => {
-            branch.branches.iter().any(|(_, nodes)| takes_room(nodes))
-                || takes_room(&branch.otherwise)
+            branch
+                .branches
+                .iter()
+                .any(|(_, nodes)| has_row_spacer(nodes))
+                || has_row_spacer(&branch.otherwise)
         }
+        Node::IfLet(branch) => has_row_spacer(&branch.then) || has_row_spacer(&branch.otherwise),
+        Node::Match(choice) => choice.arms.iter().any(|arm| has_row_spacer(&arm.body)),
         _ => false,
     })
+}
+
+fn is_backdrop_layer(node: &Node) -> bool {
+    matches!(node, Node::Element(child)
+        if child.kind == "Rail"
+            || (child.kind == "Canvas"
+                && child.prop("width").is_none()
+                && child.prop("height").is_none()))
 }
 
 fn stack_alignment(align: Option<&str>) -> &'static str {
