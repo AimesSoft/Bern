@@ -128,6 +128,16 @@ pub fn expand(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
     let commands_name = &protocol.commands.name;
     let state_fields: Vec<_> = protocol.state.fields.iter().map(|f| &f.name).collect();
     let state_types: Vec<_> = protocol.state.fields.iter().map(|f| &f.syn_ty).collect();
+    let stream_pairs: Vec<(usize, &syn::Ident)> = protocol
+        .state
+        .fields
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| f.stream)
+        .map(|(i, f)| (i, &f.name))
+        .collect();
+    let stream_positions: Vec<usize> = stream_pairs.iter().map(|(i, _)| *i).collect();
+    let stream_fields: Vec<&syn::Ident> = stream_pairs.iter().map(|(_, name)| *name).collect();
 
     let invoke_arms = protocol.commands.methods.iter().enumerate().map(|(index, method)| {
         let name = &method.name;
@@ -445,6 +455,16 @@ pub fn expand(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
 
                 fn wake(&mut self) {
                     Engine::wake(&mut self.0)
+                }
+
+                fn woken_fields(&mut self) -> ::std::option::Option<::std::vec::Vec<(usize, #p::Value)>> {
+                    if !Engine::quiet(&self.0) {
+                        return ::std::option::Option::None;
+                    }
+                    let _state = Engine::state(&self.0);
+                    ::std::option::Option::Some(::std::vec![
+                        #((#stream_positions, #b::BernValue::to_value(&_state.#stream_fields))),*
+                    ])
                 }
 
                 fn quiet(&self) -> bool {

@@ -6,7 +6,8 @@
 //! record = fields in order, list = u32 count + items. It is not used on
 //! control channels, which keep the JSON encoding.
 
-use crate::{Type, TypeTable, Value};
+use crate::{StateField, Type, TypeTable, Value};
+use std::collections::HashMap;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -195,6 +196,190 @@ pub fn decode(ty: &Type, types: &TypeTable, reader: &mut Reader<'_>) -> Result<V
     })
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum ItemKey<'a> {
+    Int(i64),
+    Text(&'a str),
+}
+
+fn item_key(item: &Value, key_index: usize) -> Option<ItemKey<'_>> {
+    let Value::Record(fields) = item else {
+        return None;
+    };
+    match fields.get(key_index)? {
+        Value::Int(id) => Some(ItemKey::Int(*id)),
+        Value::Text(id) => Some(ItemKey::Text(id.as_str())),
+        _ => None,
+    }
+}
+
+enum ListSegment {
+    Copy { start: usize, len: usize },
+    Items { start: usize, len: usize },
+}
+
+fn build_keyed_patch(
+    prev_items: &[Value],
+    next_items: &[Value],
+    key_index: usize,
+) -> Option<Vec<ListSegment>> {
+    if prev_items.is_empty() || next_items.is_empty() {
+        return None;
+    }
+    let mut by_key = HashMap::with_capacity(prev_items.len());
+    for (index, item) in prev_items.iter().enumerate() {
+        let key = item_key(item, key_index)?;
+        if by_key.insert(key, index).is_some() {
+            return None;
+        }
+    }
+    let mut segments: Vec<ListSegment> = Vec::new();
+    let mut copied = 0usize;
+    for (next_index, item) in next_items.iter().enumerate() {
+        let unchanged = item_key(item, key_index)
+            .and_then(|key| by_key.get(&key).copied())
+            .filter(|&old_index| &prev_items[old_index] == item);
+        if let Some(old_index) = unchanged {
+            copied += 1;
+            match segments.last_mut() {
+                Some(ListSegment::Copy { start, len }) if *start + *len == old_index => {
+                    *len += 1;
+                }
+                _ => segments.push(ListSegment::Copy {
+                    start: old_index,
+                    len: 1,
+                }),
+            }
+        } else {
+            match segments.last_mut() {
+                Some(ListSegment::Items { start, len }) if *start + *len == next_index => {
+                    *len += 1;
+                }
+                _ => segments.push(ListSegment::Items {
+                    start: next_index,
+                    len: 1,
+                }),
+            }
+        }
+    }
+    (copied > 0 && segments.len() <= copied).then_some(segments)
+}
+
+/// Encode a state field update. Fields without `#[keyed]` use [`encode`];
+/// keyed record lists emit either `0` followed by the full list or `1`
+/// followed by `Copy`/`Items` segments referencing `previous`.
+pub fn encode_state_field(
+    previous: Option<&Value>,
+    value: &Value,
+    field: &StateField,
+    types: &TypeTable,
+    writer: &mut Writer,
+) {
+    let Some(key_name) = &field.keyed else {
+        encode(value, &field.ty, types, writer);
+        return;
+    };
+    let (Type::List { inner }, Value::List(next_items)) = (&field.ty, value) else {
+        writer.u8(0);
+        encode(value, &field.ty, types, writer);
+        return;
+    };
+    let key_index = match inner.as_ref() {
+        Type::Record { name } => types
+            .record_def(name)
+            .and_then(|def| def.field_index(key_name)),
+        _ => None,
+    };
+    if let (Some(Value::List(prev_items)), Some(key_index)) = (previous, key_index)
+        && let Some(segments) = build_keyed_patch(prev_items, next_items, key_index)
+    {
+        writer.u8(1);
+        writer.u32(next_items.len() as u32);
+        writer.u32(segments.len() as u32);
+        for segment in segments {
+            match segment {
+                ListSegment::Copy { start, len } => {
+                    writer.u8(0);
+                    writer.u32(start as u32);
+                    writer.u32(len as u32);
+                }
+                ListSegment::Items { start, len } => {
+                    writer.u8(1);
+                    writer.u32(len as u32);
+                    for item in &next_items[start..start + len] {
+                        encode(item, inner, types, writer);
+                    }
+                }
+            }
+        }
+        return;
+    }
+    writer.u8(0);
+    encode(value, &field.ty, types, writer);
+}
+
+/// Decode a state field encoded by [`encode_state_field`].
+pub fn decode_state_field(
+    previous: Option<&Value>,
+    field: &StateField,
+    types: &TypeTable,
+    reader: &mut Reader<'_>,
+) -> Result<Value, CodecError> {
+    if field.keyed.is_none() {
+        return decode(&field.ty, types, reader);
+    }
+    match reader.u8()? {
+        0 => decode(&field.ty, types, reader),
+        1 => {
+            let Type::List { inner } = &field.ty else {
+                return Err(CodecError("keyed patch on non-list field".into()));
+            };
+            let Some(Value::List(prev_items)) = previous else {
+                return Err(CodecError(
+                    "keyed list patch without a previous list".into(),
+                ));
+            };
+            let total = reader.u32()? as usize;
+            let segment_count = reader.u32()? as usize;
+            let mut out = Vec::with_capacity(total.min(4096));
+            for _ in 0..segment_count {
+                match reader.u8()? {
+                    0 => {
+                        let start = reader.u32()? as usize;
+                        let len = reader.u32()? as usize;
+                        let end = start
+                            .checked_add(len)
+                            .filter(|end| *end <= prev_items.len())
+                            .ok_or_else(|| {
+                                CodecError("keyed list copy segment out of bounds".into())
+                            })?;
+                        out.extend_from_slice(&prev_items[start..end]);
+                    }
+                    1 => {
+                        let len = reader.u32()? as usize;
+                        for _ in 0..len {
+                            out.push(decode(inner, types, reader)?);
+                        }
+                    }
+                    other => {
+                        return Err(CodecError(format!(
+                            "invalid keyed list segment tag {other}"
+                        )));
+                    }
+                }
+            }
+            if out.len() != total {
+                return Err(CodecError(format!(
+                    "keyed list patch produced {} items, expected {total}",
+                    out.len()
+                )));
+            }
+            Ok(Value::List(out))
+        }
+        other => Err(CodecError(format!("invalid keyed list mode {other}"))),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -238,5 +423,80 @@ mod tests {
         assert!(reader.is_finished());
         let mut short = Reader::new(&writer.bytes[..writer.bytes.len() - 1]);
         assert!(decode(&ty, &types, &mut short).is_err());
+    }
+
+    #[test]
+    fn keyed_list_patches_send_only_changed_items() {
+        let types = TypeTable {
+            enums: vec![],
+            records: vec![RecordDef {
+                name: "Song".into(),
+                fields: vec![
+                    FieldDef {
+                        name: "id".into(),
+                        ty: Type::Int,
+                        doc: String::new(),
+                        content: false,
+                    },
+                    FieldDef {
+                        name: "title".into(),
+                        ty: Type::Text,
+                        doc: String::new(),
+                        content: true,
+                    },
+                    FieldDef {
+                        name: "liked".into(),
+                        ty: Type::Bool,
+                        doc: String::new(),
+                        content: false,
+                    },
+                ],
+            }],
+        };
+        let field = StateField {
+            name: "songs".into(),
+            ty: Type::list(Type::Record {
+                name: "Song".into(),
+            }),
+            doc: String::new(),
+            content: false,
+            stream: false,
+            keyed: Some("id".into()),
+        };
+        let song = |id: i64, liked: bool| {
+            Value::Record(vec![
+                Value::Int(id),
+                Value::Text(format!("Track #{id} with a long title")),
+                Value::Bool(liked),
+            ])
+        };
+        let prev = Value::List((0..200).map(|i| song(i, false)).collect());
+        let mut full = Writer::new();
+        encode_state_field(None, &prev, &field, &types, &mut full);
+        assert_eq!(full.bytes[0], 0);
+        let mut reader = Reader::new(&full.bytes);
+        assert_eq!(
+            decode_state_field(None, &field, &types, &mut reader).unwrap(),
+            prev
+        );
+
+        let mut next_items: Vec<Value> = (0..200).map(|i| song(i, i == 77)).collect();
+        next_items.push(song(200, true));
+        let next = Value::List(next_items);
+        let mut patch = Writer::new();
+        encode_state_field(Some(&prev), &next, &field, &types, &mut patch);
+        assert_eq!(patch.bytes[0], 1, "expected incremental patch mode");
+        assert!(
+            patch.bytes.len() * 10 < full.bytes.len(),
+            "patch ({} B) should be much smaller than full list ({} B)",
+            patch.bytes.len(),
+            full.bytes.len()
+        );
+        let mut reader = Reader::new(&patch.bytes);
+        assert_eq!(
+            decode_state_field(Some(&prev), &field, &types, &mut reader).unwrap(),
+            next
+        );
+        assert!(reader.is_finished());
     }
 }

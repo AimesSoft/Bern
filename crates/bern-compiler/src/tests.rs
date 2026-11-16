@@ -2364,9 +2364,19 @@ fn modules_compose_into_one_catalog_and_bind_by_namespace() {
         .map(|field| field.name.as_str())
         .collect();
     // Both modules are optional, so the switches follow them.
-    assert_eq!(fields, ["title", "activity", "notes", "tags", "modules"]);
+    assert_eq!(
+        fields,
+        [
+            "title",
+            "activity",
+            "notes.items",
+            "notes.count",
+            "tags.labels",
+            "modules.notes",
+            "modules.tags"
+        ]
+    );
     assert!(config.modules.iter().all(|module| module.optional));
-    assert!(compiled.app.types.record_def("NotesState").is_some());
     assert_eq!(
         compiled.module_protocols,
         ["notes_protocol::notes", "tags_protocol::tags"]
@@ -2383,13 +2393,13 @@ fn modules_compose_into_one_catalog_and_bind_by_namespace() {
             namespace: "notes".into()
         }
     );
-    // `notes.count` reads the `count` field inside the `notes` state field.
-    let notes = protocol.state_index("notes").unwrap();
+    // `notes.count` reads the flattened `notes.count` state field directly.
+    let notes_count = protocol.state_index("notes.count").unwrap();
     let mut found = false;
     list.body.walk(&mut |node| {
         if let ir::Node::Element(element) = node {
             for prop in element.props.values() {
-                if format!("{prop:?}").contains(&format!("field: {notes}, path: [1]")) {
+                if format!("{prop:?}").contains(&format!("field: {notes_count}, path: []")) {
                     found = true;
                 }
             }
@@ -2604,11 +2614,12 @@ fn module_protocols_use_the_types_of_their_dependencies() {
     let config = config::load(&dir.join("Bern.toml")).unwrap();
     let compiled = compile(&config).unwrap_or_else(|errors| panic!("{errors:?}"));
     let _ = std::fs::remove_dir_all(&dir);
-    let state = compiled.app.types.record_def("TagsState").unwrap();
-    let last = state
-        .fields
+    let last = compiled
+        .app
+        .protocol
+        .state
         .iter()
-        .find(|field| field.name == "last")
+        .find(|field| field.name == "tags.last")
         .unwrap();
     assert_eq!(
         last.ty,

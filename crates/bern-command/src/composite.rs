@@ -12,7 +12,7 @@
 
 use crate::outbox::{self, Pending};
 use crate::{EngineProtocol, QueryAnswer};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -20,8 +20,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 /// before the rest are dropped as a loop.
 const FOLLOW_UP_LIMIT: usize = 10_000;
 use bern_protocol::{
-    CommandError, DescriptorError, Invocation, ModulePart, ProtocolDescriptor, Type, Value,
-    command_offsets, compose, module_state_type,
+    CommandError, DescriptorError, Invocation, ModulePart, ProtocolDescriptor, Value,
+    command_offsets, compose, state_offsets,
 };
 
 /// How the application runs one of its modules.
@@ -60,8 +60,8 @@ struct Module {
     descriptor: &'static ProtocolDescriptor,
     entry: ModuleEngine,
     engine: Option<Running>,
-    /// Its state while it is switched off.
-    idle: Value,
+    /// Default values of its fields while it is switched off.
+    idle: Vec<Value>,
 }
 
 pub struct Composite {
@@ -70,12 +70,18 @@ pub struct Composite {
     modules: Vec<Module>,
     /// Where each part's commands start: the shell, then every module.
     offsets: Vec<usize>,
+    /// Where each part's state fields start: the shell, then every module.
+    state_offsets: Vec<usize>,
     /// Index of `modules.set_enabled`, when some module is optional.
     switch: Option<usize>,
     /// `namespace.event` to the commands answering it, in catalog order.
     subscribers: BTreeMap<String, Vec<usize>>,
     /// The last wake ran commands, which can change any part.
     followed: bool,
+    /// Parts touched during the current `invoke` (`0` = shell, `1..=N` = modules).
+    touched: BTreeSet<usize>,
+    /// Optional modules were switched on or off during the current `invoke`.
+    switched: bool,
 }
 
 impl Composite {
@@ -94,6 +100,7 @@ impl Composite {
             .collect();
         let composed = compose(shell.descriptor(), &module_parts)?;
         let offsets = command_offsets(shell.descriptor(), &module_parts);
+        let state_offsets = state_offsets(shell.descriptor(), &module_parts);
         let switch = modules
             .iter()
             .any(|entry| entry.optional)
@@ -104,13 +111,13 @@ impl Composite {
         let mut parts = Vec::new();
         for entry in modules {
             let id = entry.descriptor.namespace.clone();
-            let idle = Value::default_for(
-                &Type::Record {
-                    name: module_state_type(&id),
-                },
-                &descriptor.types,
-            )
-            .map_err(|error| DescriptorError(error.message))?;
+            let idle = entry
+                .descriptor
+                .state
+                .iter()
+                .map(|field| Value::default_for(&field.ty, &descriptor.types))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| DescriptorError(error.message))?;
             let running = !entry.optional
                 || saved
                     .as_ref()
@@ -134,9 +141,12 @@ impl Composite {
             shell,
             modules: parts,
             offsets,
+            state_offsets,
             switch,
             subscribers,
             followed: false,
+            touched: BTreeSet::new(),
+            switched: false,
         };
         // A running module's dependencies run too.
         let running: Vec<String> = composite
@@ -201,6 +211,8 @@ impl Composite {
                 );
             };
             let id = id.clone();
+            self.switched = true;
+            self.touched.insert(0);
             let result = self.set_enabled(&id, *enabled);
             // The shell's lifecycle callback can notify other modules.
             return (result, outbox::take());
@@ -208,6 +220,7 @@ impl Composite {
         let Some((part, local)) = self.route(command) else {
             return (Err(unknown()), Vec::new());
         };
+        self.touched.insert(part);
         let local = Invocation {
             command: local,
             params: params.to_vec(),
@@ -413,11 +426,51 @@ impl EngineProtocol for Composite {
     }
 
     fn invoke(&mut self, invocation: &Invocation) -> Result<Value, CommandError> {
+        self.touched.clear();
+        self.switched = false;
         let (result, sent) = self.run(invocation.command, &invocation.params);
         let result = Ok(result?);
         let origin = self.descriptor.commands[invocation.command].id.clone();
         self.follow(sent, &origin);
         result
+    }
+
+    fn invoked_fields(&mut self) -> Option<Vec<(usize, Value)>> {
+        if std::mem::take(&mut self.switched) {
+            self.touched.clear();
+            return None;
+        }
+        let touched = std::mem::take(&mut self.touched);
+        let mut fields = Vec::new();
+        for part in touched {
+            if part == 0 {
+                fields.extend(self.shell.snapshot().into_iter().enumerate());
+            } else if let Some(module) = self.modules.get(part - 1) {
+                let offset = self.state_offsets[part];
+                match &module.engine {
+                    Some(engine) => {
+                        fields.extend(
+                            lock(engine)
+                                .snapshot()
+                                .into_iter()
+                                .enumerate()
+                                .map(|(f, v)| (offset + f, v)),
+                        );
+                    }
+                    None => {
+                        fields.extend(
+                            module
+                                .idle
+                                .iter()
+                                .cloned()
+                                .enumerate()
+                                .map(|(f, v)| (offset + f, v)),
+                        );
+                    }
+                }
+            }
+        }
+        Some(fields)
     }
 
     /// Every part takes in what its background work left; what they send
@@ -447,16 +500,31 @@ impl EngineProtocol for Composite {
         if std::mem::take(&mut self.followed) {
             return None;
         }
-        let mut fields: Vec<(usize, Value)> =
-            self.shell.snapshot().into_iter().enumerate().collect();
-        let first = fields.len();
+        let mut fields: Vec<(usize, Value)> = match self.shell.woken_fields() {
+            Some(woken) => woken,
+            None if self.shell.quiet() => Vec::new(),
+            None => self.shell.snapshot().into_iter().enumerate().collect(),
+        };
         for (index, module) in self.modules.iter().enumerate() {
             let Some(engine) = &module.engine else {
                 continue;
             };
-            let engine = lock(engine);
-            if !engine.quiet() {
-                fields.push((first + index, Value::Record(engine.snapshot())));
+            let offset = self.state_offsets[index + 1];
+            let mut engine = lock(engine);
+            match engine.woken_fields() {
+                Some(woken) => {
+                    fields.extend(woken.into_iter().map(|(f, v)| (offset + f, v)));
+                }
+                None if engine.quiet() => {}
+                None => {
+                    fields.extend(
+                        engine
+                            .snapshot()
+                            .into_iter()
+                            .enumerate()
+                            .map(|(f, v)| (offset + f, v)),
+                    );
+                }
             }
         }
         Some(fields)
@@ -483,23 +551,21 @@ impl EngineProtocol for Composite {
     fn snapshot(&self) -> Vec<Value> {
         let mut state = self.shell.snapshot();
         for module in &self.modules {
-            // A module's state is one field of the application's.
-            let field = state.len();
-            state.push(crate::trace::snapshot_field(field, || {
-                match &module.engine {
-                    Some(engine) => Value::Record(lock(engine).snapshot()),
-                    None => module.idle.clone(),
-                }
-            }));
+            let values = match &module.engine {
+                Some(engine) => lock(engine).snapshot(),
+                None => module.idle.clone(),
+            };
+            for value in values {
+                let field = state.len();
+                state.push(crate::trace::snapshot_field(field, || value));
+            }
         }
         if self.switch.is_some() {
-            state.push(Value::Record(
-                self.modules
-                    .iter()
-                    .filter(|module| module.entry.optional)
-                    .map(|module| Value::Bool(module.engine.is_some()))
-                    .collect(),
-            ));
+            for module in &self.modules {
+                if module.entry.optional {
+                    state.push(Value::Bool(module.engine.is_some()));
+                }
+            }
         }
         state
     }

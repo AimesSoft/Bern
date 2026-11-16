@@ -95,6 +95,25 @@ pub(crate) fn changed(cx: &mut App) {
     }
 }
 
+/// Redraw only the windows that read at least one of `fields`.
+pub(crate) fn changed_fields(cx: &mut App, fields: &[usize]) {
+    if fields.is_empty() {
+        return;
+    }
+    for view in views() {
+        let _ = view.update(cx, |window, cx| {
+            if window
+                .def
+                .engine_fields
+                .iter()
+                .any(|read| fields.contains(read))
+            {
+                cx.notify();
+            }
+        });
+    }
+}
+
 /// The controls of every open window, from its content built once more
 /// for the purpose.
 pub(crate) fn controls(cx: &mut App) -> Vec<Control> {

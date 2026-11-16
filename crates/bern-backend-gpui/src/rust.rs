@@ -980,8 +980,13 @@ impl<'a> Generator<'a> {
             .windows
             .iter()
             .map(|window| {
+                let engine_fields: Vec<String> = app
+                    .window_engine_fields(&window.id)
+                    .into_iter()
+                    .map(|f| f.to_string())
+                    .collect();
                 format!(
-                    "b::WindowDef {{ id: {}, title: {}, open: {}, width: {}, height: {}, min_width: {}, min_height: {}, unified: {}, idle_after: {}, immersive: {}, idle_enabled: {}, content: window_{} }},",
+                    "b::WindowDef {{ id: {}, title: {}, open: {}, width: {}, height: {}, min_width: {}, min_height: {}, unified: {}, idle_after: {}, immersive: {}, idle_enabled: {}, engine_fields: &[{}], content: window_{} }},",
                     string(&window.id),
                     string(&window.title.key),
                     window.initial == WindowInitial::Open,
@@ -999,6 +1004,7 @@ impl<'a> Generator<'a> {
                         Some(_) => format!("Some(window_{}_idle_enabled)", window.id),
                         None => "None".into(),
                     },
+                    engine_fields.join(", "),
                     window.id,
                 )
             })

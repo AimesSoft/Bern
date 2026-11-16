@@ -126,6 +126,79 @@ impl Application {
         }
         uses
     }
+
+    /// Engine state fields read while rendering `window_id`, including
+    /// through the components it places and the `WindowSet` properties.
+    pub fn window_engine_fields(&self, window_id: &str) -> std::collections::BTreeSet<usize> {
+        let mut fields = std::collections::BTreeSet::new();
+        let collect_expr = |expr: &Expr, fields: &mut std::collections::BTreeSet<usize>| {
+            expr.walk(&mut |sub| {
+                if let ExprKind::Binding {
+                    binding: Binding::Engine { field, .. },
+                } = &sub.kind
+                {
+                    fields.insert(*field);
+                }
+            });
+        };
+        for expr in [
+            &self.windows.accent,
+            &self.windows.palette,
+            &self.windows.appearance,
+            &self.windows.icon,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            collect_expr(expr, &mut fields);
+        }
+        let Some(window) = self.window(window_id) else {
+            return fields;
+        };
+        for expr in [&window.immersive, &window.idle_enabled, &window.landscape]
+            .into_iter()
+            .flatten()
+        {
+            collect_expr(expr, &mut fields);
+        }
+        if let Some(close) = &window.close {
+            collect_expr(&close.when, &mut fields);
+            if let Text::Dynamic { expr } = &close.message {
+                collect_expr(expr, &mut fields);
+            } else if let Text::Localized { args, .. } = &close.message {
+                for (_, expr) in args {
+                    collect_expr(expr, &mut fields);
+                }
+            }
+        }
+        fields.extend(window.content.engine_fields());
+        if window_id == self.windows.primary
+            && let Some(menu_bar) = &self.windows.menu_bar
+        {
+            fields.extend(Node::Element(menu_bar.clone()).engine_fields());
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        let mut pending = Vec::new();
+        window.content.walk(&mut |node| {
+            if let Node::Component(call) = node {
+                pending.push(call.component.clone());
+            }
+        });
+        while let Some(name) = pending.pop() {
+            if !seen.insert(name.clone()) {
+                continue;
+            }
+            if let Some(component) = self.component(&name) {
+                fields.extend(component.body.engine_fields());
+                component.body.walk(&mut |node| {
+                    if let Node::Component(call) = node {
+                        pending.push(call.component.clone());
+                    }
+                });
+            }
+        }
+        fields
+    }
 }
 
 /// Breakpoints choosing between layout sizes, from `[layouts]`.
@@ -1263,6 +1336,79 @@ impl Node {
                 }
             }
         }
+    }
+
+    /// Engine state fields read directly inside this node tree while
+    /// rendering (excluding imperative click/submit action arguments, except
+    /// `Watch` whose action runs reactively).
+    pub fn engine_fields(&self) -> std::collections::BTreeSet<usize> {
+        let mut fields = std::collections::BTreeSet::new();
+        let mut record = |expr: &Expr| {
+            expr.walk(&mut |sub| {
+                if let ExprKind::Binding {
+                    binding: Binding::Engine { field, .. },
+                } = &sub.kind
+                {
+                    fields.insert(*field);
+                }
+            });
+        };
+        self.walk(&mut |node| match node {
+            Node::Element(element) => {
+                for prop in element.props.values() {
+                    match prop {
+                        Prop::Expr { expr } => record(expr),
+                        Prop::Text {
+                            text: Text::Dynamic { expr },
+                        } => record(expr),
+                        Prop::Text {
+                            text: Text::Localized { args, .. },
+                        } => {
+                            for (_, expr) in args {
+                                record(expr);
+                            }
+                        }
+                        Prop::Query { query } => {
+                            for expr in &query.args {
+                                record(expr);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if element.kind == "Watch"
+                    && let Some(action) = &element.action
+                {
+                    match action {
+                        Action::Engine { args, .. } | Action::Media { args, .. } => {
+                            for expr in args {
+                                record(expr);
+                            }
+                        }
+                        Action::Session {
+                            op: SessionOp::Set { value } | SessionOp::PushStr { value },
+                            ..
+                        } => record(value),
+                        _ => {}
+                    }
+                }
+            }
+            Node::Component(call) => {
+                for (_, arg) in &call.args {
+                    if let ComponentArg::Value { expr } = arg {
+                        record(expr);
+                    }
+                }
+            }
+            Node::If(node) => {
+                for (expr, _) in &node.branches {
+                    record(expr);
+                }
+            }
+            Node::IfLet(node) => record(&node.value),
+            Node::Match(node) => record(&node.value),
+        });
+        fields
     }
 }
 

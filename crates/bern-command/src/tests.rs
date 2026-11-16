@@ -34,6 +34,8 @@ fn descriptor() -> &'static ProtocolDescriptor {
                 ty: Type::Int,
                 doc: String::new(),
                 content: false,
+                stream: false,
+                keyed: None,
             }],
             commands: vec![
                 command(
@@ -275,6 +277,8 @@ mod queries {
                     ty: Type::Int,
                     doc: String::new(),
                     content: false,
+                    stream: false,
+                    keyed: None,
                 }],
                 commands: vec![
                     spec("add", OperationKind::Command, amount()),
@@ -480,6 +484,8 @@ mod composite {
                 ty: Type::Int,
                 doc: String::new(),
                 content: false,
+                stream: false,
+                keyed: None,
             }],
             commands: vec![CommandSpec {
                 id: "tally.bump".into(),
@@ -605,7 +611,7 @@ mod composite {
 
     #[test]
     fn a_module_that_is_not_quiet_is_read_after_a_wake() {
-        let module = (1, Value::Record(vec![Value::Int(0)]));
+        let module = (1, Value::Int(0));
         assert_eq!(woken(false), (vec![(0, Value::Int(0)), module], 1));
     }
 
@@ -639,9 +645,9 @@ mod composite {
         );
         assert_eq!(outcome.result, Ok(Value::Unit));
         receiver.recv_timeout(Duration::from_secs(5)).unwrap();
-        // The shell could read the module but did not: only the state
-        // published after the command was taken.
-        assert_eq!(taken.load(Ordering::SeqCst) - before, 1);
+        // Neither the command nor post-command publishing snapshots an
+        // untouched module.
+        assert_eq!(taken.load(Ordering::SeqCst) - before, 0);
     }
 
     #[test]
@@ -667,7 +673,7 @@ mod composite {
             Ok(Value::List(vec![Value::Text("tally".into())]))
         );
         // Off as the host started, it was woken once as it was switched on.
-        assert_eq!(host.snapshot().1[1], Value::Record(vec![Value::Int(1)]));
+        assert_eq!(host.snapshot().1[1], Value::Int(1));
     }
 
     #[test]
@@ -677,7 +683,7 @@ mod composite {
         let descriptor = host.descriptor();
         assert_eq!(descriptor.modules, ["tally"]);
         let names: Vec<_> = descriptor.state.iter().map(|f| f.name.as_str()).collect();
-        assert_eq!(names, ["value", "tally"]);
+        assert_eq!(names, ["value", "tally.count"]);
 
         let bump = host.resolve("tally.bump").unwrap();
         assert_eq!(bump, 3, "module commands follow the shell's three");
@@ -694,10 +700,7 @@ mod composite {
         );
         assert_eq!(outcome.result, Ok(Value::Int(1)));
         let update = receiver.recv().unwrap();
-        assert_eq!(
-            update.changes,
-            vec![(1, Value::Record(vec![Value::Int(1)]))]
-        );
+        assert_eq!(update.changes, vec![(1, Value::Int(1))]);
 
         let add = host.resolve("counter.add").unwrap();
         let outcome = host.dispatch_blocking(
@@ -708,10 +711,7 @@ mod composite {
             context(),
         );
         assert_eq!(outcome.result, Ok(Value::Unit));
-        assert_eq!(
-            host.snapshot().1,
-            vec![Value::Int(7), Value::Record(vec![Value::Int(1)])]
-        );
+        assert_eq!(host.snapshot().1, vec![Value::Int(7), Value::Int(1)]);
     }
 
     #[test]
@@ -895,10 +895,7 @@ mod composite {
                 };
                 engine.invoke(&invocation).unwrap();
                 notifications += 1;
-                assert_eq!(
-                    engine.snapshot()[2],
-                    Value::Record(vec![Value::Int(notifications)])
-                );
+                assert_eq!(engine.snapshot()[1], Value::Int(notifications));
                 assert!(
                     outbox::take().is_empty(),
                     "the callback leaves no delayed calls"
@@ -911,10 +908,7 @@ mod composite {
                 params: vec![Value::Text("availability".into()), Value::Bool(true)],
             })
             .unwrap();
-        assert_eq!(
-            engine.snapshot()[2],
-            Value::Record(vec![Value::Int(notifications)])
-        );
+        assert_eq!(engine.snapshot()[1], Value::Int(notifications));
     }
 
     #[test]
@@ -944,11 +938,7 @@ mod composite {
         assert_eq!(call(bump, vec![]).unwrap_err().code, "module_disabled");
         assert_eq!(
             host.snapshot().1,
-            vec![
-                Value::Int(0),
-                Value::Record(vec![Value::Int(0)]),
-                Value::Record(vec![Value::Bool(false)])
-            ]
+            vec![Value::Int(0), Value::Int(0), Value::Bool(false)]
         );
         // On again: a new engine, starting over.
         call(switch, vec![Value::Text("tally".into()), Value::Bool(true)]).unwrap();
@@ -977,10 +967,7 @@ mod composite {
             changes: Default::default(),
         };
         let engine = Composite::new(Box::new(shell), vec![tally(true, true)]).unwrap();
-        assert_eq!(
-            engine.snapshot()[2],
-            Value::Record(vec![Value::Bool(false)])
-        );
+        assert_eq!(engine.snapshot()[2], Value::Bool(false));
     }
 }
 

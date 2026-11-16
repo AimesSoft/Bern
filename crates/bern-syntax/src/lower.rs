@@ -319,9 +319,57 @@ pub fn protocol_descriptor_with(
     let mut state = Vec::new();
     for field in &protocol.state.fields {
         let ty = resolve(&field.ty, &types, field.span)?;
+        let keyed = match &field.keyed {
+            None => None,
+            Some(key) => {
+                let key_name = key.to_string();
+                let Type::List { inner } = &ty else {
+                    return Err(syn::Error::new(
+                        key.span(),
+                        format!(
+                            "`#[keyed({key_name})]` applies to a `Vec` of a record type, found {}",
+                            ty.display()
+                        ),
+                    ));
+                };
+                let Type::Record { name: rec_name } = inner.as_ref() else {
+                    return Err(syn::Error::new(
+                        key.span(),
+                        format!(
+                            "`#[keyed({key_name})]` applies to a `Vec` of a record type, found {}",
+                            ty.display()
+                        ),
+                    ));
+                };
+                let Some(def) = types.record_def(rec_name) else {
+                    return Err(syn::Error::new(
+                        key.span(),
+                        format!("unknown record `{rec_name}`"),
+                    ));
+                };
+                let Some(key_field) = def.fields.iter().find(|f| f.name == key_name) else {
+                    return Err(syn::Error::new(
+                        key.span(),
+                        format!("`{rec_name}` has no field `{key_name}`"),
+                    ));
+                };
+                if !matches!(key_field.ty, Type::Int | Type::Text) {
+                    return Err(syn::Error::new(
+                        key.span(),
+                        format!(
+                            "key field `{key_name}` of `{rec_name}` must be `i64` or `String`, found {}",
+                            key_field.ty.display()
+                        ),
+                    ));
+                }
+                Some(key_name)
+            }
+        };
         state.push(StateField {
             name: field.name.to_string(),
             content: content(field, &ty)?,
+            stream: field.stream,
+            keyed,
             ty,
             doc: field.doc.clone(),
         });

@@ -29,10 +29,14 @@ pub fn clean_item(item: &Item) -> Item {
     item
 }
 
-/// Remove `#[content]`, which only the schema reads, from fields.
+/// Remove schema-only attributes (`#[content]`, `#[stream]`, `#[keyed]`) from fields.
 pub fn strip_content(fields: &mut syn::Fields) {
     for field in fields.iter_mut() {
-        field.attrs.retain(|attr| !is_bern_attr(attr, "content"));
+        field.attrs.retain(|attr| {
+            !is_bern_attr(attr, "content")
+                && !is_bern_attr(attr, "stream")
+                && !is_bern_attr(attr, "keyed")
+        });
     }
 }
 

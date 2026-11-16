@@ -399,6 +399,8 @@ mod tests {
                 ty: Type::Int,
                 doc: String::new(),
                 content: false,
+                stream: false,
+                keyed: None,
             }],
             commands: vec![
                 CommandSpec {

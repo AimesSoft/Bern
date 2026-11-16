@@ -1,19 +1,18 @@
 //! One catalog from an application's shell protocol and its modules.
 //!
 //! Each module keeps its own namespace, so its command ids stay
-//! `module.command`. Its state becomes one field of the application state,
-//! named after the module, whose type is a record synthesized from the
-//! module's state fields. Type names are unique across the application:
-//! two different definitions with one name are an error.
+//! `module.command` and its state fields join the application state as
+//! `module.field`. Every field diffuses independently instead of packing an
+//! entire module into a single record. Type names are unique across the
+//! application: two different definitions with one name are an error.
 //!
 //! The build tool composes the descriptors it reads from source and the
 //! running engine composes the ones the protocol macros generated, with
 //! this same function, so both sides arrive at the same fingerprint.
 
 use crate::{
-    CommandPolicy, CommandSpec, DescriptorError, ExternalNames, FieldDef, MODULES_NAMESPACE,
-    OperationKind, ParamSpec, ProtocolDescriptor, RecordDef, Retry, Scope, StateField, Type,
-    valid_name,
+    CommandPolicy, CommandSpec, DescriptorError, ExternalNames, MODULES_NAMESPACE, OperationKind,
+    ParamSpec, ProtocolDescriptor, Retry, Scope, StateField, Type, valid_name,
 };
 
 /// One module of an application: its catalog, and whether it can be
@@ -99,44 +98,31 @@ pub fn compose(
             .types
             .merge(&module.types)
             .map_err(|error| DescriptorError(format!("module `{namespace}`: {}", error.message)))?;
-        let record = module_state_type(namespace);
-        if composed.types.enum_def(&record).is_some()
-            || composed.types.record_def(&record).is_some()
-        {
-            return Err(DescriptorError(format!(
-                "type `{record}` is declared by the application; the state of module `{namespace}` uses that name"
-            )));
-        }
-        composed.types.records.push(RecordDef {
-            name: record.clone(),
-            fields: module
-                .state
-                .iter()
-                .map(|field| FieldDef {
-                    name: field.name.clone(),
-                    ty: field.ty.clone(),
-                    doc: field.doc.clone(),
-                    content: field.content,
-                })
-                .collect(),
-        });
-        composed.state.push(StateField {
-            name: namespace.clone(),
-            ty: Type::Record { name: record },
-            doc: format!("State of the `{namespace}` module."),
-            content: false,
-        });
         if !module.modules.is_empty() {
             return Err(DescriptorError(format!(
                 "module `{namespace}` is itself composed; modules do not nest"
             )));
+        }
+        for field in &module.state {
+            composed.state.push(StateField {
+                name: format!("{namespace}.{}", field.name),
+                ty: field.ty.clone(),
+                doc: field.doc.clone(),
+                content: field.content,
+                stream: field.stream,
+                keyed: field.keyed.clone(),
+            });
         }
         composed.modules.push(namespace.clone());
         composed.events.extend(qualify(namespace, &module.events));
         for command in &module.commands {
             let mut command = command.clone();
             if !command.reads.is_empty() {
-                command.reads = vec![namespace.clone()];
+                command.reads = command
+                    .reads
+                    .iter()
+                    .map(|field| format!("{namespace}.{field}"))
+                    .collect();
             }
             composed.commands.push(command);
         }
@@ -181,26 +167,16 @@ pub fn compose(
                 "the application declares `{MODULES_NAMESPACE}` or `{MODULES_STATE_TYPE}`, which optional modules use"
             )));
         }
-        composed.types.records.push(RecordDef {
-            name: MODULES_STATE_TYPE.into(),
-            fields: optional
-                .iter()
-                .map(|namespace| FieldDef {
-                    name: (*namespace).into(),
-                    ty: Type::Bool,
-                    doc: format!("Whether the `{namespace}` module runs."),
-                    content: false,
-                })
-                .collect(),
-        });
-        composed.state.push(StateField {
-            name: MODULES_NAMESPACE.into(),
-            ty: Type::Record {
-                name: MODULES_STATE_TYPE.into(),
-            },
-            doc: "Which optional modules run.".into(),
-            content: false,
-        });
+        for namespace in &optional {
+            composed.state.push(StateField {
+                name: format!("{MODULES_NAMESPACE}.{namespace}"),
+                ty: Type::Bool,
+                doc: format!("Whether the `{namespace}` module runs."),
+                content: false,
+                stream: false,
+                keyed: None,
+            });
+        }
         composed.commands.push(CommandSpec {
             id: format!("{MODULES_NAMESPACE}.{SET_ENABLED}"),
             name: SET_ENABLED.into(),
@@ -248,12 +224,24 @@ pub fn command_offsets(shell: &ProtocolDescriptor, parts: &[ModulePart<'_>]) -> 
     offsets
 }
 
+/// Where each part's state fields start in the composed catalog: the shell
+/// at 0, then every module in order. Optional module switches follow.
+pub fn state_offsets(shell: &ProtocolDescriptor, parts: &[ModulePart<'_>]) -> Vec<usize> {
+    let mut offsets = vec![0];
+    let mut next = shell.state.len();
+    for part in parts {
+        offsets.push(next);
+        next += part.descriptor.state.len();
+    }
+    offsets
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
-        CommandPolicy, CommandSpec, DESCRIPTOR_VERSION, ExternalNames, OperationKind, Scope,
-        TypeTable,
+        CommandPolicy, CommandSpec, DESCRIPTOR_VERSION, ExternalNames, FieldDef, OperationKind,
+        RecordDef, Scope, TypeTable,
     };
 
     fn command(namespace: &str, name: &str) -> CommandSpec {
@@ -293,6 +281,8 @@ mod tests {
                     ty: Type::Int,
                     doc: String::new(),
                     content: false,
+                    stream: false,
+                    keyed: None,
                 })
                 .collect(),
             commands: commands
@@ -305,21 +295,22 @@ mod tests {
     }
 
     #[test]
-    fn modules_become_state_records_and_keep_their_command_ids() {
+    fn modules_flatten_their_state_fields_and_keep_their_command_ids() {
         let shell = protocol("app", &["count"], &["reset"]);
         let downloads = protocol("downloads", &["active", "done"], &["add", "remove"]);
         let library = protocol("network_library", &["items"], &["add"]);
         let composed = compose(&shell, &[part(&downloads), part(&library)]).unwrap();
         let names: Vec<_> = composed.state.iter().map(|f| f.name.as_str()).collect();
-        assert_eq!(names, ["count", "downloads", "network_library"]);
         assert_eq!(
-            composed.state[1].ty,
-            Type::Record {
-                name: "DownloadsState".into()
-            }
+            names,
+            [
+                "count",
+                "downloads.active",
+                "downloads.done",
+                "network_library.items"
+            ]
         );
-        let record = composed.types.record_def("NetworkLibraryState").unwrap();
-        assert_eq!(record.fields[0].name, "items");
+        assert_eq!(composed.state[1].ty, Type::Int);
         let ids: Vec<_> = composed.commands.iter().map(|c| c.id.as_str()).collect();
         assert_eq!(
             ids,
@@ -334,18 +325,22 @@ mod tests {
             command_offsets(&shell, &[part(&downloads), part(&library)]),
             [0, 1, 3]
         );
+        assert_eq!(
+            state_offsets(&shell, &[part(&downloads), part(&library)]),
+            [0, 1, 3]
+        );
     }
 
     #[test]
-    fn query_reads_name_the_module_field() {
+    fn query_reads_name_the_exact_module_field() {
         let shell = protocol("app", &[], &[]);
-        let mut downloads = protocol("downloads", &["active"], &[]);
+        let mut downloads = protocol("downloads", &["active", "done"], &[]);
         let mut search = command("downloads", "search");
         search.kind = OperationKind::Query;
         search.reads = vec!["active".into()];
         downloads.commands.push(search);
         let composed = compose(&shell, &[part(&downloads)]).unwrap();
-        assert_eq!(composed.commands[0].reads, ["downloads"]);
+        assert_eq!(composed.commands[0].reads, ["downloads.active"]);
     }
 
     #[test]
@@ -373,13 +368,6 @@ mod tests {
             }],
         });
         assert!(compose(&shell, &[part(&a), part(&b)]).is_err());
-
-        let mut shell = protocol("app", &[], &[]);
-        shell.types.records.push(RecordDef {
-            name: "AState".into(),
-            fields: vec![],
-        });
-        assert!(compose(&shell, &[part(&a)]).is_err());
     }
 
     #[test]
@@ -399,16 +387,14 @@ mod tests {
         )
         .unwrap();
         let fields: Vec<_> = composed.state.iter().map(|f| f.name.as_str()).collect();
-        assert_eq!(fields, ["notes", "tags", "modules"]);
-        let switches = composed.types.record_def(MODULES_STATE_TYPE).unwrap();
-        assert_eq!(switches.fields.len(), 1);
-        assert_eq!(switches.fields[0].name, "tags");
+        assert_eq!(fields, ["notes.count", "modules.tags"]);
+        assert_eq!(composed.state[1].ty, Type::Bool);
         let last = composed.commands.last().unwrap();
         assert_eq!(last.id, "modules.set_enabled");
         assert_eq!(last.external.cli, ["modules", "set-enabled"]);
         // Without optional modules nothing is added.
         let plain = compose(&shell, &[part(&notes)]).unwrap();
-        assert!(plain.state_index("modules").is_none());
+        assert!(plain.state.iter().all(|f| !f.name.starts_with("modules.")));
     }
 
     #[test]

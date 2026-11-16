@@ -273,6 +273,7 @@ private:
 namespace Codec {
 void Encode(Value const& value, BType const& type, TypeTable const& types, Writer& w);
 Value Decode(BType const& type, TypeTable const& types, Reader& r);
+Value DecodeStateField(BType const& type, bool keyed, Value const& current, TypeTable const& types, Reader& r);
 Bytes ToBytes(Value const& value, BType const& type, TypeTable const& types);
 }
 
@@ -501,6 +502,8 @@ struct Catalog {
     TypeTable types;
     /// Engine state field types, by field index.
     std::vector<BType> state;
+    /// Whether each engine state field uses incremental keyed-list patches.
+    std::vector<bool> stateKeyed;
     /// Protocol commands and queries, by catalog index.
     std::vector<CommandDef> commands;
     std::vector<SessionDef> sessions;

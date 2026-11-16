@@ -206,6 +206,8 @@ pub fn rewrite(source: &str) -> String {
         text = text.replace(call, replacement);
     }
     let text = named_spaces(&text);
+    let engine_fields = extract_engine_fields(&text);
+    let has_engine = !engine_fields.is_empty() || text.contains("final class BernEngine");
     let lines: Vec<String> = text
         .lines()
         .filter(|line| {
@@ -213,11 +215,40 @@ pub fn rewrite(source: &str) -> String {
                 .iter()
                 .any(|drop| line.trim_start().starts_with(drop))
         })
-        .map(environment)
+        .map(|line| environment(line, has_engine))
         .collect();
-    let mut out = views(&classes(scroll_anchors(lines))).join("\n");
+    let mut out = views(&classes(scroll_anchors(lines)), &engine_fields).join("\n");
     out.push('\n');
     out
+}
+
+/// Extract `(index, prop_name)` pairs from `BernEngine.bernApply`.
+fn extract_engine_fields(source: &str) -> Vec<(usize, String)> {
+    let mut in_engine = false;
+    let mut depth = 0i32;
+    let mut fields = Vec::new();
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if !in_engine && trimmed.starts_with("final class BernEngine") {
+            in_engine = true;
+            depth = braces(line);
+            continue;
+        }
+        if in_engine {
+            depth += braces(line);
+            if let Some(rest) = trimmed.strip_prefix("case ")
+                && let Some((idx_str, after)) = rest.split_once(": ")
+                && let Ok(idx) = idx_str.trim().parse::<usize>()
+                && let Some((prop, _)) = after.split_once(" = ")
+            {
+                fields.push((idx, prop.trim().to_string()));
+            }
+            if depth <= 0 {
+                break;
+            }
+        }
+    }
+    fields
 }
 
 /// `coordinateSpace(.named(x))` as `coordinateSpace(name: x)`.
@@ -293,7 +324,7 @@ fn scroll_view_of(lines: &[String], at: usize) -> Option<(usize, usize)> {
 }
 
 /// Objects of a view's environment and state, as iOS 16 follows them.
-fn environment(line: &str) -> String {
+fn environment(line: &str, has_engine: bool) -> String {
     let mut line = line.to_string();
     if let Some(at) = line.find("@Environment(")
         && let Some(end) = line[at..].find(".self)")
@@ -306,6 +337,14 @@ fn environment(line: &str) -> String {
                 "{}@Environment(\\.bernWindowContext16) private var window",
                 &line[..at]
             )
+        } else if has_engine && class == "BernEngine" {
+            let (head, tail) = (&line[..at], &line[at + end + ".self)".len()..]);
+            let var_name = tail
+                .trim()
+                .strip_prefix("private var ")
+                .unwrap_or("bernEngine")
+                .trim();
+            format!("{head}private var {var_name}: BernEngine {{ BernEngine.shared }}")
         } else {
             let (head, tail) = (&line[..at], &line[at + end + ".self)".len()..]);
             format!("{head}@BernObject({class}.self){tail}")
@@ -324,9 +363,9 @@ fn environment(line: &str) -> String {
 fn classes(lines: Vec<String>) -> Vec<String> {
     let mut out = Vec::with_capacity(lines.len());
     let mut pending = false;
-    // Inside a class: the attribute for its observed properties and how
-    // deep its braces go.
-    let mut class: Option<(&str, i32)> = None;
+    // Inside a class: the attribute for its observed properties (empty for
+    // `BernEngine`, which signals per field) and how deep its braces go.
+    let mut class: Option<(&str, i32, bool)> = None;
     for line in lines {
         let trimmed = line.trim();
         if trimmed.contains("@Observable") {
@@ -340,25 +379,45 @@ fn classes(lines: Vec<String>) -> Vec<String> {
                 out.push(rest.to_string());
                 continue;
             }
+            let is_engine = rest.contains("final class BernEngine");
             let (header, attribute) = observable_header(rest);
             pending = false;
-            class = Some((attribute, braces(&header)));
+            class = Some((
+                if is_engine { "" } else { attribute },
+                braces(&header),
+                is_engine,
+            ));
             out.push(header);
             continue;
         }
         if pending && trimmed.contains("final class") {
             pending = false;
+            let is_engine = trimmed.contains("final class BernEngine");
             let (header, attribute) = observable_header(&line);
-            class = Some((attribute, braces(&header)));
+            class = Some((
+                if is_engine { "" } else { attribute },
+                braces(&header),
+                is_engine,
+            ));
             out.push(header);
             continue;
         }
-        if let Some((attribute, depth)) = class {
+        if let Some((attribute, depth, is_engine)) = class {
             let ignored = line.contains("@ObservationIgnored");
             let line = line.replace("@ObservationIgnored ", "");
             let next = depth + braces(&line);
-            class = (next > 0).then_some((attribute, next));
-            if depth == 1 && !ignored && stored(line.trim()) {
+            class = (next > 0).then_some((attribute, next, is_engine));
+            if is_engine
+                && line.trim_start().starts_with("func bernApply(")
+                && line.trim_end().ends_with('{')
+            {
+                let defer = format!(
+                    "{}    defer {{ BernEngineSignals16.send(Int(field)) }}",
+                    &line[..line.len() - line.trim_start().len()]
+                );
+                out.push(line);
+                out.push(defer);
+            } else if depth == 1 && !ignored && !attribute.is_empty() && stored(line.trim()) {
                 let indent = &line[..line.len() - line.trim_start().len()];
                 out.push(format!("{indent}{attribute} {}", line.trim_start()));
             } else {
@@ -487,8 +546,25 @@ fn view_header(line: &str) -> bool {
     })
 }
 
+fn reads_engine_prop(body: &str, prop: &str) -> bool {
+    let needle = format!("bernEngine.{}", prop.trim_matches('`'));
+    let escaped = format!("bernEngine.`{}`", prop.trim_matches('`'));
+    for pat in [&needle, &escaped] {
+        let mut rest = body;
+        while let Some(at) = rest.find(pat.as_str()) {
+            let after = &rest[at + pat.len()..];
+            let next = after.chars().next();
+            if !next.is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '(') {
+                return true;
+            }
+            rest = after;
+        }
+    }
+    false
+}
+
 /// Has every view follow the shared signal, and what it names besides.
-fn views(lines: &[String]) -> Vec<String> {
+fn views(lines: &[String], engine_fields: &[(usize, String)]) -> Vec<String> {
     let mut out = Vec::with_capacity(lines.len());
     for (index, line) in lines.iter().enumerate() {
         out.push(line.clone());
@@ -513,6 +589,19 @@ fn views(lines: &[String]) -> Vec<String> {
             if reads.iter().any(|read| body.contains(read)) {
                 out.push(format!(
                     "{indent}    @ObservedObject var {property} = {class}.shared"
+                ));
+            }
+        }
+        if !engine_fields.is_empty() {
+            let watched: Vec<String> = engine_fields
+                .iter()
+                .filter(|(_, prop)| reads_engine_prop(&body, prop))
+                .map(|(idx, _)| idx.to_string())
+                .collect();
+            if !watched.is_empty() {
+                out.push(format!(
+                    "{indent}    @StateObject private var bernEngineFields = BernFieldObserver16([{}])",
+                    watched.join(", ")
                 ));
             }
         }
@@ -616,6 +705,29 @@ mod tests {
         assert!(
             out.contains("@StateObject private var cover = BernCover()"),
             "{out}"
+        );
+    }
+
+    #[test]
+    fn engine_views_subscribe_only_to_the_fields_they_read() {
+        let source = "@MainActor\n@Observable\nfinal class BernEngine {\n    static let shared = BernEngine()\n    private(set) var title: String = \"\"\n    private(set) var progress: Double = 0.0\n    func bernApply(_ field: UInt32, _ reader: inout BernReader) throws {\n        switch field {\n        case 0: title = try String(bern: &reader)\n        case 1: progress = try Double(bern: &reader)\n        default: break\n        }\n    }\n    func toggle() {}\n}\nstruct Header: View {\n    @Environment(BernEngine.self) private var bernEngine\n    var body: some View { Text(bernEngine.title) }\n}\nstruct ActionOnly: View {\n    @Environment(BernEngine.self) private var bernEngine\n    var body: some View { Button(\"Play\") { bernEngine.toggle() } }\n}\n";
+        let out = rewrite(source);
+        assert!(
+            !out.contains("@Published private(set) var progress"),
+            "engine fields must not share one ObservableObject publisher:\n{out}"
+        );
+        assert!(
+            out.contains("defer { BernEngineSignals16.send(Int(field)) }"),
+            "{out}"
+        );
+        assert!(
+            out.contains("BernFieldObserver16([0])"),
+            "Header should follow only field 0 (`title`):\n{out}"
+        );
+        assert_eq!(
+            out.matches("BernFieldObserver16").count(),
+            1,
+            "ActionOnly reads no state field and should not subscribe:\n{out}"
         );
     }
 

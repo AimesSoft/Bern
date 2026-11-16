@@ -228,6 +228,36 @@ Value Decode(BType const& type, TypeTable const& types, Reader& r) {
     throw DecodeError("unknown type");
 }
 
+Value DecodeStateField(BType const& type, bool keyed, Value const& current, TypeTable const& types, Reader& r) {
+    if (!keyed) return Decode(type, types, r);
+    auto mode = r.U8();
+    if (mode == 0) return Decode(type, types, r);
+    if (mode != 1 || type.kind != BType::Kind::List || current.kind != Value::Kind::List)
+        throw DecodeError("invalid keyed list patch");
+    auto total = r.U32();
+    auto segments = r.U32();
+    auto const& prev = current.Items();
+    Values out;
+    out.reserve(std::min<uint32_t>(total, 4096));
+    for (uint32_t s = 0; s < segments; ++s) {
+        auto tag = r.U8();
+        if (tag == 0) {
+            auto start = static_cast<size_t>(r.U32());
+            auto len = static_cast<size_t>(r.U32());
+            if (start > prev.size() || len > prev.size() - start)
+                throw DecodeError("keyed list copy out of bounds");
+            out.insert(out.end(), prev.begin() + start, prev.begin() + start + len);
+        } else if (tag == 1) {
+            auto len = r.U32();
+            for (uint32_t i = 0; i < len; ++i) out.push_back(Decode(*type.inner, types, r));
+        } else {
+            throw DecodeError("invalid keyed list segment");
+        }
+    }
+    if (out.size() != total) throw DecodeError("keyed list length mismatch");
+    return Value::List(std::move(out));
+}
+
 Bytes ToBytes(Value const& value, BType const& type, TypeTable const& types) {
     Writer w;
     Encode(value, type, types, w);
@@ -1046,7 +1076,11 @@ static void ReceiveState(Bytes const& bytes) {
         for (uint32_t i = 0; i < count; ++i) {
             auto field = reader.U32();
             if (field >= catalog->state.size()) return;
-            changes.emplace_back(field, Codec::Decode(catalog->state[field], catalog->types, reader));
+            bool keyed = field < catalog->stateKeyed.size() && catalog->stateKeyed[field];
+            changes.emplace_back(
+                field,
+                Codec::DecodeStateField(catalog->state[field], keyed, engine[field].Peek(), catalog->types, reader)
+            );
         }
         Reactive::Batch([&] {
             for (auto& [field, value] : changes) engine[field].Set(std::move(value));

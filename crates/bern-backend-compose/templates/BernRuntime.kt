@@ -197,6 +197,37 @@ class BernReader(private val bytes: ByteArray) {
         if (count < 0) throw BernDecodeError("invalid list length")
         return List(count) { decode() }
     }
+
+    inline fun <T> keyedList(current: List<T>, decode: () -> T): List<T> = when (val mode = u8()) {
+        0 -> list(decode)
+        1 -> {
+            val total = u32()
+            val segments = u32()
+            if (total < 0 || segments < 0) throw BernDecodeError("invalid keyed list header")
+            val out = ArrayList<T>(minOf(total, 4096))
+            repeat(segments) {
+                when (val tag = u8()) {
+                    0 -> {
+                        val start = u32()
+                        val len = u32()
+                        if (start < 0 || len < 0 || start + len > current.size) {
+                            throw BernDecodeError("keyed list copy out of bounds")
+                        }
+                        out.addAll(current.subList(start, start + len))
+                    }
+                    1 -> {
+                        val len = u32()
+                        if (len < 0) throw BernDecodeError("invalid keyed list run")
+                        repeat(len) { out.add(decode()) }
+                    }
+                    else -> throw BernDecodeError("invalid keyed list segment $tag")
+                }
+            }
+            if (out.size != total) throw BernDecodeError("keyed list length mismatch")
+            out
+        }
+        else -> throw BernDecodeError("invalid keyed list mode $mode")
+    }
 }
 
 // MARK: - Text

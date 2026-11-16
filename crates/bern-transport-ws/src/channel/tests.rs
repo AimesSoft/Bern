@@ -45,6 +45,8 @@ fn descriptor() -> &'static ProtocolDescriptor {
                 ty: Type::Int,
                 doc: String::new(),
                 content: false,
+                stream: false,
+                keyed: None,
             }],
             commands: vec![
                 spec(

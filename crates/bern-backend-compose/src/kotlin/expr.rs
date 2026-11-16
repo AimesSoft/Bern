@@ -2,7 +2,7 @@
 
 use super::values::{argument, session_var, value_literal};
 use super::{Ctx, Generator};
-use crate::names::{float, member, string, value_type};
+use crate::names::{float, member, state_member, string, value_type};
 use bern_ir::{Action, Binding, Element, Expr, ExprKind, MediaOp, Prop, Text, WindowOp};
 use bern_protocol::{Type, Value};
 
@@ -27,7 +27,7 @@ impl Generator<'_> {
                 let state = &self.app.protocol.state[*field];
                 format!(
                     "BernEngine.{}{}",
-                    member(&state.name),
+                    state_member(&state.name),
                     self.binding_path(state.ty.clone(), path)
                 )
             }

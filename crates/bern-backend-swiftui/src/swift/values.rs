@@ -2,7 +2,7 @@
 //! session state that holds them.
 
 use super::Out;
-use crate::names::{self, case, double, label, member, string, value_type};
+use crate::names::{self, case, double, label, member, state_member, string, value_type};
 use bern_ir::Application;
 use bern_protocol::{EnumDef, RecordDef, Type, TypeTable, Value};
 
@@ -326,7 +326,7 @@ pub(super) fn generate_engine(out: &mut Out, app: &Application) {
         }
         out.line(format!(
             "private(set) var {}: {} = {}",
-            member(&field.name),
+            state_member(&field.name),
             swift_type(&field.ty),
             default_literal(&field.ty, &app.types)
         ));
@@ -335,11 +335,20 @@ pub(super) fn generate_engine(out: &mut Out, app: &Application) {
     out.open("func bernApply(_ field: UInt32, _ reader: inout BernReader) throws {");
     out.open("switch field {");
     for (index, field) in protocol.state.iter().enumerate() {
-        out.line(format!(
-            "case {index}: {} = try {}(bern: &reader)",
-            member(&field.name),
-            swift_type(&field.ty)
-        ));
+        let prop = state_member(&field.name);
+        if field.keyed.is_some()
+            && let Type::List { inner } = &field.ty
+        {
+            out.line(format!(
+                "case {index}: {prop} = try reader.keyedList({prop}) {{ try {}(bern: &$0) }}",
+                swift_type(inner)
+            ));
+        } else {
+            out.line(format!(
+                "case {index}: {prop} = try {}(bern: &reader)",
+                swift_type(&field.ty)
+            ));
+        }
     }
     out.line("default: throw BernDecodeError(message: \"unknown state field \\(field)\")");
     out.close("}");

@@ -68,7 +68,22 @@ pub fn tokens(descriptor: &ProtocolDescriptor) -> TokenStream {
         let ty = type_tokens(&field.ty);
         let doc = string(&field.doc);
         let content = field.content;
-        quote!(#p::StateField { name: #name, ty: #ty, doc: #doc, content: #content })
+        let stream = field.stream;
+        let keyed = match &field.keyed {
+            Some(key) => {
+                let key = string(key);
+                quote!(::std::option::Option::Some(#key))
+            }
+            None => quote!(::std::option::Option::None),
+        };
+        quote!(#p::StateField {
+            name: #name,
+            ty: #ty,
+            doc: #doc,
+            content: #content,
+            stream: #stream,
+            keyed: #keyed,
+        })
     });
     let commands = descriptor.commands.iter().map(|command| {
         let id = string(&command.id);

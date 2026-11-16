@@ -25,7 +25,7 @@ impl Generator<'_> {
                 let state = &self.app.protocol.state[*field];
                 format!(
                     "E.{}.get(){}",
-                    state.name,
+                    super::state_prop(&state.name),
                     self.path(state.ty.clone(), path)
                 )
             }

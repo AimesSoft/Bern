@@ -135,6 +135,8 @@ fn controlled_switch_commits_new_value_without_rewriting_string_arguments() {
         ty: Type::Bool,
         doc: String::new(),
         content: false,
+        stream: false,
+        keyed: None,
     });
     app.protocol
         .commands
@@ -181,6 +183,8 @@ fn controlled_popover_waits_for_its_engine_command_completion() {
         ty: Type::Bool,
         doc: String::new(),
         content: false,
+        stream: false,
+        keyed: None,
     });
     app.protocol
         .commands
@@ -235,12 +239,16 @@ fn explicit_picker_options_keep_live_labels_and_controlled_values() {
         ty: ty.clone(),
         doc: String::new(),
         content: false,
+        stream: false,
+        keyed: None,
     });
     app.protocol.state.push(StateField {
         name: "count".into(),
         ty: Type::Int,
         doc: String::new(),
         content: false,
+        stream: false,
+        keyed: None,
     });
     app.protocol
         .commands
@@ -459,6 +467,8 @@ fn chip_pickers_stand_in_their_flow_beside_a_spacer() {
         ty: ty.clone(),
         doc: String::new(),
         content: false,
+        stream: false,
+        keyed: None,
     });
     app.protocol
         .commands

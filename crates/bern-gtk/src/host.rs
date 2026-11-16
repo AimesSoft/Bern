@@ -5,7 +5,7 @@
 //! and handled on the GTK main thread in arrival order. Engine state is
 //! mirrored into one cell per field, updated per revision in one batch.
 
-use crate::protocol::{Reader, Value, Writer, decode, encode};
+use crate::protocol::{Reader, Value, Writer, decode_state_field, encode};
 use crate::reactive::{Cell, batch};
 use crate::windows::Win;
 use crate::{
@@ -169,11 +169,13 @@ impl Host {
         let mut changes = Vec::new();
         for _ in 0..count {
             let Ok(field) = reader.u32() else { return };
-            let Some(spec) = state.get(field as usize) else {
+            let index = field as usize;
+            let Some(spec) = state.get(index) else {
                 return;
             };
-            match decode(&spec.ty, types, &mut reader) {
-                Ok(value) => changes.push((field as usize, value)),
+            let prev = self.engine.get(index).map(Cell::peek);
+            match decode_state_field(prev.as_ref(), spec, types, &mut reader) {
+                Ok(value) => changes.push((index, value)),
                 Err(_) => return,
             }
         }
@@ -714,6 +716,8 @@ pub(crate) mod tests {
                 ty,
                 doc: String::new(),
                 content: false,
+                stream: false,
+                keyed: None,
             })
             .collect();
         start(def)

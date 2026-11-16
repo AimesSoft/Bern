@@ -275,7 +275,14 @@ mod tests {
         assert_eq!(config.modules[0].id, "downloads");
         let compiled = bern_compiler::compile(&config).unwrap();
         assert!(compiled.warnings.is_empty(), "{:?}", compiled.warnings);
-        assert!(compiled.app.protocol.state_index("downloads").is_some());
+        assert!(
+            compiled
+                .app
+                .protocol
+                .state
+                .iter()
+                .any(|f| f.name.starts_with("downloads."))
+        );
         assert!(NewModule::new(&manifest, "modules").is_err());
         let _ = std::fs::remove_dir_all(&root);
     }

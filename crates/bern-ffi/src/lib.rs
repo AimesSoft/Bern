@@ -28,7 +28,7 @@ use bern_command::{CallContext, EngineProtocol, Entry, Host};
 use bern_media::MediaHub;
 use bern_protocol::{
     CommandError, CommandOutcome, Invocation, Reader, SessionCommand, Type, Value, Writer, decode,
-    encode, session_catalog,
+    encode, encode_state_field, session_catalog,
 };
 use bern_runtime::{
     CloseDecision, CloseStep, DecisionStep, FactSource, Frame, SessionHandler, SessionSpec,
@@ -365,6 +365,8 @@ fn start_channel(_: &Host, _: &Sessions, _: &MediaHub, _: &str) -> Result<Channe
     )
 }
 
+type MirroredState = Arc<Mutex<Option<(u64, Vec<Value>)>>>;
+
 /// The running application behind the C handle.
 pub struct BernApp {
     host: Arc<dyn EngineLink>,
@@ -375,6 +377,8 @@ pub struct BernApp {
     media: Arc<dyn MediaLink>,
     /// The application's media kernel, once the frontend let it execute.
     kernel: Mutex<Option<Arc<dyn bern_media::kernel::MediaKernel>>>,
+    /// Last engine snapshot mirrored to the frontend, for incremental list patches.
+    mirrored: MirroredState,
     queries: query::Subscriptions,
     _subscription: Guard,
     _media_subscription: Guard,
@@ -384,7 +388,12 @@ pub struct BernApp {
     remote: Option<Arc<remote::Remote>>,
 }
 
-fn encode_changes(host: &dyn EngineLink, revision: u64, changes: &[(usize, Value)]) -> Vec<u8> {
+fn encode_changes(
+    host: &dyn EngineLink,
+    previous: Option<&[Value]>,
+    revision: u64,
+    changes: &[(usize, Value)],
+) -> Vec<u8> {
     let descriptor = host.descriptor();
     // Inside a traced job, each field's encoding is recorded with its size.
     let traced = trace::current_job().is_some();
@@ -398,9 +407,10 @@ fn encode_changes(host: &dyn EngineLink, revision: u64, changes: &[(usize, Value
         } else {
             (0, 0)
         };
-        encode(
+        encode_state_field(
+            previous.and_then(|prev| prev.get(*field)),
             value,
-            &descriptor.state[*field].ty,
+            &descriptor.state[*field],
             &descriptor.types,
             &mut writer,
         );
@@ -550,14 +560,49 @@ pub(crate) fn assemble(
         next: AtomicU64::new(1),
     });
     let queries = query::Subscriptions::default();
+    let mirrored: MirroredState = Arc::new(Mutex::new(None));
     let updates = Arc::clone(&host);
     let stale = Arc::clone(&queries);
+    let mirrored_updates = Arc::clone(&mirrored);
     let subscription = host.subscribe(Box::new(move |update| {
-        let bytes = encode_changes(updates.as_ref(), update.revision, &update.changes);
-        if trace::on(trace::ENGINE) {
-            trace::callback(trace::CALLBACK_STATE, update.revision, 0, bytes.len());
+        {
+            let mut guard = mirrored_updates
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let bytes = match guard.as_mut() {
+                None => Some(encode_changes(
+                    updates.as_ref(),
+                    None,
+                    update.revision,
+                    &update.changes,
+                )),
+                Some((prev_rev, prev_vals)) => {
+                    if update.revision <= *prev_rev {
+                        None
+                    } else {
+                        let bytes = encode_changes(
+                            updates.as_ref(),
+                            Some(prev_vals.as_slice()),
+                            update.revision,
+                            &update.changes,
+                        );
+                        for (field, value) in &update.changes {
+                            if let Some(slot) = prev_vals.get_mut(*field) {
+                                *slot = value.clone();
+                            }
+                        }
+                        *prev_rev = update.revision;
+                        Some(bytes)
+                    }
+                }
+            };
+            if let Some(bytes) = bytes {
+                if trace::on(trace::ENGINE) {
+                    trace::callback(trace::CALLBACK_STATE, update.revision, 0, bytes.len());
+                }
+                callbacks.state(&bytes);
+            }
         }
-        callbacks.state(&bytes);
         // Answers of queries that read a changed field are stale.
         let changed: Vec<usize> = update.changes.iter().map(|(field, _)| *field).collect();
         query::refresh(updates.as_ref(), &stale, callbacks, &changed);
@@ -573,6 +618,7 @@ pub(crate) fn assemble(
         bridge,
         media,
         kernel: Mutex::new(None),
+        mirrored,
         queries,
         _subscription: subscription,
         _media_subscription: media_subscription,
@@ -633,9 +679,14 @@ pub unsafe extern "C" fn bern_app_stop(app: *mut BernApp) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bern_app_snapshot(app: *mut BernApp) -> BernBuffer {
     with_app(app, BernBuffer::empty(), |app| {
+        let mut guard = app
+            .mirrored
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let (revision, values) = app.host.snapshot();
+        *guard = Some((revision, values.clone()));
         let changes: Vec<(usize, Value)> = values.into_iter().enumerate().collect();
-        BernBuffer::from_vec(encode_changes(app.host.as_ref(), revision, &changes))
+        BernBuffer::from_vec(encode_changes(app.host.as_ref(), None, revision, &changes))
     })
 }
 
