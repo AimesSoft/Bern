@@ -924,31 +924,10 @@ extension EnvironmentValues {
 private struct BernOnBarKey: EnvironmentKey {
     static let defaultValue = false
 }
-private struct BernUnifiedChromeKey: EnvironmentKey {
-    static let defaultValue = false
-}
-private struct BernSplitSidebarOpenKey: EnvironmentKey {
-    static let defaultValue = false
-}
-private struct BernSidebarCollapsedKey: EnvironmentKey {
-    static let defaultValue: Binding<Bool>? = nil
-}
 extension EnvironmentValues {
     var bernOnBar: Bool {
         get { self[BernOnBarKey.self] }
         set { self[BernOnBarKey.self] = newValue }
-    }
-    var bernUnifiedChrome: Bool {
-        get { self[BernUnifiedChromeKey.self] }
-        set { self[BernUnifiedChromeKey.self] = newValue }
-    }
-    var bernSplitSidebarOpen: Bool {
-        get { self[BernSplitSidebarOpenKey.self] }
-        set { self[BernSplitSidebarOpenKey.self] = newValue }
-    }
-    var bernSidebarCollapsed: Binding<Bool>? {
-        get { self[BernSidebarCollapsedKey.self] }
-        set { self[BernSidebarCollapsedKey.self] = newValue }
     }
 }
 
@@ -2437,6 +2416,7 @@ struct BernPictureHero: ViewModifier {
     @Environment(BernWindowContext.self) private var window
     @Environment(\.bernHeroScopes) private var heroScopes
     @Environment(\.bernTransitionExiting) private var exiting
+    @Environment(\.bernInert) private var inert
     @State private var flying = false
     @State private var entered = false
 
@@ -2452,10 +2432,12 @@ struct BernPictureHero: ViewModifier {
             let willFlyBack = exiting && !reduced && window.platform.nsWindow.map {
                 BernWindowImageHeroes.forWindow($0).isFlyingOrLayered(id)
             } == true
+            let hidden = flying || awaiting || willFlyBack
             content
-                .opacity(flying || awaiting || willFlyBack ? 0 : 1)
+                .opacity(hidden ? 0 : 1)
+                .animation(nil, value: hidden)
                 .background(BernPictureHeroProbe(id: id, scopes: heroScopes, picture: picture, fit: fit,
-                    corner: corner, motion: motion, reduced: reduced, exiting: exiting,
+                    corner: corner, motion: motion, reduced: reduced, exiting: exiting, inert: inert,
                     visibility: { hidden in
                         var transaction = Transaction()
                         transaction.disablesAnimations = true
@@ -4426,133 +4408,53 @@ struct BernSplitView<Sidebar: View, Detail: View>: View {
     @ViewBuilder let sidebar: () -> Sidebar
     @ViewBuilder let detail: () -> Detail
     #if os(macOS)
-    @Environment(BernWindowContext.self) private var bernWindow
-    @Environment(\.bernUnifiedChrome) private var unifiedChrome
     @Environment(\.bernWindowCovered) private var windowCovered
     @Environment(\.bernInert) private var inert
     @State private var visibility: NavigationSplitViewVisibility = .all
     @State private var savedVisibility: NavigationSplitViewVisibility = .all
-    @State private var collapsed = false
-    @State private var sidebarWidth: CGFloat = 216
-    @State private var dragStartWidth: CGFloat? = nil
+    @State private var holding = false
     private var covered: Bool { windowCovered || inert }
     #endif
 
-    @ViewBuilder var body: some View {
+    var body: some View {
         #if os(macOS)
-        if unifiedChrome {
-            unifiedBody
-        } else {
-            standardBody
+        ZStack {
+            NavigationSplitView(
+                columnVisibility: $visibility,
+                sidebar: sidebar,
+                detail: {
+                    detail().toolbar(removing: covered ? .sidebarToggle : nil)
+                }
+            )
+            .opacity(holding ? 0 : 1)
+            BernSplitHold(
+                covered: covered,
+                onHold: { active in holding = active },
+                collapse: {
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        savedVisibility = visibility
+                        visibility = .detailOnly
+                    }
+                },
+                restore: {
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        visibility = savedVisibility
+                    }
+                }
+            )
+            .ignoresSafeArea(.container)
         }
         #else
         NavigationSplitView(sidebar: sidebar, detail: detail)
         #endif
     }
-
-    #if os(macOS)
-    private var unifiedBody: some View {
-        let showSidebar = !collapsed
-        let collapsedBinding: Binding<Bool>? = (collapsed && !covered) ? $collapsed : nil
-        return HStack(spacing: 0) {
-            if showSidebar {
-                unifiedSidebarColumn
-                    .disabled(covered)
-                    .accessibilityHidden(covered)
-            }
-            ZStack(alignment: .top) {
-                detail()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .environment(\.bernSplitSidebarOpen, showSidebar)
-                    .environment(\.bernSidebarCollapsed, collapsedBinding)
-                if !bernWindow.fullscreen {
-                    BernWindowDragStrip()
-                        .frame(height: 12)
-                        .frame(maxWidth: .infinity, alignment: .top)
-                }
-            }
-        }
-    }
-
-    private var unifiedSidebarColumn: some View {
-        ZStack(alignment: .topTrailing) {
-            sidebar()
-                .listStyle(.sidebar)
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    Color.clear.frame(height: bernWindow.fullscreen ? 6 : 44)
-                }
-            if !bernWindow.fullscreen {
-                BernWindowDragStrip()
-                    .frame(height: 44)
-                    .frame(maxWidth: .infinity)
-            }
-            Button(action: {
-                withAnimation(.snappy(duration: 0.22)) { collapsed = true }
-            }) {
-                Image(systemName: "sidebar.leading")
-                    .font(.system(size: 14, weight: .regular))
-                    .frame(width: 28, height: 28)
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .padding(.top, bernWindow.fullscreen ? 10 : 12)
-            .padding(.trailing, 10)
-        }
-        .frame(width: sidebarWidth)
-        .frame(maxHeight: .infinity)
-        .overlay(alignment: .trailing) {
-            Rectangle()
-                .fill(Color.primary.opacity(0.08))
-                .frame(width: 1)
-        }
-        .overlay(alignment: .trailing) {
-            Color.clear
-                .frame(width: 6)
-                .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(minimumDistance: 1)
-                        .onChanged { value in
-                            let base = dragStartWidth ?? sidebarWidth
-                            dragStartWidth = base
-                            sidebarWidth = min(max(base + value.translation.width, 180), 320)
-                        }
-                        .onEnded { _ in dragStartWidth = nil }
-                )
-        }
-    }
-
-    private var standardBody: some View {
-        NavigationSplitView(
-            columnVisibility: $visibility,
-            sidebar: sidebar,
-            detail: {
-                detail().toolbar(removing: covered ? .sidebarToggle : nil)
-            }
-        )
-        .onChange(of: covered, initial: true) { wasCovered, isCovered in
-            guard wasCovered != isCovered || isCovered else { return }
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                if isCovered {
-                    if !wasCovered {
-                        savedVisibility = visibility
-                    }
-                    visibility = .detailOnly
-                } else {
-                    visibility = savedVisibility
-                }
-            }
-        }
-    }
-    #endif
 }
 
 private struct BernSidebarToggleFollowsCover: ViewModifier {
-    #if os(macOS)
-    @Environment(\.bernUnifiedChrome) private var unifiedChrome
-    #endif
     @Environment(\.bernWindowCovered) private var windowCovered
     @Environment(\.bernInert) private var inert
     // A split view out of reach has no button to show its sidebar either.
@@ -4562,131 +4464,33 @@ private struct BernSidebarToggleFollowsCover: ViewModifier {
         #if os(tvOS)
         content
         #elseif os(macOS)
-        if unifiedChrome {
+        // A toolbar left with no item shrinks to the title bar and moves
+        // the window's content up; when a window-covering layer without its
+        // own toolbar hides the split view, a 1pt item holds its height.
+        let holdHeight = windowCovered && !inert
+        if #available(macOS 26.0, *) {
             content
+                .toolbar(removing: covered ? .sidebarToggle : nil)
+                .toolbar {
+                    if holdHeight {
+                        ToolbarItem(placement: .navigation) { BernToolbarSpace() }
+                            .sharedBackgroundVisibility(.hidden)
+                    }
+                }
         } else {
-            // A toolbar left with no item shrinks to the title bar and moves
-            // the window's content up; when a window-covering layer without its
-            // own toolbar hides the split view, a 1pt item holds its height.
-            let holdHeight = windowCovered && !inert
-            if #available(macOS 26.0, *) {
-                content
-                    .toolbar(removing: covered ? .sidebarToggle : nil)
-                    .toolbar {
-                        if holdHeight {
-                            ToolbarItem(placement: .navigation) { BernToolbarSpace() }
-                                .sharedBackgroundVisibility(.hidden)
-                        }
+            content
+                .toolbar(removing: covered ? .sidebarToggle : nil)
+                .toolbar {
+                    if holdHeight {
+                        ToolbarItem(placement: .navigation) { BernToolbarSpace() }
                     }
-            } else {
-                content
-                    .toolbar(removing: covered ? .sidebarToggle : nil)
-                    .toolbar {
-                        if holdHeight {
-                            ToolbarItem(placement: .navigation) { BernToolbarSpace() }
-                        }
-                    }
-            }
+                }
         }
         #else
         content.toolbar(removing: covered ? .sidebarToggle : nil)
         #endif
     }
 }
-
-#if os(macOS)
-private struct BernConditionalGlassCapsule: ViewModifier {
-    let active: Bool
-    @ViewBuilder func body(content: Content) -> some View {
-        if active {
-            content.modifier(BernGlassCapsule(prominent: false))
-        } else {
-            content
-        }
-    }
-}
-
-struct BernUnifiedToolbarGroup<Content: View>: View {
-    @ViewBuilder let content: () -> Content
-    @State private var hasContent = true
-
-    var body: some View {
-        let row = HStack(spacing: 0) { content() }
-            .font(.system(size: 16, weight: .regular))
-            .environment(\.bernControlGroupHeight, 36)
-        if #available(macOS 15.0, *) {
-            row
-                .onGeometryChange(for: Bool.self) { $0.size.width > 1 } action: { hasContent = $0 }
-                .frame(height: hasContent ? 36 : 0)
-                .modifier(BernConditionalGlassCapsule(active: hasContent))
-                .accessibilityElement(children: .contain)
-        } else {
-            row
-                .frame(height: 36)
-                .modifier(BernGlassCapsule(prominent: false))
-                .accessibilityElement(children: .contain)
-        }
-    }
-}
-
-/// Self-drawn Liquid Glass top bar for `chrome: unified` macOS windows, replacing
-/// AppKit's `NSToolbar` so neither windowed nor full-screen mode reserves a
-/// system titlebar/toolbar band.
-struct BernUnifiedTopBar<Leading: View, Center: View, Trailing: View>: View {
-    @ViewBuilder let leading: () -> Leading
-    @ViewBuilder let center: () -> Center
-    @ViewBuilder let trailing: () -> Trailing
-    @Environment(BernWindowContext.self) private var bernWindow
-    @Environment(\.bernSplitSidebarOpen) private var sidebarOpen
-    @Environment(\.bernSidebarCollapsed) private var sidebarCollapsed
-
-    var body: some View {
-        let leadingPad: CGFloat = (sidebarOpen || bernWindow.fullscreen) ? 16 : 80
-        let topPad: CGFloat = bernWindow.fullscreen ? 10 : 8
-        ZStack(alignment: .top) {
-            if !bernWindow.fullscreen {
-                BernWindowDragStrip()
-            }
-            HStack(spacing: 8) {
-                if let sidebarCollapsed {
-                    BernUnifiedToolbarGroup {
-                        Button(action: {
-                            withAnimation(.snappy(duration: 0.22)) {
-                                sidebarCollapsed.wrappedValue = false
-                            }
-                        }) {
-                            Image(systemName: "sidebar.leading")
-                                .font(.system(size: 15, weight: .regular))
-                                .frame(minWidth: 36, minHeight: 36)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                leading()
-                Spacer(minLength: 8)
-                center()
-                Spacer(minLength: 8)
-                trailing()
-            }
-            .padding(.leading, leadingPad)
-            .padding(.trailing, 16)
-            .padding(.top, topPad)
-            .padding(.bottom, 2)
-        }
-        .frame(height: topPad + 38)
-    }
-}
-
-struct BernUnifiedTopBarSpace: View {
-    @Environment(BernWindowContext.self) private var bernWindow
-    var body: some View {
-        Color.clear
-            .frame(height: (bernWindow.fullscreen ? 10 : 8) + 38)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-    }
-}
-#endif
 
 #if os(macOS)
 /// Room in a toolbar that shows nothing and takes no clicks.

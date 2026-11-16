@@ -62,18 +62,6 @@ impl Generator<'_> {
             .collect();
         // A view kept mounted under a covering layer (`bernInert`) yields the
         // window's toolbar and palette frame without unmounting its own body.
-        if self.platform == Platform::Macos && !items.is_empty() {
-            out.open(".safeAreaInset(edge: .top, spacing: 0) {");
-            out.open("if bernUnifiedChrome {");
-            out.open("if !bernInert {");
-            self.unified_toolbar_bar(out, &items, ctx);
-            out.close("} else {");
-            out.indent += 1;
-            out.line("BernUnifiedTopBarSpace()");
-            out.close("}");
-            out.close("}");
-            out.close("}");
-        }
         if has_palette || !items.is_empty() {
             out.open(".background {");
             out.open("if !bernInert {");
@@ -82,12 +70,7 @@ impl Generator<'_> {
                 out.line(".modifier(BernPaletteDetail())");
             }
             if !items.is_empty() {
-                if self.platform == Platform::Macos {
-                    out.open("if !bernUnifiedChrome {");
-                    out.open("SwiftUI.Color.clear.toolbar {");
-                } else {
-                    out.open(".toolbar {");
-                }
+                out.open(".toolbar {");
                 for toolbar in items {
                     let children: Vec<Node> = toolbar
                         .children
@@ -98,9 +81,6 @@ impl Generator<'_> {
                     self.toolbar_items(out, &children, ctx);
                 }
                 out.close("}");
-                if self.platform == Platform::Macos {
-                    out.close("}");
-                }
             }
             out.close("}");
             out.close("}");
@@ -306,84 +286,6 @@ impl Generator<'_> {
             } else {
                 self.nodes(out, group, &group_ctx);
             }
-            out.close("}");
-        }
-    }
-
-    fn unified_toolbar_bar(&self, out: &mut Out, toolbars: &[&Element], ctx: &Ctx) {
-        let is_search = |node: &Node| {
-            matches!(
-                node,
-                Node::Element(item)
-                    if item.kind == "Search" && item.keyword("style") != Some("palette")
-            )
-        };
-        let mut all_leading = Vec::new();
-        let mut all_center = Vec::new();
-        let mut all_trailing = Vec::new();
-        for toolbar in toolbars {
-            let children: Vec<Node> = toolbar
-                .children
-                .iter()
-                .filter(|node| !is_search(node))
-                .cloned()
-                .collect();
-            let split = children
-                .iter()
-                .position(|node| matches!(node, Node::Element(e) if e.kind == "Spacer"));
-            let (leading, trailing) = match split {
-                Some(index) => (&children[..index], &children[index + 1..]),
-                None => (&children[..0], children.as_slice()),
-            };
-            for node in leading {
-                if matches!(node, Node::Element(e) if e.kind == "Picker") {
-                    all_center.push(node.clone());
-                } else {
-                    all_leading.push(node.clone());
-                }
-            }
-            for node in trailing {
-                if matches!(node, Node::Element(e) if e.kind == "Picker") {
-                    all_center.push(node.clone());
-                } else {
-                    all_trailing.push(node.clone());
-                }
-            }
-        }
-        let body_ctx = Ctx {
-            toolbar: false,
-            shared: false,
-            ..ctx.clone()
-        };
-        out.open("BernUnifiedTopBar {");
-        self.unified_toolbar_groups(out, &all_leading, &body_ctx);
-        out.close("} center: {");
-        out.indent += 1;
-        for node in &all_center {
-            self.node(out, node, &body_ctx);
-        }
-        out.close("} trailing: {");
-        out.indent += 1;
-        self.unified_toolbar_groups(out, &all_trailing, &body_ctx);
-        out.close("}");
-    }
-
-    fn unified_toolbar_groups(&self, out: &mut Out, children: &[Node], ctx: &Ctx) {
-        let mut groups: Vec<Vec<Node>> = vec![Vec::new()];
-        for node in children {
-            match node {
-                Node::Element(element) if element.kind == "Divider" => groups.push(Vec::new()),
-                Node::Element(element) if element.kind == "Text" => {
-                    groups.push(Vec::new());
-                    self.element(out, element, ctx);
-                    groups.push(Vec::new());
-                }
-                node => groups.last_mut().expect("a group").push(node.clone()),
-            }
-        }
-        for group in groups.iter().filter(|g| !g.is_empty()) {
-            out.open("BernUnifiedToolbarGroup {");
-            self.nodes(out, group, ctx);
             out.close("}");
         }
     }

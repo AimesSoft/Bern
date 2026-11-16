@@ -1196,31 +1196,8 @@ extension View {
 /// A window's chrome, immersion and idleness: `unified` lays the content
 /// under a transparent title bar; `immersive` hides the title bar, its
 /// controls and the toolbar, and the pointer once it rests; `idleAfter`
-/// Drag region for custom-chrome windows on macOS: drags the window on pointer
-/// move and zooms/minimizes on double-click per system settings, while letting
-/// interactive SwiftUI controls placed above it receive clicks normally.
-struct BernWindowDragStrip: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView { DragView() }
-    func updateNSView(_ nsView: NSView, context: Context) {}
-
-    private final class DragView: NSView {
-        override var mouseDownCanMoveWindow: Bool { true }
-        override func mouseDown(with event: NSEvent) {
-            if event.clickCount == 2 {
-                let action = UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") ?? "Maximize"
-                if action == "Minimize" {
-                    window?.performMiniaturize(nil)
-                } else if action != "None" {
-                    window?.performZoom(nil)
-                }
-                return
-            }
-            window?.performDrag(with: event)
-        }
-    }
-}
-
-private struct BernUnifiedToolbarSuppression: ViewModifier {
+/// turns `idle` on after that many seconds without input in the window.
+private struct BernUnifiedBarAppearance: ViewModifier {
     let enabled: Bool
     @ViewBuilder func body(content: Content) -> some View {
         if enabled {
@@ -1231,119 +1208,6 @@ private struct BernUnifiedToolbarSuppression: ViewModifier {
     }
 }
 
-/// Centers standard macOS traffic-light buttons at the vertical axis of
-/// `BernUnifiedTopBar` (`8pt` top inset + `36pt` capsule / 2 = `26pt` from top)
-/// while in windowed `chrome: unified` mode, keeping AppKit's rollover tracking
-/// rect in sync across resizes, subview changes, and full-screen transitions.
-@MainActor
-final class BernUnifiedTrafficLights {
-    private static let centerFromTop: CGFloat = 26
-    private static let windows = NSMapTable<NSWindow, BernUnifiedTrafficLights>.weakToStrongObjects()
-
-    static func forWindow(_ window: NSWindow) -> BernUnifiedTrafficLights {
-        if let existing = windows.object(forKey: window) {
-            return existing
-        }
-        let instance = BernUnifiedTrafficLights()
-        windows.setObject(instance, forKey: window)
-        return instance
-    }
-
-    private weak var window: NSWindow?
-    private weak var observedContainer: NSView?
-    private weak var observedThemeFrame: NSView?
-    private var observers: [NSObjectProtocol] = []
-    private var enabled = false
-    private var adjusting = false
-
-    func configure(window: NSWindow, enabled: Bool) {
-        self.enabled = enabled
-        guard enabled else {
-            teardownObservers()
-            return
-        }
-        if self.window !== window {
-            teardownObservers()
-            self.window = window
-            let nc = NotificationCenter.default
-            for name: Notification.Name in [
-                NSWindow.didResizeNotification,
-                NSWindow.didEndLiveResizeNotification,
-                NSWindow.didExitFullScreenNotification,
-                NSWindow.didDeminiaturizeNotification,
-                NSWindow.didBecomeKeyNotification,
-                NSWindow.didResignKeyNotification,
-                NSWindow.didUpdateNotification,
-            ] {
-                observers.append(nc.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
-                    MainActor.assumeIsolated { self?.sync() }
-                })
-            }
-        }
-        sync()
-    }
-
-    func sync() {
-        guard enabled, !adjusting, let window, !window.styleMask.contains(.fullScreen) else { return }
-        if window.toolbar != nil {
-            window.toolbar?.isVisible = false
-            window.toolbar = nil
-        }
-        guard let close = window.standardWindowButton(.closeButton),
-              let titlebar = close.superview,
-              let container = titlebar.superview,
-              let themeFrame = container.superview
-        else { return }
-        if observedContainer !== container {
-            observedContainer = container
-            container.postsFrameChangedNotifications = true
-            observers.append(NotificationCenter.default.addObserver(
-                forName: NSView.frameDidChangeNotification, object: container, queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.sync() }
-            })
-        }
-        if observedThemeFrame !== themeFrame {
-            observedThemeFrame = themeFrame
-            themeFrame.postsFrameChangedNotifications = true
-            observers.append(NotificationCenter.default.addObserver(
-                forName: NSView.frameDidChangeNotification, object: themeFrame, queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.sync() }
-            })
-        }
-        let barHeight = container.frame.height
-        let topGap = max(0, Self.centerFromTop - (barHeight - close.frame.midY))
-        let wantedFrame = NSRect(
-            x: 0,
-            y: themeFrame.bounds.height - barHeight - topGap,
-            width: themeFrame.bounds.width,
-            height: barHeight
-        )
-        guard abs(container.frame.origin.y - wantedFrame.origin.y) > 0.5
-           || abs(container.frame.width - wantedFrame.width) > 0.5
-        else { return }
-        adjusting = true
-        defer { adjusting = false }
-        container.frame = wantedFrame
-        if !themeFrame.inLiveResize {
-            themeFrame.viewWillStartLiveResize()
-            themeFrame.viewDidEndLiveResize()
-        }
-    }
-
-    private func teardownObservers() {
-        for observer in observers {
-            NotificationCenter.default.removeObserver(observer)
-        }
-        observers.removeAll()
-        observedContainer = nil
-        observedThemeFrame = nil
-        window = nil
-    }
-}
-
-/// turns `idle` on after that many seconds without input in the window.
 struct BernWindowBehavior: ViewModifier {
     let context: BernWindowContext
     let unified: Bool
@@ -1358,9 +1222,8 @@ struct BernWindowBehavior: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .environment(\.bernUnifiedChrome, unified)
-            .modifier(BernUnifiedToolbarSuppression(enabled: unified))
-            .ignoresSafeArea(.container, edges: (unified || immersive) ? .top : [])
+            .modifier(BernUnifiedBarAppearance(enabled: unified))
+            .ignoresSafeArea(.all, edges: immersive ? .top : [])
             .modifier(BernPointerVisibility(hidden: hidePointer))
             .onAppear {
                 apply(attempts: 20)
@@ -1421,16 +1284,107 @@ struct BernWindowBehavior: ViewModifier {
         window.titlebarAppearsTransparent = underTitle
         window.titleVisibility = underTitle ? .hidden : .visible
         window.titlebarSeparatorStyle = underTitle ? .none : .automatic
-        if unified {
-            window.toolbar?.isVisible = false
-            window.toolbar = nil
-        } else {
-            window.toolbar?.isVisible = !immersive
-        }
+        window.toolbar?.isVisible = !immersive
         for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
             window.standardWindowButton(kind)?.isHidden = immersive && context.idle
         }
-        BernUnifiedTrafficLights.forWindow(window).configure(window: window, enabled: unified)
+    }
+}
+
+/// Holds the pre-collapse visual pixels of a `NavigationSplitView` while
+/// a covering layer hides its sidebar via `.detailOnly` so the sidebar and
+/// detail column never visibly snap left or right behind a fading overlay.
+struct BernSplitHold: NSViewRepresentable {
+    let covered: Bool
+    let onHold: @MainActor (Bool) -> Void
+    let collapse: @MainActor () -> Void
+    let restore: @MainActor () -> Void
+
+    func makeNSView(context: Context) -> HoldView { HoldView() }
+
+    func updateNSView(_ view: HoldView, context: Context) {
+        view.update(covered: covered, onHold: onHold, collapse: collapse, restore: restore)
+    }
+
+    @MainActor
+    final class HoldView: NSView {
+        private let imageView = NSImageView()
+        private var lastCovered: Bool?
+        private var capturedSize = CGSize.zero
+        private var generation = 0
+        private var onHold: (@MainActor (Bool) -> Void)?
+
+        override init(frame: NSRect) {
+            super.init(frame: frame)
+            imageView.imageScaling = .scaleAxesIndependently
+            imageView.autoresizingMask = [.width, .height]
+            imageView.isHidden = true
+            addSubview(imageView)
+        }
+        required init?(coder: NSCoder) { nil }
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        override func accessibilityIsIgnored() -> Bool { true }
+
+        override func layout() {
+            super.layout()
+            imageView.frame = bounds
+            if !imageView.isHidden && bounds.size != capturedSize {
+                imageView.isHidden = true
+                imageView.image = nil
+                let notify = onHold
+                DispatchQueue.main.async { notify?(false) }
+            }
+        }
+
+        func update(
+            covered: Bool,
+            onHold: @escaping @MainActor (Bool) -> Void,
+            collapse: @escaping @MainActor () -> Void,
+            restore: @escaping @MainActor () -> Void
+        ) {
+            self.onHold = onHold
+            if lastCovered == nil {
+                lastCovered = covered
+                if covered {
+                    DispatchQueue.main.async { collapse() }
+                }
+                return
+            }
+            guard covered != lastCovered else { return }
+            lastCovered = covered
+            generation += 1
+            let token = generation
+            if covered {
+                if let content = window?.contentView, bounds.width > 0, bounds.height > 0 {
+                    imageView.isHidden = true
+                    let rect = convert(bounds, to: content).intersection(content.bounds)
+                    if rect.width > 0, rect.height > 0,
+                       let pixels = content.bitmapImageRepForCachingDisplay(in: rect) {
+                        content.cacheDisplay(in: rect, to: pixels)
+                        let image = NSImage(size: rect.size)
+                        image.addRepresentation(pixels)
+                        imageView.image = image
+                        imageView.frame = bounds
+                        imageView.isHidden = false
+                        capturedSize = bounds.size
+                    }
+                }
+                DispatchQueue.main.async {
+                    onHold(true)
+                    collapse()
+                }
+            } else {
+                DispatchQueue.main.async { restore() }
+                // Keep the frozen split view visible across the initial layout
+                // pass while NavigationSplitView expands back from .detailOnly.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+                    guard let self, self.generation == token else { return }
+                    self.imageView.isHidden = true
+                    self.imageView.image = nil
+                    onHold(false)
+                }
+            }
+        }
     }
 }
 
@@ -2000,6 +1954,7 @@ struct BernPictureHeroProbe: NSViewRepresentable {
     let motion: BernMotion
     let reduced: Bool
     var exiting = false
+    var inert = false
     /// Fly what the window shows where the element is, for elements other
     /// than images.
     var capturesView = false
@@ -2018,6 +1973,7 @@ struct BernPictureHeroProbe: NSViewRepresentable {
         view.corner = corner
         view.motion = motion
         view.reduced = reduced
+        view.inert = inert
         view.visibility = visibility
         view.entered = entered
         if exiting {
@@ -2040,6 +1996,7 @@ final class BernPictureHeroAnchor: NSView {
     var motion = BernMotion(period: 0.48, damping: 0.86)
     var reduced = false
     var exiting = false
+    var inert = false
     var capturesView = false
     var visibility: ((Bool) -> Void)?
     var entered: (() -> Void)?
@@ -2049,13 +2006,38 @@ final class BernPictureHeroAnchor: NSView {
     /// its container leaves the window before it does.
     var lastRect: CGRect?
     private var scheduled = false
+    private var clipObserver: NSObjectProtocol?
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     override func viewWillMove(toWindow newWindow: NSWindow?) {
-        if newWindow !== window { detach() }
+        if newWindow !== window {
+            if let clipObserver {
+                NotificationCenter.default.removeObserver(clipObserver)
+                self.clipObserver = nil
+            }
+            detach()
+        }
         super.viewWillMove(toWindow: newWindow)
     }
-    override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); schedule() }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let clipObserver {
+            NotificationCenter.default.removeObserver(clipObserver)
+            self.clipObserver = nil
+        }
+        if let clip = enclosingScrollView?.contentView {
+            clip.postsBoundsChangedNotifications = true
+            clipObserver = NotificationCenter.default.addObserver(
+                forName: NSView.boundsDidChangeNotification, object: clip, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, !self.inert, !self.exiting, let heroes = self.heroes else { return }
+                    self.lastRect = heroes.rect(of: self)
+                }
+            }
+        }
+        schedule()
+    }
     override func layout() { super.layout(); schedule() }
 
     func schedule() {
@@ -2071,7 +2053,9 @@ final class BernPictureHeroAnchor: NSView {
             }
             guard self.picture != nil || self.capturesView else { return }
             self.heroes = heroes
-            self.lastRect = heroes.rect(of: self)
+            if !self.inert {
+                self.lastRect = heroes.rect(of: self)
+            }
             if self.reduced { heroes.finish(self.key) }
             guard !self.attached else { return }
             self.attached = true
@@ -2203,7 +2187,7 @@ final class BernWindowImageHeroes {
     @MainActor private class Flight {
         let view: BernHeroFlightView
         let from: BernHeroPicture
-        let to: BernHeroPicture
+        var to: BernHeroPicture
         weak var source: BernPictureHeroAnchor?
         weak var destination: BernPictureHeroAnchor?
         let motion: BernMotion
@@ -2237,6 +2221,9 @@ final class BernWindowImageHeroes {
         let key = anchor.key
         var previous = entries[key]?.last?.anchor
         var from = previous?.snapshot(in: overlay)
+        if let previous, previous.inert, let saved = previous.lastRect {
+            from?.rect = saved
+        }
         if let departure = departed.removeValue(forKey: key),
            ProcessInfo.processInfo.systemUptime - departure.time < 0.3 {
             from = departure.picture
@@ -2339,8 +2326,12 @@ final class BernWindowImageHeroes {
            !anchor.reduced && !underlying.reduced,
            prepareOverlay(),
            let from = fromPicture,
-           let to = underlying.snapshot(in: overlay),
-           from.rect != to.rect {
+           var to = underlying.snapshot(in: overlay) {
+            if let saved = underlying.lastRect,
+               underlying.inert || to.rect != saved {
+                to.rect = saved
+            }
+            if from.rect == to.rect { return }
             let flight = Flight(from: from, to: to, source: anchor, destination: underlying)
             flights[key] = flight
             anchor.visibility?(true)
@@ -2403,7 +2394,13 @@ final class BernWindowImageHeroes {
             guard window?.isVisible == true, flight.destination?.reduced != true else { finish(key); continue }
             // Keep the last pixels while the next layout pass mounts a
             // replacement; leave() retires abandoned destinations.
-            guard flight.destination?.attached == true else { continue }
+            guard let destination = flight.destination, destination.attached else { continue }
+            if !destination.inert && !destination.exiting,
+               destination.window != nil,
+               let live = rect(of: destination),
+               live.width > 0 && live.height > 0 {
+                flight.to.rect = live
+            }
             let t = (now - flight.started) / bernMotionScale
             let omega = 2 * Double.pi / max(0.01, flight.motion.period)
             let damping = max(0.01, flight.motion.damping)
