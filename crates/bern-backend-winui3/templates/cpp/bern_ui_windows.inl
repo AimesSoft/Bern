@@ -788,8 +788,25 @@ inline void TrackIdle(std::shared_ptr<Win> const& win, double seconds, std::func
         if (!wait) return;
         Host::After(std::chrono::milliseconds(static_cast<int64_t>(*wait * 1000)), [weak, generation, mine, seconds] {
             // Waking the window can show controls under a still mouse: it
-            // rests only if the mouse is over an area still.
+            // rests only if the mouse is over an area still, with no popup
+            // or text editor open.
             if (auto win = weak.lock(); win && *generation == mine && IdleWait(*win, seconds)) {
+                bool blocked = false;
+                if (win->root && win->root.XamlRoot()) {
+                    auto xamlRoot = win->root.XamlRoot();
+                    if (media::VisualTreeHelper::GetOpenPopupsForXamlRoot(xamlRoot).Size() > 0) {
+                        blocked = true;
+                    } else {
+                        auto focused = xaml::Input::FocusManager::GetFocusedElement(xamlRoot);
+                        if (focused && (focused.try_as<controls::TextBox>() || focused.try_as<controls::PasswordBox>())) {
+                            blocked = true;
+                        }
+                    }
+                }
+                if (blocked) {
+                    if (win->idleRest) win->idleRest();
+                    return;
+                }
                 win->idle.Set(true);
                 Snapshot::Schedule();
             }

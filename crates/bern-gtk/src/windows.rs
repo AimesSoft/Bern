@@ -594,12 +594,24 @@ impl Win {
             move || {
                 done.borrow_mut().take();
                 // Waking the window can show controls under a still mouse:
-                // it rests only if the mouse is over an area still.
+                // it rests only if the mouse is over an area still, with no
+                // popover or text editor open.
                 if let Some(win) = win.upgrade()
                     && win.idle_wait(seconds).is_some()
                 {
-                    win.idle.set(true);
-                    snapshot::schedule();
+                    let editing = gtk::prelude::GtkWindowExt::focus(&win.window).is_some_and(|w| {
+                        w.is::<gtk::Text>() || w.is::<gtk::TextView>() || w.is::<gtk::Editable>()
+                    });
+                    let popover =
+                        !crate::features::open_popovers(win.window.upcast_ref()).is_empty();
+                    if editing || popover {
+                        if let Some(rest) = win.idle_rest.borrow().clone() {
+                            rest();
+                        }
+                    } else {
+                        win.idle.set(true);
+                        snapshot::schedule();
+                    }
                 }
             },
         ));

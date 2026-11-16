@@ -938,6 +938,9 @@ struct BernWindowBehavior: ViewModifier {
     /// the window follow the device.
     var landscape: Bool? = nil
     @State private var timer = BernIdleTimer()
+    #if os(iOS)
+    @State private var pointerHider = BernPointerHider()
+    #endif
 
     func body(content: Content) -> some View {
         content
@@ -953,6 +956,9 @@ struct BernWindowBehavior: ViewModifier {
             .background(BernTouchWatcher { touched() })
             #if os(iOS)
             .background(BernHingeWatcher(window: context))
+            .onChange(of: immersive && context.idle, initial: true) { _, hidden in
+                pointerHider.attach(to: context.platform.window, hidden: hidden)
+            }
             #endif
             #if os(tvOS)
             .onReceive(NotificationCenter.default.publisher(for: bernRemoteActivity)) { note in
@@ -962,7 +968,12 @@ struct BernWindowBehavior: ViewModifier {
             .onContinuousHover { _ in touched() }
             .onAppear { touched() }
             .onChange(of: idleEnabled) { _, _ in touched() }
-            .onDisappear { timer.stop(context) }
+            .onDisappear {
+                timer.stop(context)
+                #if os(iOS)
+                pointerHider.attach(to: nil, hidden: false)
+                #endif
+            }
     }
 
     private func touched() {
@@ -970,6 +981,39 @@ struct BernWindowBehavior: ViewModifier {
         timer.reset(context, after: idleAfter)
     }
 }
+
+#if os(iOS)
+@MainActor
+final class BernPointerHider: NSObject, UIPointerInteractionDelegate {
+    private var hidden = false
+    private weak var view: UIView?
+    private var interaction: UIPointerInteraction?
+
+    func attach(to view: UIView?, hidden: Bool) {
+        let changed = self.hidden != hidden
+        self.hidden = hidden
+        if self.view !== view {
+            if let interaction, let oldView = self.view {
+                oldView.removeInteraction(interaction)
+            }
+            self.view = view
+            if let view {
+                let interaction = UIPointerInteraction(delegate: self)
+                view.addInteraction(interaction)
+                self.interaction = interaction
+            } else {
+                self.interaction = nil
+            }
+        } else if changed {
+            interaction?.invalidate()
+        }
+    }
+
+    func pointerInteraction(_ interaction: UIPointerInteraction, styleFor region: UIPointerRegion) -> UIPointerStyle? {
+        hidden ? UIPointerStyle.hidden() : nil
+    }
+}
+#endif
 
 @MainActor
 final class BernIdleTimer {

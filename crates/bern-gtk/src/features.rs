@@ -620,7 +620,7 @@ fn present(button: &gtk::MenuButton) {
 }
 
 /// The popovers shown in `widget`'s tree.
-fn open_popovers(widget: &gtk::Widget) -> Vec<gtk::Popover> {
+pub(crate) fn open_popovers(widget: &gtk::Widget) -> Vec<gtk::Popover> {
     let mut open = Vec::new();
     let mut pending = vec![widget.clone()];
     while let Some(widget) = pending.pop() {
