@@ -2064,6 +2064,7 @@ struct BernWindowRoot<Content: View>: View {
             ZStack {
                 if let modal { modal.transition(.opacity) }
             }
+            .allowsHitTesting(modal != nil)
             .animation(BernMotion(period: 0.45, damping: 1.0).animation, value: modal != nil)
         }
         .bernHeroRoot()

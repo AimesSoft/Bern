@@ -2248,7 +2248,9 @@ private struct BernRemovalExitSignal: Transition {
     let scope = UUID()
 
     func body(content: Content, phase: TransitionPhase) -> some View {
-        content.modifier(BernHeroScopeModifier(scope: scope, exiting: phase == .didDisappear))
+        content
+            .allowsHitTesting(phase != .didDisappear)
+            .modifier(BernHeroScopeModifier(scope: scope, exiting: phase == .didDisappear))
     }
 }
 
@@ -6310,9 +6312,10 @@ struct BernSearchPaletteHost<Content: View>: View {
 
     /// The content under the palette, which covers it while presented.
     private func layer(_ content: some View) -> some View {
-        content
-            .disabled(palette.presented)
-            .accessibilityHidden(palette.presented)
+        let blocking = palette.presented && !palette.closing
+        return content
+            .disabled(blocking)
+            .accessibilityHidden(blocking)
             .overlay {
                 GeometryReader { geometry in
                     if palette.presented {
@@ -6332,8 +6335,13 @@ struct BernSearchPaletteHost<Content: View>: View {
                             panel(in: geometry)
                         }
                         .frame(width: geometry.size.width, height: geometry.size.height)
+                        .allowsHitTesting(!palette.closing)
                         #if os(macOS)
-                        .background(BernPaletteOutsideClicks(panel: panelBounds(in: geometry)) { palette.close() })
+                        .background {
+                            if !palette.closing {
+                                BernPaletteOutsideClicks(panel: panelBounds(in: geometry)) { palette.close() }
+                            }
+                        }
                         #endif
                     }
                 }
@@ -7171,7 +7179,6 @@ private struct BernModalLayer<Content: View>: View {
             expanded = false
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + (reduceMotion ? 0.1 : 0.22)) {
-            closing = false
             dismiss()
         }
     }
@@ -7234,9 +7241,10 @@ private struct BernModalLayer<Content: View>: View {
                 ))
             }
             .coordinateSpace(name: "bern-modal-space")
+            .allowsHitTesting(!closing)
             #if os(macOS)
             .background {
-                if dismiss != nil {
+                if dismiss != nil && !closing {
                     BernPaletteOutsideClicks(panel: cardRect) { triggerDismiss() }
                 }
             }
