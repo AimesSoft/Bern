@@ -1795,7 +1795,6 @@ final class BernAppearanceRegions {
     func add(_ view: BernAppearanceRegionView) {
         views.removeAll { $0.window == nil && $0 !== view }
         if !views.contains(where: { $0 === view }) { views.append(view) }
-        syncWindow(view.window)
         guard observer == nil else { return }
         // Delivered synchronously, before the menu is drawn.
         observer = NotificationCenter.default.addObserver(
@@ -1812,26 +1811,8 @@ final class BernAppearanceRegions {
         }
     }
 
-    func remove(_ view: BernAppearanceRegionView, from oldWindow: NSWindow?) {
+    func remove(_ view: BernAppearanceRegionView) {
         views.removeAll { $0 === view }
-        syncWindow(oldWindow)
-    }
-
-    /// When a full-window `appearance:` region covers a window, sync the
-    /// NSWindow's own AppKit appearance so Liquid Glass (`NSGlassEffectView`),
-    /// segmented controls, text fields, and popovers match it too.
-    func syncWindow(_ window: NSWindow?) {
-        guard let window else { return }
-        let contentArea = max(1, window.contentLayoutRect.width * window.contentLayoutRect.height)
-        let fullCover = views.last { view in
-            guard view.window === window else { return false }
-            let frame = view.convert(view.bounds, to: nil)
-            return (frame.width * frame.height) >= contentArea * 0.85
-        }
-        let wanted = fullCover.flatMap { NSAppearance(named: $0.dark ? .darkAqua : .aqua) }
-        if window.appearance?.name != wanted?.name {
-            window.appearance = wanted
-        }
     }
 
     /// The appearance of the smallest part under `point`, in screen
@@ -1853,23 +1834,15 @@ final class BernAppearanceRegions {
 /// Marks the part it is the background of; it takes no clicks.
 final class BernAppearanceRegionView: NSView {
     var dark = true
-    private weak var lastWindow: NSWindow?
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-    override func layout() {
-        super.layout()
-        BernAppearanceRegions.shared.syncWindow(window)
-    }
-
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if let window {
-            lastWindow = window
-            BernAppearanceRegions.shared.add(self)
+        if window == nil {
+            BernAppearanceRegions.shared.remove(self)
         } else {
-            BernAppearanceRegions.shared.remove(self, from: lastWindow)
-            lastWindow = nil
+            BernAppearanceRegions.shared.add(self)
         }
     }
 }
@@ -1885,7 +1858,37 @@ struct BernAppearanceRegion: NSViewRepresentable {
 
     func updateNSView(_ view: BernAppearanceRegionView, context: Context) {
         view.dark = dark
-        BernAppearanceRegions.shared.syncWindow(view.window)
+    }
+}
+
+/// Applies `NSAppearance` solely to a child `_NSPopoverWindow` (never to the
+/// host `NSWindow`), so popovers opened inside a dark region over a light
+/// window render dark glass and dark arrows without touching the window.
+struct BernPopoverWindowAppearance: NSViewRepresentable {
+    let dark: Bool
+
+    func makeNSView(context: Context) -> ProbeView {
+        let view = ProbeView()
+        view.dark = dark
+        return view
+    }
+
+    func updateNSView(_ view: ProbeView, context: Context) {
+        view.dark = dark
+        view.apply()
+    }
+
+    @MainActor final class ProbeView: NSView {
+        var dark = false
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            apply()
+        }
+        func apply() {
+            guard let window, window.className.contains("Popover") else { return }
+            window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+        }
     }
 }
 
@@ -2214,7 +2217,8 @@ final class BernWindowImageHeroes {
         entries[key]?.last(where: { $0.anchor?.picture != nil })?.anchor?.picture
     }
 
-    func hasUnderlying(_ key: String) -> Bool {
+    func isFlyingOrLayered(_ key: String) -> Bool {
+        if flights[key] != nil { return true }
         let live = entries[key]?.filter { $0.anchor?.attached == true }.count ?? 0
         return live >= 2
     }
