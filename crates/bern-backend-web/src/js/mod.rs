@@ -102,6 +102,13 @@ fn local(name: &str) -> String {
     format!("l_{name}")
 }
 
+pub(crate) fn state_prop(name: &str) -> String {
+    match name.split_once('.') {
+        Some((namespace, field)) => format!("m${namespace}${field}"),
+        None => name.to_string(),
+    }
+}
+
 pub struct Generator<'a> {
     app: &'a Application,
     /// Whether the nodes being written are a sidebar's content, where
@@ -237,7 +244,7 @@ impl<'a> Generator<'a> {
             let initial = Value::default_for(&field.ty, types).unwrap_or(Value::Unit);
             out.line(format!(
                 "{}: B.cell({}),",
-                field.name,
+                state_prop(&field.name),
                 literal(&initial, &field.ty, types)
             ));
         }
@@ -246,11 +253,20 @@ impl<'a> Generator<'a> {
         out.open("apply(field, r) {");
         out.open("switch (field) {");
         for (index, field) in app.protocol.state.iter().enumerate() {
-            out.line(format!(
-                "case {index}: E.{}.set({}); break;",
-                field.name,
-                decode(&field.ty)
-            ));
+            let prop = state_prop(&field.name);
+            if field.keyed.is_some()
+                && let bern_protocol::Type::List { inner } = &field.ty
+            {
+                out.line(format!(
+                    "case {index}: E.{prop}.set(B.readKeyedList(r, E.{prop}.peek(), (r) => {})); break;",
+                    decode(inner)
+                ));
+            } else {
+                out.line(format!(
+                    "case {index}: E.{prop}.set({}); break;",
+                    decode(&field.ty)
+                ));
+            }
         }
         out.line("default: throw new B.DecodeError(`unknown state field ${field}`);");
         out.close("}");

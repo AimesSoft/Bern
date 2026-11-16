@@ -138,6 +138,13 @@ pub struct StateField {
     /// [`crate::FieldDef::content`]).
     #[serde(default, skip_serializing_if = "is_false")]
     pub content: bool,
+    /// `#[stream]`: a high-frequency field read even when `Engine::quiet()`
+    /// holds on a wake, so the rest of a large state need not be snapshotted.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub stream: bool,
+    /// `#[keyed(field)]`: record key field for incremental list updates.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keyed: Option<String>,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -267,6 +274,38 @@ impl ProtocolDescriptor {
                 )));
             }
             self.types.check_type(&field.ty, &mut Vec::new())?;
+            if let Some(key_name) = &field.keyed {
+                let Type::List { inner } = &field.ty else {
+                    return Err(DescriptorError(format!(
+                        "state field `{}` sets `#[keyed({key_name})]`, which applies only to a list of records",
+                        field.name
+                    )));
+                };
+                let Type::Record { name: rec_name } = inner.as_ref() else {
+                    return Err(DescriptorError(format!(
+                        "state field `{}` sets `#[keyed({key_name})]`, which applies only to a list of records",
+                        field.name
+                    )));
+                };
+                let Some(def) = self.types.record_def(rec_name) else {
+                    return Err(DescriptorError(format!(
+                        "state field `{}` references unknown record `{rec_name}`",
+                        field.name
+                    )));
+                };
+                let Some(key_field) = def.fields.iter().find(|f| &f.name == key_name) else {
+                    return Err(DescriptorError(format!(
+                        "state field `{}` sets `#[keyed({key_name})]`, which `{rec_name}` does not have",
+                        field.name
+                    )));
+                };
+                if !matches!(key_field.ty, Type::Int | Type::Text) {
+                    return Err(DescriptorError(format!(
+                        "key field `{key_name}` of `{rec_name}` must be `i64` or `String`, found {}",
+                        key_field.ty.display()
+                    )));
+                }
+            }
         }
         let mut ids = BTreeMap::new();
         for command in &self.commands {
@@ -422,6 +461,8 @@ mod tests {
             ty: Type::Int,
             doc: String::new(),
             content: false,
+            stream: false,
+            keyed: None,
         });
         with_state.validate().unwrap();
         // Unknown field.

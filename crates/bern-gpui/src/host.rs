@@ -8,7 +8,7 @@
 //! GPUI rebuilds a window's elements on each render, so no binding has to
 //! follow single fields.
 
-use crate::protocol::{Reader, Value, Writer, decode, encode};
+use crate::protocol::{Reader, Value, Writer, decode_state_field, encode};
 use crate::{AppDef, Ctx, Failure, StartEngine, text, windows};
 use bern_ffi::{BernApp, BernBuffer, BernCallbacks};
 use futures::StreamExt;
@@ -172,32 +172,40 @@ impl Host {
         self.app.get()
     }
 
-    fn receive_state(&self, bytes: &[u8]) {
+    fn receive_state(&self, bytes: &[u8]) -> Vec<usize> {
         let mut reader = Reader::new(bytes);
         let (Ok(revision), Ok(count)) = (reader.u64(), reader.u32()) else {
-            return;
+            return Vec::new();
         };
         if revision < self.revision.get() {
-            return;
+            return Vec::new();
         }
         self.revision.set(revision);
         let state = &self.def.descriptor.state;
         let types = &self.def.descriptor.types;
+        let current = self.engine.borrow();
         let mut changes = Vec::new();
         for _ in 0..count {
-            let Ok(field) = reader.u32() else { return };
-            let Some(spec) = state.get(field as usize) else {
-                return;
+            let Ok(field) = reader.u32() else {
+                return Vec::new();
             };
-            match decode(&spec.ty, types, &mut reader) {
-                Ok(value) => changes.push((field as usize, value)),
-                Err(_) => return,
+            let index = field as usize;
+            let Some(spec) = state.get(index) else {
+                return Vec::new();
+            };
+            match decode_state_field(current.get(index), spec, types, &mut reader) {
+                Ok(value) => changes.push((index, value)),
+                Err(_) => return Vec::new(),
             }
         }
+        drop(current);
         let mut engine = self.engine.borrow_mut();
+        let mut touched = Vec::with_capacity(changes.len());
         for (field, value) in changes {
             engine[field] = value;
+            touched.push(field);
         }
+        touched
     }
 
     fn receive_reply(&self, _token: u64, bytes: &[u8]) {
@@ -286,7 +294,7 @@ fn start_engine(host: &Host, start: StartEngine) -> Result<(), String> {
     }
     host.app.set(app);
     // SAFETY: the handle was just created.
-    host.receive_state(&take(unsafe { bern_ffi::bern_app_snapshot(app) }));
+    let _ = host.receive_state(&take(unsafe { bern_ffi::bern_app_snapshot(app) }));
     crate::media::attach_kernel();
     Ok(())
 }
@@ -527,8 +535,8 @@ pub(crate) fn run(def: &'static AppDef, start: StartEngine) {
                 while let Some(event) = events.next().await {
                     cx.update(|cx| match event {
                         Event::State(bytes) => {
-                            host().receive_state(&bytes);
-                            windows::changed(cx);
+                            let touched = host().receive_state(&bytes);
+                            windows::changed_fields(cx, &touched);
                         }
                         Event::Reply(token, bytes) => host().receive_reply(token, &bytes),
                         Event::SessionRequest(request, bytes) => {

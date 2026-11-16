@@ -304,25 +304,61 @@ impl Checker<'_> {
                     return None;
                 };
                 if namespace == self.protocol.namespace {
-                    let Some(field) = self.protocol.state_index(&first.to_string()) else {
+                    if first == "modules" && !self.protocol.modules.is_empty() {
+                        let Some(module_ident) = rest.get(1) else {
+                            self.error(
+                                first.span(),
+                                "read an optional module switch such as `app.modules.downloads`",
+                            );
+                            return None;
+                        };
+                        if rest.len() > 2 {
+                            self.error(rest[2].span(), "`bool` has no fields");
+                            return None;
+                        }
+                        let qualified = format!("modules.{module_ident}");
+                        let Some(field) = self.protocol.state_index(&qualified) else {
+                            self.error(
+                                module_ident.span(),
+                                format!("`{module_ident}` is not an optional module"),
+                            );
+                            return None;
+                        };
+                        (
+                            ir::Binding::Engine {
+                                field,
+                                path: Vec::new(),
+                            },
+                            Type::Bool,
+                        )
+                    } else {
+                        let Some(field) = self.protocol.state_index(&first.to_string()) else {
+                            self.error(
+                                first.span(),
+                                format!(
+                                    "protocol `{}` has no state field `{first}`",
+                                    self.protocol.namespace
+                                ),
+                            );
+                            return None;
+                        };
+                        let (sub, ty) =
+                            self.record_path(self.protocol.state[field].ty.clone(), &rest[1..])?;
+                        (ir::Binding::Engine { field, path: sub }, ty)
+                    }
+                } else {
+                    // Each module state field sits in the composed catalog as
+                    // `namespace.field`, so updates travel per field.
+                    let qualified = format!("{namespace}.{first}");
+                    let Some(field) = self.protocol.state_index(&qualified) else {
                         self.error(
                             first.span(),
-                            format!(
-                                "protocol `{}` has no state field `{first}`",
-                                self.protocol.namespace
-                            ),
+                            format!("protocol `{namespace}` has no state field `{first}`"),
                         );
                         return None;
                     };
                     let (sub, ty) =
                         self.record_path(self.protocol.state[field].ty.clone(), &rest[1..])?;
-                    (ir::Binding::Engine { field, path: sub }, ty)
-                } else {
-                    // A module's state is the application state field named
-                    // after the module.
-                    let field = self.protocol.state_index(&namespace)?;
-                    let (sub, ty) =
-                        self.record_path(self.protocol.state[field].ty.clone(), rest)?;
                     (ir::Binding::Engine { field, path: sub }, ty)
                 }
             }

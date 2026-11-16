@@ -94,6 +94,47 @@ struct BernReader {
         }
         return value
     }
+
+    mutating func keyedList<Element>(
+        _ current: [Element],
+        _ decode: (inout BernReader) throws -> Element
+    ) throws -> [Element] {
+        switch try u8() {
+        case 0:
+            let count = Int(try u32())
+            var items: [Element] = []
+            items.reserveCapacity(min(count, 4096))
+            for _ in 0..<count { items.append(try decode(&self)) }
+            return items
+        case 1:
+            let total = Int(try u32())
+            let segments = Int(try u32())
+            var out: [Element] = []
+            out.reserveCapacity(min(total, 4096))
+            for _ in 0..<segments {
+                switch try u8() {
+                case 0:
+                    let start = Int(try u32())
+                    let len = Int(try u32())
+                    guard start >= 0, len >= 0, start + len <= current.count else {
+                        throw BernDecodeError(message: "keyed list copy out of bounds")
+                    }
+                    out.append(contentsOf: current[start..<(start + len)])
+                case 1:
+                    let len = Int(try u32())
+                    for _ in 0..<len { out.append(try decode(&self)) }
+                case let tag:
+                    throw BernDecodeError(message: "invalid keyed list segment \(tag)")
+                }
+            }
+            guard out.count == total else {
+                throw BernDecodeError(message: "keyed list length mismatch")
+            }
+            return out
+        case let mode:
+            throw BernDecodeError(message: "invalid keyed list mode \(mode)")
+        }
+    }
 }
 
 protocol BernCodable {

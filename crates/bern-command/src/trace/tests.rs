@@ -236,6 +236,8 @@ fn descriptor() -> &'static ProtocolDescriptor {
             ty,
             doc: String::new(),
             content: false,
+            stream: false,
+            keyed: None,
         };
         let descriptor = ProtocolDescriptor {
             modules: Vec::new(),

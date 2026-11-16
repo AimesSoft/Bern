@@ -119,6 +119,31 @@ export function readList(reader, decode) {
   return items;
 }
 
+export function readKeyedList(reader, current, decode) {
+  const mode = reader.u8();
+  if (mode === 0) return readList(reader, decode);
+  if (mode !== 1) throw new DecodeError(`invalid keyed list mode ${mode}`);
+  const total = reader.u32();
+  const segments = reader.u32();
+  const out = [];
+  for (let s = 0; s < segments; s++) {
+    const tag = reader.u8();
+    if (tag === 0) {
+      const start = reader.u32();
+      const len = reader.u32();
+      if (start + len > current.length) throw new DecodeError("keyed list copy out of bounds");
+      for (let i = 0; i < len; i++) out.push(current[start + i]);
+    } else if (tag === 1) {
+      const len = reader.u32();
+      for (let i = 0; i < len; i++) out.push(decode(reader));
+    } else {
+      throw new DecodeError(`invalid keyed list segment ${tag}`);
+    }
+  }
+  if (out.length !== total) throw new DecodeError("keyed list length mismatch");
+  return out;
+}
+
 export function writeList(writer, value, encode) {
   writer.u32(value.length);
   for (const item of value) encode(writer, item);

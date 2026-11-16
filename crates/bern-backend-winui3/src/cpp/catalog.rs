@@ -247,6 +247,18 @@ impl Generator<'_> {
             .map(|field| field.ty.clone())
             .collect();
         out.line(format!("c.state = {};", types_list(&state)));
+        let keyed: Vec<&str> = protocol
+            .state
+            .iter()
+            .map(|field| {
+                if field.keyed.is_some() {
+                    "true"
+                } else {
+                    "false"
+                }
+            })
+            .collect();
+        out.line(format!("c.stateKeyed = {{{}}};", keyed.join(", ")));
         out.open("c.commands = {");
         for command in &protocol.commands {
             let params: Vec<Type> = command

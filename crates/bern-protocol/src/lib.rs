@@ -18,9 +18,12 @@ mod text;
 mod types;
 mod value;
 
-pub use codec::{CodecError, Reader, Writer, decode, encode};
+pub use codec::{
+    CodecError, Reader, Writer, decode, decode_state_field, encode, encode_state_field,
+};
 pub use compose::{
     MODULES_STATE_TYPE, ModulePart, SET_ENABLED, command_offsets, compose, module_state_type,
+    state_offsets,
 };
 pub use descriptor::{
     CommandPolicy, CommandSpec, Concurrency, DescriptorError, EventSpec, ExternalNames,

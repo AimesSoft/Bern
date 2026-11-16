@@ -743,6 +743,8 @@ mod tests {
                     ty: Type::Text,
                     doc: "Title of the plan.".into(),
                     content: true,
+                    stream: false,
+                    keyed: None,
                 }],
                 commands: vec![rename, notes],
                 events: vec![],

@@ -215,6 +215,8 @@ pub struct WindowDef {
     pub immersive: Option<fn(&Ctx) -> bool>,
     /// While false, the window is never idle (`idle_enabled`).
     pub idle_enabled: Option<fn(&Ctx) -> bool>,
+    /// Engine state fields read by this window and its components.
+    pub engine_fields: &'static [usize],
     /// The window's content, built again on every render.
     pub content: fn(&Ctx) -> El,
 }

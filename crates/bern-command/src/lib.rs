@@ -60,6 +60,12 @@ pub trait EngineProtocol: Send + 'static {
     }
     /// Current value of every state field, in descriptor order.
     fn snapshot(&self) -> Vec<Value>;
+    /// The fields the last `invoke` may have changed, with their positions;
+    /// `None` for all of them. A composite engine snapshots only the modules
+    /// the command and its follow-ups touched.
+    fn invoked_fields(&mut self) -> Option<Vec<(usize, Value)>> {
+        None
+    }
     /// The fields `wake` may have changed, with their positions; `None` for
     /// all of them. A snapshot of a large state costs too much for an
     /// engine woken many times a second.
@@ -772,10 +778,14 @@ impl<E: EngineProtocol> Worker<E> {
                 0,
             );
         }
+        let published = !shared.state.lock().expect("state lock").1.is_empty();
         let revision = if *poisoned {
             shared.state.lock().expect("state lock").0
         } else if job_trace.is_some() {
+            let _ = engine.invoked_fields();
             publish_traced(shared, &*engine)
+        } else if published && let Some(fields) = engine.invoked_fields() {
+            publish_fields(shared, fields)
         } else {
             publish(shared, engine.snapshot())
         };

@@ -49,6 +49,18 @@ pub fn session_variable(name: &str) -> String {
     format!("session_{name}")
 }
 
+/// The property name of a state field on the generated engine mirror.
+///
+/// Unqualified fields (`last_action`) become `lastAction`; module-qualified
+/// fields (`notes.count` or `modules.notes`) become `module_notes_count`,
+/// which cannot collide with any `camel`-converted shell field.
+pub fn state_member(name: &str) -> String {
+    match name.split_once('.') {
+        Some((namespace, field)) => format!("module_{namespace}_{}", camel(field)),
+        None => camel(name),
+    }
+}
+
 /// The view of a component in generated Swift and Kotlin: `empty` →
 /// `AppView_empty`.
 ///

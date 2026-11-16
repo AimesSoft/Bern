@@ -24,6 +24,10 @@ pub struct FieldItem {
     pub initial: Option<Expr>,
     /// `#[content]`: text that is data, shown as it is.
     pub content: bool,
+    /// `#[stream]`: high-frequency state field published even on a quiet wake.
+    pub stream: bool,
+    /// `#[keyed(field)]`: key field for incremental record-list updates.
+    pub keyed: Option<Ident>,
     pub span: Span,
 }
 
@@ -433,11 +437,38 @@ fn check_known_attrs(attrs: &[Attribute], allowed: &[&str], what: &str) -> syn::
     Ok(())
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FieldPlace {
+    ValueVariant,
+    ValueRecord,
+    Session,
+    State,
+}
+
+fn parse_stream(attrs: &[Attribute]) -> syn::Result<bool> {
+    let Some(attr) = find_attr(attrs, "stream") else {
+        return Ok(false);
+    };
+    if !matches!(attr.meta, Meta::Path(_)) {
+        return Err(error(attr.span(), "`#[stream]` takes no arguments"));
+    }
+    Ok(true)
+}
+
+fn parse_keyed(attrs: &[Attribute]) -> syn::Result<Option<Ident>> {
+    let Some(attr) = find_attr(attrs, "keyed") else {
+        return Ok(None);
+    };
+    let key: Ident = attr
+        .parse_args()
+        .map_err(|_| error(attr.span(), "expected `#[keyed(field_name)]`"))?;
+    Ok(Some(key))
+}
+
 fn parse_named_fields(
     fields: &syn::Fields,
     owner: &Ident,
-    allow_initial: bool,
-    require_pub: bool,
+    place: FieldPlace,
 ) -> syn::Result<Vec<FieldItem>> {
     let named = match fields {
         syn::Fields::Named(named) => named,
@@ -449,16 +480,18 @@ fn parse_named_fields(
             ));
         }
     };
+    let allow_initial = place == FieldPlace::Session;
+    let require_pub = place != FieldPlace::ValueVariant;
+    let allowed: &[&str] = match place {
+        FieldPlace::Session => &["initial"],
+        FieldPlace::State => &["content", "stream", "keyed"],
+        FieldPlace::ValueVariant | FieldPlace::ValueRecord => &["content"],
+    };
     let mut result = Vec::new();
     for field in &named.named {
         let name = field.ident.clone().unwrap();
         // Drafts are what the user typed, shown as it is; engine text says
         // with `#[content]` when it is data rather than a sentence.
-        let allowed: &[&str] = if allow_initial {
-            &["initial"]
-        } else {
-            &["content"]
-        };
         check_known_attrs(&field.attrs, allowed, "fields")?;
         if require_pub && !matches!(field.vis, syn::Visibility::Public(_)) {
             return Err(error(
@@ -476,6 +509,12 @@ fn parse_named_fields(
                 None
             },
             content: !allow_initial && find_attr(&field.attrs, "content").is_some(),
+            stream: place == FieldPlace::State && parse_stream(&field.attrs)?,
+            keyed: if place == FieldPlace::State {
+                parse_keyed(&field.attrs)?
+            } else {
+                None
+            },
             span: name.span(),
             name,
         });
@@ -554,7 +593,11 @@ pub fn parse_value(item: &Item) -> syn::Result<ValueItem> {
                 }
                 variants.push(VariantItem {
                     name: variant.ident.clone(),
-                    fields: parse_named_fields(&variant.fields, &variant.ident, false, false)?,
+                    fields: parse_named_fields(
+                        &variant.fields,
+                        &variant.ident,
+                        FieldPlace::ValueVariant,
+                    )?,
                     label: parse_label(&variant.attrs)?,
                     doc: doc_comment(&variant.attrs),
                     span: variant.ident.span(),
@@ -589,8 +632,7 @@ pub fn parse_value(item: &Item) -> syn::Result<ValueItem> {
                 kind: ValueKind::Record(parse_named_fields(
                     &item.fields,
                     &item.ident,
-                    false,
-                    true,
+                    FieldPlace::ValueRecord,
                 )?),
                 doc: doc_comment(&item.attrs),
                 span: item.ident.span(),
@@ -610,7 +652,7 @@ pub fn parse_session(item: &Item) -> syn::Result<SessionItem> {
     };
     reject_generics(&item.generics, &item.ident)?;
     check_known_attrs(&item.attrs, &["session"], "session state")?;
-    let fields = parse_named_fields(&item.fields, &item.ident, true, true)?;
+    let fields = parse_named_fields(&item.fields, &item.ident, FieldPlace::Session)?;
     if fields.is_empty() {
         return Err(error(
             item.ident.span(),
@@ -987,7 +1029,11 @@ pub fn parse_protocol(args: ProtocolArgs, module: ItemMod) -> syn::Result<Protoc
                 check_known_attrs(&stripped.attrs, &[], "state")?;
                 state = Some(StateItem {
                     name: stripped.ident.clone(),
-                    fields: parse_named_fields(&stripped.fields, &stripped.ident, false, true)?,
+                    fields: parse_named_fields(
+                        &stripped.fields,
+                        &stripped.ident,
+                        FieldPlace::State,
+                    )?,
                     span: stripped.ident.span(),
                 });
             }

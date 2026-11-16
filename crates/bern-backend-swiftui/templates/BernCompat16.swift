@@ -3,10 +3,45 @@
 // What SwiftUI gained in iOS 17, as far as iOS 16 can have it. The source of
 // the other front end is rewritten to call these; see `ios16.rs`.
 
+import Combine
 import SwiftUI
 import UIKit
 
 // MARK: - Following state
+
+@MainActor
+private final class BernFieldSignal16 {
+    let subject = PassthroughSubject<Void, Never>()
+}
+
+@MainActor
+enum BernEngineSignals16 {
+    private static var signals: [Int: BernFieldSignal16] = [:]
+
+    static func subject(_ field: Int) -> PassthroughSubject<Void, Never> {
+        if let existing = signals[field] { return existing.subject }
+        let created = BernFieldSignal16()
+        signals[field] = created
+        return created.subject
+    }
+
+    static func send(_ field: Int) {
+        signals[field]?.subject.send()
+    }
+}
+
+@MainActor
+final class BernFieldObserver16: ObservableObject {
+    private var cancellables: [AnyCancellable] = []
+
+    init(_ fields: [Int]) {
+        for field in fields {
+            BernEngineSignals16.subject(field).sink { [weak self] in
+                self?.objectWillChange.send()
+            }.store(in: &cancellables)
+        }
+    }
+}
 
 /// The one signal of what any view may read without declaring it, such as
 /// the language and the theme. Changes in one turn of the main loop make one

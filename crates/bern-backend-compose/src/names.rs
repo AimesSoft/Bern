@@ -45,6 +45,12 @@ pub fn member(snake: &str) -> String {
     escape(bern_target_api::names::camel(snake))
 }
 
+/// Property name of an engine state field (`count` → `count`,
+/// `notes.count` → `module_notes_count`).
+pub fn state_member(name: &str) -> String {
+    escape(bern_target_api::names::state_member(name))
+}
+
 /// `snake_case` as a Kotlin type, `UpperCamelCase`.
 pub use bern_target_api::names::{component, pascal, session_type, session_variable, value_type};
 

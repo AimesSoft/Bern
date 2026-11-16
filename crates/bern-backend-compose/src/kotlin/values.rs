@@ -2,7 +2,7 @@
 //! and session state that holds them.
 
 use super::Out;
-use crate::names::{self, double, member, string, value_type};
+use crate::names::{self, double, member, state_member, string, value_type};
 use bern_ir::Application;
 use bern_protocol::{EnumDef, RecordDef, Type, TypeTable, Value};
 
@@ -361,7 +361,7 @@ pub(super) fn generate_engine(out: &mut Out, app: &Application) {
         }
         out.line(format!(
             "var {}: {} by mutableStateOf({})",
-            member(&field.name),
+            state_member(&field.name),
             kotlin_type(&field.ty),
             default_literal(&field.ty, &app.types)
         ));
@@ -371,11 +371,20 @@ pub(super) fn generate_engine(out: &mut Out, app: &Application) {
     out.open("fun bernApply(field: Int, reader: BernReader) {");
     out.open("when (field) {");
     for (index, field) in protocol.state.iter().enumerate() {
-        out.line(format!(
-            "{index} -> {} = {}",
-            member(&field.name),
-            decode(&field.ty, "reader")
-        ));
+        let prop = state_member(&field.name);
+        if field.keyed.is_some()
+            && let Type::List { inner } = &field.ty
+        {
+            out.line(format!(
+                "{index} -> {prop} = reader.keyedList({prop}) {{ {} }}",
+                decode(inner, "reader")
+            ));
+        } else {
+            out.line(format!(
+                "{index} -> {prop} = {}",
+                decode(&field.ty, "reader")
+            ));
+        }
     }
     out.line("else -> throw BernDecodeError(\"unknown state field $field\")");
     out.close("}");
