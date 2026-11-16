@@ -189,13 +189,22 @@ pub fn one_size(element: &bern_ir::Element) -> bool {
         && (element.prop("width").is_some() || element.prop("height").is_some())
 }
 
+/// Whether an `Image` has a static blur large enough (`radius >= 4`) to bake
+/// into its downsampled bitmap instead of running a live full-viewport GPU blur.
+pub fn static_preblur(element: &bern_ir::Element) -> bool {
+    element.kind == "Image"
+        && element.keyword("hero").is_none()
+        && element.prop("animate").is_none()
+        && prop_min_number(element, "blur").is_some_and(|radius| radius >= 4.0)
+}
+
 /// An upper bound in logical points on the longer side an `Image` needs when
 /// decoded, when `width` and `height` alone do not already fix it:
 /// - a static `blur` of `radius >= 4` destroys detail finer than `1600 / radius`
 ///   points (clamped to `32..=256`, i.e. `128px` at `2x` for a `blur: 90`
 ///   window backdrop);
-/// - an `aspect`-sized card inside a `Grid(min_width: M, gap: G)` is never
-///   wider than `2 * M + G` points at any window width.
+/// - an `aspect`-sized card inside a `Grid(min_width: M, gap: G)` or a
+///   fixed-width container is never wider than that enclosing bound.
 pub fn decode_max_side(app: &Application, target: &bern_ir::Element) -> Option<f64> {
     if target.keyword("hero").is_some() {
         return None;
@@ -203,17 +212,17 @@ pub fn decode_max_side(app: &Application, target: &bern_ir::Element) -> Option<f
     let blur_cap = prop_min_number(target, "blur")
         .filter(|radius| *radius >= 4.0)
         .map(|radius| (1600.0 / radius).clamp(32.0, 256.0).ceil());
-    let grid_cap = if target.prop("width").is_none() && target.prop("height").is_none() {
+    let container_cap = if target.prop("width").is_none() && target.prop("height").is_none() {
         prop_min_number(target, "aspect")
             .filter(|aspect| *aspect > 0.0)
             .and_then(|aspect| {
-                let cell_width = enclosing_grid_max_width(app, target)?;
-                Some((cell_width * (1.0_f64).max(1.0 / aspect)).ceil())
+                let bound_width = enclosing_max_width(app, target)?;
+                Some((bound_width * (1.0_f64).max(1.0 / aspect)).ceil())
             })
     } else {
         None
     };
-    match (blur_cap, grid_cap) {
+    match (blur_cap, container_cap) {
         (Some(a), Some(b)) => Some(a.min(b)),
         (a, b) => a.or(b),
     }
@@ -255,32 +264,53 @@ fn prop_max_number(element: &bern_ir::Element, name: &str) -> Option<f64> {
     }
 }
 
-/// The maximum cell width (`2 * min_width + gap`) of the `Grid` enclosing
-/// `target`, either directly in the same tree or across every call site of
-/// the component containing `target`.
-fn enclosing_grid_max_width(app: &Application, target: &bern_ir::Element) -> Option<f64> {
-    fn grid_bound(element: &bern_ir::Element) -> Option<f64> {
-        if element.kind != "Grid" {
-            return None;
+/// The tightest enclosing width bound for `target`: either a `Grid` cell
+/// (`2 * min_width + gap`) or a fixed-width layout container, across direct
+/// trees or every call site of the component containing `target`.
+fn enclosing_max_width(app: &Application, target: &bern_ir::Element) -> Option<f64> {
+    fn container_bound(element: &bern_ir::Element) -> Option<f64> {
+        if element.kind == "Grid" {
+            let min_width = prop_max_number(element, "min_width")?;
+            let gap = prop_max_number(element, "gap").unwrap_or(8.0).max(0.0);
+            return (min_width > 0.0).then_some(2.0 * min_width + gap);
         }
-        let min_width = prop_max_number(element, "min_width")?;
-        let gap = prop_max_number(element, "gap").unwrap_or(8.0).max(0.0);
-        (min_width > 0.0).then_some(2.0 * min_width + gap)
+        if matches!(
+            element.kind.as_str(),
+            "Column" | "Row" | "Stack" | "Positioned" | "ScaleBox"
+        ) {
+            return prop_max_number(element, "width").filter(|w| *w > 0.0);
+        }
+        None
+    }
+
+    fn combine(active: Option<f64>, local: Option<f64>) -> Option<f64> {
+        match (active, local) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
+    }
+
+    fn clears_horizontal_bound(element: &bern_ir::Element) -> bool {
+        element.kind == "ScrollView" && element.keyword("axis") == Some("horizontal")
     }
 
     fn find_target(
         node: &Node,
         target: &bern_ir::Element,
-        active_grid: Option<f64>,
+        active_bound: Option<f64>,
     ) -> Option<Option<f64>> {
         match node {
             Node::Element(el) => {
                 if std::ptr::eq(el, target) {
-                    return Some(active_grid);
+                    return Some(active_bound);
                 }
-                let next_grid = grid_bound(el).or(active_grid);
+                let next_bound = if clears_horizontal_bound(el) {
+                    None
+                } else {
+                    combine(active_bound, container_bound(el))
+                };
                 for child in &el.children {
-                    if let Some(found) = find_target(child, target, next_grid) {
+                    if let Some(found) = find_target(child, target, next_bound) {
                         return Some(found);
                     }
                 }
@@ -291,17 +321,17 @@ fn enclosing_grid_max_width(app: &Application, target: &bern_ir::Element) -> Opt
                 .iter()
                 .flat_map(|(_, body)| body)
                 .chain(&node.otherwise)
-                .find_map(|child| find_target(child, target, active_grid)),
+                .find_map(|child| find_target(child, target, active_bound)),
             Node::IfLet(node) => node
                 .then
                 .iter()
                 .chain(&node.otherwise)
-                .find_map(|child| find_target(child, target, active_grid)),
+                .find_map(|child| find_target(child, target, active_bound)),
             Node::Match(node) => node
                 .arms
                 .iter()
                 .flat_map(|arm| &arm.body)
-                .find_map(|child| find_target(child, target, active_grid)),
+                .find_map(|child| find_target(child, target, active_bound)),
             Node::Component(_) => None,
         }
     }
@@ -318,13 +348,14 @@ fn enclosing_grid_max_width(app: &Application, target: &bern_ir::Element) -> Opt
         return direct_bound;
     }
 
-    // `target` stands in `owner` outside a local Grid: check if every root
-    // path reaching `owner` across windows and components passes through a Grid.
+    // `target` stands in `owner` outside a local bound: check if every root
+    // path reaching `owner` across windows and components passes through a
+    // bounded container.
     fn collect_calls<'a>(
         app: &'a Application,
         node: &'a Node,
         callee: &str,
-        active_grid: Option<f64>,
+        active_bound: Option<f64>,
         visited: &mut std::collections::BTreeSet<&'a str>,
         saw_any: &mut bool,
         max_bound: &mut f64,
@@ -332,7 +363,7 @@ fn enclosing_grid_max_width(app: &Application, target: &bern_ir::Element) -> Opt
         match node {
             Node::Component(call) if call.component == callee => {
                 *saw_any = true;
-                let Some(bound) = active_grid else {
+                let Some(bound) = active_bound else {
                     return false;
                 };
                 *max_bound = max_bound.max(bound);
@@ -349,7 +380,7 @@ fn enclosing_grid_max_width(app: &Application, target: &bern_ir::Element) -> Opt
                     app,
                     &comp.body,
                     callee,
-                    active_grid,
+                    active_bound,
                     visited,
                     saw_any,
                     max_bound,
@@ -358,25 +389,29 @@ fn enclosing_grid_max_width(app: &Application, target: &bern_ir::Element) -> Opt
                 ok
             }
             Node::Element(el) => {
-                let next_grid = grid_bound(el).or(active_grid);
+                let next_bound = if clears_horizontal_bound(el) {
+                    None
+                } else {
+                    combine(active_bound, container_bound(el))
+                };
                 el.children
                     .iter()
-                    .all(|c| collect_calls(app, c, callee, next_grid, visited, saw_any, max_bound))
+                    .all(|c| collect_calls(app, c, callee, next_bound, visited, saw_any, max_bound))
             }
             Node::If(node) => node
                 .branches
                 .iter()
                 .flat_map(|(_, body)| body)
                 .chain(&node.otherwise)
-                .all(|c| collect_calls(app, c, callee, active_grid, visited, saw_any, max_bound)),
+                .all(|c| collect_calls(app, c, callee, active_bound, visited, saw_any, max_bound)),
             Node::IfLet(node) => {
                 node.then.iter().chain(&node.otherwise).all(|c| {
-                    collect_calls(app, c, callee, active_grid, visited, saw_any, max_bound)
+                    collect_calls(app, c, callee, active_bound, visited, saw_any, max_bound)
                 })
             }
             Node::Match(node) => {
                 node.arms.iter().flat_map(|arm| &arm.body).all(|c| {
-                    collect_calls(app, c, callee, active_grid, visited, saw_any, max_bound)
+                    collect_calls(app, c, callee, active_bound, visited, saw_any, max_bound)
                 })
             }
         }

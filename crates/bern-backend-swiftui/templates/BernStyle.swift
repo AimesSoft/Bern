@@ -2000,7 +2000,7 @@ extension View {
     /// How the element appears and disappears, each moved by its spring;
     /// a short fade when motion is reduced.
     /// A page across the whole window (`whole`) stops at its edge as it
-    /// comes in: see `BernMoveIn`.
+    /// comes in: see `BernWholeMoveTransition`.
     func bernTransition(
         insertion: AnyTransition?, insertionMotion: BernMotion?,
         removal: AnyTransition?, removalMotion: BernMotion?, appear: BernAppear? = nil,
@@ -2161,42 +2161,20 @@ private struct BernWholeWindow: ViewModifier {
     }
 }
 
-/// A page across the whole window coming in from `edge`: it stops at the
-/// edge, where a spring would carry it past, lifting it off the far edge
-/// and showing what lies behind for a moment. Applied with ignoredByLayout:
-/// painted coordinates must not change which safe areas the page reaches.
-private struct BernMoveIn: GeometryEffect {
+/// A page across the whole window moving in from or out to `edge`: rendered
+/// through `visualEffect` so painted coordinates never alter layout or which
+/// safe areas the page reaches, while Core Animation composites the translation
+/// at native display refresh rate.
+@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
+private struct BernWholeMoveTransition: Transition {
     let edge: Edge
-    nonisolated var progress: Double
+    let distanceFactor: Double
 
-    nonisolated var animatableData: Double {
-        get { progress }
-        set { progress = newValue }
-    }
-
-    nonisolated func effectValue(size: CGSize) -> ProjectionTransform {
-        let away = bernAway(edge, size: size, by: 1 - min(progress, 1))
-        return ProjectionTransform(CGAffineTransform(translationX: away.width, y: away.height))
-    }
-}
-
-/// A page across the whole window going out to `edge`: a tenth of its size
-/// past it, so the slow end of its spring passes off screen instead of
-/// keeping its last strip at the edge. A geometry effect, as SwiftUI's own
-/// move: a view on its way out is drawn on, not built again. This effect is
-/// also ignored by layout, keeping safe areas fixed while the page leaves.
-private struct BernMoveOut: GeometryEffect {
-    let edge: Edge
-    nonisolated var progress: Double
-
-    nonisolated var animatableData: Double {
-        get { progress }
-        set { progress = newValue }
-    }
-
-    nonisolated func effectValue(size: CGSize) -> ProjectionTransform {
-        let away = bernAway(edge, size: size, by: progress * 1.1)
-        return ProjectionTransform(CGAffineTransform(translationX: away.width, y: away.height))
+    func body(content: Content, phase: TransitionPhase) -> some View {
+        content.visualEffect { content, proxy in
+            let offset = phase.isIdentity ? CGSize.zero : bernAway(edge, size: proxy.size, by: distanceFactor)
+            return content.offset(offset)
+        }
     }
 }
 
@@ -2211,11 +2189,21 @@ nonisolated private func bernAway(_ edge: Edge, size: CGSize, by fraction: Doubl
 }
 
 extension AnyTransition {
-    /// Out to beyond `edge`, for a page across the whole window: see
-    /// `BernMoveOut`.
-    static func bernMoveOut(edge: Edge) -> AnyTransition {
-        .modifier(active: BernMoveOut(edge: edge, progress: 1).ignoredByLayout(),
-                  identity: BernMoveOut(edge: edge, progress: 0).ignoredByLayout())
+    /// In from `edge` across the whole window without overshooting past it.
+    static func bernWholeMoveIn(edge: Edge) -> AnyTransition {
+        if #available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *) {
+            return AnyTransition(BernWholeMoveTransition(edge: edge, distanceFactor: 1.0))
+        }
+        return .move(edge: edge)
+    }
+
+    /// Out to a tenth of its size past `edge`, so the spring tail passes off
+    /// screen instead of lingering at the edge.
+    static func bernWholeMoveOut(edge: Edge) -> AnyTransition {
+        if #available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *) {
+            return AnyTransition(BernWholeMoveTransition(edge: edge, distanceFactor: 1.1))
+        }
+        return .move(edge: edge)
     }
 }
 
@@ -2285,9 +2273,12 @@ private struct BernTransitionModifier: ViewModifier {
     }
 
     func body(content: Content) -> some View {
+        let effectiveInsertionMotion = whole && appear?.isMove == true
+            ? insertionMotion.map { BernMotion(period: $0.period, damping: max($0.damping, 1.0)) }
+            : insertionMotion
         if let appear, stagger != nil || delay != nil || appear.entersItself {
             content
-                .modifier(BernEntrance(appear: appear, motion: insertionMotion, clock: stagger, delay: delay, whole: whole))
+                .modifier(BernEntrance(appear: appear, motion: effectiveInsertionMotion, clock: stagger, delay: delay))
                 .transition(tracked(.asymmetric(
                     insertion: .identity,
                     removal: (removal ?? .identity).animation(removalMotion?.animation))))
@@ -2295,7 +2286,7 @@ private struct BernTransitionModifier: ViewModifier {
             content.transition(tracked(.opacity.animation(.easeInOut(duration: 0.15))))
         } else {
             content.transition(tracked(.asymmetric(
-                insertion: (insertion ?? .identity).animation(insertionMotion?.animation),
+                insertion: (insertion ?? .identity).animation(effectiveInsertionMotion?.animation),
                 removal: (removal ?? .identity).animation(removalMotion?.animation))))
         }
     }
@@ -2621,12 +2612,24 @@ enum BernDraw {
 
 /// Public ranges count Unicode scalars, never UTF-16 code units or ruby glyphs.
 /// Reject malformed, overlapping and out-of-bounds ranges before Core Text sees them.
-struct BernRubySpan: Sendable {
+struct BernRubySpan: Equatable, Sendable {
     var range: NSRange
     var scalars: Range<Int>
     var reading: String
 
+    private struct ParseKey: Hashable {
+        let text: String
+        let json: String
+    }
+
+    private static let parseLock = NSLock()
+    private nonisolated(unsafe) static var parseCache: [ParseKey: [BernRubySpan]] = [:]
+    private nonisolated(unsafe) static var parseOrder: [ParseKey] = []
+
     static func parse(_ json: String, text: String) -> [BernRubySpan] {
+        if json.isEmpty || json == "[]" { return [] }
+        let key = ParseKey(text: text, json: json)
+        if let cached = parseLock.withLock({ parseCache[key] }) { return cached }
         guard let data = json.data(using: .utf8),
               let rows = try? JSONSerialization.jsonObject(with: data) as? [[Any]] else { return [] }
         let offsets = scalarOffsets(text)
@@ -2647,7 +2650,18 @@ struct BernRubySpan: Sendable {
                   !(text as NSString).substring(with: range).contains(where: { $0.isNewline }) else { continue }
             result.append(BernRubySpan(range: range, scalars: s..<e, reading: reading))
         }
-        return result.sorted { $0.range.location < $1.range.location }
+        let sorted = result.sorted { $0.range.location < $1.range.location }
+        parseLock.withLock {
+            if parseCache[key] == nil {
+                parseOrder.append(key)
+            }
+            parseCache[key] = sorted
+            while parseOrder.count > 256 {
+                let oldest = parseOrder.removeFirst()
+                parseCache.removeValue(forKey: oldest)
+            }
+        }
+        return sorted
     }
 
     static func scalarOffsets(_ text: String) -> [Int] {
@@ -2714,31 +2728,40 @@ struct BernRubyText<Plain: View>: View, Animatable {
             let route = BernLitRoute(number >= 0 ? path() : "")
             let clock = clock(), since = since()
             BernRubyLayout(document: document) {
-                TimelineView(.animation(paused: route.isEmpty || since <= 0)) { timeline in
-                    let place = route.isEmpty ? number : route.place(at: clock + (since > 0 ? timeline.date.timeIntervalSince1970 - since : 0))
-                    #if os(macOS) || os(watchOS)
-                    Canvas { graphics, size in
-                        let layout = document.layout(width: size.width, color: color.resolve(in: environment).cgColor)
-                        graphics.withCGContext { context in
-                            layout.draw(in: context, mark: mark?.resolve(in: environment).cgColor, lit: place)
-                        }
+                if route.isEmpty || since <= 0 {
+                    let place = route.isEmpty ? number : route.place(at: clock)
+                    rubyInk(document: document, place: place)
+                } else {
+                    TimelineView(.animation) { timeline in
+                        let place = route.place(at: clock + timeline.date.timeIntervalSince1970 - since)
+                        rubyInk(document: document, place: place)
                     }
-                    #else
-                    // SwiftUI resolves tint in this view's complete environment. On older
-                    // systems UIColor(Color).cgColor loses semantic colors before Core Text
-                    // sees them; changing UIKit's current traits cannot recover that context.
-                    ZStack(alignment: .topLeading) {
-                        if let mark {
-                            BernRubyInk(document: document, lit: -1, marks: true).tint(mark)
-                        }
-                        BernRubyInk(document: document, lit: place, marks: false).tint(color)
-                    }
-                    #endif
                 }
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(Text(verbatim: text))
         }
+    }
+
+    @ViewBuilder private func rubyInk(document: BernRubyDocument, place: Double) -> some View {
+        #if os(macOS) || os(watchOS)
+        Canvas { graphics, size in
+            let layout = document.layout(width: size.width, color: color.resolve(in: environment).cgColor)
+            graphics.withCGContext { context in
+                layout.draw(in: context, mark: mark?.resolve(in: environment).cgColor, lit: place)
+            }
+        }
+        #else
+        // SwiftUI resolves tint in this view's complete environment. On older
+        // systems UIColor(Color).cgColor loses semantic colors before Core Text
+        // sees them; changing UIKit's current traits cannot recover that context.
+        ZStack(alignment: .topLeading) {
+            if let mark {
+                BernRubyInk(document: document, lit: -1, marks: true).tint(mark)
+            }
+            BernRubyInk(document: document, lit: place, marks: false).tint(color)
+        }
+        #endif
     }
 
     private var nativeFont: CTFont {
@@ -2796,10 +2819,26 @@ private struct BernRubyInk: UIViewRepresentable {
     }
 
     func updateUIView(_ view: BernRubyInkView, context: Context) {
+        let same = view.lastText == document.text
+            && view.lastSpans == document.spans
+            && view.lastFont.map { CFEqual($0, document.font) } == true
+            && view.lastLineHeight == document.lineHeight
+            && view.lastLimit == document.limit
+            && view.lastLit == lit
+            && view.lastMarks == marks
         view.document = document
         view.lit = lit
         view.marks = marks
-        view.setNeedsDisplay()
+        if !same {
+            view.lastText = document.text
+            view.lastSpans = document.spans
+            view.lastFont = document.font
+            view.lastLineHeight = document.lineHeight
+            view.lastLimit = document.limit
+            view.lastLit = lit
+            view.lastMarks = marks
+            view.setNeedsDisplay()
+        }
     }
 }
 
@@ -2807,6 +2846,13 @@ private final class BernRubyInkView: UIView {
     var document: BernRubyDocument?
     var lit: Double = -1
     var marks = false
+    var lastText: String?
+    var lastSpans: [BernRubySpan]?
+    var lastFont: CTFont?
+    var lastLineHeight: CGFloat?
+    var lastLimit: Int?
+    var lastLit: Double?
+    var lastMarks: Bool?
 
     override func tintColorDidChange() {
         super.tintColorDidChange()
@@ -2840,8 +2886,35 @@ struct BernRubyDocument: @unchecked Sendable {
     let lineHeight: CGFloat?
     let limit: Int?
 
+    private struct LayoutEntry: @unchecked Sendable {
+        let text: String
+        let spans: [BernRubySpan]
+        let font: CTFont
+        let lineHeight: CGFloat?
+        let limit: Int?
+        let width: CGFloat
+        let color: CGColor
+        let drawing: BernRubyDrawing
+    }
+
+    private static let layoutLock = NSLock()
+    private nonisolated(unsafe) static var layoutCache: [LayoutEntry] = []
+
     func layout(width proposed: CGFloat, color: CGColor = CGColor(gray: 0, alpha: 1)) -> BernRubyDrawing {
         let width = proposed.isFinite ? max(1, proposed) : 1_000_000
+        if let hit = Self.layoutLock.withLock({
+            Self.layoutCache.first {
+                $0.width == width
+                    && $0.lineHeight == lineHeight
+                    && $0.limit == limit
+                    && $0.text == text
+                    && $0.spans == spans
+                    && CFEqual($0.font, font)
+                    && CFEqual($0.color, color)
+            }?.drawing
+        }) {
+            return hit
+        }
         // Shape the base paragraph directly without CTRubyAnnotation: Core Text
         // splits fallback fonts into separate CTRuns before resolving ruby
         // attributes and attaches a multi-run annotation to a single fallback
@@ -2938,12 +3011,21 @@ struct BernRubyDocument: @unchecked Sendable {
             y += height
             start = end
         }
-        return BernRubyDrawing(rows: rows, offsets: offsets,
-                               size: CGSize(width: proposed.isFinite ? width : ceil(measuredWidth), height: ceil(y)))
+        let drawing = BernRubyDrawing(rows: rows, offsets: offsets,
+                                      size: CGSize(width: proposed.isFinite ? width : ceil(measuredWidth), height: ceil(y)))
+        Self.layoutLock.withLock {
+            Self.layoutCache.append(LayoutEntry(
+                text: text, spans: spans, font: font, lineHeight: lineHeight,
+                limit: limit, width: width, color: color, drawing: drawing))
+            if Self.layoutCache.count > 128 {
+                Self.layoutCache.removeFirst()
+            }
+        }
+        return drawing
     }
 }
 
-struct BernRubyDrawing {
+struct BernRubyDrawing: @unchecked Sendable {
     struct Reading {
         var line: CTLine
         var x: CGFloat
@@ -3057,11 +3139,42 @@ struct BernRubyDrawing {
 private struct BernRubyLayout: Layout {
     let document: BernRubyDocument
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        document.layout(width: proposal.width ?? .infinity).size
+    final class Cache {
+        var text = ""
+        var spans: [BernRubySpan] = []
+        var font: CTFont?
+        var lineHeight: CGFloat?
+        var limit: Int?
+        var width: CGFloat?
+        var size: CGSize = .zero
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    func makeCache(subviews: Subviews) -> Cache { Cache() }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
+        let width = proposal.width ?? .infinity
+        let sameWidth = cache.width == width || (cache.width?.isInfinite == true && width.isInfinite)
+        if sameWidth,
+           cache.text == document.text,
+           cache.spans == document.spans,
+           cache.lineHeight == document.lineHeight,
+           cache.limit == document.limit,
+           cache.font.map({ CFEqual($0, document.font) }) == true
+        {
+            return cache.size
+        }
+        let size = document.layout(width: width).size
+        cache.text = document.text
+        cache.spans = document.spans
+        cache.font = document.font
+        cache.lineHeight = document.lineHeight
+        cache.limit = document.limit
+        cache.width = width
+        cache.size = size
+        return size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
         for view in subviews {
             view.place(at: bounds.origin, anchor: .topLeading, proposal: ProposedViewSize(bounds.size))
         }
@@ -3210,31 +3323,41 @@ struct BernLitText: View {
     var body: some View {
         let number = lit()
         let route = BernLitRoute(number >= 0 ? path() : "")
-        if route.isEmpty {
+        if number < 0 {
+            SwiftUI.Text(verbatim: text)
+        } else if route.isEmpty {
             bernLit(text, number).bernLitting { number }
         } else {
-            #if os(watchOS)
             let (clock, since) = (clock(), since())
-            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: since <= 0)) { timeline in
-                let place = route.place(at: clock + (since > 0 ? timeline.date.timeIntervalSince1970 - since : 0))
-                SwiftUI.Text(verbatim: text).textRenderer(BernLitRenderer(lit: place))
-            }
-            #else
-            if #available(macOS 15, iOS 18, tvOS 18, *) {
-                SwiftUI.Text(verbatim: text)
-                    .textRenderer(BernLitMeasure(measured: measured))
-                    .opacity(0.4)
-                    .overlay {
-                        BernLitLayer(text: text, measured: measured, route: route, clock: clock(), since: since())
-                            .allowsHitTesting(false)
-                    }
-            } else {
-                let (clock, since) = (clock(), since())
-                TimelineView(.animation(paused: since <= 0)) { timeline in
-                    bernLit(text, route.place(at: clock + (since > 0 ? timeline.date.timeIntervalSince1970 - since : 0)))
+            if since <= 0 {
+                let place = route.place(at: clock)
+                if #available(macOS 15, iOS 18, tvOS 18, watchOS 11, *) {
+                    SwiftUI.Text(verbatim: text).textRenderer(BernLitRenderer(lit: place))
+                } else {
+                    bernLit(text, place)
                 }
+            } else {
+                #if os(watchOS)
+                TimelineView(.animation(minimumInterval: 1.0 / 30)) { timeline in
+                    let place = route.place(at: clock + timeline.date.timeIntervalSince1970 - since)
+                    SwiftUI.Text(verbatim: text).textRenderer(BernLitRenderer(lit: place))
+                }
+                #else
+                if #available(macOS 15, iOS 18, tvOS 18, *) {
+                    SwiftUI.Text(verbatim: text)
+                        .textRenderer(BernLitMeasure(measured: measured))
+                        .opacity(0.4)
+                        .overlay {
+                            BernLitLayer(text: text, measured: measured, route: route, clock: clock, since: since)
+                                .allowsHitTesting(false)
+                        }
+                } else {
+                    TimelineView(.animation) { timeline in
+                        bernLit(text, route.place(at: clock + timeline.date.timeIntervalSince1970 - since))
+                    }
+                }
+                #endif
             }
-            #endif
         }
     }
 }
@@ -3250,6 +3373,7 @@ struct BernLitGlyphs: Equatable {
 /// Where the glyphs of a `Text` stand.
 final class BernLitMeasured: ObservableObject, @unchecked Sendable {
     @Published var lines: [BernLitGlyphs] = []
+    nonisolated(unsafe) var lastReported: [BernLitGlyphs] = []
 }
 
 /// Draws the text as it is, and tells where it stands.
@@ -3272,6 +3396,8 @@ private struct BernLitMeasure: TextRenderer {
             context.draw(line)
         }
         let found = lines
+        guard measured.lastReported != found else { return }
+        measured.lastReported = found
         DispatchQueue.main.async { [measured] in
             if measured.lines != found { measured.lines = found }
         }
@@ -3532,10 +3658,15 @@ extension View {
 
     /// The view's picture blurred with `radius` points, kept inside its
     /// bounds and `corner`; bypassed at zero so sharp rows allocate no
-    /// offscreen rasterization layer.
+    /// offscreen rasterization layer, and clipped without a rounded-rectangle
+    /// mask layer when `corner <= 0`.
     @ViewBuilder func bernBlur(_ radius: Double, corner: Double) -> some View {
         if radius > 0.01 {
-            blur(radius: radius).clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+            if corner > 0 {
+                blur(radius: radius).clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+            } else {
+                blur(radius: radius).clipped()
+            }
         } else {
             self
         }
@@ -3855,10 +3986,24 @@ final class BernScrollItems {
     private(set) var arrivals = 0
     /// How many scrolls to a set position have come to rest.
     private(set) var stops = 0
+    /// Callback hooks for `BernScrollPosition` so its body does not subscribe
+    /// to `@Observable` properties and re-render the entire scroll view.
+    @ObservationIgnored var onStopsChanged: (@MainActor () -> Void)?
+    @ObservationIgnored var onNearestChanged: (@MainActor () -> Void)?
+    @ObservationIgnored private var arrivalHandlers: [AnyHashable: @MainActor () -> Void] = [:]
+    @ObservationIgnored var placed = false
     /// The item being scrolled to; it arrives once it has stopped moving.
     @ObservationIgnored private var coming: AnyHashable?
     @ObservationIgnored private var nudges = false
     @ObservationIgnored private var watch = 0
+
+    func registerArrival(_ key: AnyHashable, _ handler: @escaping @MainActor () -> Void) {
+        arrivalHandlers[key] = handler
+    }
+
+    func unregisterArrival(_ key: AnyHashable) {
+        arrivalHandlers.removeValue(forKey: key)
+    }
 
     /// Setting the position scrolls to `key`: it arrives once it stops,
     /// with a nudge unless it is where the view starts.
@@ -3888,9 +4033,11 @@ final class BernScrollItems {
             guard let self, current == self.watch, let key = self.coming else { return }
             self.coming = nil
             self.stops += 1
+            self.onStopsChanged?()
             if self.nudges {
                 self.arrived = key
                 self.arrivals += 1
+                self.arrivalHandlers[key]?()
             }
         }
     }
@@ -3928,7 +4075,10 @@ final class BernScrollItems {
             return x * x + y * y
         }
         let found = frames.min { distance($0.value) < distance($1.value) }?.key
-        if found != nearest { nearest = found }
+        if found != nearest {
+            nearest = found
+            onNearestChanged?()
+        }
     }
 }
 
@@ -3951,23 +4101,45 @@ extension View {
     }
 }
 
+private struct BernOptionalNudgeEffect: ViewModifier {
+    let active: Bool
+    let count: Int
+    let motion: BernMotion?
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if active {
+            content.modifier(BernNudgeEffect(count: count, motion: motion))
+        } else {
+            content
+        }
+    }
+}
+
 private struct BernScrollItem: ViewModifier {
     let key: AnyHashable
     @Environment(\.bernScrollItems) private var items
+    @State private var arrivalCount = 0
 
     func body(content: Content) -> some View {
         let tracked = items?.tracks(key) == true
+        let hasArrival = items?.arrival != nil
         return content
-            .modifier(
-                BernNudgeEffect(
-                    count: items?.arrived == key ? items?.arrivals ?? 0 : 0,
-                    motion: items?.arrival))
+            .modifier(BernOptionalNudgeEffect(active: hasArrival, count: arrivalCount, motion: items?.arrival))
+            .onAppear {
+                if hasArrival, tracked {
+                    let countBinding = $arrivalCount
+                    items?.registerArrival(key) { countBinding.wrappedValue += 1 }
+                }
+            }
             .onGeometryChange(for: CGRect.self) {
                 tracked ? $0.frame(in: .named(bernScrollSpace)) : .null
             } action: { frame in
                 items?.report(key, frame)
             }
-            .onDisappear { items?.remove(key) }
+            .onDisappear {
+                items?.unregisterArrival(key)
+                items?.remove(key)
+            }
     }
 }
 
@@ -4118,34 +4290,33 @@ private struct BernScrollPosition<ID: Hashable & Sendable>: ViewModifier {
     let motion: BernMotion
     let arrival: BernMotion?
     @State private var target: ID?
-    /// Set once the view stands at the first position, after its first
-    /// layout has measured the margins.
-    @State private var placed = false
     @State private var items = BernScrollItems(keyType: ID.self)
     @BernReducedMotion private var reduce
 
     func body(content: Content) -> some View {
-        content
+        if items.anchor != anchor { items.anchor = anchor }
+        if items.arrival != arrival { items.arrival = arrival }
+        return content
             .environment(\.bernScrollItems, items)
             .coordinateSpace(.named(bernScrollSpace))
             .scrollPosition(id: $target, anchor: anchor)
             .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
-                items.anchor = anchor
-                items.arrival = arrival
                 items.viewport = size
                 items.settle()
             }
             .onAppear {
+                let targetBinding = $target
+                items.onStopsChanged = {
+                    items.clearing = true
+                    targetBinding.wrappedValue = nil
+                    Task { @MainActor in items.clearing = false }
+                }
+                items.onNearestChanged = {
+                    follow(target: targetBinding.wrappedValue)
+                }
                 items.expect(AnyHashable(position.wrappedValue), nudge: false)
                 target = position.wrappedValue
-                placed = true
-            }
-            // Once there, the platform's position lets go, so that the
-            // person's next scroll comes to rest on an item as any other.
-            .onChange(of: items.stops) { _, _ in
-                items.clearing = true
-                target = nil
-                Task { @MainActor in items.clearing = false }
+                items.placed = true
             }
             .onChange(of: position.wrappedValue) { _, wanted in
                 if AnyHashable(wanted) == items.followed {
@@ -4155,17 +4326,16 @@ private struct BernScrollPosition<ID: Hashable & Sendable>: ViewModifier {
                 guard wanted != target, target != nil || AnyHashable(wanted) != items.nearest else { return }
                 scroll(to: wanted)
             }
-            .onChange(of: items.nearest) { _, _ in follow() }
             .onChange(of: target) { _, current in
                 if current == nil { items.cancelArrival() }
-                follow()
+                follow(target: current)
             }
     }
 
     /// While the person scrolls, `position` follows the item nearest the
     /// anchor.
-    private func follow() {
-        guard placed, target == nil, let nearest = items.nearest?.base as? ID,
+    private func follow(target: ID?) {
+        guard items.placed, target == nil, let nearest = items.nearest?.base as? ID,
             nearest != position.wrappedValue
         else { return }
         items.followed = AnyHashable(nearest)
@@ -5358,14 +5528,16 @@ enum BernAppear: Sendable {
         return false
     }
 
-    /// It comes in by itself once it has been drawn: a growing rule, or a
-    /// whole page moving in, whose first drawing may take long enough to
-    /// use up a transition's time before anything moves on screen.
+    var isMove: Bool {
+        if case .move = self { return true }
+        return false
+    }
+
+    /// It comes in by itself once it has been drawn: a growing rule whose
+    /// first drawing starts from zero on mount.
     var entersItself: Bool {
-        switch self {
-        case .grow, .move: return true
-        default: return false
-        }
+        if case .grow = self { return true }
+        return false
     }
 
     var scale: Double {
@@ -5412,24 +5584,15 @@ extension AnyTransition {
 private struct BernEntranceLook: ViewModifier {
     let appear: BernAppear
     let shown: Bool
-    var whole = false
 
     @ViewBuilder func body(content: Content) -> some View {
         if case .grow(let edge) = appear {
             content.modifier(BernGrow(edge: edge, progress: shown ? 1 : 0))
-        } else if case .move(let edge) = appear, whole {
-            content.modifier(BernMoveIn(edge: edge, progress: shown ? 1 : 0).ignoredByLayout())
         } else if case .move(let edge) = appear {
             let shown = shown
             content.visualEffect { content, proxy in
-                let size = proxy.size
-                let away: CGSize = switch edge {
-                case .top: CGSize(width: 0, height: -size.height)
-                case .bottom: CGSize(width: 0, height: size.height)
-                case .leading: CGSize(width: -size.width, height: 0)
-                case .trailing: CGSize(width: size.width, height: 0)
-                }
-                return content.offset(shown ? .zero : away)
+                let away = shown ? .zero : bernAway(edge, size: proxy.size, by: 1)
+                return content.offset(away)
             }
         } else {
             content
@@ -5521,7 +5684,6 @@ struct BernEntrance: ViewModifier {
     let motion: BernMotion?
     let clock: BernStaggerClock?
     let delay: Double?
-    var whole = false
     @Environment(BernWindowContext.self) private var window
     @BernReducedMotion private var reduce
     @Environment(\.layoutDirection) private var direction
@@ -5529,13 +5691,13 @@ struct BernEntrance: ViewModifier {
     @State private var place = BernPlace()
 
     func body(content: Content) -> some View {
-        let measuring = !shown
+        let measuring = !shown && clock != nil
         return content
             .environment(\.bernStagger, nil)
             .onGeometryChange(for: CGRect.self) { measuring ? $0.frame(in: .global) : .zero } action: {
-                if !shown { place.frame = $0 }
+                if measuring { place.frame = $0 }
             }
-            .modifier(BernEntranceLook(appear: appear, shown: shown || reduce || bernForcedReduceMotion, whole: whole))
+            .modifier(BernEntranceLook(appear: appear, shown: shown || reduce || bernForcedReduceMotion))
             .task(id: window.settled) {
                 guard !shown else { return }
                 if reduce || bernForcedReduceMotion || (!window.settled && delay == nil && !appear.grows) {

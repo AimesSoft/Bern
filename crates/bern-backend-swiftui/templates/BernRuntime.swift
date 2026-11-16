@@ -9,6 +9,9 @@
 // lifecycle, snapshots and the video view — is in BernAppKit.swift and
 // BernUIKit.swift, of which a build compiles the one for its platform.
 
+#if canImport(CoreImage)
+import CoreImage
+#endif
 #if !os(watchOS)
 import GameController
 #endif
@@ -2159,12 +2162,16 @@ struct BernImage: View {
     /// Upper bound in points on the longer side needed when decoded, such as
     /// a heavily blurred backdrop or an aspect card inside a bounded grid.
     var decodeMax: CGFloat? = nil
+    /// Static blur radius >= 4 baked into the downsampled bitmap instead of
+    /// running a live full-viewport GPU blur every frame.
+    var blur: Double = 0
     /// The picture loaded last, with what it was loaded for: once the
     /// source changes it is no longer shown, so the old picture does not
     /// stand in for the new one while that loads.
     @State private var fetched: (request: BernPictures.Request, picture: Picture)?
     @Environment(\.colorScheme) private var scheme
     @Environment(\.displayScale) private var displayScale
+    @Environment(BernWindowContext.self) private var window: BernWindowContext?
 
     struct Picture: @unchecked Sendable {
         let image: CGImage
@@ -2284,39 +2291,87 @@ struct BernImage: View {
         return Picture(image: image, orientation: orientation, ratio: w > 0 && h > 0 ? w / h : 1)
     }
 
-    var body: some View {
-        let resource = scheme == .dark ? darkName ?? name : name
-        let samples = oneSize || decodeMax != nil
-        let decodeWidth: CGFloat? = switch (width, decodeMax) {
-        case let (w?, m?): min(w, m)
-        case let (w?, nil): oneSize ? w : nil
-        case let (nil, m?): m
-        case (nil, nil): nil
+    #if canImport(CoreImage)
+    private struct BlurKey: Hashable {
+        let image: ObjectIdentifier
+        let sigma: Int
+    }
+
+    @MainActor private static let blurCIContext = CIContext(options: [.cacheIntermediates: false])
+    @MainActor private static var blurCache: [BlurKey: (source: CGImage, picture: Picture)] = [:]
+    @MainActor private static var blurOrder: [BlurKey] = []
+
+    @MainActor static func blurred(_ picture: Picture, radius: CGFloat, in size: CGSize, fit: BernImageFit) -> Picture {
+        guard radius >= 4, size.width > 0, size.height > 0 else { return picture }
+        let pw = CGFloat(picture.image.width), ph = CGFloat(picture.image.height)
+        guard pw > 0, ph > 0 else { return picture }
+        let turned = picture.orientation == .left || picture.orientation == .right
+            || picture.orientation == .leftMirrored || picture.orientation == .rightMirrored
+        let displayW = turned ? ph : pw
+        let displayH = turned ? pw : ph
+        let scale: CGFloat
+        switch fit {
+        case .contain: scale = min(size.width / displayW, size.height / displayH)
+        case .cover, .fill: scale = max(size.width / displayW, size.height / displayH)
         }
-        let decodeHeight: CGFloat? = switch (height, decodeMax) {
-        case let (h?, m?): min(h, m)
-        case let (h?, nil): oneSize ? h : nil
-        case let (nil, m?): m
-        case (nil, nil): nil
+        guard scale.isFinite, scale > 0 else { return picture }
+        let sigma = radius / scale
+        guard sigma > 0.1 else { return picture }
+        let quantized = max(1, Int((sigma * 4).rounded()))
+        let key = BlurKey(image: ObjectIdentifier(picture.image), sigma: quantized)
+        if let entry = blurCache[key] { return entry.picture }
+        let input = CIImage(cgImage: picture.image)
+        let extent = input.extent
+        guard let filter = CIFilter(name: "CIGaussianBlur") else { return picture }
+        filter.setValue(input.clampedToExtent(), forKey: kCIInputImageKey)
+        filter.setValue(Double(quantized) / 4.0, forKey: kCIInputRadiusKey)
+        let format: CIFormat = picture.image.bitsPerComponent > 8 ? .RGBAh : .RGBA8
+        let space = picture.image.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)
+        guard let output = filter.outputImage?.cropped(to: extent),
+              let cg = blurCIContext.createCGImage(output, from: extent, format: format, colorSpace: space)
+        else { return picture }
+        let result = Picture(image: cg, orientation: picture.orientation, ratio: picture.ratio)
+        if blurCache[key] == nil {
+            blurOrder.append(key)
         }
-        let declared = resource.flatMap {
-            samples ? Self.picture($0, width: decodeWidth, height: decodeHeight, fit: fit, scale: displayScale) : Self.picture($0)
+        blurCache[key] = (picture.image, result)
+        while blurOrder.count > 16 {
+            let oldest = blurOrder.removeFirst()
+            blurCache.removeValue(forKey: oldest)
         }
-        // A picture from a URL with sides that never change (or a known blur /
-        // grid bound) is decoded at its size, as a declared one is.
-        let request = url.map {
-            BernPictures.Request(url: $0, width: decodeWidth, height: decodeHeight, fit: fit, scale: samples ? displayScale : 0)
+        return result
+    }
+    #endif
+
+    private var viewportSize: CGSize? {
+        if let window {
+            let w = window.layoutWidth, h = window.layoutHeight
+            if w.isFinite, h.isFinite, w > 0, h > 0 { return CGSize(width: w, height: h) }
         }
-        let picture = declared
-            ?? request.flatMap { BernPictures.shared.cached($0) }
-            ?? fetched.flatMap { $0.request == request ? $0.picture : nil }
-            // Its source changed: a file on this device is read at once, so
-            // its place is not left empty for a frame in between.
-            ?? (fetched != nil ? request.flatMap { BernPictures.shared.local($0) } : nil)
-        let ratio = picture?.ratio ?? 1
-        let content = Group {
-            if let picture {
-                let image = SwiftUI.Image(decorative: picture.image, scale: 1, orientation: picture.orientation)
+        #if canImport(UIKit) && !os(watchOS)
+        let scenes = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .filter { $0.session.role == .windowApplication }
+        if let size = scenes.first?.coordinateSpace.bounds.size, size.width > 0, size.height > 0 {
+            return size
+        }
+        #endif
+        return nil
+    }
+
+    @ViewBuilder private func rendered(_ picture: Picture?, in boxSize: CGSize?) -> some View {
+        let resolved: Picture? = {
+            guard let picture else { return nil }
+            #if canImport(CoreImage)
+            if blur >= 4, let boxSize {
+                return Self.blurred(picture, radius: CGFloat(blur), in: boxSize, fit: fit)
+            }
+            #endif
+            return picture
+        }()
+        Group {
+            if let resolved {
+                let image = SwiftUI.Image(decorative: resolved.image, scale: 1, orientation: resolved.orientation)
                     .renderingMode(rendering)
                 switch fit {
                 case .contain: image.resizable().aspectRatio(contentMode: .fit)
@@ -2330,10 +2385,68 @@ struct BernImage: View {
         #if !os(watchOS)
         .allowedDynamicRange(.high)
         #endif
+        #if !canImport(CoreImage)
+        .bernBlur(blur, corner: 0)
+        #endif
+    }
+
+    var body: some View {
+        let resource = scheme == .dark ? darkName ?? name : name
+        let viewportBound: (width: CGFloat, height: CGFloat)? = {
+            guard width == nil, height == nil, decodeMax == nil, let size = viewportSize else { return nil }
+            func bucket(_ x: CGFloat) -> CGFloat { ceil(max(64, x) / 64) * 64 }
+            if hero != nil {
+                return (bucket(size.width), bucket(size.height))
+            }
+            if let aspect, aspect > 0 {
+                return (bucket(min(size.width, size.height * aspect)), bucket(min(size.height, size.width / aspect)))
+            }
+            return covers ? (bucket(size.width), bucket(size.height)) : nil
+        }()
+        let samples = oneSize || decodeMax != nil || viewportBound != nil
+        let decodeScale = (oneSize || decodeMax != nil) ? displayScale : (viewportBound != nil ? displayScale * 0.5 : 0)
+        let decodeWidth: CGFloat? = switch (width, decodeMax, viewportBound) {
+        case let (w?, m?, _): min(w, m)
+        case let (w?, nil, _): oneSize ? w : nil
+        case let (nil, m?, _): m
+        case let (nil, nil, v?): v.width
+        case (nil, nil, nil): nil
+        }
+        let decodeHeight: CGFloat? = switch (height, decodeMax, viewportBound) {
+        case let (h?, m?, _): min(h, m)
+        case let (h?, nil, _): oneSize ? h : nil
+        case let (nil, m?, _): m
+        case let (nil, nil, v?): v.height
+        case (nil, nil, nil): nil
+        }
+        let declared = resource.flatMap {
+            samples ? Self.picture($0, width: decodeWidth, height: decodeHeight, fit: fit, scale: decodeScale) : Self.picture($0)
+        }
+        // A picture from a URL with sides that never change (or a known blur,
+        // grid or viewport bound) is decoded at its size, as a declared one is.
+        let request = url.map {
+            BernPictures.Request(url: $0, width: decodeWidth, height: decodeHeight, fit: fit, scale: samples ? decodeScale : 0)
+        }
+        let picture = declared
+            ?? request.flatMap { BernPictures.shared.cached($0) }
+            ?? fetched.flatMap { $0.request == request ? $0.picture : nil }
+            // Its source changed: a file on this device is read at once, so
+            // its place is not left empty for a frame in between.
+            ?? (fetched != nil ? request.flatMap { BernPictures.shared.local($0) } : nil)
+        let ratio = picture?.ratio ?? 1
         let shown = Group {
             if covers {
                 Color.clear
-                    .overlay { content }
+                    .overlay {
+                        if blur >= 4 {
+                            GeometryReader { proxy in
+                                rendered(picture, in: proxy.size)
+                                    .frame(width: proxy.size.width, height: proxy.size.height)
+                            }
+                        } else {
+                            rendered(picture, in: nil)
+                        }
+                    }
                     .clipped()
             } else if let aspect {
                 Color.clear
@@ -2341,11 +2454,23 @@ struct BernImage: View {
                     // The overlay receives the aspect-fitted proposal directly.
                     // Measuring it and feeding that size back adds a geometry
                     // update for every image on every animated grid resize.
-                    .overlay { content }
+                    .overlay {
+                        if blur >= 4 {
+                            GeometryReader { proxy in
+                                rendered(picture, in: proxy.size)
+                                    .frame(width: proxy.size.width, height: proxy.size.height)
+                            }
+                        } else {
+                            rendered(picture, in: nil)
+                        }
+                    }
                     .clipped()
                     .frame(width: width, height: height)
             } else {
-                content.frame(width: width ?? height.map { $0 * ratio }, height: height ?? width.map { $0 / ratio }).clipped()
+                let w = width ?? height.map { $0 * ratio }
+                let h = height ?? width.map { $0 / ratio }
+                let box = (w != nil && h != nil) ? CGSize(width: w!, height: h!) : nil
+                rendered(picture, in: box).frame(width: w, height: h).clipped()
             }
         }
         .task(id: request) {

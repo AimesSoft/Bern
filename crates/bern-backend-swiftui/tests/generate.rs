@@ -1983,15 +1983,17 @@ fn alternate_icons_compile_beside_the_primary_and_switch_at_run_time() {
             .any(|file| String::from_utf8_lossy(&file.contents)
                 .contains(".bernSpin(true, period: 12.0)"))
     );
-    // Its picture beneath, blurred and lit under the pointer, inside its
+    // Its picture beneath, pre-blurred and lit under the pointer, inside its
     // corner.
     assert!(
         mac.iter()
             .filter(|file| file.path.extension().is_some_and(|ext| ext == "swift"))
-            .any(|file| String::from_utf8_lossy(&file.contents)
-                .contains(".bernBlur(16.0, corner: 12.0)\n")
-                && String::from_utf8_lossy(&file.contents)
-                    .contains(".bernGlow(1.0, opacity: 0.3, corner: 12.0)"))
+            .any(|file| {
+                let text = String::from_utf8_lossy(&file.contents);
+                text.contains("blur: 16.0)")
+                    && text.contains(".clipShape(SwiftUI.RoundedRectangle(cornerRadius: 12.0, style: .continuous))")
+                    && text.contains(".bernGlow(1.0, opacity: 0.3, corner: 12.0)")
+            })
     );
     let args = actool(&SwiftUiMacos.plan(&compiled.app, &mac_context).unwrap());
     assert!(args.contains("--alternate-app-icon AppIcon-neon"), "{args}");
@@ -2585,20 +2587,23 @@ fn content_in_a_window_starts_at_its_top_leading_corner() {
     );
 }
 
-/// Whole-window motion must not feed its painted coordinates into safe-area layout.
+/// Whole-window motion runs through a render-time `Transition` (no `GeometryEffect`
+/// or async `.task` start) so Core Animation composites at 120Hz without shifting
+/// safe areas or overshooting past the entry edge.
 #[test]
-fn whole_window_motion_is_ignored_by_layout() {
+fn whole_window_motion_uses_composited_render_transition() {
     let style = include_str!("../templates/BernStyle.swift");
-    assert!(style.contains("private struct BernMoveIn: GeometryEffect"));
-    assert!(style.contains(
-        "content.modifier(BernMoveIn(edge: edge, progress: shown ? 1 : 0).ignoredByLayout())"
-    ));
-    assert!(style.contains("BernMoveOut(edge: edge, progress: 1).ignoredByLayout()"));
-    assert!(style.contains("BernMoveOut(edge: edge, progress: 0).ignoredByLayout()"));
-    let start = style.find("private struct BernMoveIn:").unwrap();
-    let end = start + style[start..].find("private struct BernMoveOut:").unwrap();
-    assert!(!style[start..end].contains("visualEffect"));
-    assert!(style[start..end].contains("1 - min(progress, 1)"));
+    assert!(!style.contains("BernMoveIn"));
+    assert!(!style.contains("BernMoveOut"));
+    assert!(style.contains("private struct BernWholeMoveTransition: Transition"));
+    assert!(style.contains("BernWholeMoveTransition(edge: edge, distanceFactor: 1.0)"));
+    assert!(style.contains("BernWholeMoveTransition(edge: edge, distanceFactor: 1.1)"));
+    assert!(style.contains("damping: max($0.damping, 1.0)"));
+    assert!(
+        style.contains("var entersItself: Bool {\n        if case .grow = self { return true }")
+    );
+    assert!(style.contains("if corner > 0 {\n                blur(radius: radius).clipShape("));
+    assert!(style.contains("} else {\n                blur(radius: radius).clipped()"));
 }
 
 /// Slider feedback is tied to the interaction binding, never observed values.

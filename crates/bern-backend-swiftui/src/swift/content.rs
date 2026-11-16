@@ -287,8 +287,15 @@ impl Generator<'_> {
         let decode_max = bern_target_api::svg::decode_max_side(self.app, element)
             .map(|cap| format!(", decodeMax: {}", double(cap)))
             .unwrap_or_default();
+        let preblur = if bern_target_api::svg::static_preblur(element) {
+            self.length(element, "blur")
+                .map(|radius| format!(", blur: {radius}"))
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
         out.line(format!(
-            "BernImage({source}, label: {}, width: {}, height: {}, fit: {fit}{}, aspect: {}{hero}{one_size}{covers}{decode_max})",
+            "BernImage({source}, label: {}, width: {}, height: {}, fit: {fit}{}, aspect: {}{hero}{one_size}{covers}{decode_max}{preblur})",
             self.text_prop(element, "label")
                 .unwrap_or_else(|| "nil".into()),
             length("width"),
