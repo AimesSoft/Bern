@@ -225,6 +225,31 @@ impl<'a> Generator<'a> {
                 // here; its own children start afresh. A repetition adds no
                 // layout: its rows stand where it does.
                 let repeats = element.kind == "ForEach";
+                // In a row lined up on its baseline, each unweighted child is;
+                // a yielding unweighted child also tells `BernRow` its words
+                // can give way before controls do.
+                let baseline = ctx.baseline && !repeats && !self.element_weighted_in_row(element);
+                let yields = ctx.scope == Scope::Row
+                    && !repeats
+                    && self.element_yields_width(element, &mut std::collections::HashSet::new());
+                let ellipsizes = yields
+                    && self
+                        .element_ellipsizes_width(element, &mut std::collections::HashSet::new());
+                let row_box = match (baseline, yields, ellipsizes) {
+                    (true, true, true) => {
+                        Some("Box(Modifier.alignByBaseline().bernRowYields(ellipsizes = true)) {")
+                    }
+                    (true, true, false) => {
+                        Some("Box(Modifier.alignByBaseline().bernRowYields()) {")
+                    }
+                    (true, false, _) => Some("Box(Modifier.alignByBaseline()) {"),
+                    (false, true, true) => Some("Box(Modifier.bernRowYields(ellipsizes = true)) {"),
+                    (false, true, false) => Some("Box(Modifier.bernRowYields()) {"),
+                    (false, false, _) => None,
+                };
+                if let Some(open) = row_box {
+                    out.open(open);
+                }
                 let own = if repeats {
                     Ctx {
                         window: false,
@@ -232,6 +257,11 @@ impl<'a> Generator<'a> {
                     }
                 } else {
                     Ctx {
+                        scope: if row_box.is_some() {
+                            Scope::Other
+                        } else {
+                            ctx.scope
+                        },
                         stagger: false,
                         layer: false,
                         baseline: false,
@@ -240,12 +270,6 @@ impl<'a> Generator<'a> {
                         ..ctx.clone()
                     }
                 };
-                // In a row lined up on its baseline, each child is; a
-                // spacer takes the free space instead.
-                let baseline = ctx.baseline && !repeats && element.kind != "Spacer";
-                if baseline {
-                    out.open("Box(Modifier.alignByBaseline()) {");
-                }
                 // Text cannot be shorter than its line: in a row of a given
                 // height it keeps its own and stands out of the row by the
                 // row's alignment instead of being cut.
@@ -424,7 +448,7 @@ impl<'a> Generator<'a> {
                 if overflow.is_some() {
                     out.close("}");
                 }
-                if baseline {
+                if row_box.is_some() {
                     out.close("}");
                 }
                 if window.is_some() {
@@ -451,15 +475,47 @@ impl<'a> Generator<'a> {
                     })
                     .collect();
                 let call = format!("{}({})", names::component(&component.name), args.join(", "));
+                let fills = ctx.scope == Scope::Row
+                    && self.fills_width(
+                        std::slice::from_ref(&component.body),
+                        &mut std::collections::HashSet::from([component.name.clone()]),
+                    );
+                let flex_root = matches!(
+                    &component.body,
+                    Node::Element(root)
+                        if matches!(root.kind.as_str(), "ScrollView" | "Table")
+                            || (root.kind == "Row"
+                                && root.prop("width").is_none()
+                                && root.children.iter().any(|child| matches!(child, Node::Element(el) if el.kind == "Spacer")))
+                );
+                let yields = ctx.scope == Scope::Row
+                    && !fills
+                    && self.yields_width(
+                        std::slice::from_ref(&component.body),
+                        &mut std::collections::HashSet::from([component.name.clone()]),
+                    );
+                let ellipsizes = yields
+                    && self.ellipsizes_width(
+                        std::slice::from_ref(&component.body),
+                        &mut std::collections::HashSet::from([component.name.clone()]),
+                    );
                 // In a column or row the component's layout can take the
                 // free room there, as it would written in place.
                 let call = match ctx.scope {
-                    Scope::Column | Scope::Row => {
+                    Scope::Column => {
                         format!(
                             "CompositionLocalProvider(LocalBernFlex provides this) {{ {call} }}"
                         )
                     }
-                    Scope::Other | Scope::Flow => call,
+                    Scope::Row if fills && flex_root => {
+                        format!(
+                            "CompositionLocalProvider(LocalBernFlex provides this) {{ {call} }}"
+                        )
+                    }
+                    Scope::Row if fills => {
+                        format!("Box(Modifier.weight(1f)) {{ {call} }}")
+                    }
+                    Scope::Row | Scope::Other | Scope::Flow => call,
                 };
                 // A component written in the window takes the window's room
                 // as its body would.
@@ -467,12 +523,26 @@ impl<'a> Generator<'a> {
                     .window
                     .then(|| self.window_body(&component.body))
                     .flatten();
-                if ctx.baseline {
-                    out.line(format!("Box(Modifier.alignByBaseline()) {{ {call} }}"));
-                } else if let Some(open) = window {
-                    out.line(format!("{open} {call} }}"));
+                let yield_mod = if ellipsizes {
+                    "bernRowYields(ellipsizes = true)"
                 } else {
-                    out.line(call);
+                    "bernRowYields()"
+                };
+                match (ctx.baseline && !fills, yields) {
+                    (true, true) => out.line(format!(
+                        "Box(Modifier.alignByBaseline().{yield_mod}) {{ {call} }}"
+                    )),
+                    (true, false) => {
+                        out.line(format!("Box(Modifier.alignByBaseline()) {{ {call} }}"))
+                    }
+                    (false, true) => out.line(format!("Box(Modifier.{yield_mod}) {{ {call} }}")),
+                    (false, false) => {
+                        if let Some(open) = window {
+                            out.line(format!("{open} {call} }}"));
+                        } else {
+                            out.line(call);
+                        }
+                    }
                 }
             }
             Node::If(node) if Self::branches_move(node) => self.animated_if(out, node, ctx),
@@ -582,7 +652,8 @@ impl<'a> Generator<'a> {
             "WebPage" => self.web_page(out, element),
             "Image" => self.image(out, element),
             "Spacer" => match ctx.scope {
-                Scope::Column | Scope::Row | Scope::Flow => out.line("Spacer(Modifier.weight(1f))"),
+                Scope::Row => out.line("Spacer(Modifier.weight(1f).bernRowSpacer())"),
+                Scope::Column | Scope::Flow => out.line("Spacer(Modifier.weight(1f))"),
                 Scope::Other => out.line("Spacer(Modifier.size(8.dp))"),
             },
             // Android windows have no buttons of their own.

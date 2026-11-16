@@ -1836,3 +1836,74 @@ fn touch_gestures_extract_actions_instead_of_rendering_them() {
         runtime.contains("hasSystemFeature(android.content.pm.PackageManager.FEATURE_TOUCHSCREEN)")
     );
 }
+
+#[test]
+fn bern_row_folds_leading_words_and_marks_yielding_items() {
+    let dir = std::env::temp_dir().join("bern-compose-row-shrinking-test");
+    let ui = r#"
+use bern::prelude::*;
+
+#[component]
+pub fn trailing_time(app: stage::Client) -> impl View {
+    ui! {
+        Text(content: tr! { "en" => "{n}" ; n: app.count }, style: caption, lines: 1)
+    }
+}
+
+#[component]
+pub fn stretch_slider(app: stage::Client) -> impl View {
+    ui! {
+        Slider(id: progress, label: tr! { "en" => "Progress" }, label_hidden: true, current: app.count, min: 0, max: 10) => app.add()
+    }
+}
+
+#[component]
+pub fn app(app: stage::Client, windows: AppWindows) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Stage" }, initial: open) {
+                Row(gap: 12, align: center) {
+                    Column(gap: 4) {
+                        Row(gap: 8, align: center) {
+                            if app.count > 0 {
+                                Row(gap: 8, align: center) {
+                                    Text(content: tr! { "en" => "Primary Title" }, lines: 1)
+                                    Text(content: tr! { "en" => "Secondary Subtitle" }, lines: 1)
+                                }
+                            } else {
+                                Text(content: tr! { "en" => "Idle" }, lines: 1)
+                            }
+                            Spacer
+                            IconButton(id: fav, icon: "heart", prominence: plain, label: tr! { "en" => "Favorite" }) => app.add()
+                            trailing_time(app: app)
+                        }
+                        stretch_slider(app: app)
+                    }
+                }
+            }
+        }
+    }
+}
+"#;
+    let (_, compiled) = stage_project(&dir, ui);
+    let kotlin = bern_backend_compose::Generator::new(&compiled.app).generate("dev.bern.stage", 0);
+    // Outer column around a spaced row and a slider component stretches in its row.
+    assert!(
+        kotlin.contains(
+            "Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4f.dp)"
+        ),
+        "{kotlin}"
+    );
+    // Exhaustive conditional leading words fold the spacer into a weighted box.
+    assert!(kotlin.contains("Box(Modifier.weight(1f)) {"), "{kotlin}");
+    assert!(!kotlin.contains("bernRowSpacer()"), "{kotlin}");
+    // Sibling texts inside the inner `BernRow` mark themselves as yielding, while
+    // `IconButton` stays firm and the trailing text component is marked yielding.
+    assert!(kotlin.contains("BernRow("), "{kotlin}");
+    assert!(
+        kotlin
+            .contains("Box(Modifier.bernRowYields(ellipsizes = true)) { AppView_trailing_time() }"),
+        "{kotlin}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -104,8 +104,19 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.AlignmentLine
+import androidx.compose.ui.layout.FirstBaseline
 import androidx.compose.ui.layout.HorizontalAlignmentLine
+import androidx.compose.ui.layout.IntrinsicMeasurable
+import androidx.compose.ui.layout.IntrinsicMeasureScope
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.Measurable
+import androidx.compose.ui.layout.MeasurePolicy
+import androidx.compose.ui.layout.MeasureResult
+import androidx.compose.ui.layout.MeasureScope
+import androidx.compose.ui.layout.Measured
+import androidx.compose.ui.layout.ParentDataModifier
+import androidx.compose.ui.layout.Placeable
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -121,6 +132,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.constrainHeight
@@ -658,6 +670,367 @@ fun BernFlow(gap: Dp, align: Alignment.Horizontal = Alignment.Start, content: @C
         verticalArrangement = Arrangement.spacedBy(gap),
         itemVerticalAlignment = Alignment.CenterVertically,
     ) { content() }
+}
+
+internal data class BernRowData(
+    val weight: Float = 0f,
+    val fill: Boolean = true,
+    val align: Alignment.Vertical? = null,
+    val alignmentLine: AlignmentLine? = null,
+    val alignmentLineBlock: ((Measured) -> Int)? = null,
+    val spacer: Boolean = false,
+    val yields: Boolean = false,
+    val ellipsizes: Boolean = false,
+) {
+    fun linePosition(placeable: Placeable): Int = when {
+        alignmentLineBlock != null -> alignmentLineBlock.invoke(placeable)
+        alignmentLine != null -> placeable[alignmentLine]
+        else -> AlignmentLine.Unspecified
+    }
+}
+
+private object BernRowSpacerModifier : ParentDataModifier {
+    override fun Density.modifyParentData(parentData: Any?): Any =
+        ((parentData as? BernRowData) ?: BernRowData()).copy(spacer = true)
+}
+
+private object BernRowYieldsModifier : ParentDataModifier {
+    override fun Density.modifyParentData(parentData: Any?): Any =
+        ((parentData as? BernRowData) ?: BernRowData()).copy(yields = true)
+}
+
+private object BernRowEllipsizesModifier : ParentDataModifier {
+    override fun Density.modifyParentData(parentData: Any?): Any =
+        ((parentData as? BernRowData) ?: BernRowData()).copy(yields = true, ellipsizes = true)
+}
+
+private data class BernRowWeightModifier(val weight: Float, val fill: Boolean) : ParentDataModifier {
+    override fun Density.modifyParentData(parentData: Any?): Any =
+        ((parentData as? BernRowData) ?: BernRowData()).copy(weight = weight, fill = fill)
+}
+
+private data class BernRowAlignModifier(val align: Alignment.Vertical) : ParentDataModifier {
+    override fun Density.modifyParentData(parentData: Any?): Any =
+        ((parentData as? BernRowData) ?: BernRowData()).copy(align = align)
+}
+
+private data class BernRowLineModifier(val line: HorizontalAlignmentLine) : ParentDataModifier {
+    override fun Density.modifyParentData(parentData: Any?): Any =
+        ((parentData as? BernRowData) ?: BernRowData()).copy(alignmentLine = line, alignmentLineBlock = null)
+}
+
+private class BernRowLineBlockModifier(val block: (Measured) -> Int) : ParentDataModifier {
+    override fun Density.modifyParentData(parentData: Any?): Any =
+        ((parentData as? BernRowData) ?: BernRowData()).copy(alignmentLine = null, alignmentLineBlock = block)
+
+    override fun equals(other: Any?): Boolean =
+        other is BernRowLineBlockModifier && other.block === block
+
+    override fun hashCode(): Int = block.hashCode()
+}
+
+/// Marks a `Spacer` in a `BernRow`: when the row is too narrow, yielding words
+/// before a single spacer give way before anything after it.
+fun Modifier.bernRowSpacer(): Modifier = this.then(BernRowSpacerModifier)
+
+/// Marks a direct `BernRow` child whose words can give up width when the row
+/// is narrower than its unweighted items, leaving controls at their own width;
+/// `ellipsizes` items (with `lines`) truncate before unclamped labels wrap.
+fun Modifier.bernRowYields(ellipsizes: Boolean = false): Modifier =
+    this.then(if (ellipsizes) BernRowEllipsizesModifier else BernRowYieldsModifier)
+
+internal object BernRowScopeInstance : RowScope {
+    override fun Modifier.weight(weight: Float, fill: Boolean): Modifier =
+        this.then(BernRowWeightModifier(weight, fill))
+
+    override fun Modifier.align(alignment: Alignment.Vertical): Modifier =
+        this.then(BernRowAlignModifier(alignment))
+
+    override fun Modifier.alignBy(alignmentLine: HorizontalAlignmentLine): Modifier =
+        this.then(BernRowLineModifier(alignmentLine))
+
+    override fun Modifier.alignByBaseline(): Modifier =
+        alignBy(FirstBaseline)
+
+    override fun Modifier.alignBy(alignmentLineBlock: (Measured) -> Int): Modifier =
+        this.then(BernRowLineBlockModifier(alignmentLineBlock))
+}
+
+private fun IntrinsicMeasurable.bernIntrinsicWidth(max: Boolean, height: Int): Int =
+    try {
+        (if (max) maxIntrinsicWidth(height) else minIntrinsicWidth(height)).coerceAtLeast(0)
+    } catch (_: IllegalStateException) {
+        0
+    }
+
+private fun IntrinsicMeasurable.bernIntrinsicHeight(max: Boolean, width: Int): Int =
+    try {
+        (if (max) maxIntrinsicHeight(width) else minIntrinsicHeight(width)).coerceAtLeast(0)
+    } catch (_: IllegalStateException) {
+        0
+    }
+
+private fun bernShareWidths(indices: List<Int>, weights: LongArray, budget: Int, out: IntArray) {
+    var left = budget.coerceAtLeast(0)
+    var remaining = indices.sumOf { weights[it] }
+    for (index in indices) {
+        val w = weights[index]
+        val share = if (remaining > 0L && left > 0) {
+            ((left.toLong() * w + remaining / 2L) / remaining).toInt().coerceIn(0, left)
+        } else {
+            0
+        }
+        out[index] = share
+        left -= share
+        remaining -= w
+    }
+}
+
+private fun bernOfferUnweighted(
+    n: Int,
+    data: Array<BernRowData?>,
+    ideal: IntArray,
+    room: Int,
+): IntArray {
+    val offered = ideal.copyOf()
+    val unweighted = (0 until n).filter { (data[it]?.weight ?: 0f) <= 0f }
+    val used = unweighted.sumOf { ideal[it].toLong() }
+    if (used <= room.toLong()) return offered
+
+    val weights = LongArray(n) { ideal[it].toLong() }
+    val spacers = (0 until n).filter { data[it]?.spacer == true }
+    val yielding = unweighted.filter { data[it]?.yields == true && ideal[it] > 0 }
+    val firm = unweighted.filter { data[it]?.yields != true && ideal[it] > 0 }
+    fun byEllipsis(items: List<Int>): List<List<Int>> =
+        listOf(items.filter { data[it]?.ellipsizes == true }, items.filter { data[it]?.ellipsizes != true })
+    val pools: List<List<Int>> = if (spacers.size == 1 && yielding.any { it < spacers[0] }) {
+        val at = spacers[0]
+        byEllipsis(yielding.filter { it < at }) + byEllipsis(yielding.filter { it > at }) + listOf(firm)
+    } else {
+        byEllipsis(yielding) + listOf(firm)
+    }
+    var missing = used - room.toLong()
+    for (pool in pools) {
+        if (missing <= 0L || pool.isEmpty()) continue
+        val poolTotal = pool.sumOf { offered[it].toLong() }
+        if (missing >= poolTotal) {
+            for (index in pool) offered[index] = 0
+            missing -= poolTotal
+        } else {
+            bernShareWidths(pool, weights, (poolTotal - missing).toInt(), offered)
+            missing = 0L
+        }
+    }
+    return offered
+}
+
+/// A `Row`, laid out as rows are on the other targets: while the unweighted
+/// items fit, each gets its natural width and weighted items share what is
+/// left. When the row is too narrow, controls keep their width while yielding
+/// words share the deficit in proportion to their natural width (leading words
+/// before a single spacer first), instead of Compose's greedy left-to-right
+/// pass starving trailing items down to a single character's width.
+@Composable
+fun BernRow(
+    modifier: Modifier = Modifier,
+    gap: Dp = 8.dp,
+    verticalAlignment: Alignment.Vertical = Alignment.CenterVertically,
+    content: @Composable RowScope.() -> Unit,
+) {
+    val policy = remember(gap, verticalAlignment) {
+        object : MeasurePolicy {
+            override fun MeasureScope.measure(
+                measurables: List<Measurable>,
+                constraints: Constraints,
+            ): MeasureResult {
+                val n = measurables.size
+                if (n == 0) return layout(constraints.minWidth, constraints.minHeight) {}
+                val gapPx = gap.roundToPx()
+                val totalGap = (gapPx.toLong() * (n - 1)).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+                val data = Array(n) { measurables[it].parentData as? BernRowData }
+                val placeables = arrayOfNulls<Placeable>(n)
+                val childMaxH = constraints.maxHeight
+                if (!constraints.hasBoundedWidth) {
+                    val unbounded = Constraints(minWidth = 0, maxWidth = Constraints.Infinity, minHeight = 0, maxHeight = childMaxH)
+                    for (i in 0 until n) placeables[i] = measurables[i].measure(unbounded)
+                } else {
+                    val room = (constraints.maxWidth - totalGap).coerceAtLeast(0)
+                    val intrinsicH = if (constraints.hasFixedHeight) childMaxH else Constraints.Infinity
+                    val ideal = IntArray(n) { i ->
+                        if ((data[i]?.weight ?: 0f) <= 0f) measurables[i].bernIntrinsicWidth(max = true, intrinsicH) else 0
+                    }
+                    val offered = bernOfferUnweighted(n, data, ideal, room)
+                    var fixedUsed = 0
+                    val weighted = ArrayList<Int>(n)
+                    for (i in 0 until n) {
+                        if ((data[i]?.weight ?: 0f) <= 0f) {
+                            val p = measurables[i].measure(
+                                Constraints(minWidth = 0, maxWidth = offered[i], minHeight = 0, maxHeight = childMaxH),
+                            )
+                            placeables[i] = p
+                            fixedUsed += p.width
+                        } else {
+                            weighted.add(i)
+                        }
+                    }
+                    var free = (room - fixedUsed).coerceAtLeast(0)
+                    var remainingWeight = weighted.sumOf { data[it]!!.weight.toDouble() }
+                    for (i in weighted) {
+                        val d = data[i]!!
+                        val w = d.weight.toDouble()
+                        val share = if (remainingWeight > 0.0 && free > 0) {
+                            (free * w / remainingWeight).roundToInt().coerceIn(0, free)
+                        } else {
+                            0
+                        }
+                        free -= share
+                        remainingWeight -= w
+                        placeables[i] = measurables[i].measure(
+                            Constraints(
+                                minWidth = if (d.fill) share else 0,
+                                maxWidth = share,
+                                minHeight = 0,
+                                maxHeight = childMaxH,
+                            ),
+                        )
+                    }
+                }
+                var maxChildH = 0
+                var beforeBaseline = 0
+                var afterBaseline = 0
+                var widthSum = 0L
+                for (i in 0 until n) {
+                    val p = placeables[i]!!
+                    widthSum += p.width
+                    maxChildH = max(maxChildH, p.height)
+                    val pos = data[i]?.linePosition(p) ?: AlignmentLine.Unspecified
+                    if (pos != AlignmentLine.Unspecified) {
+                        beforeBaseline = max(beforeBaseline, pos)
+                        afterBaseline = max(afterBaseline, p.height - pos)
+                    }
+                }
+                val contentH = max(maxChildH, beforeBaseline + afterBaseline)
+                val rowH = contentH.coerceIn(constraints.minHeight, constraints.maxHeight)
+                val contentW = (widthSum + totalGap).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+                val rowW = contentW.coerceIn(constraints.minWidth, constraints.maxWidth)
+                return layout(rowW, rowH) {
+                    var x = 0
+                    for (i in 0 until n) {
+                        val p = placeables[i]!!
+                        val d = data[i]
+                        val pos = d?.linePosition(p) ?: AlignmentLine.Unspecified
+                        val y = if (pos != AlignmentLine.Unspecified) {
+                            beforeBaseline - pos
+                        } else {
+                            (d?.align ?: verticalAlignment).align(p.height, rowH)
+                        }
+                        p.placeRelative(x, y)
+                        if (i < n - 1) x += p.width + gapPx
+                    }
+                }
+            }
+
+            private fun IntrinsicMeasureScope.intrinsicWidth(
+                measurables: List<IntrinsicMeasurable>,
+                height: Int,
+                maxWidth: Boolean,
+            ): Int {
+                val n = measurables.size
+                if (n == 0) return 0
+                val gapPx = gap.roundToPx()
+                val totalGap = (gapPx.toLong() * (n - 1)).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+                var fixed = 0L
+                var totalWeight = 0f
+                var maxUnit = 0f
+                for (m in measurables) {
+                    val d = m.parentData as? BernRowData
+                    val w = d?.weight ?: 0f
+                    val childW = m.bernIntrinsicWidth(maxWidth, height)
+                    if (w <= 0f) {
+                        fixed += childW
+                    } else {
+                        totalWeight += w
+                        maxUnit = max(maxUnit, childW / w)
+                    }
+                }
+                val weighted = (maxUnit * totalWeight).roundToInt().toLong()
+                return (fixed + weighted + totalGap).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+            }
+
+            private fun IntrinsicMeasureScope.intrinsicHeight(
+                measurables: List<IntrinsicMeasurable>,
+                width: Int,
+                maxHeight: Boolean,
+            ): Int {
+                val n = measurables.size
+                if (n == 0) return 0
+                if (width == Constraints.Infinity) {
+                    return measurables.maxOf { it.bernIntrinsicHeight(maxHeight, Constraints.Infinity) }
+                }
+                val gapPx = gap.roundToPx()
+                val totalGap = (gapPx.toLong() * (n - 1)).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+                val room = (width - totalGap).coerceAtLeast(0)
+                val data = Array(n) { measurables[it].parentData as? BernRowData }
+                val ideal = IntArray(n) { i ->
+                    if ((data[i]?.weight ?: 0f) <= 0f) measurables[i].bernIntrinsicWidth(max = true, Constraints.Infinity) else 0
+                }
+                val offered = bernOfferUnweighted(n, data, ideal, room)
+                var fixedUsed = 0
+                val weighted = ArrayList<Int>(n)
+                for (i in 0 until n) {
+                    if ((data[i]?.weight ?: 0f) <= 0f) {
+                        fixedUsed += offered[i]
+                    } else {
+                        weighted.add(i)
+                    }
+                }
+                var free = (room - fixedUsed).coerceAtLeast(0)
+                var remainingWeight = weighted.sumOf { data[it]!!.weight.toDouble() }
+                val childWidths = offered.copyOf()
+                for (i in weighted) {
+                    val w = data[i]!!.weight.toDouble()
+                    val share = if (remainingWeight > 0.0 && free > 0) {
+                        (free * w / remainingWeight).roundToInt().coerceIn(0, free)
+                    } else {
+                        0
+                    }
+                    childWidths[i] = share
+                    free -= share
+                    remainingWeight -= w
+                }
+                var tallest = 0
+                for (i in 0 until n) {
+                    tallest = max(tallest, measurables[i].bernIntrinsicHeight(maxHeight, childWidths[i]))
+                }
+                return tallest
+            }
+
+            override fun IntrinsicMeasureScope.minIntrinsicWidth(
+                measurables: List<IntrinsicMeasurable>,
+                height: Int,
+            ): Int = intrinsicWidth(measurables, height, maxWidth = false)
+
+            override fun IntrinsicMeasureScope.maxIntrinsicWidth(
+                measurables: List<IntrinsicMeasurable>,
+                height: Int,
+            ): Int = intrinsicWidth(measurables, height, maxWidth = true)
+
+            override fun IntrinsicMeasureScope.minIntrinsicHeight(
+                measurables: List<IntrinsicMeasurable>,
+                width: Int,
+            ): Int = intrinsicHeight(measurables, width, maxHeight = false)
+
+            override fun IntrinsicMeasureScope.maxIntrinsicHeight(
+                measurables: List<IntrinsicMeasurable>,
+                width: Int,
+            ): Int = intrinsicHeight(measurables, width, maxHeight = true)
+        }
+    }
+    Layout(
+        content = { BernRowScopeInstance.content() },
+        modifier = modifier,
+        measurePolicy = policy,
+    )
 }
 
 // @bern:wear-skip-start

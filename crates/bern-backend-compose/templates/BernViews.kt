@@ -623,7 +623,7 @@ fun BernButton(
             Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
         }
-        Text(label, style = textStyle)
+        Text(label, style = textStyle, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
     val error = MaterialTheme.colorScheme.error
     var padding = if (style?.size != null) style.insets else ButtonDefaults.ContentPadding
