@@ -27,6 +27,13 @@ export function Svg(p, ctx, { source, label, width, height, fit = "contain", pla
     }
   }
 
+  function configureNow(runNow) {
+    if (disposed || !player) return;
+    const isDark = dark(canvas);
+    const textRgba = isDark ? 0xFFFFFFFF : 0x000000FF;
+    B.svgConfigure(player, runNow, cfgSpeed, cfgRestart, fitCode, interactive, isDark, reduceMotion(), textRgba);
+  }
+
   function renderFrame(nowMs) {
     if (disposed || !player || !ctx2d) return;
     const rect = canvas.getBoundingClientRect();
@@ -39,10 +46,7 @@ export function Svg(p, ctx, { source, label, width, height, fit = "contain", pla
       canvas.width = wPx;
       canvas.height = hPx;
     }
-    const isDark = dark(canvas);
-    const textRgba = isDark ? 0xFFFFFFFF : 0x000000FF;
-    const runNow = cfgPlaying && visible && !document.hidden;
-    B.svgConfigure(player, runNow, cfgSpeed, cfgRestart, fitCode, interactive, isDark, reduceMotion(), textRgba);
+    configureNow(cfgPlaying && visible && !document.hidden);
     const { status, pixels } = B.svgRender(player, nowMs * 0.001, wPx, hPx);
     if ((status & 1) !== 0 && pixels) {
       ctx2d.putImageData(new ImageData(pixels, wPx, hPx), 0, 0);
@@ -65,7 +69,7 @@ export function Svg(p, ctx, { source, label, width, height, fit = "contain", pla
   const io = new IntersectionObserver(entries => {
     visible = entries[0]?.isIntersecting ?? true;
     if (visible) renderFrame(performance.now());
-    else syncLoop();
+    else { configureNow(false); syncLoop(); }
   });
   io.observe(canvas);
 
@@ -74,7 +78,7 @@ export function Svg(p, ctx, { source, label, width, height, fit = "contain", pla
 
   const onVis = () => {
     if (!document.hidden) renderFrame(performance.now());
-    else syncLoop();
+    else { configureNow(false); syncLoop(); }
   };
   document.addEventListener("visibilitychange", onVis);
 

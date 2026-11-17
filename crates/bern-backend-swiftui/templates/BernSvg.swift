@@ -48,7 +48,6 @@ private final class BernSvgController: ObservableObject {
 
     func renderFrame(
         name: String,
-        date: Date,
         width: CGFloat,
         height: CGFloat,
         scale: CGFloat,
@@ -82,7 +81,7 @@ private final class BernSvgController: ObservableObject {
         let s = max(1.0, scale)
         let wPx = UInt32(max(1, Int((max(1.0, width) * s).rounded())))
         let hPx = UInt32(max(1, Int((max(1.0, height) * s).rounded())))
-        let status = bern_svg_render(player, date.timeIntervalSinceReferenceDate, wPx, hPx, 0)
+        let status = bern_svg_render(player, ProcessInfo.processInfo.systemUptime, wPx, hPx, 0)
         let changed = (status & 1) != 0
         let nowActive = (status & 2) != 0
 
@@ -116,6 +115,34 @@ private final class BernSvgController: ObservableObject {
             }
         }
         return image
+    }
+
+    func pause(
+        fit: String,
+        speed: Double,
+        restart: Double,
+        interactive: Bool,
+        dark: Bool,
+        reduceMotion: Bool
+    ) {
+        guard let player else { return }
+        let fitCode: UInt8 = switch fit {
+        case "cover": 1
+        case "fill": 2
+        default: 0
+        }
+        let textRgba: UInt32 = dark ? 0xFFFFFFFF : 0x000000FF
+        _ = bern_svg_configure(
+            player,
+            0,
+            speed.isFinite && speed > 0 ? speed : 1,
+            restart.isFinite ? restart : 0,
+            fitCode,
+            interactive ? 1 : 0,
+            dark ? 1 : 0,
+            reduceMotion ? 1 : 0,
+            textRgba
+        )
     }
 
     func pointer(kind: UInt8, x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat) {
@@ -157,18 +184,18 @@ struct BernSvg: View {
         #else
         let sceneLive = phase != .background
         #endif
-        let running = controller.active && playing && visible && sceneLive
+        let live = playing && visible && sceneLive
+        let running = controller.active && live
         let w = max(0, width)
         let h = max(0, height)
-        TimelineView(.animation(minimumInterval: nil, paused: !running)) { timeline in
+        TimelineView(.animation(minimumInterval: nil, paused: !running)) { _ in
             if let cgImage = controller.renderFrame(
                 name: name,
-                date: timeline.date,
                 width: w,
                 height: h,
                 scale: displayScale,
                 fit: fit,
-                playing: playing && visible && sceneLive,
+                playing: live,
                 speed: speed,
                 restart: restart,
                 interactive: interactive,
@@ -192,6 +219,18 @@ struct BernSvg: View {
         .accessibilityHidden(label == nil)
         .onAppear { visible = true }
         .onDisappear { visible = false }
+        .onChange(of: live) { _, nowLive in
+            if !nowLive {
+                controller.pause(
+                    fit: fit,
+                    speed: speed,
+                    restart: restart,
+                    interactive: interactive,
+                    dark: scheme == .dark,
+                    reduceMotion: reduceMotion
+                )
+            }
+        }
     }
 }
 
