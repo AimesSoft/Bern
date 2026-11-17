@@ -41,17 +41,13 @@ struct NativeSvgState : std::enable_shared_from_this<NativeSvgState> {
         return freq.QuadPart > 0 ? static_cast<double>(counter.QuadPart) / static_cast<double>(freq.QuadPart) : 0.0;
     }
 
-    void RenderNow() {
-        if (disposed || !player || !loaded) return;
-        double scale = frame.XamlRoot() ? frame.XamlRoot().RasterizationScale() : 1.0;
-        if (scale <= 0.0) scale = 1.0;
-        uint32_t wPx = static_cast<uint32_t>((std::max)(1.0, std::round((std::max)(1.0, widthPt) * scale)));
-        uint32_t hPx = static_cast<uint32_t>((std::max)(1.0, std::round((std::max)(1.0, heightPt) * scale)));
+    void Configure(bool runNow) {
+        if (disposed || !player) return;
         bool dark = frame.ActualTheme() == xaml::ElementTheme::Dark;
         uint32_t textRgba = dark ? 0xFFFFFFFFu : 0x000000FFu;
         bern_svg_configure(
             player,
-            playing ? 1 : 0,
+            runNow ? 1 : 0,
             speed,
             restart,
             fitCode,
@@ -60,6 +56,15 @@ struct NativeSvgState : std::enable_shared_from_this<NativeSvgState> {
             Reduced() ? 1 : 0,
             textRgba
         );
+    }
+
+    void RenderNow() {
+        if (disposed || !player || !loaded) return;
+        double scale = frame.XamlRoot() ? frame.XamlRoot().RasterizationScale() : 1.0;
+        if (scale <= 0.0) scale = 1.0;
+        uint32_t wPx = static_cast<uint32_t>((std::max)(1.0, std::round((std::max)(1.0, widthPt) * scale)));
+        uint32_t hPx = static_cast<uint32_t>((std::max)(1.0, std::round((std::max)(1.0, heightPt) * scale)));
+        Configure(playing && loaded);
         uint8_t status = bern_svg_render(player, NowSeconds(), wPx, hPx, 1);
         if ((status & 1) != 0) {
             if (!bitmap || static_cast<uint32_t>(bitmap.PixelWidth()) != wPx || static_cast<uint32_t>(bitmap.PixelHeight()) != hPx) {
@@ -196,7 +201,7 @@ inline void Svg(Parent const& p, Ctx const& ctx, SvgProps props) {
         if (auto s = weak.lock()) { s->loaded = true; s->RenderNow(); }
     });
     state->frame.Unloaded([weak](auto&&, auto&&) {
-        if (auto s = weak.lock()) { s->loaded = false; s->SyncLoop(); }
+        if (auto s = weak.lock()) { s->loaded = false; s->Configure(false); s->SyncLoop(); }
     });
 
     Place(p, state->frame);

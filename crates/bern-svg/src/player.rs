@@ -530,6 +530,12 @@ impl Player {
 
         self.evaluate_frame();
         let active = self.is_active();
+        // Reset the wall-clock anchor whenever the player enters idle sleep or
+        // pauses so waking up on a later interaction starts from `self.clock`
+        // rather than jumping ahead by the elapsed sleep interval.
+        if !active || !self.config.playing {
+            self.last_wall = None;
+        }
 
         let frame_hash = self.compute_frame_hash(width_px, height_px, format);
         if self.last_frame_hash == Some(frame_hash) && self.last_size == (width_px, height_px) {
@@ -1289,6 +1295,14 @@ impl Player {
     pub fn is_active(&self) -> bool {
         if !self.config.playing {
             return false;
+        }
+        if self.config.interactive
+            && !self.config.reduced_motion
+            && (self.scene.data.interaction.on_click.is_some()
+                || self.scene.data.interaction.on_dblclick.is_some())
+            && self.clock + 1e-6 < f64::from(self.scene.data.interaction.ready_after)
+        {
+            return true;
         }
         if let Some((_, Some(expire_at))) = self.timed_class
             && self.clock < expire_at

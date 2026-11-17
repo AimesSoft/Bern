@@ -321,6 +321,12 @@ pub fn Svg(p: &Parent, ctx: &Ctx, props: SvgProps) {
     }
     {
         let st = Rc::clone(&state);
+        pic.connect_unmap(move |pic| {
+            st.borrow_mut().render_into(pic, monotonic_secs());
+        });
+    }
+    {
+        let st = Rc::clone(&state);
         pic.connect_scale_factor_notify(move |pic| {
             st.borrow_mut().render_into(pic, monotonic_secs());
         });

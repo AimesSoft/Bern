@@ -545,4 +545,55 @@ mod tests {
         });
         assert_eq!(player.clock(), 0.0);
     }
+
+    #[test]
+    fn waking_from_idle_sleep_starts_expression_at_zero_without_jumping() {
+        let svg = r##"
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"
+             data-bern-ready="1.0s"
+             data-bern-dblclick="trigger(do-wink: 1.5s)">
+          <style>
+            .intro { animation: pop 0.5s both; }
+            .do-wink .head { animation: tilt 1.5s linear both; }
+            @keyframes pop { 0% { opacity: 0; } 100% { opacity: 1; } }
+            @keyframes tilt { 0% { opacity: 1; } 20% { opacity: 0.2; } 100% { opacity: 1; } }
+          </style>
+          <circle class="intro" cx="50" cy="50" r="40" fill="#3E5BD8"/>
+          <rect class="head" x="20" y="20" width="60" height="60" fill="#222B4F"/>
+        </svg>"##;
+        let bytes = compile(svg).unwrap();
+        let scene = Arc::new(Scene::from_bytes(&bytes).unwrap());
+        let mut player = Player::new(scene);
+
+        // Entrance finishes at 0.5s, but `ready_after` keeps the clock active until 1.0s.
+        let (s0, _) = player.render(0.0, 32, 32, PixelFormat::RgbaPremul);
+        assert!(s0.active);
+        let (s_half, _) = player.render(0.6, 32, 32, PixelFormat::RgbaPremul);
+        assert!(s_half.active, "clock must advance to data-bern-ready");
+        let (s_idle, idle_px) = player.render(1.2, 32, 32, PixelFormat::RgbaPremul);
+        assert!(!s_idle.active);
+        let idle_snapshot = idle_px.to_vec();
+
+        // Simulate a long idle pause (100 seconds) before double-clicking.
+        let wake = player.pointer(PointerEvent::DoubleClick(0.5, 0.5));
+        assert!(wake.changed && wake.active);
+        assert_eq!(player.root_classes(), vec!["do-wink"]);
+
+        // First frame after waking must evaluate at local_time = 0.0 (matching 0% keyframe),
+        // not jump forward by the 100s sleep interval or expire immediately.
+        let (first, first_px) = player.render(101.2, 32, 32, PixelFormat::RgbaPremul);
+        assert!(first.active);
+        assert_eq!(first_px, idle_snapshot.as_slice());
+        assert_eq!(player.root_classes(), vec!["do-wink"]);
+
+        // Subsequent frame 0.3s later reaches 20% of the 1.5s animation (`opacity: 0.2`).
+        let (mid, mid_px) = player.render(101.5, 32, 32, PixelFormat::RgbaPremul);
+        assert!(mid.changed && mid.active);
+        assert_ne!(mid_px, idle_snapshot.as_slice());
+
+        // Finishing the 1.5s animation cleans up the class and sleeps again.
+        let (done, _) = player.render(102.8, 32, 32, PixelFormat::RgbaPremul);
+        assert!(!done.active);
+        assert!(player.root_classes().is_empty());
+    }
 }
