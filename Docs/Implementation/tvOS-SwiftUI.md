@@ -103,6 +103,8 @@ The `tvos` key of `[app.icon]`:
 
 ## Local control channel
 
+For the simulator, run the app CLI on the Mac. With IPC enabled, `target/bern/tvos/skills/<program>/SKILL.md` documents the CLI in the adjacent `bin/` directory; neither is inside the simulator app bundle.
+
 Same as iOS: `bern run` hands the Mac's temporary directory to the app through `SIMCTL_CHILD_BERN_IPC_DIR`, and the CLI and JSON client on the Mac connect over IPC to the app in the simulator; when the app is launched from the Home screen, the channel does not listen. When a macOS, iOS or Android engine with the same bundle identifier is running at the same time, pick one with `--engine`: `--engine tvos` picks the simulator's.
 
 ## Build and run

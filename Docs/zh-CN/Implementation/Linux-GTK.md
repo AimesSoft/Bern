@@ -94,7 +94,7 @@
 - **窗口与草稿**：窗口出现时向会话运行时登记，获得代次与外部 ID（`main#1`），草稿单元由运行时返回的初值创建；写入先经运行时，再更新单元。窗口关闭即释放草稿、控件登记与查询订阅，应用级播放器继续。
 - **控件登记与会话命令**：可操作控件挂载时登记目标 ID（`组件.控件id`，列表行附加 `[键]`）、角色、名称、可用性与动作闭包，外部的 `ui.*` 命令经这些闭包执行；禁用、被关闭确认阻挡、多处挂载分别返回 `target_unavailable`、`target_blocked`、`target_ambiguous`；密码框不暴露值。
 - **应用生命周期**：`AdwApplication` 以 `bundle_id` 为应用 ID，同一用户只运行一个实例；最后一个窗口关闭后应用保持运行（引擎与外部入口仍可用），再次启动应用会打开主窗口；声明了 `StatusItem` 时它在桌面的状态区，从那里打开窗口或退出（见“状态栏项”）。Ctrl+Q 退出（与 macOS 的 Cmd-Q 一样不经过关闭检查），Ctrl+W 关闭当前窗口，设置窗口按 Esc 关闭。
-- **外部入口**：与 macOS 相同的本地控制通道（`channels = ["ipc"]`），CLI从同一命令目录生成。
+- **外部入口**：与 macOS 相同的本地控制通道（`channels = ["ipc"]`），CLI 从同一命令目录生成。
 
 ## 窗口
 
@@ -241,7 +241,7 @@ cargo run -p bern-cli -- build --manifest examples/showcase/Bern.toml --target l
 target/bern/linux/Showcase/showcase
 ```
 
-需要 GTK 4.14、libadwaita 1.5 与 libsoup 3 的开发包（Ubuntu：`libgtk-4-dev`、`libadwaita-1-dev`、`libsoup-3.0-dev`）。产物位于 `target/bern/linux/`：`Showcase/showcase`（界面程序）、`Showcase/resources/`（随包资源，程序按自身位置查找）、`Showcase/dev.bern.showcase.desktop`、`bin/showcase`、应用 crate `app/`、构建清单 `build.json`（记录 GTK 与 libadwaita 最低版本、媒体后端与呈现、资源名称）。Rust 编译目录为 `target/bern-glue-linux/`。
+需要 GTK 4.14、libadwaita 1.5 与 libsoup 3 的开发包（Ubuntu：`libgtk-4-dev`、`libadwaita-1-dev`、`libsoup-3.0-dev`）。产物位于 `target/bern/linux/`：`Showcase/showcase`（界面程序）、`Showcase/resources/`（随包资源，程序按自身位置查找）、`Showcase/dev.bern.showcase.desktop`、`bin/showcase`、启用 IPC 时的 `skills/showcase/SKILL.md`、应用 crate `app/`、构建清单 `build.json`（记录 GTK 与 libadwaita 最低版本、媒体后端与呈现、资源名称）。Rust 编译目录为 `target/bern-glue-linux/`。
 
 应用图标在 `Showcase/icons/dev.bern.showcase.png`（没有声明 `[app].icon` 时为 512 像素的 Bern 标志）。启动时这个目录加入图标主题的搜索路径，窗口的默认图标名为 `bundle_id`；找不到时在标准错误报告。生成的 `.desktop` 文件以绝对路径指向它。`[app.icon].linux` 为图标主题文件夹时，其中最大的 PNG 作为这个文件，全部图标改名为 `bundle_id` 后放在 `Showcase/icons/hicolor/` 下，`.deb` 把它们装进 `/usr/share/icons/hicolor`。GNOME 在 Wayland 下从已安装的 `.desktop` 文件取程序坞图标，把生成的文件复制到 `~/.local/share/applications/` 后程序坞显示标志；构建不会写入用户目录。
 
@@ -251,7 +251,7 @@ target/bern/linux/Showcase/showcase
 
 `bern package --target linux` 按 release 构建，生成 `<程序>_<版本>_<架构>.deb`（系统有 `dpkg-deb` 时）与 `<产品>-<版本>-linux-<架构>.tar.gz`：
 
-- `.deb` 把应用、图标与 `bin/` 中的 CLI装到 `/opt/<bundle_id>`，另有 `/usr/share/applications/<bundle_id>.desktop`、`hicolor` 图标主题中的图标与 `/usr/bin/<程序>` 启动器；依赖 `libgtk-4-1 (>= 4.14)` 与 `libadwaita-1-0 (>= 1.5)`，使用媒体时另加 `libgtk-4-media-gstreamer` 与 `gstreamer1.0-plugins-good`，并推荐 `gstreamer1.0-libav`。维护者取自 `[app].publisher`。
+- `.deb` 把应用和图标安装到 `/opt/<bundle_id>`，CLI 位于其 `bin/` 子目录；启用 IPC 时，Skill 位于 `skills/<程序>/SKILL.md`，另有 `/usr/share/applications/<bundle_id>.desktop`、`hicolor` 图标主题中的图标与 `/usr/bin/<程序>` 启动器；依赖 `libgtk-4-1 (>= 4.14)` 与 `libadwaita-1-0 (>= 1.5)`，使用媒体时另加 `libgtk-4-media-gstreamer` 与 `gstreamer1.0-plugins-good`，并推荐 `gstreamer1.0-libav`。维护者取自 `[app].publisher`。
 - 用到 `Svg` 时，`.deb` 另带 AppArmor 配置 `/etc/apparmor.d/<bundle_id>`。WebKitGTK 用 bubblewrap 为网页进程建沙箱，需要建立用户命名空间；Ubuntu 24.04 起（`kernel.apparmor_restrict_unprivileged_userns = 1`）只有 AppArmor 配置里有 `userns` 的程序能建立，沙箱失败时 WebKitGTK 中止整个应用。配置与 Ubuntu 为自带的 WebKitGTK 应用（epiphany、devhelp 等）提供的相同：`flags=(unconfined)`，只给程序一个名字和 `userns` 权限，不另加限制，并包含可选的 `local/<bundle_id>` 供管理员补充；附着路径是 `/opt/<bundle_id>/<程序>`（`/usr/bin/<程序>` 是指向它的链接，AppArmor 按解析后的路径匹配）。配置列为 conffile，`dpkg` 保留管理员的修改，卸载（remove）后保留、彻底卸载（purge）时删除。`postinst` 只在 AppArmor 启用时（`aa-enabled`）以 `apparmor_parser -r -T -W` 立即载入，载入失败不影响安装；`postrm` 在 purge 时删去编译缓存。配置使用 AppArmor 4 的语法（`abi <abi/4.0>`、`userns`），更早的 AppArmor 不能解析它（载入失败，安装照常完成）。没有 `Svg` 的应用不带配置，也没有维护脚本。
 - `.tar.gz` 与开发构建不带配置。在限制用户命名空间的系统上运行用到 `Svg` 的应用，需要为解开后的界面程序添加同样的配置（需要 root；路径含空格时加引号），`bern package` 会提示这一点：
 

@@ -48,8 +48,8 @@ paths = ["media/aurora.mp4", "media/tides.mp4", "media/broken.mp4", "images/land
 
 [targets.macos]
 platform = "macos"
-# Entries besides the UI. "ipc" assembles the local control channel used by
-# the generated CLI and JSON clients; omit it for no listener.
+# IPC lets the app CLI and direct JSON clients reach the running engine.
+# The build writes skills/<program>/SKILL.md for the same CLI commands.
 channels = ["ipc"]
 
 # The same app on iOS, built for the simulator: one scene, the settings
@@ -81,8 +81,8 @@ ui = "web"
 platform = "browser"
 web_mode = "app"
 
-# The WebUI build: the page connects to a separate engine host, which also
-# serves the CLI and JSON entries through its IPC channel.
+# WebUI connects to a separate engine host. The app CLI reaches that host
+# over IPC; skills/<program>/SKILL.md lists the commands for this build.
 [targets.web_ui]
 ui = "web"
 platform = "browser"

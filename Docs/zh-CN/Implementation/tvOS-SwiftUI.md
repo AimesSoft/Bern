@@ -103,6 +103,8 @@ Rust 1.99.0 的 rustup 为 `aarch64-apple-tvos` 与 `aarch64-apple-tvos-sim` 提
 
 ## 本地控制通道
 
+控制模拟器时，在 Mac 上运行应用 CLI。启用 IPC 后，`target/bern/tvos/skills/<程序>/SKILL.md` 说明同级 `bin/` 目录中 CLI 的用法；两者都不在模拟器应用包内。
+
 与 iOS 相同：`bern run` 把 Mac 的临时目录经 `SIMCTL_CHILD_BERN_IPC_DIR` 交给应用，Mac 上的 CLI 和 JSON 客户端经 IPC 连到模拟器里的应用；从主屏幕启动时通道不监听。同一包标识的 macOS、iOS 或 Android 引擎同时在运行时，用 `--engine` 指定：`--engine tvos` 选模拟器里的。
 
 ## 构建与运行

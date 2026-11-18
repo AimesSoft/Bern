@@ -428,7 +428,7 @@ pub fn markdown(app: &Application, place: &Place) -> String {
 
     let _ = writeln!(
         out,
-        "## Command line\n\nRelative to this file: `{}`.\n",
+        "## Command line\n\nRelative to this file: `{}`. If you copy this skill elsewhere, use the CLI’s actual path. Use the app CLI from the same build as the running app, not the `bern` build tool.\n",
         place.cli
     );
     if let Some(installed) = &place.installed {

@@ -7,7 +7,8 @@
 <p><b>One Rust declaration, compiled into each platform's own native UI.</b></p>
 
 <p>From the desktop to the phone, built for AI: SwiftUI, WinUI 3, GTK 4, Jetpack Compose and the Web.<br>
-No JS engine and no embedded browser on the desktop or the phone; an agent can activate buttons by name through the app CLI.</p>
+No JS engine or embedded browser by default on desktop or mobile.<br>
+<b>Skills + CLI:</b> With IPC enabled, agents read <code>SKILL.md</code> and use the app CLI to operate controls by name.</p>
 
 <p>
 <img alt="macOS · SwiftUI" src="https://img.shields.io/badge/macOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
@@ -19,7 +20,7 @@ No JS engine and no embedded browser on the desktop or the phone; an agent can a
 </p>
 
 <p>
-<img alt="CLI + Skill" src="https://img.shields.io/badge/AI-CLI%20%2B%20Skill-8B5CF6?style=flat-square">
+<img alt="Skills + CLI" src="https://img.shields.io/badge/AI-Skills%20%2B%20CLI-8B5CF6?style=flat-square">
 <img alt="Memory about 40 MB" src="https://img.shields.io/badge/memory-about%2040%20MB-0EA5E9?style=flat-square">
 <img alt="No JS engine" src="https://img.shields.io/badge/JS%20engine-none-111827?style=flat-square">
 <img alt="Rust 1.99" src="https://img.shields.io/badge/Rust-1.99-B7410E?style=flat-square&logo=rust&logoColor=white">
@@ -67,7 +68,7 @@ No JS engine and no embedded browser on the desktop or the phone; an agent can a
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/why-en-dark.svg">
-<img alt="Why Bern: compiled into native UI, one Rust declaration generating each platform's own UI code with no JS engine at runtime; built for AI, where omissions are compile errors and buttons can be activated by name from the CLI; too light to feel cross-platform, 39 MB, 0.4 s and 2.7 MB on macOS, 35 MB, 0.3 s and 4.2 MB on Windows, 189 KB on the web" src="Docs/Assets/tables/why-en-light.svg" width="100%">
+<img alt="Why Bern: compiled into native UI, one Rust declaration generating each platform's own UI code with no JS engine at runtime; built for AI, where omissions are compile errors and agents read SKILL.md and activate buttons by name with the app CLI; too light to feel cross-platform, 39 MB, 0.4 s and 2.7 MB on macOS, 35 MB, 0.3 s and 4.2 MB on Windows, 189 KB on the web" src="Docs/Assets/tables/why-en-light.svg" width="100%">
 </picture>
 
 ## Who uses Bern
@@ -124,7 +125,7 @@ Every build also writes a full feature coverage report per target (`features.jso
 
 ### Using the app: meaning, not pixels
 
-In most frameworks, letting an AI operate a desktop app means screenshots, recognition, coordinates and synthetic clicks. With the control channel enabled, Bern generates an app CLI and a `SKILL.md` that describes its commands: every control has a stable name and role, the agent reads structure, its actions take the same code path as a user's click, and the app answers with what actually happened.
+With the control channel enabled, Bern generates `SKILL.md` from the app’s command catalog. In the example below, the agent looks up `ui set-bool` and its arguments in `skills/showcase/SKILL.md`, then runs `showcase ui inspect` to find the switch’s target. It operates the switch by that name through the CLI, using the same code as a click, without a screenshot or coordinates.
 
 ```sh
 $ showcase ui inspect                 # the agent reads meaning, not pixels
@@ -140,7 +141,7 @@ $ showcase window confirm-close --window settings#1 --confirmation settings#1:c1
 { "outcome": "Rejected", "reason": "save_failed: invalid_name: a display name has 1 to 40 characters …" }
 ```
 
-The generated skill gives agents the same commands a person can run, from `showcase ui inspect` to `showcase showcase set-display-name --name Demo`. To operate a remote app, use SSH to run its CLI on the machine hosting the control channel, as the user running the app. When a button is disabled, blocked by a dialog or missing, the agent gets a clear error code rather than a click that does nothing.
+You can run the same commands yourself, including app-specific ones such as `showcase showcase set-display-name --name Demo`. Use the CLI from the same build as the app. Over SSH, run it on the machine hosting the control channel, under the account that owns the endpoint. If a control is disabled, blocked by a dialog or missing, the CLI returns an error code.
 
 ## Measured
 
@@ -374,12 +375,12 @@ The chart is a sketch by architecture, not a ranking: the horizontal axis is whe
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/capabilities-en-dark.svg">
-<img alt="Platforms and capabilities: support for macOS, Windows, Linux, mobile and the web, plus native look, app CLI + Skill and compile-time checks; Bern's mobile support is partial and it has all three capabilities" src="Docs/Assets/tables/capabilities-en-light.svg" width="100%">
+<img alt="Platforms and capabilities: support for macOS, Windows, Linux, mobile and the web, plus native look, Skills + CLI and compile-time checks; Bern's mobile support is partial and it has all three capabilities" src="Docs/Assets/tables/capabilities-en-light.svg" width="100%">
 </picture>
 
 - **Mobile**: iOS and Android. React Native's desktop versions are maintained by Microsoft; uni-app also covers mini programs and HarmonyOS; Bern's Android target runs on devices and makes packages, its iOS target builds simulator apps, and iOS device packages are planned.
 - **Native look**: the controls are the platform's own, with look, accessibility and input methods from the system. Qt Widgets and uni-app x come close and count as partly.
-- **App CLI + Skill**: the framework generates a command line for the running interface and a skill that documents it. Other frameworks can be automated from outside through accessibility APIs or test tools such as Playwright and Flutter Driver.
+- **Skills + CLI**: Bern generates the app CLI and its `SKILL.md` from one command catalog. People and agents use the same commands. Other frameworks can be automated from outside through accessibility APIs or test tools such as Playwright and Flutter Driver.
 - **Compile-time checks**: a missing translation, a feature without an entry in some layout, or an entry not registered to a feature is a compiler error (see [Built for AI](#built-for-ai)). Other frameworks mostly find these with linters, translation tools or tests.
 - **Maturity**: Electron and Qt are very mature; Flutter, React Native, uni-app, Tauri and Avalonia are mature; Dioxus is developing quickly; GPUI powers the Zed editor while its general-purpose components are early; Bern is an early preview.
 
@@ -485,7 +486,7 @@ showcase window list                                         # actual window sta
 ssh HOST /path/to/showcase state
 ```
 
-The control channel starts only when the target declares `channels = ["ipc"]`; without it the app listens on nothing. An Android app listens on the phone; `bern run` joins it to this computer with `adb forward`, so the CLI works as usual.
+The target setting `channels = ["ipc"]` enables external control. On Android, run the CLI on the development computer where `bern run` set up `adb forward`, not on the phone. For a standalone Web `app` with IPC enabled, `bern run` starts a local bridge to the open browser tab; the static site archive does not include the local CLI or its `SKILL.md`.
 
 ## Roadmap
 

@@ -100,6 +100,8 @@ The generator corresponds one-to-one to the SwiftUI generator, with components s
 
 ## Local control channel
 
+With IPC enabled, the host build produces `bin/<program>` and `skills/<program>/SKILL.md`. Neither is installed in the APK or AAB. To control the device over SSH, log in to the development computer as the account that owns the `adb forward` endpoint and run the CLI there.
+
 The app is its own system user, and developer tools cannot share a directory with it, so on Android the channel listens on the abstract socket `bern.<package-id>`. The peer check allows the app's own user and the shell user that `adb` runs as (root on development builds of the system), so other apps cannot connect. After the app starts, `bern run` runs `adb forward`, connecting `android.sock` in the app directory on this computer to this abstract socket, so the CLI and JSON clients (built for this computer) find it just as on desktop; when other engines of the app run too, `--engine android` picks it. On a later run it first removes the old forward and then recreates it; otherwise the old forward would not recreate the socket file.
 
 ## Media
