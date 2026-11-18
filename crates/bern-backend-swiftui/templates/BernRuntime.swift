@@ -330,6 +330,11 @@ final class BernLanguage: @unchecked Sendable {
         let initial = kept ?? Bundle.main.preferredLocalizations.first ?? declared.first ?? "en"
         current = initial
         bundle = Self.bundle(for: initial)
+        Self.publish(initial)
+    }
+
+    private static func publish(_ tag: String) {
+        Array(tag.utf8).withUnsafeBufferPointer { bern_platform_language($0.baseAddress, $0.count) }
     }
 
     /// Where the language chosen in the app is kept: it stays through a restart.
@@ -345,6 +350,7 @@ final class BernLanguage: @unchecked Sendable {
         guard supported.contains(language) else { return false }
         bundle = Self.bundle(for: language)
         current = language
+        Self.publish(language)
         UserDefaults.standard.set(language, forKey: Self.keptLanguage)
         return true
     }
@@ -1030,7 +1036,24 @@ private func bernPlatformRequest(
         guard let pointer else { return "" }
         return String(decoding: UnsafeBufferPointer(start: pointer, count: length), as: UTF8.self)
     }
-    switch text(operation, operationLength) {
+    let name = text(operation, operationLength)
+    switch name {
+    #if os(macOS) || os(iOS)
+    case "can_open_https", "open_https":
+        guard let url = URL(string: text(first, firstLength)), url.scheme == "https", url.host != nil else { return 1 }
+        let perform: @MainActor () -> Int32 = {
+            #if os(macOS)
+            guard NSWorkspace.shared.urlForApplication(toOpen: url) != nil else { return 1 }
+            return name == "can_open_https" || NSWorkspace.shared.open(url) ? 0 : 1
+            #else
+            guard UIApplication.shared.canOpenURL(url) else { return 1 }
+            if name == "open_https" { UIApplication.shared.open(url) }
+            return 0
+            #endif
+        }
+        if Thread.isMainThread { return MainActor.assumeIsolated { perform() } }
+        return DispatchQueue.main.sync { MainActor.assumeIsolated { perform() } }
+    #endif
     case "copy_text" where BernClipboard.available:
         let copied = text(first, firstLength)
         DispatchQueue.main.async { BernClipboard.copy(copied) }

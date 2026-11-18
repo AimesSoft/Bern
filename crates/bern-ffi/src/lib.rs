@@ -1229,6 +1229,18 @@ pub unsafe extern "C" fn bern_platform_install(context: *mut c_void, request: Pl
     });
 }
 
+/// Publish the active interface language for commands running off the UI thread.
+///
+/// # Safety
+/// `tag` must point to `len` bytes of UTF-8 for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bern_platform_language(tag: *const u8, len: usize) {
+    // SAFETY: the caller keeps the bytes alive until this function returns.
+    if let Some(tag) = unsafe { url_text(tag, len) } {
+        bern_command::platform::set_ui_language(tag);
+    }
+}
+
 /// The system opened the application with the file at `url` (UTF-8), of a
 /// kind `[[app.opens]]` declares: the engine takes it with
 /// `bern::files::take_opened`. Hosts may call it before `bern_app_start`.

@@ -556,6 +556,7 @@ void Install(Catalog const& catalog) {
     bool known = std::find(supported.begin(), supported.end(), kept) != supported.end();
     auto chosen = known ? kept : Choose(catalog.defaultLanguage);
     language.Set(chosen);
+    bern_platform_language(reinterpret_cast<uint8_t const*>(chosen.data()), chosen.size());
     strings.Set(TableFor(chosen));
 }
 
@@ -569,6 +570,7 @@ bool SetLanguage(std::string const& tag) {
         language.Set(tag);
         strings.Set(TableFor(tag));
     });
+    bern_platform_language(reinterpret_cast<uint8_t const*>(tag.data()), tag.size());
     KeepLanguage(tag);
     return true;
 }
@@ -1143,6 +1145,21 @@ static void OnQuery(void*, uint64_t subscription, uint8_t const* bytes, size_t l
 /// Windows leaves the choice to the user.
 static int32_t OnPlatformRequest(void*, uint8_t const* operation, size_t operationLen, uint8_t const* first, size_t firstLen, uint8_t const*, size_t) {
     std::string_view name(reinterpret_cast<char const*>(operation), operationLen);
+    if (name == "can_open_https" || name == "open_https") {
+        auto text = std::string(reinterpret_cast<char const*>(first), firstLen);
+        if (!text.starts_with("https://") || text.find('\0') != std::string::npos) return 1;
+        DWORD length = 0;
+        AssocQueryStringW(ASSOCF_IS_PROTOCOL, ASSOCSTR_PROGID, L"https", nullptr, nullptr, &length);
+        if (length <= 1) return 1;
+        if (name == "can_open_https") return 0;
+        auto url = Wide(text);
+        SHELLEXECUTEINFOW open{sizeof(open)};
+        open.fMask = SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC;
+        open.lpVerb = L"open";
+        open.lpFile = url.c_str();
+        open.nShow = SW_SHOWNORMAL;
+        return ShellExecuteExW(&open) ? 0 : 1;
+    }
     if (name == "make_default_opener") {
         Post([] {
             auto page = L"ms-settings:defaultapps?registeredAppUser=" + std::wstring(Wide(catalog->bundleId));
