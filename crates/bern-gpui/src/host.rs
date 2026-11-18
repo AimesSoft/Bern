@@ -41,6 +41,8 @@ enum Event {
     SessionRequest(u64, Vec<u8>),
     /// A query subscription's new state.
     Query(u64, Vec<u8>),
+    /// The media hub's state: every player.
+    Media(Vec<u8>),
     /// Interface state changed: every window renders again.
     Redraw,
     /// The network changed: what it refused may come now.
@@ -159,10 +161,12 @@ extern "C" fn on_session_request(_: *mut c_void, request: u64, bytes: *const u8,
     send(Event::SessionRequest(request, copy(bytes, len)));
 }
 
-// Media and queries are not part of this target yet; its capabilities do
-// not list them, so the compiler rejects applications that use them.
+// The application's media kernel runs the players: the frontend executes
+// no media requests itself.
 extern "C" fn on_media_request(_: *mut c_void, _: *const u8, _: usize) {}
-extern "C" fn on_media_state(_: *mut c_void, _: *const u8, _: usize) {}
+extern "C" fn on_media_state(_: *mut c_void, bytes: *const u8, len: usize) {
+    send(Event::Media(copy(bytes, len)));
+}
 extern "C" fn on_query(_: *mut c_void, subscription: u64, bytes: *const u8, len: usize) {
     send(Event::Query(subscription, copy(bytes, len)));
 }
@@ -296,6 +300,8 @@ fn start_engine(host: &Host, start: StartEngine) -> Result<(), String> {
     // SAFETY: the handle was just created.
     let _ = host.receive_state(&take(unsafe { bern_ffi::bern_app_snapshot(app) }));
     crate::media::attach_kernel();
+    // SAFETY: the handle is live.
+    crate::media::receive_state(&take(unsafe { bern_ffi::media::bern_media_snapshot(app) }));
     Ok(())
 }
 
@@ -544,6 +550,11 @@ pub(crate) fn run(def: &'static AppDef, start: StartEngine) {
                         }
                         Event::Query(subscription, bytes) => {
                             if crate::query::receive(subscription, &bytes) {
+                                windows::changed(cx);
+                            }
+                        }
+                        Event::Media(bytes) => {
+                            if crate::media::receive_state(&bytes) {
                                 windows::changed(cx);
                             }
                         }

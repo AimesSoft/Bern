@@ -36,6 +36,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerType
+import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.LayoutCoordinates
@@ -2447,6 +2450,158 @@ fun Modifier.bernDoubleTap(enabled: Boolean, onClick: () -> Unit, onDoubleTap: (
                 }
             }
         } finally { pending?.cancel(); pending = null }
+    }
+}
+
+// MARK: - Pointer events of elements
+
+/// The pointer events of an element other than a button, around it without
+/// layout of its own: the element is measured with the constraints the box
+/// is given and the box takes its size, so `modifier` carries only the
+/// element's share of the row or column it stands in. What is composed
+/// after the element, such as the popup of its menu, takes no room.
+@Composable
+fun BernPointerBox(
+    modifier: Modifier,
+    onDoubleTap: (() -> Unit)?,
+    onMenu: (() -> Unit)?,
+    onWheelUp: (() -> Unit)?,
+    onWheelDown: (() -> Unit)?,
+    content: @Composable () -> Unit,
+) {
+    val events = modifier
+        .then(if (onMenu != null) Modifier.bernMenuPress(onMenu) else Modifier)
+        .bernDoubleTapThrough(onDoubleTap)
+        .bernWheel(onWheelUp, onWheelDown)
+    Layout(content, events) { measurables, constraints ->
+        val placeables = measurables.map { it.measure(constraints) }
+        val width = constraints.constrainWidth(placeables.maxOfOrNull { it.width } ?: 0)
+        val height = constraints.constrainHeight(placeables.maxOfOrNull { it.height } ?: 0)
+        layout(width, height) { placeables.forEach { it.place(0, 0) } }
+    }
+}
+
+/// Runs `onDoubleTap` for a second tap or click soon after a first one near
+/// it. Unlike a button's, the taps still reach what is inside, a slider's
+/// drag or a video's controls: only the release of the second is taken, so
+/// the content does not take it as a tap of its own.
+@Composable
+fun Modifier.bernDoubleTapThrough(onDoubleTap: (() -> Unit)?): Modifier {
+    if (onDoubleTap == null) return this
+    val double by rememberUpdatedState(onDoubleTap)
+    val accepting = bernGestureActive()
+    return pointerInput(accepting) {
+        if (!accepting) return@pointerInput
+        var firstUp = 0L
+        var firstPosition = Offset.Zero
+        var armed = false
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            val config = viewConfiguration
+            val second = armed &&
+                down.uptimeMillis - firstUp in config.doubleTapMinTimeMillis..config.doubleTapTimeoutMillis &&
+                (down.position - firstPosition).getDistance() <= config.touchSlop * 2
+            armed = false
+            if (currentEvent.buttons.isSecondaryPressed) return@awaitEachGesture
+            var tap = !down.isConsumed
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                val pointer = event.changes.firstOrNull { it.id == down.id } ?: break
+                if (pointer.isConsumed || event.changes.count { it.pressed } > 1 ||
+                    (pointer.position - down.position).getDistance() > config.touchSlop) tap = false
+                if (!pointer.pressed) {
+                    // A press held as long as a long press is not a tap.
+                    if (tap && pointer.uptimeMillis - down.uptimeMillis < config.longPressTimeoutMillis) {
+                        if (second) {
+                            pointer.consume()
+                            double()
+                        } else {
+                            armed = true
+                            firstUp = pointer.uptimeMillis
+                            firstPosition = pointer.position
+                        }
+                    }
+                    break
+                }
+            }
+        }
+    }
+}
+
+/// Runs `onUp` or `onDown` once for each notch a mouse wheel or trackpad
+/// scrolls over the element, adding up partial turns. The element takes the
+/// scrolling in a direction it answers, so scroll views around it do not
+/// move; in the other direction they do. Compose reports a notch as a
+/// vertical scroll delta of 1, negative toward the top.
+@Composable
+fun Modifier.bernWheel(onUp: (() -> Unit)?, onDown: (() -> Unit)?): Modifier {
+    if (onUp == null && onDown == null) return this
+    val up by rememberUpdatedState(onUp)
+    val down by rememberUpdatedState(onDown)
+    return pointerInput(Unit) {
+        var turned = 0f
+        awaitPointerEventScope {
+            while (true) {
+                val event = awaitPointerEvent()
+                if (event.type != PointerEventType.Scroll) continue
+                for (change in event.changes) {
+                    val delta = change.scrollDelta.y
+                    if (delta == 0f || change.isConsumed) continue
+                    val action = (if (delta < 0f) up else down) ?: continue
+                    change.consume()
+                    // Turning back starts over.
+                    if (turned != 0f && (turned < 0f) != (delta < 0f)) turned = 0f
+                    turned += delta
+                    while (turned <= -1f) { turned += 1f; action() }
+                    while (turned >= 1f) { turned -= 1f; action() }
+                }
+            }
+        }
+    }
+}
+
+/// The width of a Material 3 slider's thumb at rest; the track starts and
+/// ends half of it inside the slider's edges.
+private val BernSliderThumbWidth = 4.dp
+
+/// Reports where a mouse or stylus hovering a Material 3 slider is along its
+/// track, from 0 at its start to 1 at its end, and null once it leaves or the
+/// slider goes; touch reports nothing. A report that would not change the
+/// last one is not made.
+@Composable
+fun Modifier.bernSliderHover(onHover: ((Double?) -> Unit)?): Modifier {
+    if (onHover == null) return this
+    val report by rememberUpdatedState(onHover)
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    return pointerInput(rtl) {
+        var last: Double? = null
+        fun put(next: Double?) {
+            if (next == last) return
+            last = next
+            report(next)
+        }
+        try {
+            awaitPointerEventScope {
+                while (true) {
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                    val change = event.changes.firstOrNull() ?: continue
+                    if (change.type == PointerType.Touch) continue
+                    when (event.type) {
+                        PointerEventType.Exit -> put(null)
+                        PointerEventType.Enter, PointerEventType.Move -> {
+                            val inset = BernSliderThumbWidth.toPx() / 2f
+                            val track = size.width - inset * 2f
+                            val along = if (track <= 0f) 0.0
+                                else ((change.position.x - inset) / track).toDouble().coerceIn(0.0, 1.0)
+                            put(if (rtl) 1.0 - along else along)
+                        }
+                        else -> {}
+                    }
+                }
+            }
+        } finally {
+            put(null)
+        }
     }
 }
 

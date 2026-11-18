@@ -242,7 +242,12 @@ pub fn context_menu(
 }
 
 /// The rows of a menu's panel; choosing one closes the panel `target`.
-fn entry_list(c: &Ctx, target: &str, entries: Vec<MenuEntry>, hide_disabled: bool) -> gpui::Div {
+pub(crate) fn entry_list(
+    c: &Ctx,
+    target: &str,
+    entries: Vec<MenuEntry>,
+    hide_disabled: bool,
+) -> gpui::Div {
     let hover = c.slot("menu", "hover", "background");
     let error = c.color("status.error");
     let disabled = c.color("disabled.foreground");

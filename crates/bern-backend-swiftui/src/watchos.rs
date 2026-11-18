@@ -65,6 +65,8 @@ pub(crate) const FEATURES: &[&str] = &[
     feature::WATCH,
     feature::LOGIN_SWITCH,
     feature::BUTTON_CONTENT,
+    feature::POINTER_EVENTS,
+    feature::PLAYER_STATE,
     feature::TOOLBAR_SEARCH,
     feature::SEARCH_RESULTS,
     feature::SESSION_ACTIONS,

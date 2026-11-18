@@ -28,6 +28,22 @@ impl Target for ComposeWearos {
                 .filter(|name| *name != "WebPage")
                 .collect()
         });
+        // A watch has no mouse: the crown scrolls, and nothing hovers.
+        static FEATURES: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
+        let android = descriptor.features;
+        descriptor.features = FEATURES.get_or_init(|| {
+            android
+                .iter()
+                .copied()
+                .filter(|feature| {
+                    ![
+                        bern_target_api::feature::WHEEL,
+                        bern_target_api::feature::SLIDER_HOVER,
+                    ]
+                    .contains(feature)
+                })
+                .collect()
+        });
         descriptor
     }
 

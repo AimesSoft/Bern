@@ -35,6 +35,9 @@ impl Generator<'_> {
             Binding::Window { field } if field == "fold" => literal(&Value::Float(0.0)),
             // `window.idle` and the window's layout size, kept per window.
             Binding::Window { field } => format!("c.window({})", string(field)),
+            Binding::Player { player, field } => {
+                format!("b::player_state({}, {})", string(player), string(field))
+            }
         }
     }
 

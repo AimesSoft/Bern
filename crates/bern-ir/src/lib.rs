@@ -1780,8 +1780,9 @@ pub fn lazy_grid_items(grid: &Element) -> Option<&Element> {
     if grid.kind != "Grid" || grid.keyword("masonry") == Some("true") {
         return None;
     }
-    match grid.children.as_slice() {
-        [Node::Element(each)]
+    let mut content = grid.content();
+    match (content.next(), content.next()) {
+        (Some(Node::Element(each)), None)
             if each.kind == "ForEach"
                 && each.template.is_some()
                 && each.expr("items").is_some()
@@ -2431,5 +2432,24 @@ mod tests {
         let mut count = 0;
         tree.walk(&mut |_| count += 1);
         assert_eq!(count, seen.len());
+    }
+
+    #[test]
+    fn a_lazy_grid_with_pointer_events_stays_lazy() {
+        let Node::Element(grid) = element(
+            "Grid",
+            vec![
+                keyed_rows(),
+                element("DoubleTap", vec![]),
+                element("ContextMenu", vec![]),
+                element("WheelUp", vec![]),
+            ],
+        ) else {
+            unreachable!()
+        };
+        assert!(
+            lazy_grid_items(&grid).is_some(),
+            "pointer events stand beside the grid, not among its cells"
+        );
     }
 }

@@ -28,6 +28,7 @@
 | `KeysField` | 可写 `Vec<String>` 或 `Vec<i64>` 会话字段，存行的键 |
 | `BoolField` | 可写布尔会话字段 |
 | `NumberField` | 可写浮点会话字段 |
+| `OptionalNumberField` | 可写的 `Option<f64>` 会话字段，由元素写入，所报告的情况结束时清为 `None` |
 | `PickerField` | 可写、变体带标签的枚举会话字段 |
 | `SelectionField` | 可写导航选择枚举字段 |
 | `SelectionValue` | 与导航选择字段匹配的枚举值 |
@@ -113,14 +114,17 @@
 | `Adaptive` | `id: Id` | 仅含 ["Layout"]；无动作 |
 | `Layout` | **`size: compact / medium / expanded / large / tv`** | 可含子内容；无动作；直接位于 ["Adaptive"] |
 | `Menu` | **`id: Id`**<br>**`label: DisplayText`**<br>`hide_disabled: Flag`<br>`icon: Icon`<br>`style: button / icon`<br>`shape: capsule`<br>`height: Length` | 仅含 ["MenuItem", "Divider"]；无动作 |
-| `MenuItem` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`role: normal / destructive`<br>`enabled: Bool`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`files: FileKinds`<br>`paste: TextField` | 不含子节点；必须绑定动作；直接位于 ["Menu", "TableMenu"]；`pick` 与 `paste` 二选一 |
+| `MenuItem` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`role: normal / destructive`<br>`enabled: Bool`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`files: FileKinds`<br>`paste: TextField` | 不含子节点；必须绑定动作；直接位于 ["Menu", "TableMenu", "ContextMenu"]；`pick` 与 `paste` 二选一 |
 | `LanguagePicker` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag` | 不含子节点；无动作 |
 | `List` | `items: Items`<br>`key: KeyField` | 可含子内容；无动作 |
 | `ForEach` | **`items: Items`**<br>**`key: KeyField`** | 可含子内容；无动作 |
 | `Table` | **`id: Id`**<br>**`label: DisplayText`**<br>**`items: Items`**<br>**`key: KeyField`**<br>`selection: KeysField` | 仅含 ["TableColumn", "TableMenu"]，至少一个 `TableColumn`，最多一个 `TableMenu`；动作可选，是选中行的主操作（双击或 Enter，触屏上点一行）；`selection` 是 `Vec<String>` 或 `Vec<i64>` 草稿，按行的顺序存选中行的键。使用 `\|item\|` 行模板 |
 | `TableColumn` | **`title: DisplayText`**<br>`width: Number`<br>`sorted: Bool`<br>`descending: Bool` | 恰好一个子节点，是每行这一格的内容；动作可选，点表头时运行；直接位于 ["Table"]；`sorted`、`descending` 只显示排序标记，行的顺序由引擎决定 |
 | `TableMenu` | 无 | 仅含 ["MenuItem", "Divider"]；无动作；直接位于 ["Table"]；右键或长按一行时打开，该行不在选中行里时先只选中它 |
-| `ContextMenu` | 无 | 仅含 ["MenuItem", "Divider"]；无动作；直接位于 ["Button"]，每个按钮最多一个；不算按钮显示的内容；右键或长按按钮时打开 |
+| `ContextMenu` | 无 | 仅含 ["MenuItem", "Divider"]；无动作；直接位于指针事件的宿主元素内（见下文），每个元素最多一个；不算元素显示的内容；右键或长按元素时打开 |
+| `DoubleTap` | 无 | 不含子节点；必须绑定动作；直接位于指针事件的宿主元素内，每个元素最多一个；双击或双击触摸时运行；在 `Button` 上与按钮自己的动作互斥，在其他元素上单击仍交给内容 |
+| `WheelUp` | 无 | 不含子节点；必须绑定动作；直接位于指针事件的宿主元素内，每个元素最多一个；滚轮或触控板在元素上向上滚动（让滚动视图回到顶部的方向）每一格运行一次，这段滚动由元素接住 |
+| `WheelDown` | 无 | 不含子节点；必须绑定动作；直接位于指针事件的宿主元素内，每个元素最多一个；滚轮或触控板在元素上向下滚动每一格运行一次，这段滚动由元素接住 |
 | `PreviewList` | **`items: Items`**<br>**`key: KeyField`**<br>**`item_height: Number`**<br>`gap: Number`<br>`more_height: Number` | 按可用高度创建能完整放下的前几项；有剩余时为 `+N` 留位，默认高度 22；不滚动，也不创建隐藏项。使用 `\|item\|` 行模板 |
 | `Text` | **`content: DisplayText`**<br>`style: large_title / title / title2 / title3 / headline / subheadline / body / callout / footnote / caption / caption2 / control / code`<br>`emphasis: primary / secondary / tertiary`<br>`color: accent / status.success / status.warning / status.error`<br>`mark: ColorRole`<br>`lines: Number`<br>`font_size: Length`<br>`line_height: Length`<br>`ruby: TextValue`<br>`markdown: Flag`<br>`bold: Bool`<br>`lit: Length` | 不含子节点；无动作；`color` 与 `emphasis` 二选一 |
 | `Canvas` | `width: Length`<br>`height: Length`<br>`label: DisplayText` | 仅含 ["Shape", "Series", "Pattern"]；无动作 |
@@ -138,7 +142,7 @@
 | `SearchItem` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`detail: DisplayText`<br>`hint: DisplayText`<br>`navigation: Bool`<br>`pick: FileField`<br>`files: FileKinds`<br>`feature: Feature` | 可含子内容；必须绑定动作 |
 | `Switch` | **`id: Id`**<br>**`label: DisplayText`**<br>`value: BoolField`<br>`checked: Bool`<br>`label_hidden: Flag`<br>`shape: capsule / chip`<br>`height: Length`<br>`style: switch / checkbox / button`<br>`icon: Icon`<br>`shortcut: Shortcut`<br>`login_item: Flag` | 不含子节点；动作可选；`login_item: true` 显示并改变系统的登录项，不写 `value`、`checked` 与动作 |
 | `ShortcutInput` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag`<br>**`current: Shortcut`**（状态，不可为字面量）<br>`prompt: DisplayText`<br>`empty: DisplayText`<br>`enabled: Bool`<br>`feature: Feature` | 不含子节点；必须绑定动作，动作中与 `current` 相同的表达式换成选中的快捷键 |
-| `Slider` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag`<br>`value: NumberField`<br>`current: NumberValue`<br>`continuous: Flag`（仅 `current`）<br>**`min: Number`**<br>**`max: Number`**<br>`step: Number`<br>`min_icon: Icon`<br>`max_icon: Icon`<br>`feature: Feature` | 不含子节点；动作可选 |
+| `Slider` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag`<br>`value: NumberField`<br>`current: NumberValue`<br>`continuous: Flag`（仅 `current`）<br>`hover: OptionalNumberField`<br>**`min: Number`**<br>**`max: Number`**<br>`step: Number`<br>`min_icon: Icon`<br>`max_icon: Icon`<br>`feature: Feature` | 除指针事件外不含子节点；动作可选；指针停在滑块上时 `hover` 是指针在轨道上的位置，`min` 处为 0，`max` 处为 1，其余时候为 `None`；它不改变滑块的值 |
 | `Video` | **`id: Id`**<br>`source: MediaSource`<br>`player: Player`<br>`label: DisplayText`<br>`controls: standard / none`<br>`fit: contain / cover / fill`<br>`sizing: standard / fill`<br>`corner: Length` | 不含子节点；无动作。`controls: none` 的视频只显示画面，可以作为 `Button` 的内容。`sizing: fill` 让播放表面占满有明确大小的父容器，`fit` 只控制视频内容如何放进表面；内核弹幕可以使用黑边。默认 `standard` 保持原有布局。应用登记了媒体内核时由内核画进视图给它的表面，见[设计文档](../Design.md#应用自带的媒体内核) |
 | `Query` | **`id: Id`**<br>**`query: Query`**<br>`presented: Bool`<br>`loading: DisplayText`<br>`empty: DisplayText`<br>`failed: DisplayText`<br>`icon: Icon` | 结果模板；开头可放一个 `QueryStatusHeader`；无动作 |
 | `QueryStatusHeader` | — | 恰好一个子节点；必须是 `Query` 的第一个直接子节点，至多一次；无动作 |
@@ -149,6 +153,8 @@
 `Grid` 加 `masonry` 时成为瀑布流：各项按自己的高度排，每一项放进目前最短的那一列（一样短时取最左边的），适合高度不一的卡片。SwiftUI 与 Compose 用自定义布局，Web 用一像素高的网格行让各项跨过自己的高度；GTK 与 Windows 暂按普通网格逐行排。
 
 `Text(style: code)` 用平台自己的等宽字体，比正文略小，用于代码、命令和文件内容：SwiftUI 的 `.monospaced` 设计，Compose 的 `FontFamily.Monospace`，Web 的 `ui-monospace` 一族，GTK 的 `monospace` 样式类，Windows 的 Cascadia Mono（没有时 Consolas）。`style!` 的 `text` 块可以像其他样式一样给它定字号与字重。
+
+**指针事件。** `DoubleTap`、`ContextMenu`、`WheelUp` 与 `WheelDown` 写成所作用元素的直接子节点，由它作宿主：`Button`、`Video`、`Slider`、`Image`、`Svg`、`Text`、`Label`、`Progress`、`Column`、`Row`、`Grid`、`Stack`、`Flow`、`ScaleBox` 或 `Positioned`。它们不是视图，不算元素显示的内容，所以 `Text`、`Slider` 这样的叶子元素也能用花括号带上它们；它们不能放在 `if` 或 `ForEach` 里。每个元素每种最多一个。它们是捷径：所做的事还要能经按钮、菜单或快捷键完成，键盘、遥控器与辅助技术不会双击、右键或滚动滚轮。
 
 `Svg` 在构建期将带动画与交互的 `.svg` 资源预编译为紧凑的 `BSVG` 场景，在全部目标平台由纯 Rust 原生播放，无需 WebView；指针交互通过根 `<svg>` 上的 `data-bern-click` / `data-bern-dblclick` 与可选 `data-bern-ready` 声明，`static_source`、`data` 与 `external_links` 仍为兼容既有源码而保留。不含动画或交互的静态 SVG 自动降级为 `Image`。见[动画 SVG](../Implementation/Animated-SVG.md)。
 

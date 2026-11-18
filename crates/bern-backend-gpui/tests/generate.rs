@@ -808,3 +808,232 @@ fn brightness_reports_availability_without_setting_the_requested_value() {
         "only availability may be written: {call}"
     );
 }
+
+/// An actionable button of the showcase, without children, and the
+/// pointer event of `kind` running its action.
+fn button_and_event() -> (
+    bern_ir::Application,
+    bern_ir::Element,
+    impl Fn(&str) -> bern_ir::Node,
+) {
+    use bern_ir::Node;
+    let app = compile("showcase").1.app;
+    let mut button = None;
+    app.walk(&mut |node, _| {
+        if let Node::Element(element) = node
+            && element.kind == "Button"
+            && element.action.is_some()
+        {
+            button = Some(element.clone());
+        }
+    });
+    let mut button = button.expect("showcase has an actionable button");
+    button.children.clear();
+    let template = button.clone();
+    let event = move |kind: &str| {
+        let mut event = template.clone();
+        event.kind = kind.into();
+        event.props.clear();
+        event.id = None;
+        if kind == "ContextMenu" {
+            let mut item = template.clone();
+            item.kind = "MenuItem".into();
+            item.props.retain(|name, _| name == "label");
+            event.action = None;
+            event.children = vec![Node::Element(item)];
+        }
+        Node::Element(event)
+    };
+    (app, button, event)
+}
+
+const POINTER_EVENTS: [&str; 4] = ["DoubleTap", "ContextMenu", "WheelUp", "WheelDown"];
+
+/// The generated function of the application's first component.
+fn first_component(app: &bern_ir::Application) -> String {
+    let code = bern_backend_gpui::Generator::new(app, "macos").generate(0, "{}");
+    let start = code
+        .find(&format!("pub fn c_{}(", app.components[0].name))
+        .unwrap();
+    let end = code[start..]
+        .find(
+            "
+}
+",
+        )
+        .unwrap()
+        + start;
+    code[start..end].to_string()
+}
+
+#[test]
+fn pointer_events_stand_around_a_video_and_a_stack() {
+    use bern_ir::{Node, Prop};
+    let (mut app, button, event) = button_and_event();
+    let mut video = button.clone();
+    video.kind = "Video".into();
+    video.id = Some("preview_view".into());
+    video.action = None;
+    video.props.clear();
+    video.props.insert(
+        "player".into(),
+        Prop::Player {
+            id: "preview".into(),
+        },
+    );
+    video.props.insert(
+        "controls".into(),
+        Prop::Keyword {
+            value: "none".into(),
+        },
+    );
+    video.children = POINTER_EVENTS.iter().map(|kind| event(kind)).collect();
+    let mut stack = button.clone();
+    stack.kind = "Stack".into();
+    stack.id = None;
+    stack.action = None;
+    stack.props.clear();
+    stack.children = vec![Node::Element(video)];
+    stack
+        .children
+        .extend(POINTER_EVENTS.iter().map(|kind| event(kind)));
+    app.components[0].body = Node::Element(stack);
+    let generator = bern_backend_gpui::Generator::new(&app, "macos");
+    let problems = generator.check();
+    assert!(
+        !problems.iter().any(|problem| POINTER_EVENTS
+            .iter()
+            .chain(["MenuItem"].iter())
+            .any(|kind| problem.message.contains(kind))),
+        "{problems:?}"
+    );
+    let code = first_component(&app);
+    assert_eq!(code.matches("b::pointer_events(c,").count(), 2, "{code}");
+    assert_eq!(
+        code.matches("b::PointerEvents { double_tap: Some(b::act(")
+            .count(),
+        2
+    );
+    assert_eq!(code.matches("wheel_up: Some(b::act(").count(), 2);
+    assert_eq!(code.matches("wheel_down: Some(b::act(").count(), 2);
+    assert_eq!(code.matches("b::menu_item(c,").count(), 2);
+    // The stack's events stand around the stack, whose only layer is the
+    // video with its own: no event is a layer.
+    let outer = code.find("b::pointer_events(c,").unwrap();
+    let stack = code.find("b::stack(c,").unwrap();
+    let inner = code[stack..].find("b::pointer_events(c,").unwrap() + stack;
+    let video = code.find("b::video(c,").unwrap();
+    assert!(outer < stack && stack < inner && inner < video, "{code}");
+    assert_eq!(
+        code.matches("v.push(").count() - code.matches("v.push(b::menu_item(").count(),
+        1,
+        "{code}"
+    );
+    assert!(!code.contains("b::context_menu(c,"));
+}
+
+#[test]
+fn a_button_turns_the_wheel_beside_its_own_events() {
+    use bern_ir::Node;
+    let (mut app, mut button, event) = button_and_event();
+    button.children = vec![event("DoubleTap"), event("WheelUp"), event("WheelDown")];
+    app.components[0].body = Node::Element(button);
+    let code = first_component(&app);
+    // Its own double click stays the button's; the wheel stands around it.
+    assert!(code.contains("b::ButtonProps { double_tap: Some(b::act("));
+    assert!(
+        code.contains("b::PointerEvents { double_tap: None, wheel_up: Some(b::act("),
+        "{code}"
+    );
+    assert!(code.contains("}, None, b::button(c,"), "{code}");
+    // Wheel turns are no content: the button keeps its label.
+    assert!(code.contains("b::button(c,"));
+    assert!(!code.contains("b::button_with(c,"));
+}
+
+#[test]
+fn a_slider_reports_where_the_pointer_hovers() {
+    use bern_ir::{Node, Prop};
+    let mut app = compile("showcase").1.app;
+    let mut slider = None;
+    app.walk(&mut |node, _| {
+        if let Node::Element(element) = node
+            && element.kind == "Slider"
+            && element.field("value").is_some()
+        {
+            slider = Some(element.clone());
+        }
+    });
+    let mut slider = slider.expect("a session-backed slider");
+    app.components[0].body = Node::Element(slider.clone());
+    let plain = bern_backend_gpui::Generator::new(&app, "macos").generate(0, "{}");
+    // The showcase has diagnostics of its own elsewhere; hover adds none.
+    let before = bern_backend_gpui::Generator::new(&app, "macos").check();
+    assert!(plain.contains("max_icon: None, hover: None }"), "{plain}");
+    let field = slider.field("value").unwrap().clone();
+    slider.props.insert("hover".into(), Prop::Field { field });
+    app.components[0].body = Node::Element(slider);
+    let generator = bern_backend_gpui::Generator::new(&app, "macos");
+    let problems = generator.check();
+    assert_eq!(problems.len(), before.len(), "{problems:?}");
+    let code = generator.generate(0, "{}");
+    assert!(code.contains(", hover: Some(b::Field {"), "{code}");
+}
+
+#[test]
+fn declarations_read_player_state_from_the_runtime() {
+    use bern_ir::{Binding, Expr, ExprKind, IfNode, Node};
+    use bern_protocol::Type;
+    let (mut app, button, _) = button_and_event();
+    app.components[0].body = Node::Element(button.clone());
+    let before = bern_backend_gpui::Generator::new(&app, "macos").check();
+    let read = |field: &str, ty: Type| Expr {
+        ty,
+        kind: ExprKind::Binding {
+            binding: Binding::Player {
+                player: "preview".into(),
+                field: field.into(),
+            },
+        },
+    };
+    app.components[0].body = Node::If(IfNode {
+        branches: vec![
+            (
+                read("playing", Type::Bool),
+                vec![Node::Element(button.clone())],
+            ),
+            (read("buffering", Type::Bool), vec![Node::Element(button)]),
+        ],
+        otherwise: vec![],
+    });
+    let generator = bern_backend_gpui::Generator::new(&app, "macos");
+    let problems = generator.check();
+    assert_eq!(problems.len(), before.len(), "{problems:?}");
+    let code = first_component(&app);
+    assert!(
+        code.contains("c.player(\"preview\", \"playing\")"),
+        "{code}"
+    );
+    assert!(
+        code.contains("c.player(\"preview\", \"buffering\")"),
+        "{code}"
+    );
+}
+
+#[test]
+fn the_target_lists_pointer_events_and_player_state() {
+    use bern_target_api::feature;
+    for target in [Gpui::MACOS, Gpui::WINDOWS, Gpui::LINUX] {
+        let features = target.descriptor().features;
+        for wanted in [
+            feature::POINTER_EVENTS,
+            feature::WHEEL,
+            feature::SLIDER_HOVER,
+            feature::PLAYER_STATE,
+        ] {
+            assert!(features.contains(&wanted), "{wanted}");
+        }
+        assert!(target.descriptor().components.contains(&"WheelUp"));
+        assert!(target.descriptor().components.contains(&"WheelDown"));
+    }
+}

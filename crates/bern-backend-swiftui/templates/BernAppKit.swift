@@ -1832,6 +1832,81 @@ struct BernPopoverOutsidePress: NSViewRepresentable {
     }
 }
 
+/// The turns of a mouse wheel or the two-finger scroll of a trackpad over
+/// the view: `up` and `down` run once per notch, the way that would move a
+/// scroll view toward its top and its bottom under the user's scroll
+/// direction setting. The view takes the scrolling in a direction it
+/// answers, so a scroll view around it does not move; scrolling in the
+/// other direction, and horizontal scrolling, passes it by.
+struct BernWheelSource: NSViewRepresentable {
+    let up: (() -> Void)?
+    let down: (() -> Void)?
+    let enabled: Bool
+
+    func makeNSView(context: Context) -> Observer { Observer() }
+
+    func updateNSView(_ view: Observer, context: Context) {
+        view.up = up
+        view.down = down
+        view.enabled = enabled
+    }
+
+    static func dismantleNSView(_ view: Observer, coordinator: ()) { view.stop() }
+
+    @MainActor final class Observer: NSView {
+        /// The scrolling of a trackpad or a smooth wheel that adds up to
+        /// one notch, in points; the web front end counts the same.
+        private static let notch: CGFloat = 100
+        var up: (() -> Void)?
+        var down: (() -> Void)?
+        var enabled = true
+        private var monitor: Any?
+        /// Trackpad scrolling not yet a notch, in points.
+        private var turned: CGFloat = 0
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            stop()
+            guard window != nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                let taken = MainActor.assumeIsolated { self?.take(event) ?? false }
+                return taken ? nil : event
+            }
+        }
+
+        /// Whether the event is the view's: over the view, vertical, and
+        /// in a direction the view answers.
+        func take(_ event: NSEvent) -> Bool {
+            guard enabled, let window, event.window === window,
+                  bounds.contains(convert(event.locationInWindow, from: nil)) else { return false }
+            let delta = event.scrollingDeltaY
+            guard delta != 0, abs(delta) >= abs(event.scrollingDeltaX) else { return false }
+            // The deltas follow the user's scroll direction setting, so a
+            // positive one moves content down: toward the scroll view's top.
+            guard let action = (delta > 0 ? up : down) else { return false }
+            if event.hasPreciseScrollingDeltas {
+                // A turn back starts over.
+                if turned != 0, (turned < 0) != (delta < 0) { turned = 0 }
+                turned += delta
+                while turned >= Self.notch { turned -= Self.notch; action() }
+                while turned <= -Self.notch { turned += Self.notch; action() }
+            } else {
+                // A mouse wheel reports one event per notch.
+                action()
+            }
+            return true
+        }
+
+        func stop() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+            turned = 0
+        }
+    }
+}
+
 /// `idle_area`: the window goes idle only while the pointer rests over
 /// this view (or another `idle_area`), after `seconds`.
 struct BernIdleArea: ViewModifier {

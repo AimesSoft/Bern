@@ -177,10 +177,10 @@ impl Generator<'_> {
                 match decoration {
                     Some(spec) => {
                         out.open(format!("B::Decorate(p, c, {spec}, {BUILDER}"));
-                        self.element(out, element);
+                        self.with_events(out, element);
                         out.close("});");
                     }
-                    None => self.element(out, element),
+                    None => self.with_events(out, element),
                 }
                 if placement.is_some() {
                     out.close("});");
@@ -297,6 +297,18 @@ impl Generator<'_> {
         out.close("});");
     }
 
+    /// An element, with the pointer events it declares on what it makes.
+    fn with_events(&self, out: &mut Out, element: &Element) {
+        match self.pointer_events(element) {
+            Some(spec) => {
+                out.open(format!("B::PointerEvents(p, c, {spec}, {BUILDER}"));
+                self.element(out, element);
+                out.close("});");
+            }
+            None => self.element(out, element),
+        }
+    }
+
     fn element(&self, out: &mut Out, element: &Element) {
         match element.kind.as_str() {
             "Text" => self.text_element(out, element),
@@ -380,7 +392,8 @@ impl Generator<'_> {
             | "MenuBar" | "CommandMenu" | "CommandItem"
             // The application builds the status item's menu when it opens.
             | "StatusItem"
-            | "PickerOption" | "TableColumn" | "TableMenu" | "ContextMenu" | "DoubleTap" | "OnCommit" => {
+            | "PickerOption" | "TableColumn" | "TableMenu" | "ContextMenu" | "DoubleTap" | "WheelUp"
+            | "WheelDown" | "OnCommit" => {
                 // Realized by their parents.
             }
             other => out.line(format!("/* unsupported {other} */")),

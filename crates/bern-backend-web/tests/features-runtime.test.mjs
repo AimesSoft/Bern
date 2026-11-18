@@ -29,7 +29,7 @@ function runtime(search = "") {
     getAttribute(name) { return this.attributes[name] ?? null; }
     removeAttribute(name) { delete this.attributes[name]; }
     hasAttribute(name) { return name in this.attributes; }
-    addEventListener(name, callback) { (this.events[name] ??= []).push(callback); }
+    addEventListener(name, callback, options) { (this.events[name] ??= []).push(callback); (this.listenerOptions ??= {})[name] = options; }
     removeEventListener(name, callback) { this.events[name] = (this.events[name] ?? []).filter(one => one !== callback); }
     get children() { return this.childNodes.filter((child) => child.nodeType === 1); }
     querySelectorAll(selector) {
@@ -167,7 +167,7 @@ function runtime(search = "") {
     reportError(error) { throw error; },
   };
   const context = vm.createContext(globals);
-  for (const [name, extra] of [["bern", ["chooseLanguage", "host"]], ["features", ["transitionFrom"]]]) {
+  for (const [name, extra] of [["bern", ["chooseLanguage", "host", "media"]], ["features", ["transitionFrom"]]]) {
     const source = readFileSync(new URL(`../templates/${name}.js`, import.meta.url), "utf8");
     const exported = [...source.matchAll(/^export (?:async )?(?:class|function|const) (\w+)/gm)].map((match) => match[1]);
     const plain = source.replace(/^import .+;$/gm, "").replace(/^export /gm, "");
@@ -2626,4 +2626,169 @@ test("Swipe defers unmount cleanup until OnCommit and always cleans up on action
     assert.equal(f.active.peek(), false);
     assert.equal(f.node.captured, null);
   }
+});
+
+function pointerFixture(spec, build = (p) => p.append(new p.constructor("div"))) {
+  const env = runtime();
+  const { B, F, Element } = env;
+  env.document.body = new Element("body");
+  Element.prototype.showPopover = function () { this.open = true; };
+  Element.prototype.hidePopover = function () { this.open = false; };
+  const root = new Element("root"), scope = new B.Scope(), calls = [];
+  B.within(scope, () => F.PointerEvents(root, {}, spec(calls), build));
+  return { ...env, root, node: root.children[0], scope, calls };
+}
+
+test("wheel over any element runs its action once per notch and takes the scrolling", () => {
+  const { node, calls } = pointerFixture((calls) => ({ wheelUp: () => calls.push("up"), wheelDown: () => calls.push("down") }));
+  assert.equal(node.listenerOptions.wheel.passive, false, "only an active listener can keep the page from scrolling");
+  const wheel = (deltaY, deltaMode = 0, init = {}) => node.dispatch("wheel", { deltaY, deltaMode, ...init });
+  assert.equal(wheel(40), true);
+  assert.deepEqual(calls, [], "trackpad pixels add up to a notch");
+  wheel(60);
+  assert.deepEqual(calls, ["down"]);
+  wheel(250);
+  assert.deepEqual(calls, ["down", "down", "down"], "every notch runs once");
+  wheel(-10);
+  wheel(-90);
+  assert.deepEqual(calls.slice(3), ["up"], "turning back starts a new notch");
+  wheel(-3, 1);
+  wheel(2, 2);
+  assert.deepEqual(calls.slice(4), ["up", "down", "down"], "three lines or one page are a notch");
+  calls.length = 0;
+  for (const one of [0.3, 0.3, 0.4]) wheel(one * 3, 1);
+  assert.deepEqual(calls, ["down"], "fractions summed in floating point still make a notch");
+  calls.length = 0;
+  assert.equal(wheel(100, 0, { ctrlKey: true }), false, "Ctrl and pinches zoom the page");
+  assert.equal(wheel(0, 0, { deltaX: 100 }), false, "horizontal scrolling goes on");
+  let prevented = false;
+  node.events.wheel[0]({ deltaY: 100, deltaMode: 0, defaultPrevented: true, preventDefault() { prevented = true; } });
+  assert.equal(prevented, false);
+  assert.deepEqual(calls, [], "an element inside took the turn");
+  const upOnly = pointerFixture((calls) => ({ wheelUp: () => calls.push("up") }));
+  assert.equal(upOnly.node.dispatch("wheel", { deltaY: 100, deltaMode: 0 }), false, "an unhandled direction passes through");
+  assert.equal(upOnly.node.dispatch("wheel", { deltaY: -100, deltaMode: 0 }), true);
+  assert.deepEqual(upOnly.calls, ["up"]);
+});
+
+test("a double click or double tap on an element other than a button runs its DoubleTap, single presses reach the content", () => {
+  const { node, calls, Element } = pointerFixture((calls) => ({ doubleTap: () => calls.push("double") }));
+  assert.equal(node.events.click, undefined, "single clicks are the content's");
+  node.dispatch("dblclick", { timeStamp: 10 });
+  assert.deepEqual(calls, ["double"]);
+  const inner = new Element("button");
+  node.append(inner);
+  node.dispatch("dblclick", { timeStamp: 20, target: { closest: () => inner } });
+  assert.deepEqual(calls, ["double"], "a control inside keeps its own presses");
+  const touch = (type, time, x = 5) => node.dispatch(type, { pointerType: "touch", isPrimary: true, clientX: x, clientY: 5, timeStamp: time });
+  touch("pointerdown", 1000); touch("pointerup", 1050);
+  touch("pointerdown", 1300); touch("pointerup", 1350);
+  assert.deepEqual(calls, ["double", "double"]);
+  node.dispatch("dblclick", { timeStamp: 1400 });
+  assert.deepEqual(calls, ["double", "double"], "the browser's own dblclick after the taps runs nothing more");
+  touch("pointerdown", 3000); touch("pointerup", 3050);
+  touch("pointerdown", 3800); touch("pointerup", 3850);
+  assert.deepEqual(calls, ["double", "double"], "taps too far apart in time are single");
+  touch("pointerdown", 5000); touch("pointerup", 5050);
+  touch("pointerdown", 5100, 60); touch("pointerup", 5150, 60);
+  assert.deepEqual(calls, ["double", "double"], "or in place");
+  const slider = pointerFixture((calls) => ({ doubleTap: () => calls.push("double"), control: true }));
+  const input = new slider.Element("input");
+  slider.node.append(input);
+  slider.node.dispatch("dblclick", { timeStamp: 10, target: { closest: () => input } });
+  assert.deepEqual(slider.calls, ["double"], "a slider's own input is the element");
+});
+
+test("a context menu opens on an element other than a button, unless one inside opened", () => {
+  const { node, calls, document, timers } = pointerFixture((calls) => ({
+    label: () => "Clip", menu: [{ id: "remove", label: () => "Remove", action: () => calls.push("remove") }],
+  }));
+  const list = document.body.children[0];
+  assert.equal(list.attributes["aria-label"], "Clip");
+  assert.equal(node.dispatch("contextmenu", { clientX: 10, clientY: 20 }), true);
+  assert.equal(list.open, true);
+  assert.equal(list.style.left, "10px");
+  list.children[0].dispatch("click");
+  assert.deepEqual(calls, ["remove"]);
+  assert.equal(list.open, false);
+  node.events.contextmenu.at(-1)({ clientX: 0, clientY: 0, defaultPrevented: true, preventDefault() {} });
+  assert.equal(list.open, false, "a menu inside opened instead");
+  const held = { pointerType: "touch", clientX: 3, clientY: 4 };
+  const before = timers.length;
+  for (const listener of node.events.pointerdown) listener(held);
+  assert.equal(timers.length, before + 1);
+  for (const listener of node.events.pointerdown) listener(held);
+  assert.equal(timers.length, before + 1, "a long touch opens one menu, the innermost");
+  timers.at(-1).callback();
+  assert.equal(list.open, true);
+});
+
+test("a slider holds where a mouse hovers along its track and clears it when it leaves", () => {
+  const { B, Element } = runtime();
+  const host = new Element("div");
+  const value = B.cell(5), shown = B.cell(null);
+  const values = [], writes = [];
+  const field = { get: () => value.get(), peek: () => value.peek(), set: (next) => { values.push(next); value.set(next); } };
+  const hover = { get: () => shown.get(), peek: () => shown.peek(), set: (next) => { writes.push(next); shown.set(next); } };
+  const scope = new B.Scope();
+  B.within(scope, () => B.Slider(host, {}, { id: "seek", label: () => "Seek", field, hover, min: 0, max: 10, labelHidden: true }));
+  const input = host.children[0].children[0];
+  // A 16 pixel thumb's center travels 200 of the track's 216 pixels.
+  input.rect = { left: 100, top: 0, width: 216, height: 20 };
+  const move = (clientX, pointerType = "mouse") => input.dispatch("pointermove", { clientX, pointerType });
+  input.dispatch("pointerenter", { clientX: 108, pointerType: "mouse" });
+  move(208);
+  move(208);
+  move(400, "pen");
+  move(50);
+  assert.deepEqual(writes, [0, 0.5, 1, 0], "the same place is written once");
+  move(158, "touch");
+  assert.deepEqual(writes, [0, 0.5, 1, 0], "a touch does not hover");
+  input.dispatch("pointerleave", { pointerType: "mouse" });
+  input.dispatch("pointerleave", { pointerType: "mouse" });
+  assert.deepEqual(writes, [0, 0.5, 1, 0, null]);
+  input.style.direction = "rtl";
+  move(158);
+  assert.equal(shown.peek(), 0.75, "a right-to-left track starts at its right");
+  assert.deepEqual(values, [], "hovering never sets the value");
+  assert.equal(Number(input.value), 5);
+  scope.dispose();
+  assert.equal(shown.peek(), null, "a slider that goes while hovered clears it");
+});
+
+test("player state in declarations follows the media hub", () => {
+  const { B } = runtime();
+  const scope = new B.Scope();
+  const fields = ["position", "duration", "progress", "position_ms", "duration_ms", "playing", "paused", "buffering", "ended", "failed", "seekable", "volume", "muted"];
+  const seen = [];
+  B.within(scope, () => B.effect(() => seen.push(Object.fromEntries(fields.map((field) => [field, B.playerState("preview", field)])))));
+  assert.deepEqual(seen.at(-1), {
+    position: 0, duration: 0, progress: 0, position_ms: 0n, duration_ms: null, playing: false, paused: false,
+    buffering: false, ended: false, failed: false, seekable: false, volume: 1, muted: false,
+  });
+  const report = (state) => B.media.players.set(new Map([["preview", { id: "preview", positionMs: 0n, durationMs: null, seekable: false, volume: 1, muted: false, ...state }]]));
+  report({ phase: 3, positionMs: 30000n, durationMs: 120000n, seekable: true, volume: 0.5, muted: true });
+  assert.deepEqual(seen.at(-1), {
+    position: 30, duration: 120, progress: 0.25, position_ms: 30000n, duration_ms: 120000n, playing: true, paused: false,
+    buffering: false, ended: false, failed: false, seekable: true, volume: 0.5, muted: true,
+  });
+  report({ phase: 5, positionMs: 130000n, durationMs: 120000n });
+  assert.equal(seen.at(-1).buffering, true);
+  assert.equal(seen.at(-1).playing, false);
+  assert.equal(seen.at(-1).progress, 1, "progress stops at the end");
+  report({ phase: 1, positionMs: 4000n });
+  assert.equal(seen.at(-1).buffering, true, "loading is buffering");
+  assert.equal(seen.at(-1).progress, 0, "no progress while the duration is unknown");
+  assert.equal(seen.at(-1).duration, 0);
+  assert.equal(seen.at(-1).duration_ms, null);
+  for (const [phase, name] of [[4, "paused"], [6, "ended"], [7, "failed"]]) {
+    report({ phase });
+    assert.equal(seen.at(-1)[name], true, name);
+  }
+  const count = seen.length;
+  B.media.players.set(new Map([["other", { phase: 3 }]]));
+  assert.equal(seen.at(-1).playing, false, "another player's state is not this one's");
+  scope.dispose();
+  B.media.players.set(new Map());
+  assert.equal(seen.length, count + 1);
 });

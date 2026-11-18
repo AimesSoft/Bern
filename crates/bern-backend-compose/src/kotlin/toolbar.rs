@@ -174,14 +174,8 @@ impl Generator<'_> {
         out.close("}");
     }
 
-    /// A button, inside the long-press menu of its `ContextMenu` when it
-    /// has one. The menu's items are controls too, reached while it is
-    /// closed.
-    pub(super) fn context_menu(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
-        let Some(items) = element.context_menu() else {
-            self.button(out, element, ctx);
-            return;
-        };
+    /// The items of a `ContextMenu` as controls, reached while it is closed.
+    pub(super) fn menu_controls(&self, out: &mut Out, items: &[&Element], ctx: &Ctx) {
         for item in items.iter().filter(|item| item.kind == "MenuItem") {
             let item_label = self.text_prop(item, "label").unwrap_or_default();
             let (action, file) = self.pressed(item);
@@ -192,8 +186,11 @@ impl Generator<'_> {
             ));
             self.shortcut(out, item, &action);
         }
-        out.open("BernContextMenu({ dismiss ->");
-        for item in &items {
+    }
+
+    /// The items of an open `ContextMenu`, which close it as they run.
+    pub(super) fn menu_items(&self, out: &mut Out, items: &[&Element]) {
+        for item in items {
             if item.kind == "Divider" {
                 out.line("HorizontalDivider()");
                 continue;
@@ -207,6 +204,19 @@ impl Generator<'_> {
                 item.keyword("role") == Some("destructive")
             ));
         }
+    }
+
+    /// A button, inside the long-press menu of its `ContextMenu` when it
+    /// has one. The menu's items are controls too, reached while it is
+    /// closed.
+    pub(super) fn context_menu(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let Some(items) = element.context_menu() else {
+            self.button(out, element, ctx);
+            return;
+        };
+        self.menu_controls(out, &items, ctx);
+        out.open("BernContextMenu({ dismiss ->");
+        self.menu_items(out, &items);
         out.close("}) {");
         out.indent += 1;
         // Inside the menu's box, not the row or column around it.

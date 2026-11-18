@@ -23,6 +23,11 @@ impl Generator<'_> {
     fn binding(&self, binding: &Binding) -> String {
         match binding {
             Binding::Window { field } => format!("bernWindow.{}", member(field)),
+            // A read of the map of players: what composes it recomposes as
+            // the player's state changes.
+            Binding::Player { player, field } => {
+                format!("BernMedia.fields({}).{}", string(player), member(field))
+            }
             Binding::Engine { field, path } => {
                 let state = &self.app.protocol.state[*field];
                 format!(

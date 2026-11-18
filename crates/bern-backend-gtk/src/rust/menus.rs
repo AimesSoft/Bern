@@ -108,7 +108,7 @@ impl Generator<'_> {
         }
     }
 
-    /// The items of a button's `ContextMenu`, `None` for each divider; an
+    /// The items of an element's `ContextMenu`, `None` for each divider; an
     /// empty list without one.
     pub(super) fn context_menu(&self, element: &Element) -> String {
         let items = element.context_menu().unwrap_or_default();

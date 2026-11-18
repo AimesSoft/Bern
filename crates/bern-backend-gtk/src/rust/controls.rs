@@ -140,7 +140,7 @@ impl Generator<'_> {
 
     pub(super) fn slider(&self, out: &mut Out, element: &Element) {
         out.line(format!(
-            "b::Slider(p, c, b::SliderProps {{ id: {}, label: {}, model: {}, min: {}, max: {}, step: {}, min_icon: {}, max_icon: {}, label_hidden: {}, continuous: {} }}, {});",
+            "b::Slider(p, c, b::SliderProps {{ id: {}, label: {}, model: {}, min: {}, max: {}, step: {}, min_icon: {}, max_icon: {}, label_hidden: {}, continuous: {}, hover: {} }}, {});",
             self.id(element),
             some(self.text_prop(element, "label")),
             some(self.model(element, "current", false)),
@@ -151,6 +151,7 @@ impl Generator<'_> {
             Self::icon(element, "max_icon"),
             element.keyword("label_hidden") == Some("true"),
             element.keyword("continuous") == Some("true"),
+            some(self.field(element, "hover")),
             // A controlled slider's action is its change.
             if element.expr("current").is_some() {
                 "None".into()

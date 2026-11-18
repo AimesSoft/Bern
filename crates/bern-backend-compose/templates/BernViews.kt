@@ -1042,6 +1042,7 @@ fun BernSlider(
     maxIcon: ImageVector?,
     labelHidden: Boolean = false,
     modifier: Modifier = Modifier,
+    onHover: ((Double?) -> Unit)? = null,
 ) {
     val steps = if (step != null && step > 0) maxOf(0, Math.round((max - min) / step).toInt() - 1) else 0
     Column(modifier.fillMaxWidth().semantics { if (labelHidden) contentDescription = label }) {
@@ -1054,7 +1055,7 @@ fun BernSlider(
                 valueRange = min.toFloat()..max.toFloat(),
                 steps = steps,
                 onValueChangeFinished = onCommit,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).bernSliderHover(onHover),
             )
             if (maxIcon != null) Icon(maxIcon, contentDescription = null)
         }
@@ -1080,12 +1081,13 @@ fun BernControlledSlider(
     labelHidden: Boolean = false,
     continuous: Boolean = false,
     modifier: Modifier = Modifier,
+    onHover: ((Double?) -> Unit)? = null,
 ) {
     var preview by remember { mutableStateOf<Double?>(null) }
     BernSlider(
         label, preview ?: value, { preview = it; if (continuous) commit(it) }, min, max, step,
         { preview?.let(commit); preview = null },
-        minIcon, maxIcon, labelHidden, modifier,
+        minIcon, maxIcon, labelHidden, modifier, onHover,
     )
 }
 
@@ -1544,6 +1546,28 @@ fun BernContextMenu(menu: @Composable (dismiss: () -> Unit) -> Unit, content: @C
     Box(Modifier.bernMenuPress { open = true }) {
         content()
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            BernPopupContent { Column { menu { open = false } } }
+        }
+    }
+}
+
+/// The pointer events of an element that is not a button: a double tap or
+/// click, the `ContextMenu` a long press or a secondary click opens at the
+/// element, and the notches of a wheel. Single taps still reach the element.
+@Composable
+fun BernPointerEvents(
+    modifier: Modifier = Modifier,
+    onDoubleTap: (() -> Unit)? = null,
+    onWheelUp: (() -> Unit)? = null,
+    onWheelDown: (() -> Unit)? = null,
+    menu: (@Composable (dismiss: () -> Unit) -> Unit)? = null,
+    content: @Composable () -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    val openMenu = { open = true }
+    BernPointerBox(modifier, onDoubleTap, if (menu != null) openMenu else null, onWheelUp, onWheelDown) {
+        content()
+        if (menu != null) DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             BernPopupContent { Column { menu { open = false } } }
         }
     }

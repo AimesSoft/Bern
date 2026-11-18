@@ -338,7 +338,44 @@ impl Generator<'_> {
         ));
     }
 
-    /// A button's `ContextMenu`: the system's menu on a secondary click or
+    /// The pointer events of an element other than a button: a double
+    /// click or tap, its context menu and wheel turns, as modifiers that
+    /// keep its layout as it is.
+    pub(super) fn pointer_events(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        if let Some(events) = self.pointer_modifier(element, true) {
+            out.line(format!(".modifier({events})"));
+        }
+        self.context_menu(out, element, ctx);
+    }
+
+    /// `BernPointerEvents(…)` for an element's `DoubleTap`, unless its
+    /// button arbitrates that itself, and its wheel turns where the system
+    /// has a wheel; none when it declares neither.
+    pub(super) fn pointer_modifier(&self, element: &Element, double_tap: bool) -> Option<String> {
+        let event = |kind: &str| {
+            element
+                .pointer_event(kind)
+                .and_then(|event| event.action.as_ref())
+                .map(|action| format!("{{ {} }}", self.action(action)))
+        };
+        let double_tap = double_tap.then(|| event("DoubleTap")).flatten();
+        let wheel = matches!(self.platform, Platform::Macos | Platform::Ios);
+        let up = wheel.then(|| event("WheelUp")).flatten();
+        let down = wheel.then(|| event("WheelDown")).flatten();
+        if double_tap.is_none() && up.is_none() && down.is_none() {
+            return None;
+        }
+        let closure = |closure: Option<String>| closure.unwrap_or_else(|| "nil".into());
+        Some(format!(
+            "BernPointerEvents(doubleTap: {}, wheelUp: {}, wheelDown: {}, shaped: {})",
+            closure(double_tap),
+            closure(up),
+            closure(down),
+            element.kind != "Button"
+        ))
+    }
+
+    /// An element's `ContextMenu`: the system's menu on a secondary click or
     /// a long press. Its items are controls too, reached while it is closed.
     pub(super) fn context_menu(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         let Some(items) = element.context_menu() else {
@@ -699,6 +736,7 @@ impl Generator<'_> {
             };
             let label = self.text_prop(element, "label").unwrap_or_default();
             out.line(format!("BernControlledSlider(value: {value}, minimum: {}, maximum: {}, step: {}, label: {label}, labelHidden: {}, continuous: {}, commit: {commit})", double(element.number("min").unwrap_or(0.0)), double(element.number("max").unwrap_or(1.0)), element.number("step").map(double).unwrap_or_else(|| "nil".into()), element.keyword("label_hidden") == Some("true"), element.keyword("continuous") == Some("true")));
+            self.slider_hover(out, element);
             out.line(format!(".bernControl({}, role: \"slider\", label: {label}, actions: BernControlActions(setNumber: {commit}, value: {{ BernText.text({value}) }}))", self.target(element, ctx)));
             return;
         }
@@ -781,6 +819,7 @@ impl Generator<'_> {
             out.line(".labelsHidden()");
         }
         out.line(".bernAccentTint()");
+        self.slider_hover(out, element);
         let commit = action
             .map(|action| format!("; {action}"))
             .unwrap_or_default();
@@ -788,6 +827,17 @@ impl Generator<'_> {
             ".bernControl({}, role: \"slider\", label: {label}, actions: BernControlActions(setNumber: {{ value in {field} = value{commit} }}, value: {{ BernText.text({field}) }}))",
             self.target(element, ctx)
         ));
+    }
+
+    /// `hover`: where the pointer is along the track while it is over the
+    /// slider, on the systems with a pointer.
+    fn slider_hover(&self, out: &mut Out, element: &Element) {
+        if !matches!(self.platform, Platform::Macos | Platform::Ios) {
+            return;
+        }
+        if let Some(hover) = self.field(element, "hover") {
+            out.line(format!(".bernSliderHover({})", self.binding_of(&hover)));
+        }
     }
 
     pub(super) fn picker(&self, out: &mut Out, element: &Element, ctx: &Ctx) {

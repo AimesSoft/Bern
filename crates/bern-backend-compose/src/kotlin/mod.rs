@@ -9,6 +9,7 @@ mod expr;
 mod layout;
 mod motion;
 mod navigation;
+mod pointer;
 mod table;
 mod toolbar;
 mod values;
@@ -635,6 +636,15 @@ impl<'a> Generator<'a> {
     }
 
     fn element(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        // A button realizes its own; the others stand inside theirs.
+        if element.kind != "Button" && element.has_pointer_events() {
+            self.with_pointer_events(out, element, ctx);
+        } else {
+            self.element_view(out, element, ctx);
+        }
+    }
+
+    fn element_view(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         match element.kind.as_str() {
             "Text" => self.text_view(out, element),
             "Canvas" => self.canvas(out, element, ctx),
@@ -719,7 +729,7 @@ impl<'a> Generator<'a> {
             "LanguagePicker" => self.language_picker(out, element, ctx),
             "Detail" | "Destination" | "Tab" | "Sidebar" | "SidebarItem" | "SidebarHeader"
             | "WindowSet" | "Window" | "Layout" | "MenuItem" | "TabAccessory" | "PickerOption"
-            | "TableColumn" | "TableMenu" | "ContextMenu"
+            | "TableColumn" | "TableMenu" | "ContextMenu" | "DoubleTap" | "WheelUp" | "WheelDown"
             // Android has no menu bar for applications.
             | "MenuBar" | "CommandMenu" | "CommandItem"
             // Nor a status area.

@@ -356,6 +356,43 @@ Stack {
 }
 ```
 
+## Pointer events and player state
+
+Double clicks, right clicks and the scroll wheel are written inside the element they act on. A wheel runs its action once per notch; a trackpad's smooth scrolling is added up and runs it once for each notch's worth. While an element has a `WheelUp` or `WheelDown`, it takes the scrolling over it, and a scroll view around it does not move. Below, the wheel over the video changes the volume, a double click toggles full screen, and a right click opens a menu:
+
+```rust
+Video(id: screen, player: players.main, controls: none, label: tr! { "zh-Hans" => "画面", "en" => "Picture" }) {
+    DoubleTap => app.toggle_full_screen()
+    WheelUp => app.volume_up()
+    WheelDown => app.volume_down()
+    ContextMenu {
+        MenuItem(id: replay, label: tr! { "zh-Hans" => "从头播放", "en" => "Play from the Start" }) => players.main.seek(0)
+    }
+}
+```
+
+On a `Button`, a pointer press waits to see whether a second one follows, and runs either the button's action or the `DoubleTap` action. On other elements single clicks still go to the controls inside.
+
+`Slider(hover: draft.at)` writes where the pointer is along the track while it is over the slider, from 0 at `min` to 1 at `max`, and `None` once it leaves; it does not change the value. Together with the player's state it can show the time under the pointer on a seek bar.
+
+A declaration reads the state of an app player as `players.<id>.<field>`, without going through the engine:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `position`, `duration` | `f64` | Seconds; `duration` is 0 while unknown |
+| `progress` | `f64` | `position` over `duration`, from 0 to 1; 0 while the duration is unknown |
+| `position_ms`, `duration_ms` | `i64`, `Option<i64>` | Milliseconds; `duration_ms` is `None` while unknown |
+| `playing`, `paused`, `buffering`, `ended`, `failed` | `bool` | The phase; `buffering` covers loading and waiting for data |
+| `seekable`, `volume`, `muted` | `bool`, `f64`, `bool` | Whether the position can be changed, the volume from 0 to 1, muting |
+
+Seconds can be written out with `{t, duration, m:ss}`. In the seek bar below, the action gets the fraction the user chose in place of `players.main.progress`:
+
+```rust
+Slider(id: seek, label: tr! { "zh-Hans" => "进度", "en" => "Position" }, label_hidden: true,
+    current: players.main.progress, hover: draft.at, min: 0, max: 1
+) => app.seek_fraction(players.main.progress)
+Text(content: tr! { "zh-Hans" => "{at, duration, m:ss} / {length, duration, m:ss}", "en" => "{at, duration, m:ss} / {length, duration, m:ss}"; at: players.main.position, length: players.main.duration })
+```
 ## Other interfaces
 
 Animated SVG is a standalone component used on demand; for its interface, resource declarations, platform dependencies and lifecycle see the [dedicated document](../Implementation/Animated-SVG.md). For the full semantics of the video player, queries, modules, themes and the command protocol, continue to see the [design document](../Design.md) and the corresponding implementation notes.

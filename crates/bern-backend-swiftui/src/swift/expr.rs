@@ -33,6 +33,11 @@ impl Generator<'_> {
     fn binding(&self, binding: &Binding) -> String {
         match binding {
             Binding::Window { field } => format!("bernWindow.{}", member(field)),
+            Binding::Player { player, field } => format!(
+                "BernPlayerReading(BernMedia.shared.players[{}]).{}",
+                string(player),
+                member(field)
+            ),
             Binding::Engine { field, path } => {
                 let state = &self.app.protocol.state[*field];
                 format!(

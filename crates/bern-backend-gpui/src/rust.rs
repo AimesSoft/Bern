@@ -342,6 +342,8 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
     ),
     ("ScreenBrightness", &["value", "available"]),
     ("DoubleTap", &[]),
+    ("WheelUp", &[]),
+    ("WheelDown", &[]),
     ("OnCommit", &[]),
     (
         "SplitButton",
@@ -478,6 +480,7 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "min_icon",
             "max_icon",
             "tint",
+            "hover",
         ],
     ),
     ("Shortcut", &["key", "enabled"]),
@@ -558,6 +561,8 @@ pub const COMPONENT_NAMES: &[&str] = &[
     "Swipe",
     "ScreenBrightness",
     "DoubleTap",
+    "WheelUp",
+    "WheelDown",
     "OnCommit",
     "SplitButton",
     "PreviewList",
@@ -2084,6 +2089,21 @@ pub fn app() -> b::AppDef {{
     }
 
     fn element_built(&self, element: &Element, ctx: &str, leaving: bool) -> Option<String> {
+        // Pointer events stand around what the element shows, not in it; a
+        // `Button` takes its double click and menu itself.
+        let owner = element.has_pointer_events()
+            && bern_ir::spec::POINTER_OWNERS.contains(&element.kind.as_str());
+        let events = owner.then_some(element);
+        let content;
+        let element = if owner && element.kind != "Button" {
+            content = Element {
+                children: element.content().cloned().collect(),
+                ..element.clone()
+            };
+            &content
+        } else {
+            element
+        };
         let Some((_, properties)) = COMPONENTS.iter().find(|(kind, _)| *kind == element.kind)
         else {
             // The target's capability check names the component.
@@ -2140,6 +2160,10 @@ pub fn app() -> b::AppDef {{
         let code = self.element_code(element);
         self.reflow_next.replace(None);
         let code = code?;
+        let code = match events {
+            Some(events) => self.pointer_events(events, code),
+            None => code,
+        };
         let code = match reflow {
             Some(_) => format!("b::reflow_origin({code})"),
             None => code,
@@ -2450,7 +2474,7 @@ pub fn app() -> b::AppDef {{
                     field_ref(self.session_index(&available.session), available.field)
                 )
             }
-            "DoubleTap" | "OnCommit" => return None,
+            "DoubleTap" | "WheelUp" | "WheelDown" | "OnCommit" => return None,
             "Swipe" => {
                 let Some(field) = element.field("value") else {
                     self.unsupported("a `Swipe` without a draft".into(), at);
@@ -2832,13 +2856,14 @@ pub fn app() -> b::AppDef {{
                     self.pick(element),
                     self.shortcut(element),
                 );
-                // A `ContextMenu` is not part of what the button shows.
+                // A `ContextMenu` is not part of what the button shows; its
+                // wheel turns stand around it (`pointer_events`).
                 let (menus, content): (Vec<Node>, Vec<Node>) = element
                     .children
                     .iter()
-                    .filter(
-                        |node| !matches!(node, Node::Element(child) if child.kind == "DoubleTap"),
-                    )
+                    .filter(|node| {
+                        !matches!(node, Node::Element(child) if matches!(child.kind.as_str(), "DoubleTap" | "WheelUp" | "WheelDown"))
+                    })
                     .cloned()
                     .partition(
                         |node| matches!(node, Node::Element(child) if child.kind == "ContextMenu"),
@@ -3046,7 +3071,7 @@ pub fn app() -> b::AppDef {{
                         (None, None) => format!("{fallback:?}"),
                     };
                 format!(
-                    "b::slider(c, {}, {}, {model}, b::SliderProps {{ tint: {}, min: {}, max: {}, step: {}, continuous: {}, label_hidden: {}, min_icon: {}, max_icon: {} }})",
+                    "b::slider(c, {}, {}, {model}, b::SliderProps {{ tint: {}, min: {}, max: {}, step: {}, continuous: {}, label_hidden: {}, min_icon: {}, max_icon: {}, hover: {} }})",
                     id(),
                     text("label"),
                     match element.keyword("tint") {
@@ -3064,6 +3089,13 @@ pub fn app() -> b::AppDef {{
                     element.prop("label_hidden").is_some(),
                     self.icon(element.icon("min_icon")),
                     self.icon(element.icon("max_icon")),
+                    match element.field("hover") {
+                        Some(field) => format!(
+                            "Some({})",
+                            field_ref(self.session_index(&field.session), field.field)
+                        ),
+                        None => "None".into(),
+                    },
                 )
             }
             "Shortcut" => {
@@ -3665,6 +3697,39 @@ pub fn app() -> b::AppDef {{
         ops
     }
 
+    /// `code`, the expression of `element`, with the pointer events it
+    /// declares: on a `Button`, only its wheel turns.
+    fn pointer_events(&self, element: &Element, code: String) -> String {
+        let action = |kind: &str| {
+            element
+                .pointer_event(kind)
+                .map(|event| self.action(event))
+                .unwrap_or_else(|| "None".into())
+        };
+        let (double_tap, menu) = if element.kind == "Button" {
+            ("None".to_string(), "None".to_string())
+        } else {
+            (
+                action("DoubleTap"),
+                match element.pointer_event("ContextMenu") {
+                    Some(menu) => format!("Some({})", self.menu_entries(&menu.children)),
+                    None => "None".into(),
+                },
+            )
+        };
+        let (up, down) = (action("WheelUp"), action("WheelDown"));
+        if [&double_tap, &menu, &up, &down]
+            .iter()
+            .all(|code| code.as_str() == "None")
+        {
+            return code;
+        }
+        format!(
+            "b::pointer_events(c, {}, b::PointerEvents {{ double_tap: {double_tap}, wheel_up: {up}, wheel_down: {down} }}, {menu}, {code})",
+            string(element.id.as_deref().unwrap_or(&element.path))
+        )
+    }
+
     /// The entries of a `Menu` or `ContextMenu`, through any control flow.
     fn menu_entries(&self, children: &[Node]) -> String {
         self.entries(
@@ -4052,6 +4117,12 @@ pub fn app() -> b::AppDef {{
                     self.unsupported(format!("`window.{field}`"), at);
                 }
                 format!("c.window({})", string(field))
+            }
+            Binding::Player { player, field } => {
+                if !bern_ir::PLAYER_FIELDS.contains(&field.as_str()) {
+                    self.unsupported(format!("`players.{player}.{field}`"), at);
+                }
+                format!("c.player({}, {})", string(player), string(field))
             }
         }
     }

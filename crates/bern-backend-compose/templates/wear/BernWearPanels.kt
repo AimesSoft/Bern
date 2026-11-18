@@ -120,6 +120,23 @@ fun BernContextMenu(menu: @Composable (dismiss: () -> Unit) -> Unit, content: @C
     if (open) BernWearDialog(onDismiss = { open = false }) { menu { open = false } }
 }
 
+/// The pointer events of an element that is not a button: a double tap, and
+/// the `ContextMenu` a long press opens. Single taps still reach the element.
+@Composable
+fun BernPointerEvents(
+    modifier: Modifier = Modifier,
+    onDoubleTap: (() -> Unit)? = null,
+    onWheelUp: (() -> Unit)? = null,
+    onWheelDown: (() -> Unit)? = null,
+    menu: (@Composable (dismiss: () -> Unit) -> Unit)? = null,
+    content: @Composable () -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    val openMenu = { open = true }
+    BernPointerBox(modifier, onDoubleTap, if (menu != null) openMenu else null, onWheelUp, onWheelDown, content)
+    if (open && menu != null) BernWearDialog(onDismiss = { open = false }) { menu { open = false } }
+}
+
 @Composable
 fun BernInspector(presented: Boolean, onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     if (presented) BernWearDialog(onDismiss, content)

@@ -73,6 +73,10 @@ The optional GPUI target (`ui = "gpui"`, macOS, Windows, Linux) is a first versi
 | `grid_cells` | Grids whose row height is set from the column width (`Grid(cell_ratio:, cell_extra:)`), with cell content top-aligned and able to extend into the row spacing | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
 | `size_classes` | Four-tier size adaptation | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
 | `text_formats` | Plural branches, dates and durations in text, and enum labels that display variant fields (see [Text, content and formatting](UI.md#text-content-and-formatting)) | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
+| `pointer_events` | `DoubleTap` and `ContextMenu` on any visible element besides `Button` | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
+| `wheel` | `WheelUp` and `WheelDown` mouse wheel or trackpad scrolling on elements | Supported | Supported | — (ignored, warning) | Supported | Supported | Supported | Supported |
+| `slider_hover` | `Slider(hover:)` reporting the pointer position along the track as `Option<f64>` | Supported | Supported | — (stays `None`, warning) | Supported | Supported | Supported | Supported |
+| `player_state` | Reading `players.<id>.<field>` directly in declarations | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
 
 ## Capabilities not fully expressed by the feature flags above
 

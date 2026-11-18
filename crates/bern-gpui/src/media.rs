@@ -16,9 +16,9 @@
 use crate::El;
 use crate::ctx::Ctx;
 use crate::host::{host, status, take};
-use crate::protocol::{Value, Writer, encode};
+use crate::protocol::{Reader, Type, Value, Writer, decode, encode};
 use bern_ffi::media_contract::kernel::{self, FrameSink, SurfaceHandle, SurfaceKind, VideoFrame};
-use bern_ffi::media_contract::{MediaCommand, media_catalog};
+use bern_ffi::media_contract::{MediaCommand, Observation, PLAYER_FIELDS, Phase, media_catalog};
 use gpui::{Bounds, IntoElement, ParentElement, Pixels, RenderImage, Styled, div};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -71,6 +71,99 @@ pub fn media(_c: &Ctx, op: MediaOp, player: &str, args: Vec<Value>) {
             0,
         )
     }
+}
+
+thread_local! {
+    /// Each player's state as the media hub last reported it, by id: the
+    /// fields of its `MediaPlayer` record.
+    static PLAYERS: RefCell<HashMap<String, Vec<Value>>> = RefCell::new(HashMap::new());
+    static PLAYERS_REVISION: Cell<u64> = const { Cell::new(0) };
+    /// A declaration read a player's state, so its changes redraw.
+    static PLAYERS_READ: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Take the media hub's state (`on_media_state`, `bern_media_snapshot`):
+/// its revision, then every player. Whether the windows should render
+/// again.
+pub(crate) fn receive_state(bytes: &[u8]) -> bool {
+    let mut reader = Reader::new(bytes);
+    let (Ok(revision), Ok(count)) = (reader.u64(), reader.u32()) else {
+        return false;
+    };
+    if revision < PLAYERS_REVISION.with(Cell::get) {
+        return false;
+    }
+    let (types, _) = media_catalog();
+    let record = Type::Record {
+        name: "MediaPlayer".into(),
+    };
+    let mut players = HashMap::new();
+    for _ in 0..count {
+        let Ok(Value::Record(fields)) = decode(&record, &types, &mut reader) else {
+            return false;
+        };
+        if let Some(Value::Text(id)) = fields.first() {
+            players.insert(id.clone(), fields);
+        }
+    }
+    PLAYERS_REVISION.with(|current| current.set(revision));
+    PLAYERS.with(|current| *current.borrow_mut() = players);
+    PLAYERS_READ.with(Cell::get)
+}
+
+/// `players.<player>.<field>` in a declaration, from the player's last
+/// reported state; before any, the state of a player that has loaded
+/// nothing.
+pub(crate) fn player_field(player: &str, field: &str) -> Value {
+    PLAYERS_READ.with(|read| read.set(true));
+    PLAYERS.with(|players| {
+        let players = players.borrow();
+        let fields = players.get(player);
+        let at = |name: &str| {
+            let index = PLAYER_FIELDS
+                .iter()
+                .position(|(field, ..)| *field == name)?;
+            fields?.get(index)
+        };
+        let int = |name: &str| match at(name)? {
+            Value::Int(value) => Some(*value),
+            Value::Optional(Some(value)) => match **value {
+                Value::Int(value) => Some(value),
+                _ => None,
+            },
+            _ => None,
+        };
+        let flag = |name: &str| Value::Bool(matches!(at(name), Some(Value::Bool(true))));
+        let phase = match at("phase") {
+            Some(Value::Enum { variant, .. }) => Phase::from_index(*variant),
+            _ => None,
+        };
+        let seconds = |ms: Option<i64>| ms.map_or(0.0, |ms| ms as f64 / 1000.0);
+        let position = seconds(int("position_ms"));
+        let duration = seconds(int("duration_ms")).max(0.0);
+        match field {
+            "position" => Value::Float(position),
+            "duration" => Value::Float(duration),
+            "progress" if duration > 0.0 => Value::Float((position / duration).clamp(0.0, 1.0)),
+            "progress" => Value::Float(0.0),
+            "position_ms" => Value::Int(int("position_ms").unwrap_or(0)),
+            "duration_ms" => match int("duration_ms") {
+                Some(duration) => Value::some(Value::Int(duration)),
+                None => Value::none(),
+            },
+            "playing" => Value::Bool(phase == Some(Phase::Playing)),
+            "paused" => Value::Bool(phase == Some(Phase::Paused)),
+            "buffering" => Value::Bool(matches!(phase, Some(Phase::Loading | Phase::Buffering))),
+            "ended" => Value::Bool(phase == Some(Phase::Ended)),
+            "failed" => Value::Bool(phase == Some(Phase::Failed)),
+            "seekable" | "muted" => flag(field),
+            "volume" => match at("volume") {
+                Some(Value::Float(volume)) => Value::Float(*volume),
+                _ => Value::Float(Observation::idle().volume),
+            },
+            _ => Value::Unit,
+        }
+    })
 }
 
 /// How a `Video` shows.

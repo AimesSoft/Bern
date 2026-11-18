@@ -12,9 +12,7 @@ impl Generator<'_> {
             Node::Element(child) if child.kind == "DoubleTap" => Some(self.action_fn(child)),
             _ => None,
         });
-        let content: Vec<_> = element.children.iter().filter(|node| {
-            !matches!(node, Node::Element(child) if matches!(child.kind.as_str(), "DoubleTap" | "ContextMenu"))
-        }).cloned().collect();
+        let content: Vec<_> = element.content().cloned().collect();
         let enabled = element
             .expr("enabled")
             .map(|expr| format!("() => {}", self.expr(expr)));
@@ -79,6 +77,42 @@ impl Generator<'_> {
             ));
         }
         self.shortcut(out, element, &action);
+    }
+
+    /// The pointer events of an element of `POINTER_OWNERS`, for
+    /// `F.PointerEvents`. A `Button` realizes its double tap and menu
+    /// itself, exclusive with its action.
+    pub(super) fn pointer_events(&self, element: &Element) -> Option<String> {
+        if !bern_ir::spec::POINTER_OWNERS.contains(&element.kind.as_str()) {
+            return None;
+        }
+        let event = |kind: &str| {
+            element
+                .pointer_event(kind)
+                .map(|event| self.action_fn(event))
+        };
+        let button = element.kind == "Button";
+        let double_tap = (!button).then(|| event("DoubleTap")).flatten();
+        let menu = (!button).then(|| self.context_menu(element)).flatten();
+        let (up, down) = (event("WheelUp"), event("WheelDown"));
+        if double_tap.is_none() && menu.is_none() && up.is_none() && down.is_none() {
+            return None;
+        }
+        Some(Self::props(vec![
+            ("doubleTap", double_tap),
+            (
+                "label",
+                menu.as_ref().and_then(|_| self.text_prop(element, "label")),
+            ),
+            ("menu", menu),
+            ("wheelUp", up),
+            ("wheelDown", down),
+            // Presses on a slider are its own, not those of a control in it.
+            (
+                "control",
+                (element.kind == "Slider").then(|| "true".to_string()),
+            ),
+        ]))
     }
 
     pub(super) fn text_input(&self, out: &mut Out, element: &Element) {
@@ -167,6 +201,7 @@ impl Generator<'_> {
                     "continuous",
                     Some((element.keyword("continuous") == Some("true")).to_string())
                 ),
+                ("hover", self.field(element, "hover")),
                 ("min", element.number("min").map(number)),
                 ("max", element.number("max").map(number)),
                 ("step", element.number("step").map(number)),

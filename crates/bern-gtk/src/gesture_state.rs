@@ -138,6 +138,102 @@ impl Drag {
     }
 }
 
+/// The presses of a double click or tap on content that keeps its single
+/// presses: a press close in time and place to the one before completes
+/// it, unless the pointer travelled while it was down.
+#[derive(Default)]
+pub(crate) struct Presses {
+    first: Option<(u64, f64, f64)>,
+    down: Option<(f64, f64)>,
+}
+
+impl Presses {
+    /// Whether this press completes a double click or tap.
+    pub fn press(&mut self, now: u64, x: f64, y: f64, interval: u64, distance: f64) -> bool {
+        // A second finger, or a press whose release never came.
+        if self.down.is_some() {
+            self.first = None;
+        }
+        let double = self.first.is_some_and(|(at, from_x, from_y)| {
+            now.saturating_sub(at) <= interval
+                && (x - from_x).abs() <= distance
+                && (y - from_y).abs() <= distance
+        });
+        self.first = (!double).then_some((now, x, y));
+        self.down = Some((x, y));
+        double
+    }
+
+    pub fn moved(&mut self, x: f64, y: f64, distance: f64) {
+        if let Some((from_x, from_y)) = self.down
+            && ((x - from_x).abs() > distance || (y - from_y).abs() > distance)
+        {
+            self.first = None;
+        }
+    }
+
+    pub fn release(&mut self) {
+        self.down = None;
+    }
+
+    pub fn cancel(&mut self) {
+        self.first = None;
+        self.down = None;
+    }
+}
+
+/// Wheel turns from scroll deltas in notches: a discrete step is one, and
+/// smooth deltas add up to one before it turns. A change of direction
+/// starts over.
+#[derive(Default)]
+pub(crate) struct Notches {
+    total: f64,
+}
+
+impl Notches {
+    /// The notches `delta` completes: negative upward, positive downward.
+    pub fn scroll(&mut self, delta: f64) -> i32 {
+        if !delta.is_finite() || delta == 0.0 {
+            return 0;
+        }
+        if self.total != 0.0 && self.total.signum() != delta.signum() {
+            self.total = 0.0;
+        }
+        self.total += delta;
+        // Smooth deltas such as tenths may sum to just under a notch.
+        let whole = (self.total + self.total.signum() * 1e-9).trunc();
+        self.total -= whole;
+        if self.total.abs() < 1e-9 {
+            self.total = 0.0;
+        }
+        whole as i32
+    }
+
+    pub fn reset(&mut self) {
+        self.total = 0.0;
+    }
+}
+
+/// Where `x` stands along a slider's trough, from 0 at its minimum to 1 at
+/// its maximum: the knob's centre travels between half a knob in from each
+/// end of the trough.
+pub(crate) fn track_fraction(x: f64, start: f64, length: f64, knob: f64, flipped: bool) -> f64 {
+    let travel = length - knob.max(0.0);
+    let fraction = if travel > 0.0 {
+        (x - start - knob.max(0.0) / 2.0) / travel
+    } else if length > 0.0 {
+        (x - start) / length
+    } else {
+        0.0
+    };
+    let fraction = if fraction.is_nan() {
+        0.0
+    } else {
+        fraction.clamp(0.0, 1.0)
+    };
+    if flipped { 1.0 - fraction } else { fraction }
+}
+
 /// Keep `active` true through both actions: clearing it may synchronously
 /// rebuild a Watch that writes the engine's old value into the draft.
 /// The guard also releases the gesture if any callback unwinds.
@@ -254,6 +350,74 @@ mod tests {
         t.click();
         t.cancel(); // unmount/capture loss/keyboard activation
         assert_eq!(t.expire(t.generation), Tap::None);
+    }
+
+    #[test]
+    fn double_presses_need_time_place_and_no_travel() {
+        let mut p = Presses::default();
+        assert!(!p.press(10, 0.0, 0.0, 400, 5.0));
+        p.release();
+        assert!(p.press(200, 2.0, 1.0, 400, 5.0));
+        p.release();
+        // A third press starts over.
+        assert!(!p.press(300, 2.0, 1.0, 400, 5.0));
+        p.release();
+        // Too late, then too far.
+        assert!(!p.press(900, 2.0, 1.0, 400, 5.0));
+        p.release();
+        assert!(!p.press(1000, 20.0, 1.0, 400, 5.0));
+        p.release();
+        // A drag on the first press, such as moving a slider, is no tap.
+        assert!(!p.press(2000, 0.0, 0.0, 400, 5.0));
+        p.moved(30.0, 0.0, 5.0);
+        p.release();
+        assert!(!p.press(2100, 0.0, 0.0, 400, 5.0));
+        p.release();
+        // Motion without a press changes nothing.
+        p.moved(100.0, 100.0, 5.0);
+        assert!(p.press(2200, 0.0, 0.0, 400, 5.0));
+        // A second finger while the first is down.
+        assert!(!p.press(3000, 0.0, 0.0, 400, 5.0));
+        assert!(!p.press(3050, 1.0, 0.0, 400, 5.0));
+        p.cancel();
+        assert!(!p.press(3100, 1.0, 0.0, 400, 5.0));
+    }
+
+    #[test]
+    fn wheel_steps_turn_once_and_smooth_deltas_add_up() {
+        let mut n = Notches::default();
+        assert_eq!(n.scroll(1.0), 1);
+        assert_eq!(n.scroll(1.0), 1);
+        assert_eq!(n.scroll(-1.0), -1);
+        assert_eq!(n.scroll(0.0), 0);
+        assert_eq!(n.scroll(f64::NAN), 0);
+        let mut turned = 0;
+        for _ in 0..10 {
+            turned += n.scroll(0.1);
+        }
+        assert_eq!(turned, 1);
+        assert_eq!(n.scroll(0.6), 0);
+        // Turning back drops what had gathered the other way.
+        assert_eq!(n.scroll(-0.6), 0);
+        assert_eq!(n.scroll(-0.5), -1);
+        assert_eq!(n.scroll(3.0), 3);
+        n.scroll(0.9);
+        n.reset();
+        assert_eq!(n.scroll(0.2), 0);
+    }
+
+    #[test]
+    fn hovering_a_track_reads_from_knob_centre_to_knob_centre() {
+        // A trough from 10 to 110 with a 20 wide knob: its centre runs
+        // from 20 to 100.
+        assert_eq!(track_fraction(20.0, 10.0, 100.0, 20.0, false), 0.0);
+        assert_eq!(track_fraction(60.0, 10.0, 100.0, 20.0, false), 0.5);
+        assert_eq!(track_fraction(100.0, 10.0, 100.0, 20.0, false), 1.0);
+        assert_eq!(track_fraction(0.0, 10.0, 100.0, 20.0, false), 0.0);
+        assert_eq!(track_fraction(200.0, 10.0, 100.0, 20.0, false), 1.0);
+        assert_eq!(track_fraction(40.0, 10.0, 100.0, 20.0, true), 0.75);
+        assert_eq!(track_fraction(35.0, 10.0, 50.0, 60.0, false), 0.5);
+        assert_eq!(track_fraction(5.0, 0.0, 0.0, 0.0, false), 0.0);
     }
 
     #[test]

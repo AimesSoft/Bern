@@ -1015,6 +1015,86 @@ final class BernPointerHider: NSObject, UIPointerInteractionDelegate {
 }
 #endif
 
+#if os(iOS)
+/// The turns of a mouse wheel or the two-finger scroll of a trackpad over
+/// the view: `up` and `down` run once per notch, the way that would move a
+/// scroll view toward its top and its bottom under the user's scroll
+/// direction setting. The view takes that scrolling, so a scroll view
+/// around it does not move. Touches fall through to the content.
+struct BernWheelSource: UIViewRepresentable {
+    let up: (() -> Void)?
+    let down: (() -> Void)?
+    let enabled: Bool
+
+    func makeUIView(context: Context) -> Observer { Observer() }
+
+    func updateUIView(_ view: Observer, context: Context) {
+        view.up = up
+        view.down = down
+        view.enabled = enabled
+    }
+
+    @MainActor final class Observer: UIView {
+        /// The scrolling of a trackpad or a smooth wheel that adds up to
+        /// one notch, in points; the web front end counts the same.
+        private static let notch: CGFloat = 100
+        var up: (() -> Void)?
+        var down: (() -> Void)?
+        var enabled = true
+        /// Scrolling of the current gesture not yet a notch, in points.
+        private var turned: CGFloat = 0
+        /// Whether the current gesture already fired a notch.
+        private var fired = false
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            accessibilityElementsHidden = true
+            let wheel = UIPanGestureRecognizer(target: self, action: #selector(wheeled(_:)))
+            // Wheels and trackpads only: touches stay with the content.
+            wheel.allowedScrollTypesMask = .all
+            wheel.allowedTouchTypes = []
+            addGestureRecognizer(wheel)
+        }
+
+        required init?(coder: NSCoder) { nil }
+
+        /// Scroll events find the view where the pointer is; touches fall
+        /// through to the content.
+        override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+            guard let event, event.type == .scroll else { return nil }
+            return bounds.contains(point) ? self : nil
+        }
+
+        @objc private func wheeled(_ wheel: UIPanGestureRecognizer) {
+            let delta = wheel.translation(in: self).y
+            wheel.setTranslation(.zero, in: self)
+            switch wheel.state {
+            case .began, .changed:
+                guard enabled, delta != 0 else { return }
+                // A turn back starts over.
+                if turned != 0, (turned < 0) != (delta < 0) { turned = 0 }
+                turned += delta
+                while turned >= Self.notch { turned -= Self.notch; fire(up: true) }
+                while turned <= -Self.notch { turned += Self.notch; fire(up: false) }
+            case .ended, .cancelled:
+                defer { turned = 0; fired = false }
+                // A gesture that never made a notch is one notch of a wheel.
+                guard !fired, turned != 0 else { return }
+                fire(up: turned > 0)
+            default:
+                break
+            }
+        }
+
+        private func fire(up toward: Bool) {
+            guard enabled else { return }
+            fired = true
+            (toward ? up : down)?()
+        }
+    }
+}
+#endif
+
 @MainActor
 final class BernIdleTimer {
     private var timer: Timer?
