@@ -125,6 +125,7 @@ pub(crate) fn install(table: StringTable, supported: &[&str], fallback: &str) {
         .and_then(|path| std::fs::read_to_string(path).ok())
         .filter(|tag| supported.contains(tag));
     let language = kept.unwrap_or_else(|| choose(&supported, fallback));
+    bern_ffi::platform::set_ui_language(&language);
     LANGUAGE.with(|cell| {
         let _ = cell.set(Language {
             strings: Cell::new(strings_of(table, &language)),
@@ -150,6 +151,7 @@ pub(crate) fn set_language(tag: &str) -> bool {
         if !language.supported.iter().any(|supported| supported == tag) {
             return false;
         }
+        bern_ffi::platform::set_ui_language(tag);
         batch(|| {
             language.current.set(tag.to_string());
             language.strings.set(strings_of(language.table, tag));

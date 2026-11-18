@@ -97,6 +97,7 @@ void bern_media_surface_frame(BernApp* app, uint8_t const* view, size_t len, dou
 void bern_buffer_free(BernBuffer buffer);
 /// Answer the engine's platform requests, such as `copy_text`: an
 /// operation and its two texts; 0 when done.
+void bern_platform_language(uint8_t const* tag, size_t len);
 void bern_platform_install(void* context, int32_t (*request)(void*, uint8_t const*, size_t, uint8_t const*, size_t, uint8_t const*, size_t));
 /// The system opened the application with the file at `url` (UTF-8), of a
 /// kind `[[app.opens]]` declares.

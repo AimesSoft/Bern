@@ -32,6 +32,7 @@ typedef struct {
 // operation and two texts (UTF-8) and answers 0 when done, 2 when the user
 // did not allow it. Call before `bern_app_start`; `request` may run on any
 // thread.
+void bern_platform_language(const uint8_t *tag, size_t len);
 void bern_platform_install(void *context, int32_t (*request)(void *context, const uint8_t *operation, size_t operation_len, const uint8_t *first, size_t first_len, const uint8_t *second, size_t second_len));
 // The system opened the application with the file at `url` (UTF-8), of a kind
 // `[[app.opens]]` declares. May come before `bern_app_start`.

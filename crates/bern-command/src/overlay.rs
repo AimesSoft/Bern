@@ -25,6 +25,17 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, RwLock};
 
+#[cfg(target_os = "macos")]
+mod mac_panel;
+mod panel;
+#[cfg(target_os = "windows")]
+mod win_panel;
+
+pub use panel::{
+    Control, Panel, PanelEvent, TextEffect, TextStyle, panel_changed, panel_dismissed, panel_open,
+    panel_supported, set_panel_waker, show_panel, take_panel_events,
+};
+
 /// One line of an overlay.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Line {
@@ -262,11 +273,18 @@ pub fn press(overlay: &str, button: &str) {
 
 /// A host that draws overlays itself (the GTK host on Linux).
 pub trait Host: Send + Sync {
+    fn supports_panel(&self) -> bool {
+        false
+    }
     fn show(&self, id: &str, overlay: &Overlay);
+    fn show_styled(&self, id: &str, overlay: &Overlay, _style: TextStyle) {
+        self.show(id, overlay);
+    }
     /// Only how far the lines are lit changed since `show`.
     fn lit(&self, id: &str, overlay: &Overlay) {
         self.show(id, overlay);
     }
+    fn panel(&self, _id: &str, _panel: Option<&Panel>) {}
     fn hide(&self, id: &str);
 }
 
@@ -307,7 +325,7 @@ pub fn ask() {
 }
 
 /// What each overlay shows now.
-static SHOWN: Mutex<BTreeMap<String, Overlay>> = Mutex::new(BTreeMap::new());
+static SHOWN: Mutex<BTreeMap<String, (Overlay, TextStyle)>> = Mutex::new(BTreeMap::new());
 
 /// What an overlay needs for what it shows next.
 #[derive(Debug, PartialEq, Eq)]
@@ -356,22 +374,46 @@ impl Overlay {
 
 /// Show `overlay` as the overlay `id`, putting it up when it is not.
 pub fn show(id: &str, overlay: &Overlay) {
+    show_styled(id, overlay, TextStyle::default());
+}
+
+/// Show `overlay` with explicit text effect and opacity.
+pub fn show_styled(id: &str, overlay: &Overlay, style: TextStyle) {
+    let style = TextStyle {
+        effect: style.effect,
+        opacity: if style.opacity.is_finite() {
+            style.opacity.clamp(0.0, 1.0)
+        } else {
+            1.0
+        },
+    };
     let was = SHOWN
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .insert(id.to_string(), overlay.clone());
-    let change = was.map_or(Change::All, |was| was.change_to(overlay));
+        .insert(id.to_string(), (overlay.clone(), style));
+    let change = match was {
+        None => Change::All,
+        Some((was_overlay, was_style)) if was_style != style => {
+            let _ = was_overlay;
+            Change::All
+        }
+        Some((was_overlay, _)) => was_overlay.change_to(overlay),
+    };
+    if change == Change::All && (overlay.locked || overlay.place != Place::Free) {
+        show_panel(id, None);
+    }
     match (change, host()) {
         (Change::Nothing, _) => {}
         (Change::Lit, Some(host)) => host.lit(id, overlay),
-        (Change::All, Some(host)) => host.show(id, overlay),
+        (Change::All, Some(host)) => host.show_styled(id, overlay, style),
         (Change::Lit, None) => lit_here(id, overlay),
-        (Change::All, None) => show_here(id, overlay),
+        (Change::All, None) => show_here(id, overlay, style),
     }
 }
 
 /// Take the overlay `id` down.
 pub fn hide(id: &str) {
+    show_panel(id, None);
     SHOWN.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
     match host() {
         Some(host) => host.hide(id),
@@ -386,21 +428,21 @@ fn lit_here(id: &str, overlay: &Overlay) {
     #[cfg(target_os = "windows")]
     win::lit(id.to_string(), overlay.clone());
     #[cfg(target_os = "android")]
-    let _ = crate::platform::request("overlay_lit", id, &as_json(overlay));
+    let _ = crate::platform::request("overlay_lit", id, &as_json(overlay, TextStyle::default()));
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "android")))]
     let _ = (id, overlay);
 }
 
 /// Show an overlay with this system's own windows.
-fn show_here(id: &str, overlay: &Overlay) {
+fn show_here(id: &str, overlay: &Overlay, style: TextStyle) {
     #[cfg(target_os = "macos")]
-    mac::show(id.to_string(), overlay.clone());
+    mac::show(id.to_string(), overlay.clone(), style);
     #[cfg(target_os = "windows")]
-    win::show(id.to_string(), overlay.clone());
+    win::show(id.to_string(), overlay.clone(), style);
     #[cfg(target_os = "android")]
-    let _ = crate::platform::request("overlay_show", id, &as_json(overlay));
+    let _ = crate::platform::request("overlay_show", id, &as_json(overlay, style));
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "android")))]
-    let _ = (id, overlay);
+    let _ = (id, overlay, style);
 }
 
 fn hide_here(id: &str) {
@@ -439,9 +481,9 @@ pub fn save_place(id: &str, x: f64, y: f64) {
         .write(&format!("overlay.{id}"), format!("{x},{y}").as_bytes());
 }
 
-/// An overlay as JSON for a host: its lines, place, lock and buttons.
+/// An overlay as JSON for a host: its lines, place, lock, buttons and text style.
 #[cfg(any(target_os = "android", test))]
-fn as_json(overlay: &Overlay) -> String {
+fn as_json(overlay: &Overlay, style: TextStyle) -> String {
     fn text(value: &str) -> String {
         let mut out = String::from("\"");
         for c in value.chars() {
@@ -491,15 +533,22 @@ fn as_json(overlay: &Overlay) -> String {
             )
         })
         .collect();
+    let effect = match style.effect {
+        TextEffect::None => "none",
+        TextEffect::Shadow => "shadow",
+        TextEffect::Outline => "outline",
+    };
     format!(
-        "{{\"lines\":[{}],\"place\":\"{}\",\"locked\":{},\"buttons\":[{}]}}",
+        "{{\"lines\":[{}],\"place\":\"{}\",\"locked\":{},\"buttons\":[{}],\"effect\":\"{}\",\"opacity\":{}}}",
         lines.join(","),
         match overlay.place {
             Place::Free => "free",
             Place::Taskbar => "taskbar",
         },
         overlay.locked,
-        buttons.join(",")
+        buttons.join(","),
+        effect,
+        style.opacity
     )
 }
 
@@ -510,7 +559,8 @@ fn as_json(overlay: &Overlay) -> String {
 /// the bar's buttons.
 #[cfg(target_os = "macos")]
 mod mac {
-    use super::{Line, Overlay, Route};
+    use super::mac_panel::Adjustment;
+    use super::{Line, Overlay, Panel, Route, TextEffect, TextStyle};
     use dispatch2::{DispatchQueue, DispatchTime};
     use objc2::rc::Retained;
     use objc2::runtime::{AnyClass, AnyObject, NSObject, ProtocolObject};
@@ -519,8 +569,8 @@ mod mac {
         NSBackingStoreType, NSBox, NSBoxType, NSButton, NSColor, NSEvent, NSFont,
         NSFontAttributeName, NSFontWeightSemibold, NSForegroundColorAttributeName, NSImage,
         NSImageSymbolConfiguration, NSPanel, NSScreen, NSShadow, NSShadowAttributeName,
-        NSTextField, NSTitlePosition, NSUserInterfaceItemIdentification, NSView,
-        NSWindowCollectionBehavior, NSWindowStyleMask,
+        NSStrokeColorAttributeName, NSStrokeWidthAttributeName, NSTextField, NSTitlePosition,
+        NSUserInterfaceItemIdentification, NSView, NSWindowCollectionBehavior, NSWindowStyleMask,
     };
     use objc2_foundation::{
         NSArray, NSMutableAttributedString, NSMutableDictionary, NSNumber, NSPoint, NSRect, NSSize,
@@ -561,7 +611,7 @@ mod mac {
     /// Measure an edge in the complete shaped line, including kerning and
     /// ligatures. The native field adds a two-point inset on either side.
     fn source_edge(line: &Line, byte: usize, mtm: MainThreadMarker) -> f64 {
-        let field = styled(line, &line.text, 1.0, mtm);
+        let field = styled(line, &line.text, TextEffect::None, 1.0, mtm);
         let text = field.attributedStringValue();
         // SAFETY: NSAttributedString is toll-free bridged to its CF type;
         // the created CTLine is released after its UTF-16 offset is read.
@@ -584,10 +634,12 @@ mod mac {
     /// A panel and what changes as the pointer comes and goes.
     struct Shown {
         panel: Retained<NSPanel>,
+        adjustment: Option<Retained<Adjustment>>,
         plate: Option<Retained<NSBox>>,
         /// Each button's round, and the button.
         buttons: Vec<(Retained<NSBox>, Retained<NSButton>)>,
         locked: bool,
+        allows_panel: bool,
         /// What is lit of each line that shows, for those that light up.
         lit: Vec<Option<Lit>>,
     }
@@ -607,7 +659,10 @@ mod mac {
             let line = &self.line;
             *self.widths.entry(at).or_insert_with(|| {
                 if line.ruby_spans().is_empty() {
-                    styled(line, &line.text[..at], 1.0, mtm).frame().size.width
+                    styled(line, &line.text[..at], TextEffect::None, 1.0, mtm)
+                        .frame()
+                        .size
+                        .width
                 } else {
                     source_edge(line, at, mtm) + 4.0
                 }
@@ -683,6 +738,7 @@ mod mac {
 
     thread_local! {
         static PANELS: RefCell<HashMap<String, Shown>> = RefCell::new(HashMap::new());
+        static PENDING: RefCell<HashMap<String, Panel>> = RefCell::new(HashMap::new());
         static POLLING: Cell<bool> = const { Cell::new(false) };
         static TARGET: RefCell<Option<Retained<Target>>> = const { RefCell::new(None) };
     }
@@ -723,12 +779,82 @@ mod mac {
         })
     }
 
-    pub fn show(id: String, overlay: Overlay) {
+    pub fn show(id: String, overlay: Overlay, style: TextStyle) {
         DispatchQueue::main().exec_async(move || {
             if let Some(mtm) = MainThreadMarker::new() {
-                put(mtm, &id, &overlay);
+                put(mtm, &id, &overlay, style);
             }
         });
+    }
+
+    pub fn panel(id: String, panel: Option<Panel>) {
+        DispatchQueue::main().exec_async(move || {
+            if let Some(mtm) = MainThreadMarker::new() {
+                set_panel(mtm, &id, panel);
+            }
+        });
+    }
+
+    pub(super) fn detach_panel(id: String) {
+        DispatchQueue::main().exec_async(move || {
+            let adjustment = PANELS.with(|panels| {
+                panels
+                    .borrow()
+                    .get(&id)
+                    .and_then(|shown| shown.adjustment.clone())
+            });
+            if let Some(adjustment) = adjustment {
+                adjustment.fold();
+                adjustment.detach();
+            }
+        });
+    }
+
+    fn set_panel(mtm: MainThreadMarker, id: &str, panel: Option<Panel>) {
+        let Some(panel) = panel else {
+            PENDING.with(|pending| pending.borrow_mut().remove(id));
+            let adjustment = PANELS.with(|panels| {
+                panels
+                    .borrow()
+                    .get(id)
+                    .and_then(|shown| shown.adjustment.clone())
+            });
+            if let Some(adjustment) = adjustment {
+                adjustment.fold();
+            }
+            return;
+        };
+        enum Target {
+            Ready(Retained<Adjustment>),
+            Defer,
+            Refuse,
+        }
+        let target = PANELS.with(|panels| {
+            let mut panels = panels.borrow_mut();
+            let Some(shown) = panels.get_mut(id) else {
+                return Target::Defer;
+            };
+            if !shown.allows_panel {
+                return Target::Refuse;
+            }
+            let adjustment = shown
+                .adjustment
+                .get_or_insert_with(|| Adjustment::for_parent(id, shown.panel.clone(), mtm))
+                .clone();
+            Target::Ready(adjustment)
+        });
+        match target {
+            Target::Ready(adjustment) => {
+                PENDING.with(|pending| pending.borrow_mut().remove(id));
+                adjustment.present(panel);
+            }
+            Target::Defer => {
+                PENDING.with(|pending| pending.borrow_mut().insert(id.to_owned(), panel));
+            }
+            Target::Refuse => {
+                PENDING.with(|pending| pending.borrow_mut().remove(id));
+            }
+        }
     }
 
     /// Only how far the lines are lit changed: the panel stays as it is.
@@ -737,10 +863,10 @@ mod mac {
             let Some(mtm) = MainThreadMarker::new() else {
                 return;
             };
-            let done = PANELS.with(|panels| {
+            let fallback = PANELS.with(|panels| {
                 let mut panels = panels.borrow_mut();
                 let Some(shown) = panels.get_mut(&id) else {
-                    return false;
+                    return Some(TextStyle::default());
                 };
                 let lines = overlay.lines.iter().filter(|line| !line.text.is_empty());
                 for (lit, line) in shown.lit.iter_mut().zip(lines) {
@@ -750,22 +876,30 @@ mod mac {
                         lit.show(mtm);
                     }
                 }
-                true
+                None
             });
-            if !done {
-                put(mtm, &id, &overlay);
+            if let Some(style) = fallback {
+                put(mtm, &id, &overlay, style);
             }
         });
     }
 
     pub fn hide(id: String) {
         DispatchQueue::main().exec_async(move || {
-            PANELS.with(|panels| {
-                if let Some(shown) = panels.borrow().get(&id) {
-                    keep_place(&id, &shown.panel);
-                    shown.panel.orderOut(None);
-                }
+            PENDING.with(|pending| pending.borrow_mut().remove(&id));
+            let owner = PANELS.with(|panels| {
+                panels
+                    .borrow()
+                    .get(&id)
+                    .map(|s| (s.panel.clone(), s.adjustment.clone()))
             });
+            if let Some((parent, adjustment)) = owner {
+                if let Some(adjustment) = adjustment {
+                    adjustment.fold();
+                }
+                keep_place(&id, &parent);
+                parent.orderOut(None);
+            }
         });
     }
 
@@ -777,21 +911,33 @@ mod mac {
 
     /// A line: faded, and over it what is lit, cut off inside the character
     /// `Line::lit` stops in.
-    fn label(line: &Line, mtm: MainThreadMarker) -> (Retained<NSView>, Option<Lit>) {
-        if !line.lights() {
-            return (annotated(line, 1.0, mtm), None);
-        }
-        let label = annotated(line, super::FADED, mtm);
-        let size = label.frame().size;
-        let clip = NSView::initWithFrame(
-            NSView::alloc(mtm),
-            NSRect::new(NSPoint::new(0.0, 0.0), size),
+    fn label(
+        line: &Line,
+        style: TextStyle,
+        mtm: MainThreadMarker,
+    ) -> (Retained<NSView>, Option<Lit>) {
+        let lights = line.lights();
+        let base = annotated(
+            line,
+            style.effect,
+            if lights { super::FADED } else { 1.0 },
+            mtm,
         );
+        let size = base.frame().size;
+        let frame = NSRect::new(NSPoint::new(0.0, 0.0), size);
+        let label = NSView::initWithFrame(NSView::alloc(mtm), frame);
+        label.setWantsLayer(true);
+        label.setAlphaValue(style.opacity);
+        label.addSubview(&base);
+        if !lights {
+            return (label, None);
+        }
+        let clip = NSView::initWithFrame(NSView::alloc(mtm), frame);
         clip.setClipsToBounds(true);
         // The text, with its blurred shadow, is drawn once: moving the cut
         // only changes the bounds of a layer.
         clip.setWantsLayer(true);
-        let bright = annotated(line, 1.0, mtm);
+        let bright = annotated(line, style.effect, 1.0, mtm);
         bright.setWantsLayer(true);
         // SAFETY: `NSViewLayerContentsRedrawNever` is 0.
         let _: () = unsafe { msg_send![&*clip, setLayerContentsRedrawPolicy: 0isize] };
@@ -810,8 +956,13 @@ mod mac {
     /// Keep the original line as one shaped, accessible text field. Readings
     /// occupy a reserved band above their measured source ranges; they do not
     /// contribute characters to the highlighting clock.
-    fn annotated(line: &Line, alpha: f64, mtm: MainThreadMarker) -> Retained<NSView> {
-        let base = styled(line, &line.text, alpha, mtm);
+    fn annotated(
+        line: &Line,
+        effect: TextEffect,
+        alpha: f64,
+        mtm: MainThreadMarker,
+    ) -> Retained<NSView> {
+        let base = styled(line, &line.text, effect, alpha, mtm);
         let spans = line.ruby_spans();
         if spans.is_empty() {
             return base.into_super().into_super();
@@ -839,9 +990,12 @@ mod mac {
             let width = (end_edge - start_edge).abs().max(1.0);
             let mut style = line.clone();
             style.size *= 0.45;
-            let measured = styled(&style, &reading, alpha, mtm).frame().size.width;
+            let measured = styled(&style, &reading, TextEffect::None, 1.0, mtm)
+                .frame()
+                .size
+                .width;
             style.size *= (width / measured.max(1.0)).min(1.0);
-            let ruby = styled(&style, &reading, alpha, mtm);
+            let ruby = styled(&style, &reading, effect, alpha, mtm);
             let ruby_size = ruby.frame().size;
             ruby.setFrameOrigin(NSPoint::new(
                 left + (width - ruby_size.width) / 2.0,
@@ -856,7 +1010,13 @@ mod mac {
     }
 
     /// `text` in the style of `line`, its alpha scaled by `alpha`.
-    fn styled(line: &Line, text: &str, alpha: f64, mtm: MainThreadMarker) -> Retained<NSTextField> {
+    fn styled(
+        line: &Line,
+        text: &str,
+        effect: TextEffect,
+        alpha: f64,
+        mtm: MainThreadMarker,
+    ) -> Retained<NSTextField> {
         let attributes = NSMutableDictionary::<NSString, AnyObject>::new();
         let font = if line.bold {
             NSFont::boldSystemFontOfSize(line.size)
@@ -865,10 +1025,6 @@ mod mac {
         };
         let [r, g, b, a] = line.color.map(|c| c as f64 / 255.0);
         let color = NSColor::colorWithSRGBRed_green_blue_alpha(r, g, b, a * alpha);
-        let shadow = NSShadow::new();
-        shadow.setShadowOffset(NSSize::new(0.0, -1.0));
-        shadow.setShadowBlurRadius(3.0);
-        shadow.setShadowColor(Some(&NSColor::colorWithWhite_alpha(0.0, 0.85)));
         // SAFETY: the keys are AppKit's attribute names, with values of their
         // kinds.
         unsafe {
@@ -877,7 +1033,29 @@ mod mac {
                 &color,
                 ProtocolObject::from_ref(NSForegroundColorAttributeName),
             );
-            attributes.setObject_forKey(&shadow, ProtocolObject::from_ref(NSShadowAttributeName));
+            match effect {
+                TextEffect::None => {}
+                TextEffect::Shadow => {
+                    let shadow = NSShadow::new();
+                    shadow.setShadowOffset(NSSize::new(0.0, -1.0));
+                    shadow.setShadowBlurRadius(3.0);
+                    shadow.setShadowColor(Some(&NSColor::colorWithWhite_alpha(0.0, 0.85)));
+                    attributes
+                        .setObject_forKey(&shadow, ProtocolObject::from_ref(NSShadowAttributeName));
+                }
+                TextEffect::Outline => {
+                    let stroke = NSColor::colorWithWhite_alpha(0.0, 0.9);
+                    let width = NSNumber::new_f64(-3.5);
+                    attributes.setObject_forKey(
+                        &stroke,
+                        ProtocolObject::from_ref(NSStrokeColorAttributeName),
+                    );
+                    attributes.setObject_forKey(
+                        &width,
+                        ProtocolObject::from_ref(NSStrokeWidthAttributeName),
+                    );
+                }
+            }
         }
         // SAFETY: string attributes as AppKit takes them.
         let text = unsafe {
@@ -936,10 +1114,12 @@ mod mac {
         view
     }
 
-    fn put(mtm: MainThreadMarker, id: &str, overlay: &Overlay) {
-        let panel = PANELS
-            .with(|panels| panels.borrow().get(id).map(|shown| shown.panel.clone()))
-            .unwrap_or_else(|| {
+    fn put(mtm: MainThreadMarker, id: &str, overlay: &Overlay, style: TextStyle) {
+        let (panel, adjustment) = PANELS.with(|panels| {
+            let mut panels = panels.borrow_mut();
+            if let Some(shown) = panels.get_mut(id) {
+                (shown.panel.clone(), shown.adjustment.take())
+            } else {
                 let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(200.0, 60.0));
                 let panel = NSPanel::initWithContentRect_styleMask_backing_defer(
                     NSPanel::alloc(mtm),
@@ -970,12 +1150,13 @@ mod mac {
                 let _: () = unsafe { msg_send![&*panel, setRestorable: false] };
                 // SAFETY: the panel stays in `PANELS` and is never closed.
                 unsafe { panel.setReleasedWhenClosed(false) };
-                panel
-            });
-        let shown = panel.isVisible();
+                (panel, None)
+            }
+        });
+        let was_visible = panel.isVisible();
         // Where it was: the middle of its bottom edge, kept as the text
         // changes width.
-        let place = if shown {
+        let place = if was_visible {
             let frame = panel.frame();
             Some((frame.origin.x + frame.size.width / 2.0, frame.origin.y))
         } else {
@@ -985,7 +1166,7 @@ mod mac {
             .lines
             .iter()
             .filter(|line| !line.text.is_empty())
-            .map(|line| label(line, mtm))
+            .map(|line| label(line, style, mtm))
             .unzip();
         // None on the taskbar. Locked, only the buttons that unlock it, each
         // where it is when unlocked.
@@ -1071,20 +1252,38 @@ mod mac {
             NSRect::new(NSPoint::new(x - width / 2.0, y), NSSize::new(width, height)),
             true,
         );
+        let allows_panel = !overlay.locked && overlay.place == super::Place::Free;
         let shown = Shown {
             panel: panel.clone(),
+            adjustment: adjustment.clone(),
             plate,
             buttons,
             locked: overlay.locked,
+            allows_panel,
             lit,
         };
         hover(&shown);
         PANELS.with(|panels| panels.borrow_mut().insert(id.to_string(), shown));
+        if !allows_panel {
+            set_panel(mtm, id, None);
+        }
         if overlay.lines.iter().all(|line| line.text.is_empty()) {
+            if let Some(adjustment) = &adjustment {
+                adjustment.detach();
+            }
             panel.orderOut(None);
         } else {
-            panel.orderFrontRegardless();
+            if !was_visible {
+                panel.orderFrontRegardless();
+            }
+            if let Some(adjustment) = &adjustment {
+                adjustment.refresh();
+            }
             poll();
+        }
+        let pending = PENDING.with(|pending| pending.borrow_mut().remove(id));
+        if let Some(pending) = pending {
+            set_panel(mtm, id, Some(pending));
         }
         keep_place(id, &panel);
     }
@@ -1300,8 +1499,10 @@ fn pick_taskbar_room(
 
 #[cfg(target_os = "windows")]
 mod win {
+    use super::win_panel::Tool;
     use super::{
-        Line, Overlay, Place, Room, Route, TASKBAR_GAP, merge_intervals, pick_taskbar_room,
+        Line, Overlay, Panel, Place, Room, Route, TASKBAR_GAP, TextEffect, TextStyle,
+        merge_intervals, pick_taskbar_room,
     };
     use std::cell::RefCell;
     use std::collections::HashMap;
@@ -1363,9 +1564,10 @@ mod win {
     use windows_numerics::Vector2;
 
     enum Message {
-        Show(String, Overlay),
+        Show(String, Overlay, TextStyle),
         /// Only how far the lines are lit, or their routes, changed.
         Lit(String, Overlay),
+        Panel(String, Option<Panel>),
         Hide(String),
     }
 
@@ -1422,6 +1624,8 @@ mod win {
     const GLYPHS: &[(&str, u16)] = &[
         ("backward.fill", 0xEB9E),
         ("forward.fill", 0xEB9D),
+        ("gearshape", 0xE713),
+        ("gearshape.fill", 0xE713),
         ("lock.fill", 0xE72E),
         ("lock.open.fill", 0xE785),
         ("pause.fill", 0xF8AE),
@@ -1429,12 +1633,16 @@ mod win {
         ("xmark", 0xE711),
     ];
 
-    pub fn show(id: String, overlay: Overlay) {
-        send(Message::Show(id, overlay));
+    pub fn show(id: String, overlay: Overlay, style: TextStyle) {
+        send(Message::Show(id, overlay, style));
     }
 
     pub fn lit(id: String, overlay: Overlay) {
         send(Message::Lit(id, overlay));
+    }
+
+    pub fn panel(id: String, panel: Option<Panel>) {
+        send(Message::Panel(id, panel));
     }
 
     pub fn hide(id: String) {
@@ -1483,6 +1691,8 @@ mod win {
         visible: bool,
         /// On the taskbar, the room it had when it was last drawn.
         room: Option<Room>,
+        style: TextStyle,
+        tool: Option<Box<Tool>>,
     }
 
     #[derive(Clone, PartialEq, Eq)]
@@ -1898,6 +2108,9 @@ mod win {
                     with_window(hwnd, |window, _, _| {
                         window.place = Some(place);
                         super::save_place(&window.id, place.0, place.1);
+                        if let Some(tool) = &mut window.tool {
+                            tool.owner_moved(window.visible);
+                        }
                     });
                 }
                 LRESULT(0)
@@ -1994,6 +2207,7 @@ mod win {
                 ..Default::default()
             };
             RegisterClassExW(&class);
+            super::win_panel::register(instance.into());
             let Ok(d2d) =
                 D2D1CreateFactory::<ID2D1Factory>(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)
             else {
@@ -2053,6 +2267,9 @@ mod win {
                     window.visible = false;
                     window.over = false;
                     window.hot = None;
+                    if let Some(tool) = &mut window.tool {
+                        tool.present(None, false);
+                    }
                     // SAFETY: a window of this thread.
                     unsafe {
                         let _ = KillTimer(Some(window.hwnd), TASKBAR_TIMER);
@@ -2062,6 +2279,26 @@ mod win {
                     }
                 }
                 refresh_scanner(&windows);
+            }),
+            Message::Panel(id, panel) => WINDOWS.with(|windows| {
+                let mut windows = windows.borrow_mut();
+                if let Some(window) = windows.get_mut(&id) {
+                    let allowed = window.visible
+                        && !window.overlay.locked
+                        && window.overlay.place == Place::Free;
+                    if panel.is_some() && !allowed {
+                        if let Some(tool) = &mut window.tool {
+                            tool.present(None, false);
+                        }
+                        return;
+                    }
+                    if panel.is_some() && window.tool.is_none() {
+                        window.tool = Tool::new(&id, window.hwnd, instance);
+                    }
+                    if let Some(tool) = &mut window.tool {
+                        tool.present(panel, allowed);
+                    }
+                }
             }),
             Message::Lit(id, overlay) => {
                 let moved = WINDOWS.with(|windows| {
@@ -2080,10 +2317,17 @@ mod win {
                 });
                 if !moved {
                     // SAFETY: as this call's own.
-                    unsafe { apply(Message::Show(id, overlay), d2d, dwrite, instance) };
+                    unsafe {
+                        apply(
+                            Message::Show(id, overlay, TextStyle::default()),
+                            d2d,
+                            dwrite,
+                            instance,
+                        )
+                    };
                 }
             }
-            Message::Show(id, overlay) => WINDOWS.with(|windows| {
+            Message::Show(id, overlay, style) => WINDOWS.with(|windows| {
                 let mut windows = windows.borrow_mut();
                 {
                     let window = windows.entry(id.clone()).or_insert_with(|| {
@@ -2118,15 +2362,29 @@ mod win {
                             parent: None,
                             visible: false,
                             room: None,
+                            style: TextStyle::default(),
+                            tool: None,
                         }
                     });
                     window.overlay = overlay;
+                    window.style = style;
                     window.visible = true;
                 }
                 refresh_scanner(&windows);
                 if let Some(window) = windows.get_mut(&id) {
                     // SAFETY: draws a window of this thread.
                     let _ = unsafe { draw(window, d2d, dwrite) };
+                    if let Some(tool) = &mut window.tool {
+                        let allowed = window.visible
+                            && window.frame.is_some()
+                            && !window.overlay.locked
+                            && window.overlay.place == Place::Free;
+                        if !allowed {
+                            tool.present(None, false);
+                        } else {
+                            tool.owner_moved(true);
+                        }
+                    }
                 }
             }),
         }
@@ -2840,16 +3098,37 @@ mod win {
                         }
                     }
                 }
-                let shadow = dark(0.75)?;
+                let text_opacity = window.style.opacity as f32;
+                let effect_alpha = match window.style.effect {
+                    TextEffect::None => 0.0,
+                    TextEffect::Shadow => 0.75 * text_opacity,
+                    TextEffect::Outline => 0.9 * text_opacity,
+                };
+                let shadow = dark(effect_alpha)?;
+                let offsets: &[(f32, f32)] = match window.style.effect {
+                    TextEffect::None => &[],
+                    TextEffect::Shadow => &[(1.0, 1.5), (0.0, 1.0), (1.0, 0.0), (-0.5, 1.0)],
+                    TextEffect::Outline => &[
+                        (-1.5, 0.0),
+                        (1.5, 0.0),
+                        (0.0, -1.5),
+                        (0.0, 1.5),
+                        (-1.0, -1.0),
+                        (1.0, -1.0),
+                        (-1.0, 1.0),
+                        (1.0, 1.0),
+                    ],
+                };
                 let mut top = margin + bar_height;
                 for (layout, line_width, line_height, [r, g, b, a], index, readings, band) in &lines
                 {
                     let left = (width as f32 - line_width) / 2.0;
-                    let alpha = if dim && index.is_some() {
-                        super::FADED as f32
-                    } else {
-                        1.0
-                    };
+                    let alpha = text_opacity
+                        * if dim && index.is_some() {
+                            super::FADED as f32
+                        } else {
+                            1.0
+                        };
                     let brush = target.CreateSolidColorBrush(
                         &D2D1_COLOR_F {
                             r: *r as f32 / 255.0,
@@ -2859,9 +3138,7 @@ mod win {
                         },
                         None,
                     )?;
-                    // A soft shadow: the text a little down and around, dark,
-                    // under the text itself.
-                    for (dx, dy) in [(1.0, 1.5), (0.0, 1.0), (1.0, 0.0), (-0.5, 1.0)] {
+                    for &(dx, dy) in offsets {
                         target.DrawTextLayout(
                             Vector2 {
                                 X: left + dx * scale,
@@ -2878,7 +3155,7 @@ mod win {
                     };
                     target.DrawTextLayout(at, layout, &brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
                     for (reading, x, y) in readings {
-                        for (dx, dy) in [(1.0, 1.5), (0.0, 1.0), (1.0, 0.0), (-0.5, 1.0)] {
+                        for &(dx, dy) in offsets {
                             target.DrawTextLayout(
                                 Vector2 {
                                     X: left + x + dx * scale,
@@ -3076,8 +3353,8 @@ mod tests {
             }],
         };
         assert_eq!(
-            as_json(&overlay),
-            r##"{"lines":[{"text":"你好 \"world\"","ruby":"","size":28,"bold":true,"color":"#ffff8000","lit":2}],"place":"taskbar","locked":true,"buttons":[{"id":"lock","symbol":"lock.open.fill","whileLocked":true}]}"##
+            as_json(&overlay, TextStyle::default()),
+            r##"{"lines":[{"text":"你好 \"world\"","ruby":"","size":28,"bold":true,"color":"#ffff8000","lit":2}],"place":"taskbar","locked":true,"buttons":[{"id":"lock","symbol":"lock.open.fill","whileLocked":true}],"effect":"shadow","opacity":1}"##
         );
     }
 
@@ -3141,7 +3418,8 @@ mod tests {
             lines: vec![ruby_line("漢😀", r#"[[0,1,"か\"ん\n"]]"#)],
             ..Overlay::default()
         };
-        let value: serde_json::Value = serde_json::from_str(&as_json(&shown)).unwrap();
+        let value: serde_json::Value =
+            serde_json::from_str(&as_json(&shown, TextStyle::default())).unwrap();
         assert_eq!(
             value["lines"][0]["ruby"].as_str(),
             Some(shown.lines[0].ruby.as_str())
@@ -3206,7 +3484,8 @@ mod tests {
         assert_eq!(overlay(0.5).lines[0].lit_now(), Some(1.0));
         assert_eq!(overlay(0.0).change_to(&overlay(0.5)), Change::Lit);
         assert!(
-            as_json(&overlay(0.5)).contains(r#""lit":0,"path":"0 0 1 2","clock":0.5,"since":0"#)
+            as_json(&overlay(0.5), TextStyle::default())
+                .contains(r#""lit":0,"path":"0 0 1 2","clock":0.5,"since":0"#)
         );
     }
 

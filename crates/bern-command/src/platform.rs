@@ -57,6 +57,52 @@ fn path_text(path: &Path) -> Result<&str, CommandError> {
         .ok_or_else(|| CommandError::new("invalid_path", "the path is not valid UTF-8"))
 }
 
+/// The interface language selected by the host, also available on engine threads.
+static UI_LANGUAGE: RwLock<String> = RwLock::new(String::new());
+
+/// Publish the host's current BCP 47 language tag after launch or a language change.
+pub fn set_ui_language(tag: &str) {
+    *UI_LANGUAGE.write().unwrap_or_else(|e| e.into_inner()) = tag.to_owned();
+}
+
+/// A headless engine or a host without localized UI returns an empty tag.
+pub fn ui_language() -> String {
+    #[cfg(target_os = "android")]
+    if let Ok(tag) = request("ui_language", "", "") {
+        return tag;
+    }
+    UI_LANGUAGE
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
+/// External handlers receive HTTPS links only, never files or custom schemes.
+fn https_url(url: &str) -> bool {
+    !url.chars()
+        .any(|c| c.is_whitespace() || c.is_control() || c == '\\')
+        && url
+            .strip_prefix("https://")
+            .and_then(|rest| rest.split(['/', '?', '#']).next())
+            .is_some_and(|authority| !authority.is_empty() && !authority.contains('@'))
+}
+
+/// Whether the host can hand an HTTPS URL to an external browser or handler.
+pub fn can_open_https(url: &str) -> bool {
+    https_url(url) && request("can_open_https", url, "").is_ok_and(|s| s.is_empty() || s == "yes")
+}
+
+/// Hand an HTTPS URL to the system's chosen application after a user action.
+pub fn open_https(url: &str) -> Result<(), CommandError> {
+    if !https_url(url) {
+        return Err(CommandError::new(
+            "invalid_url",
+            "expected an absolute HTTPS link",
+        ));
+    }
+    request("open_https", url, "").map(|_| ())
+}
+
 /// Copy text using the system clipboard on the UI thread.
 pub fn copy_text(text: &str) -> Result<(), CommandError> {
     request("copy_text", text, "").map(|_| ())

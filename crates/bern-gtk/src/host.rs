@@ -513,6 +513,24 @@ impl bern_ffi::platform::Services for Services {
         _second: &str,
     ) -> Result<String, bern_ffi::protocol::CommandError> {
         match operation {
+            "can_open_https" if first.starts_with("https://") => {
+                Ok(if gio::AppInfo::default_for_uri_scheme("https").is_some() {
+                    "yes"
+                } else {
+                    "no"
+                }
+                .into())
+            }
+            "open_https" if first.starts_with("https://") => {
+                gio::AppInfo::launch_default_for_uri(first, None::<&gio::AppLaunchContext>)
+                    .map(|()| String::new())
+                    .map_err(|error| {
+                        bern_ffi::protocol::CommandError::new(
+                            "platform_unavailable",
+                            error.to_string(),
+                        )
+                    })
+            }
             "copy_text" => {
                 let text = first.to_string();
                 glib::MainContext::default().invoke(move || {
