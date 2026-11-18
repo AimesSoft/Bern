@@ -1431,18 +1431,50 @@ inline xaml::Style TextStyle(char const* style) {
 
 }
 
-/// Bern icon names (SF Symbols naming) as Segoe Fluent Icons / Segoe MDL2
-/// Assets glyphs, the system icon fonts of Windows 11 and Windows 10. The
-/// table comes with the catalog.
+/// Both XAML frontends share the catalog's system glyphs and Fluent paths.
 namespace Icons {
 inline wchar_t const* Glyph(std::string_view name) { return bern::IconGlyph(name); }
 
-inline controls::FontIcon Icon(std::string_view name, double size = 16) {
+inline controls::FontIcon Font(std::string_view name, double size = 16) {
     controls::FontIcon icon;
     icon.Glyph(Glyph(name));
     icon.FontSize(size);
     return icon;
 }
+
+inline media::Geometry PathData(wchar_t const* path) {
+    // Catalog strings have static lifetime. Each XAML thread can share its
+    // parsed geometries between icons without sharing their visual elements.
+    static thread_local std::unordered_map<wchar_t const*, media::Geometry> cache;
+    if (auto found = cache.find(path); found != cache.end()) return found->second;
+    auto data = xaml::Markup::XamlBindingHelper::ConvertValue(
+        winrt::xaml_typename<media::Geometry>(), winrt::box_value(winrt::hstring{path})).as<media::Geometry>();
+    return cache.emplace(path, data).first->second;
+}
+
+inline controls::IconElement Icon(std::string_view name, double size = 16) {
+    if (auto path = bern::IconPath(name)) {
+        controls::PathIcon icon;
+        icon.Data(PathData(path));
+        icon.Width(size);
+        icon.Height(size);
+        return icon;
+    }
+    return Font(name, size);
+}
+
+#if BERN_WINUI
+inline controls::IconSource Source(std::string_view name) {
+    if (auto path = bern::IconPath(name)) {
+        controls::PathIconSource icon;
+        icon.Data(PathData(path));
+        return icon;
+    }
+    controls::FontIconSource icon;
+    icon.Glyph(Glyph(name));
+    return icon;
+}
+#endif
 }
 
 // ---------------------------------------------------------------------------

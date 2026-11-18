@@ -1,11 +1,7 @@
-//! Bern icon names (SF Symbols naming) as glyphs of the system icon fonts:
-//! Segoe Fluent Icons on Windows 11 and Segoe MDL2 Assets on Windows 10,
-//! which share these code points except for `WINDOWS_10_GLYPHS`. The tables
-//! are the one source: the catalog carries them to the runtime, and the
-//! check rejects names they lack.
-//! The fonts have no quote bubble, so `quote.bubble`, the lyrics button of
-//! Apple's music apps, is the captions box with a speaker: words that go
-//! with the sound. (A microphone, which it was, reads as recording.)
+//! Windows icon names: system font glyphs (Segoe Fluent Icons on Windows
+//! 11, Segoe MDL2 Assets on Windows 10) and Fluent System Icon paths for
+//! symbols the fonts do not supply in matching regular and filled weights.
+//! Validation and both XAML frontends use these same tables.
 
 /// `(name, code point)`, sorted by name.
 pub const GLYPHS: &[(&str, u32)] = &[
@@ -25,8 +21,6 @@ pub const GLYPHS: &[(&str, u32)] = &[
     ("bubble.left.and.bubble.right", 0xE8F2),
     ("calendar", 0xE787),
     ("camera", 0xE722),
-    ("captions.bubble", 0xED1E),
-    ("captions.bubble.fill", 0xED1E),
     ("character.cursor.ibeam", 0xE765),
     ("chart.bar", 0xEAFC),
     ("checkmark", 0xE73E),
@@ -91,8 +85,6 @@ pub const GLYPHS: &[(&str, u32)] = &[
     ("puzzlepiece.extension", 0xEA86),
     ("qrcode", 0xED14),
     ("qrcode.viewfinder", 0xEE6F),
-    ("quote.bubble", 0xED1F),
-    ("quote.bubble.fill", 0xED1F),
     ("rectangle.portrait.and.arrow.right", 0xF3B1),
     ("repeat", 0xE8EE),
     ("repeat.1", 0xE8ED),
@@ -120,8 +112,6 @@ pub const GLYPHS: &[(&str, u32)] = &[
     ("sun.max.fill", 0xE706),
     ("sun.min", 0xE706),
     ("switch.2", 0xE73A),
-    ("text.bubble", 0xE8BD),
-    ("text.bubble.fill", 0xE7E7),
     ("text.rectangle", 0xED1E),
     ("textformat", 0xE8D2),
     ("textformat.size", 0xE8E9),
@@ -148,6 +138,44 @@ pub const WINDOWS_10_GLYPHS: &[(&str, u32)] = &[
     ("pip.enter", 0xE944),
     ("sparkles", 0xE734),
 ];
+
+// Both weights must come from the same 20-unit Fluent design.
+macro_rules! fluent_pair {
+    ($name:literal, $family:literal) => {
+        [
+            (
+                $name,
+                include_str!(concat!(
+                    "../icons/fluent/ic_fluent_",
+                    $family,
+                    "_20_regular.path"
+                )),
+            ),
+            (
+                concat!($name, ".fill"),
+                include_str!(concat!(
+                    "../icons/fluent/ic_fluent_",
+                    $family,
+                    "_20_filled.path"
+                )),
+            ),
+        ]
+    };
+}
+
+pub const FLUENT_PAIRS: &[[(&str, &str); 2]] = &[
+    fluent_pair!("captions.bubble", "subtitles"),
+    fluent_pair!("quote.bubble", "comment_quote"),
+    fluent_pair!("text.bubble", "comment_text"),
+];
+
+pub fn supported(name: &str) -> bool {
+    glyph(name).is_some()
+        || FLUENT_PAIRS
+            .iter()
+            .flatten()
+            .any(|&(known, _)| known == name)
+}
 
 /// The glyph of `name`, if the fonts have one.
 pub fn glyph(name: &str) -> Option<u32> {
@@ -188,9 +216,26 @@ mod tests {
     }
 
     #[test]
-    fn every_name_of_the_bern_icon_set_has_a_glyph() {
+    fn fluent_bubbles_have_two_distinct_weights_instead_of_font_substitutes() {
+        for name in ["quote.bubble", "text.bubble", "captions.bubble"] {
+            let &[(regular, outline), (filled, solid)] =
+                FLUENT_PAIRS.iter().find(|pair| pair[0].0 == name).unwrap();
+            assert_eq!(filled, format!("{regular}.fill"));
+            for (symbol, path) in [(regular, outline), (filled, solid)] {
+                assert!(supported(symbol) && glyph(symbol).is_none(), "{symbol}");
+                assert!(
+                    path.starts_with('M') && path.trim_end().ends_with('Z'),
+                    "{symbol}"
+                );
+            }
+            assert_ne!(outline, solid, "{name}");
+        }
+    }
+
+    #[test]
+    fn every_name_of_the_bern_icon_set_has_artwork() {
         for name in bern_target_api::icon_set::NAMES {
-            assert!(glyph(name).is_some(), "the Windows icon fonts lack {name}");
+            assert!(supported(name), "the Windows icon set lacks {name}");
         }
     }
 }

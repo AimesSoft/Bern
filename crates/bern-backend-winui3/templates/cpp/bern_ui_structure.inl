@@ -1578,7 +1578,7 @@ inline xaml::FrameworkElement ControlBar(Ctx const& ctx, std::string const& id, 
         setMuted(!(state && state->muted));
     };
 
-    auto playIcon = Icons::Icon("play.fill");
+    auto playIcon = Icons::Font("play.fill");
     controls::Button play;
     play.Content(playIcon);
     Styles::MakeSubtle(play);
@@ -1595,7 +1595,7 @@ inline xaml::FrameworkElement ControlBar(Ctx const& ctx, std::string const& id, 
     }
     Scrubber position(seek, [positionText](double ms) { positionText.Text(Wide(Media::Time(static_cast<int64_t>(ms)))); });
     position.slider.VerticalAlignment(xaml::VerticalAlignment::Center);
-    auto muteIcon = Icons::Icon("speaker.wave.3.fill");
+    auto muteIcon = Icons::Font("speaker.wave.3.fill");
     controls::Button mute;
     mute.Content(muteIcon);
     Styles::MakeSubtle(mute);
@@ -2060,7 +2060,7 @@ inline void Table(Parent const& p, Ctx const& ctx, TableProps props, std::vector
         Secondary(title);
         label.Children().Append(title);
         if (column.sorted) {
-            auto arrow = Icons::Icon("chevron.up", 10);
+            auto arrow = Icons::Font("chevron.up", 10);
             arrow.VerticalAlignment(xaml::VerticalAlignment::Center);
             Reactive::Run([arrow, ctx, sorted = column.sorted, descending = column.descending] {
                 bool on = R::Truthy(sorted(ctx));

@@ -1460,11 +1460,7 @@ inline void Toast(Parent const& p, Ctx const& ctx, ToastProps props) {
             notice.Severity(controls::InfoBarSeverity::Informational);
             notice.IsClosable(false);
             notice.Message(text);
-            if (!icon.empty()) {
-                controls::FontIconSource glyph;
-                glyph.Glyph(Icons::Glyph(icon));
-                notice.IconSource(glyph);
-            }
+            if (!icon.empty()) notice.IconSource(Icons::Source(icon));
             notice.IsOpen(true);
 #else
             // The system XAML has no InfoBar: a bar of its shape.
