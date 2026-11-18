@@ -142,10 +142,13 @@ pub fn show_panel(id: &str, panel: Option<&Panel>) {
             }
         }
     }
-    if let Some(host) = host() {
-        host.panel(id, panel);
-        return;
+    match host() {
+        Some(host) => host.panel(id, panel),
+        None => panel_here(id, panel),
     }
+}
+
+fn panel_here(id: &str, panel: Option<&Panel>) {
     #[cfg(target_os = "macos")]
     super::mac::panel(id.to_owned(), panel.cloned());
     #[cfg(target_os = "windows")]
@@ -155,6 +158,8 @@ pub fn show_panel(id: &str, panel: Option<&Panel>) {
         let data = panel.map(panel_json).unwrap_or_default();
         let _ = crate::platform::request("overlay_panel", id, &data);
     }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "android")))]
+    let _ = (id, panel);
 }
 
 /// Report a native control value change, coalescing consecutive drag samples
