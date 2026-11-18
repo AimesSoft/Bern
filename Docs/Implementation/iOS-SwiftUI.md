@@ -72,6 +72,8 @@ On iPad the same app bundle handles windows as Apple's documentation describes:
 
 ## Local control channel
 
+For the simulator, run the app CLI on the Mac. With IPC enabled, `target/bern/ios/skills/<program>/SKILL.md` documents the CLI in the adjacent `bin/` directory; neither is inside the simulator app bundle.
+
 The app in the simulator is a process on the Mac and can share the file system with the Mac, so the CLI and the JSON client (built for the Mac) can connect to it over the IPC channel. The app's own temporary directory is in a deep container path, and the socket path exceeds the length limit of Unix sockets; `bern run` therefore hands the Mac's temporary directory to the app through `BERN_IPC_DIR` (via `simctl`'s `SIMCTL_CHILD_` variables), and the channel creates its socket there. On iOS the channel listens only when this variable is set: when the app is launched by tapping it on the Home Screen or is installed on a device, no other process can connect to it, so the channel does not start.
 
 `BERN_IPC_DIR` works on other platforms too: it replaces the temporary directory as the parent of each app's socket directory.

@@ -116,7 +116,7 @@ HDR 图片（PQ 或 HLG 的 PNG、带增益图的 JPEG）不经过 XAML 的 `Ima
 - **响应式**：单元、效果与作用域和其他目标相同；效果在运行中创建的子作用域在下一次运行前结束；批量更新后每个受影响的效果只运行一次。
 - **宿主**：UI 线程上有一个只接收消息的窗口，负责投递任务（`WM_APP`）和定时器（`WM_TIMER`），在两种前端下都可用。它还兼作单实例标识：互斥量 `Local\Bern.<bundle_id>`。再次启动时，新进程找到这个窗口、交出前台权限并请求显示主窗口，然后自己退出。
 - **应用生命周期**：最后一个窗口关闭后应用退出，引擎随之停止（WinUI 调用 `Application.Exit`，Islands 结束消息循环）；声明了 `StatusItem` 时应用留在通知区域，从它的菜单退出（见“状态栏项”）。Ctrl+W 关闭当前窗口；设置窗口按 Esc 关闭，不可最小化与最大化。
-- **外部入口**：与其他目标相同的本地控制通道（`channels = ["ipc"]`）；CLI从同一命令目录生成，CRT 同样静态链接。
+- **外部入口**：与其他目标相同的本地控制通道（`channels = ["ipc"]`）；CLI 从同一命令目录生成，CRT 同样静态链接。
 
 ## 窗口
 
@@ -316,7 +316,7 @@ target\bern\windows\Showcase\showcase.exe
   | 展示应用：再次构建 | 约 60 秒 | 约 9 秒 |
   | 首次 release 构建 / 再次 | 约 90 秒 | 约 95 秒 / 5 秒 |
 
-产物位于 `target/bern/windows/`：`Showcase/`（`showcase.exe`、`Microsoft.WindowsAppRuntime.Bootstrap.dll` 与 `resources/`）、`bin/showcase.exe`，以及构建清单 `build.json`（记录前端、组件包版本与最低 Windows 版本）。
+产物位于 `target/bern/windows/`：`Showcase/`（`showcase.exe`、`Microsoft.WindowsAppRuntime.Bootstrap.dll` 与 `resources/`）、`bin/showcase.exe`、启用 IPC 时生成的 `skills/showcase/SKILL.md`，以及构建清单 `build.json`（记录前端、组件包版本与最低 Windows 版本）。
 
 应用图标 `app.ico`（没有声明 `[app].icon` 时为 Bern 标志的圆形版，16 到 256 像素各一张 PNG）编入可执行文件的图标资源 1：资源管理器显示它。运行时按窗口所在显示器的 DPI 把它设为每个窗口的大小图标（任务栏、Alt+Tab、Islands 的系统标题栏），WinUI 3 的 `TitleBar` 另以 `ImageIconSource` 显示其中最接近标题栏尺寸的一张。`[app.icon].windows` 可以给出 `.ico` 文件，原样编入；其中的位图项（不是 PNG 的）由标题栏包成单张的 `.ico` 再解码。
 
@@ -335,7 +335,7 @@ target\bern\windows\Showcase\showcase.exe
 
 `bern package --target windows` 按 release 构建，生成 `<产品>-<版本>-windows-<架构>-setup.exe` 与同名 `.zip`：
 
-- 应用目录与 `bin\` 中的 CLI先复制到暂存目录；有 `BERN_WINDOWS_CERTIFICATE` 时用 `signtool` 签名这些程序，再签安装程序（证书库指纹或 `.pfx`，RFC 3161 时间戳）。证书与密码只从环境变量读取，不写进生成的脚本。
+- 先把应用目录和 `bin\` 中的 CLI 复制到暂存目录；若启用 IPC，也复制 `skills\` 下的 `SKILL.md`。有 `BERN_WINDOWS_CERTIFICATE` 时用 `signtool` 签名这些程序，再签安装程序（证书库指纹或 `.pfx`，RFC 3161 时间戳）。证书与密码只从环境变量读取，不写进生成的脚本。
 - 安装程序由 Bern 生成（`templates/installer/`），用同一套 MSVC 编译。`pack.cpp` 在签名之后运行，用 Windows 压缩 API（LZMS，64 MB 块）把暂存的文件压缩成 `setup.cpp` 的一个资源；安装时用同一个 API 解压，所以安装程序不带解压代码。它按当前用户安装到 `%LOCALAPPDATA%\Programs\<产品>`，不需要管理员权限；创建开始菜单快捷方式，在“应用和功能”中登记卸载项。`/S` 静默安装。清单声明 `asInvoker`，否则 Windows 会把名字带 setup 的程序当成需要提权的安装程序。
 - 安装程序只有一个窗口，用 Direct2D 绘制：应用图标、名称、版本和一个真实的按钮，键盘和屏幕阅读器因此能用。窗口没有标题栏，除控件外按住任何地方都能移动。工作时按钮换成细进度条，此时不能关闭窗口。按钮按“应用和功能”里的版本显示“安装”“更新”（上方一行显示新旧版本）或“重新安装”，完成后显示“打开”；失败时原因显示在那一行，按钮变成“重试”。窗口跟随系统的浅色或深色模式，文字跟随系统界面语言（英文、简体中文、繁体中文、日文）。新文件解压完成前，已安装的版本保持不动。
 - 安装目录中的 `uninstall.exe` 是安装程序的副本，先把自己复制到临时目录再执行，以便删除整个目录；`/S` 静默卸载。卸载时也删去状态栏项“登录时启动”登记的 `Run` 值与任务管理器在 `StartupApproved` 下的记录。应用或其工具在运行时（按进程映像路径判断），安装与卸载都拒绝进行，不删任何文件；`uninstall.exe` 最后删除，中途失败也能再次卸载。

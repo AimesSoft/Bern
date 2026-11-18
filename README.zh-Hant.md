@@ -7,7 +7,8 @@
 <p><b>一份 Rust 宣告，編譯成每個平台自己的原生介面。</b></p>
 
 <p>從桌面到手機，為 AI 而建：SwiftUI、WinUI 3、GTK 4、Jetpack Compose 與 Web。<br>
-桌面和手機上沒有 JS 引擎，沒有內嵌瀏覽器；Agent 可以透過應用程式 CLI 依名稱操作按鈕。</p>
+桌面與手機預設不隨附 JS 引擎或瀏覽器。<br>
+<b>Skills + CLI：</b>啟用 IPC 後，Agent 可在 <code>SKILL.md</code> 查詢指令，再用應用程式的 CLI 依名稱操作控制項。</p>
 
 <p>
 <img alt="macOS · SwiftUI" src="https://img.shields.io/badge/macOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
@@ -19,7 +20,7 @@
 </p>
 
 <p>
-<img alt="CLI + Skill" src="https://img.shields.io/badge/AI-CLI%20%2B%20Skill-8B5CF6?style=flat-square">
+<img alt="Skills + CLI" src="https://img.shields.io/badge/AI-Skills%20%2B%20CLI-8B5CF6?style=flat-square">
 <img alt="記憶體約 40 MB" src="https://img.shields.io/badge/%E8%A8%98%E6%86%B6%E9%AB%94-%E7%B4%84%2040%20MB-0EA5E9?style=flat-square">
 <img alt="無 JS 引擎" src="https://img.shields.io/badge/JS%20%E5%BC%95%E6%93%8E-%E7%84%A1-111827?style=flat-square">
 <img alt="Rust 1.99" src="https://img.shields.io/badge/Rust-1.99-B7410E?style=flat-square&logo=rust&logoColor=white">
@@ -67,7 +68,7 @@
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/why-zh-Hant-dark.svg">
-<img alt="為什麼選擇 Bern：編譯成原生介面，一份 Rust 宣告產生各平台自己的 UI 程式碼，執行時沒有 JS 引擎；為 AI 而建，漏寫是編譯錯誤，命令列可以依名稱操作按鈕；輕到不像跨平台，macOS 記憶體 39 MB、0.4 秒出現視窗、應用程式套件 2.7 MB，Windows 35 MB、0.3 秒、4.2 MB，Web 189 KB" src="Docs/Assets/tables/why-zh-Hant-light.svg" width="100%">
+<img alt="為什麼選擇 Bern：編譯成原生介面，一份 Rust 宣告產生各平台自己的 UI 程式碼，執行時沒有 JS 引擎；為 AI 而建，漏寫是編譯錯誤，Agent 在 SKILL.md 查詢指令，再用應用程式的 CLI 依名稱操作按鈕；輕到不像跨平台，macOS 記憶體 39 MB、0.4 秒出現視窗、應用程式套件 2.7 MB，Windows 35 MB、0.3 秒、4.2 MB，Web 189 KB" src="Docs/Assets/tables/why-zh-Hant-light.svg" width="100%">
 </picture>
 
 ## 誰使用了 Bern
@@ -124,7 +125,7 @@ compact: missing
 
 ### AI 使用應用程式：讀語意，不讀像素
 
-在大多數框架裡，讓 AI 操作一個桌面應用程式意味著截圖、辨識、算座標、模擬點擊。啟用控制通道後，Bern 會產生應用程式 CLI 和說明其命令的 `SKILL.md`：介面上每個控制項都有穩定的名稱與角色，Agent 讀到的是結構，做的事情與使用者點擊走同一段程式碼，結果由應用程式如實回覆。
+啟用控制通道後，Bern 會從應用程式的命令目錄產生 `SKILL.md`。以下面的開關為例：Agent 在 `skills/showcase/SKILL.md` 查到 `ui set-bool` 的用法，再執行 `showcase ui inspect`，找出目前視窗中開關的名稱。把這個名稱傳給應用程式的 CLI，就能像使用者點按一樣切換開關，不需要截圖或座標。
 
 ```sh
 $ showcase ui inspect                 # Agent 讀到的是語意，不是像素
@@ -140,7 +141,7 @@ $ showcase window confirm-close --window settings#1 --confirmation settings#1:c1
 { "outcome": "Rejected", "reason": "save_failed: invalid_name: a display name has 1 to 40 characters …" }
 ```
 
-產生的 Skill 列出的就是使用者可直接執行的命令，從 `showcase ui inspect` 到業務命令 `showcase showcase set-display-name --name Demo`。若要操作遠端應用程式，請透過 SSH 登入控制通道所在的主機，以執行應用程式的使用者身分執行同一個 CLI。按鈕被停用、被對話框擋住、目標不存在時，Agent 收到的是明確的錯誤碼，而不是一次沒有效果的點擊。
+你也可以執行相同的指令，包括 `showcase showcase set-display-name --name Demo` 這類應用程式自訂的命令。請使用與應用程式一同建置的 CLI；從遠端操作時，透過 SSH 登入控制通道所在的主機，以擁有該端點的帳號執行。控制項遭停用、被對話框擋住或不存在時，CLI 會傳回明確的錯誤碼。
 
 ## 實測數據
 
@@ -374,12 +375,12 @@ iOS 兩個前端都保留時，寫 `packages = "separate"` 可以打成兩個 `.
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/capabilities-zh-Hant-dark.svg">
-<img alt="平台與能力：各框架對 macOS、Windows、Linux、行動端、Web 的支援，以及原生外觀、CLI + Skill 與編譯期檢查；Bern 的行動端為部分支援，三項能力都具備" src="Docs/Assets/tables/capabilities-zh-Hant-light.svg" width="100%">
+<img alt="平台與能力：各框架對 macOS、Windows、Linux、行動端、Web 的支援，以及原生外觀、Skills + CLI 與編譯期檢查；Bern 的行動端為部分支援，三項能力都具備" src="Docs/Assets/tables/capabilities-zh-Hant-light.svg" width="100%">
 </picture>
 
 - **行動端**：iOS 與 Android。React Native 的桌面版本由微軟維護，uni-app 另涵蓋小程式與鴻蒙；Bern 的 Android 目標已能在實機執行並打包，iOS 目標目前建置模擬器應用程式，實機打包在規劃中。
 - **原生外觀**：控制項就是平台自己的控制項，外觀、無障礙與輸入法由系統提供。Qt Widgets 與 uni-app x 接近原生，記為部分。
-- **應用程式 CLI + Skill**：框架為執行中的介面產生命令列，並產生說明這些命令的 Skill。其他框架可以藉助無障礙介面，或 Playwright、Flutter Driver 等測試工具從外部自動化。
+- **Skills + CLI**：Bern 從同一份命令目錄產生應用程式的 CLI 和 `SKILL.md`，使用者與 Agent 使用相同的指令。其他框架可以透過無障礙介面，或 Playwright、Flutter Driver 等測試工具從外部自動化。
 - **編譯期檢查**：翻譯缺漏、功能在某個版面沒有入口、入口沒有登記功能，都由編譯器直接報錯（見[為 AI 而建](#為-ai-而建)）。其他框架多藉助 lint、翻譯工具或測試發現這類問題。
 - **成熟度**：Electron 與 Qt 非常成熟；Flutter、React Native、uni-app、Tauri 與 Avalonia 成熟；Dioxus 發展中；GPUI 支撐著 Zed 編輯器，通用元件仍在早期；Bern 是早期預覽。
 
@@ -485,7 +486,7 @@ showcase window list                                         # 視窗的實際�
 ssh HOST /path/to/showcase state
 ```
 
-只有目標宣告了 `channels = ["ipc"]` 時才會啟動控制通道；未宣告則應用程式不監聽任何連接埠。Android 應用程式在手機上監聽，`bern run` 以 `adb forward` 把它接到這台電腦，命令列可照常使用。
+目標的 `channels = ["ipc"]` 會啟用外部控制。Android 的 CLI 在開發電腦上執行，連線至 `bern run` 透過 `adb forward` 轉送的端點，而非在手機上執行。獨立 Web `app` 啟用 IPC 後，`bern run` 會啟動本機橋接程式，連線至已開啟的瀏覽器分頁；發佈的靜態網站套件不含本機 CLI 或 `SKILL.md`。
 
 ## 路線圖
 

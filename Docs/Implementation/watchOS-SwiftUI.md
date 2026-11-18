@@ -45,6 +45,8 @@ This document records what is implemented and verified for the `swiftui + watcho
 
 ## Build and run
 
+For the simulator, run the app CLI on the Mac. With IPC enabled, `target/bern/watchos/skills/<program>/SKILL.md` documents the CLI in the adjacent `bin/` directory; neither is inside the simulator app bundle.
+
 ```bash
 rustup target add aarch64-apple-watchos aarch64-apple-watchos-sim
 ```

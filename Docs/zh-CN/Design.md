@@ -47,7 +47,7 @@ Bern 名称来自《海猫鸣泣之时》中的 Frederica Bernkastel。Bern 作�
 - 新 UI 目标通过独立生成器、运行时适配与构建集成接入，核心层不依赖具体 UI 框架。
 - 默认提供完整的深浅色适配：原生目标使用平台自身的颜色体系，缺少该体系的目标由 Bern 统一推导颜色、控件状态和对比关系，使应用使用者不承担主题适配工作。
 - 通过编译期诊断检查组件属性、本地化完整性、功能入口覆盖和平台能力要求。
-- 强制 UI 的所有语义操作命令化，使 UI、CLI 和 JSON 控制通道 可以驱动同一引擎实例。
+- 强制 UI 的所有语义操作命令化，使 UI、CLI 和 JSON 控制通道可以驱动同一引擎实例。
 - 从同一份类型化描述派生各入口，提供导航、焦点、异步资源和可复现场景的通用规则。
 - 以统一声明支持多个独立窗口，在原生多窗口不可用时自动适配虚拟窗口，保留各窗口的交互状态。
 - 保持必要且明确的运行时，负责动态状态、事件和平台桥接。
@@ -1509,11 +1509,11 @@ JSON 是编码，不是传输。JSON 控制消息可以经本地通道或网络�
 - 驱动界面的会话命令、窗口种类 id、界面语言与控件身份的写法；
 - 参数和结果用到的记录与枚举的 JSON 形式。
 
-文件以 skill 的 front matter 开头：`name` 为程序名，`description` 写应用各语言的名称、用途和命令列表，不超过 1024 个字符。正文说明程序相对 skill 文件的位置与安装后的位置、调用写法、退出状态，以及如何通过 SSH 在控制通道所在的机器上运行同一份 CLI；同组命令共有的错误码只在组首说明一次。需要额外步骤才能连上的目标另有说明：iOS 与 tvOS 模拟器中的应用要以 `BERN_IPC_DIR` 启动，Android 要用 `adb forward` 转发控制通道，WebUI 要先启动引擎宿主。若把 Skill 复制到其他目录，改用已安装的 CLI 路径，不再使用相对构建目录的路径。
+文件以 skill 的 front matter 开头：`name` 为程序名，`description` 写应用各语言的名称、用途和命令列表，不超过 1024 个字符。正文说明程序相对 skill 文件的位置与安装后的位置、调用写法、退出状态，以及如何通过 SSH 在控制通道所在的机器上运行同一份 CLI；同组命令共有的错误码只在组首说明一次。不同目标有各自的连接说明：iOS、tvOS 和 watchOS 模拟器中的应用要以 `BERN_IPC_DIR` 启动，Android 用 `adb forward` 转发控制通道，WebUI 要先启动引擎宿主。如果把 Skill 复制到其他目录，请告诉 Agent 原构建或安装目录中的 CLI 路径；文件里的相对路径只适用于原目录结构。
 
-**从旧版升级：** 旧构建单独分发 `<程序>-mcp`。请从 MCP 客户端中删除它的注册项，改用同一次新构建生成的 CLI 和 Skill。无需注册新的服务；原有 JSON 控制通道仍可使用。
+**升级已有应用：** 重新构建应用，使用这次构建生成的 CLI 和 `SKILL.md`。重建会清除分发目录中旧的 `<程序>-mcp` 可执行文件。如果曾在 MCP 客户端注册它，请自行删除对应的配置项，不需要注册替代服务。直接发送 JSON 的客户端仍使用原有控制通道。
 
-不监听控制通道的目标不写 skill，并删除之前构建留下的；Web `app` 构建没有 CLI，也没有 skill。安装包同样附带：macOS 放在应用的 `Contents/Resources/skills`，随应用一起签名；Windows 的安装程序与 `.zip`、Linux 的 `.deb`（`/opt/<bundle_id>/skills`）与 `.tar.gz`、WebUI 的压缩包都放在 `bin/` 旁。Android 的 APK 与 AAB 不含 CLI，也不含 skill。
+未启用 IPC 的目标不生成 Skill，也会清除之前构建留下的 Skill。独立 Web `app` 启用 IPC 后，本地开发构建会为浏览器桥生成 CLI 和 Skill；发布的静态站点包不含两者。对于分发 Skill 的目标，macOS 将它放在应用的 `Contents/Resources/skills`，随应用一起签名；Windows 的安装程序与 `.zip`、Linux 的 `.deb`（`/opt/<bundle_id>/skills`）与 `.tar.gz`、WebUI 的压缩包都放在 `bin/` 旁。Android 的 APK 与 AAB 不含 CLI，也不含 skill。
 
 同一个跳转操作的入口映射示意如下：
 
@@ -2268,18 +2268,18 @@ tvOS 暂不支持备用图标：绑定了 `icon` 的应用在电视上保持主�
 
 `bern doctor` 检查 Rust 版本（1.99 起）、macOS SDK 26 与 Swift 编译器、带 C++ 工具的 Visual Studio 与含 `cppwinrt.exe` 的 Windows SDK 以及 MSVC 版 Rust、GTK 4.14 与 libadwaita 1.5 的开发包、`wasm32-unknown-unknown` 目标。在项目内运行时还列出 Bern 的来源与每个目标在本机能否构建；本机能构建的已声明目标缺少工具时以失败退出。
 
-生成的 crate 是独立的工作区，应用工作区 `Cargo.toml` 里的 `[profile]` 原样带进去（`bern_target_api::glue::profiles`），例如 `[profile.dev.package."*"] opt-level = 3` 让 debug 构建里读标签、解图片、解音频的库也是优化过的：Windows PC 上一个应用导入 1345 个音乐文件从约 100 秒降到 5.5 秒。release 构建的生成 crate 统一以 `lto = true`、`codegen-units = 1`、`strip = true` 编译（`bern_target_api::glue::RELEASE_PROFILE`，应用自己的 release 设置覆盖它；引擎捕获 panic 的地方保持 `panic = "unwind"`，这一项应用不能改）：macOS arm64 上 planner 的应用 CLI从 1.50 MB 降到 0.91 MB，WebUI 引擎宿主从 2.50 MB 降到 1.35 MB，页面模块从 685 KB 降到 518 KB，宿主的 release 构建约慢一倍。
+生成的 crate 是独立的工作区，应用工作区 `Cargo.toml` 里的 `[profile]` 原样带进去（`bern_target_api::glue::profiles`），例如 `[profile.dev.package."*"] opt-level = 3` 让 debug 构建里读标签、解图片、解音频的库也是优化过的：Windows PC 上一个应用导入 1345 个音乐文件从约 100 秒降到 5.5 秒。release 构建的生成 crate 统一以 `lto = true`、`codegen-units = 1`、`strip = true` 编译（`bern_target_api::glue::RELEASE_PROFILE`，应用自己的 release 设置覆盖它；引擎捕获 panic 的地方保持 `panic = "unwind"`，这一项应用不能改）：macOS arm64 上 planner 的应用 CLI 从 1.50 MB 降到 0.91 MB，WebUI 引擎宿主从 2.50 MB 降到 1.35 MB，页面模块从 685 KB 降到 518 KB，宿主的 release 构建约慢一倍。
 
 `bern package` 按 release 构建本机能构建的目标，再由目标模块生成安装包，统一写入 `target/bern/dist/`：
 
 | 目标 | 包 | 说明 |
 | --- | --- | --- |
-| macOS | `<产品>-<版本>-macos-<架构>.dmg` | 应用与指向“应用程序”的链接；应用 CLI放在 `Contents/Helpers`，Agent skill 放在 `Contents/Resources/skills` |
+| macOS | `<产品>-<版本>-macos-<架构>.dmg` | 应用与指向“应用程序”的链接；应用 CLI 位于 `Contents/Helpers`，启用 IPC 时 Skill 位于 `Contents/Resources/skills` |
 | iOS | `<产品>-<版本>-ios.ipa` | 模拟器构建出的包，引擎、SwiftUI 前端与图标按真机（`aarch64-apple-ios`、`iphoneos`）重新编译，Info.plist 标为 `iPhoneOS`，临时签名；iOS 只装开发者签过的应用，用 AltStore、Sideloadly 这类以 Apple ID 重新签名的工具安装（开发者证书与描述文件的签名尚未实现） |
-| Windows | `…-windows-<架构>-setup.exe` 与 `.zip` | 安装程序由 Bern 生成并用同一套 MSVC 编译：按当前用户安装到 `%LOCALAPPDATA%\Programs`，不需要管理员权限，创建开始菜单快捷方式与“应用和功能”中的卸载项，`/S` 静默安装与卸载；应用运行时拒绝覆盖或卸载。`.zip` 为免安装版本。两者都带 `bin\` 中的 CLI和 `skills\` 中的 Agent skill |
-| Linux | `<产品>-<版本>-linux-<架构>.deb` 与 `.tar.gz` | `.deb` 安装到 `/opt/<bundle_id>`，附带菜单项、图标主题中的图标与 `/usr/bin` 启动器，依赖声明 GTK 4.14 与 libadwaita 1.5，使用媒体时另加 GStreamer；系统没有 `dpkg-deb` 时只生成 `.tar.gz`。两者都带 `bin/` 中的 CLI和 `skills/` 中的 Agent skill |
+| Windows | `…-windows-<架构>-setup.exe` 与 `.zip` | 安装程序由 Bern 生成并用同一套 MSVC 编译：按当前用户安装到 `%LOCALAPPDATA%\Programs`，不需要管理员权限，创建开始菜单快捷方式与“应用和功能”中的卸载项，`/S` 静默安装与卸载；应用运行时拒绝覆盖或卸载。`.zip` 为免安装版本。两者都带 `bin\` 中的 CLI；启用 IPC 时，Skill 位于 `skills\` |
+| Linux | `<产品>-<版本>-linux-<架构>.deb` 与 `.tar.gz` | `.deb` 安装到 `/opt/<bundle_id>`，附带菜单项、图标主题中的图标与 `/usr/bin` 启动器，依赖声明 GTK 4.14 与 libadwaita 1.5，使用媒体时另加 GStreamer；系统没有 `dpkg-deb` 时只生成 `.tar.gz`。两者都带 `bin/` 中的 CLI；启用 IPC 时，Skill 位于 `skills/` |
 | Android | `<应用>-<版本>-android.apk` 与 `.aab` | APK 直接安装，App Bundle 用于上架；Gradle 从 `BERN_ANDROID_KEYSTORE`、`BERN_ANDROID_KEYSTORE_PASSWORD`、`BERN_ANDROID_KEY_ALIAS`（可选 `BERN_ANDROID_KEY_PASSWORD`）读取发布密钥，没有设置时用调试密钥签名并提示不能上架 |
-| Web | `<程序>-<版本>-web.zip`，WebUI 为 `…-webui-<系统>-<架构>` | 只含服务器需要的文件；WebUI 另含引擎宿主及其 CLI与 Agent skill |
+| Web | `<程序>-<版本>-web.zip`，WebUI 为 `…-webui-<系统>-<架构>` | 静态包只含站点文件。WebUI 另带引擎宿主和 CLI；启用 IPC 时还带有 Skill |
 
 签名所需的证书只留在构建的机器或 CI 服务中，经环境变量提供，不写入 `Bern.toml`：`BERN_MACOS_SIGNING_IDENTITY` 以强化运行时与安全时间戳签名应用、工具与磁盘映像，`BERN_MACOS_NOTARY_PROFILE` 再提交公证并装订；`BERN_WINDOWS_CERTIFICATE`（证书库中的指纹或 `.pfx`，密码取自 `BERN_WINDOWS_CERTIFICATE_PASSWORD`）以 `signtool` 签名应用、工具与安装程序并加 RFC 3161 时间戳。没有配置时仍生成包，并说明未签名的后果。`[app].publisher` 是可选的发布者名称，显示在安装程序、卸载项与 Debian 包中。`[app].files_folder = true` 让 iOS 上应用的 Documents 文件夹出现在「文件」App 中（`UIFileSharingEnabled` 与 `LSSupportsOpeningDocumentsInPlace`），用户放进去的文件由引擎自己读取，例如音乐应用的本地曲库；其他平台没有对应的东西。`[app].background_audio = true` 让应用在后台与锁屏时继续播放自己的声音（iOS 的 `audio` 后台模式；Android 的前台服务权限与 `BernPlaybackService`），`[app].overlays = true` 让 Android 应用可以请求显示悬浮文字（`SYSTEM_ALERT_WINDOW`），见“系统的正在播放”与“悬浮文字”。`[app].photos = true` 让引擎用 `bern::platform::save_image(path)` 把图片存到系统保存用户照片的地方，供其他应用选用，例如同一部手机上的另一个应用从相册扫的登录二维码：iOS 的 Info.plist 以 `NSPhotoLibraryAddUsageDescription` 按每种支持的语言说明原因，系统第一次只请用户允许向相册添加；Android 10 及以上放进“图片”中以应用命名的文件夹，不需要询问。调用会等系统的回答，引擎应在工作线程上调用；`refused` 表示用户没有允许，其他平台回答 `platform_unavailable`。
 
@@ -2349,6 +2349,7 @@ Web 后端生成 HTML 和 CSS，以及必要的 DOM 创建、事件监听和属�
 | 浏览器内包含 | UI、前端运行时、协议客户端和 Rust WASM 业务引擎 | UI、前端运行时与独立引擎的协议客户端 |
 | 权威业务状态 | 当前浏览器引擎实例 | 连接的独立 Bern 引擎实例 |
 | 引擎命令执行 | 通过类型化本地适配调用浏览器内引擎 | 通过 JSON 控制通道请求独立引擎执行 |
+| 开启 IPC 后的外部 CLI | 本地开发桥把命令转发给选定的浏览器标签页，不启动第二个引擎 | CLI 连接引擎宿主；会话命令发给指定的 UI 会话 |
 | 前端 WASM | 承担 UI 绑定、主题计算等前端职责，并包含可用的引擎实现 | 可继续承担 UI 绑定、主题计算和受限展示计算，不包含业务引擎实现 |
 | 部署产物 | 静态 Web 资源与包含引擎的 WASM 产物 | 可独立部署或由引擎宿主提供的静态 UI 资源；引擎单独构建部署 |
 | 关闭页面 | 浏览器内引擎的生命周期按其宿主策略结束或保留，持久化另行声明 | 解除或失效该 UI 会话及浏览器执行端，不默认终止独立引擎 |

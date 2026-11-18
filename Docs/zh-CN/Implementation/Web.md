@@ -116,6 +116,8 @@ flowchart LR
 - **图标**：Web 版本用 Lucide（`lucide-static` v1.54.0）。所用的 87 个 Lucide SVG 与其 LICENSE 保存在 `crates/bern-backend-web/icons/lucide/`，以 `include_str!` 编入，构建时不联网。`icons.rs` 的对照表把每个 SF Symbols 名字对应到一个 Lucide 图标，并为 `.fill` 名字标明填充方式：整体（`play.fill`、`pause.fill`、`speaker.fill`、`star.fill`）、部分（`speaker.wave.3.fill`、`speaker.slash.fill` 只填喇叭，`sun.max.fill` 只填圆盘）、镂空（`xmark.circle.fill` 用遮罩把叉号从实心圆中挖出；遮罩 id 是占位符，运行时为每个图标实例替换成唯一 id）。填充保留 2 px 描边，实心版与线条版轮廓一致。运行时的 `icon()` 在根 `<svg>` 上设置 Lucide 的描边属性。生成的页面目录包含 `THIRD_PARTY_NOTICES.txt`（ISC 与 Feather 的 MIT 授权全文），`app.js` 的图标表前有指向它的注释。应用用到对照表中没有的名字时构建失败并指向声明（检查与 Compose、GTK、Windows 共用 `bern_target_api::icon_set::check`）。对照表至少包含 Bern 图标集（`icon_set::NAMES`）的全部名字，测试逐个核对。2026-10-20 补上 Windows 已有而 Web 缺的 `arrow.left`（`arrow-left`）、`chevron.up`（`chevron-up`）与 `star.fill`（`star` 整体填充）；两个新 SVG 是按 lucide-static 1.54.0 同名图标的路径数据与文件格式写入的，没有联网下载，未与发布包逐字节比对。
 - **媒体**：每个播放器一个 HTML `<video>`；执行端完成 hub 的加载、卸载、播放、暂停、跳转、音量、静音请求，`play()` 以 Promise 的结果完成请求，跳转以 `seeked` 完成；媒体事件只作为观测报告，不派发命令。视图把播放器的元素放入自己的区域，单视图（`multi_view: false`）。
 
+独立 `app` 目标声明 `channels = ["ipc"]` 后，开发构建还会生成本机 CLI `bin/<程序>` 和 `skills/<程序>/SKILL.md`。运行 `bern run --target web_app` 并打开它打印的网址，本地开发桥就会把 CLI 请求转发给该标签页中的引擎，不会另起一个原生引擎。若有多个标签页连接，用 `--engine ID` 选择。
+
 ## 窗口呈现
 
 v0.2 视觉规范下，生成的 `app.js` 为每个窗口种类写明呈现方式：声明 `presentation: floating` 的为 `floating`，WindowSet 的主窗口为 `page`，其余为 `dialog`。IR 版本为 4（新增 `Presentation::Floating` 与目标能力 `WindowCapabilities.floating`；不能提供浮动窗口的目标在检查阶段拒绝该声明）。
@@ -185,7 +187,7 @@ flowchart LR
 
 ## 打包
 
-`bern package --target web_app` 生成 `<程序>-<版本>-web.zip`（Linux 上为 `.tar.gz`），只含服务器需要的文件：页面、脚本、WebAssembly、样式、图标、随包资源与第三方声明，不含生成的胶水源码与构建报告。`ui` 构建另含引擎宿主及其 CLI，开启 IPC 时还带有 Skill，文件名标明系统与架构（`…-webui-macos-arm64`）。macOS 上用 `ditto` 打包，不带资源分叉与扩展属性。新项目的 `app` 包为 0.55 MB（未压缩），11 个文件。
+`bern package --target web_app` 生成 `<程序>-<版本>-web.zip`（Linux 上为 `.tar.gz`），只含服务器需要的文件：页面、脚本、WebAssembly、样式、图标、随包资源与第三方声明，不含本机 CLI、Skill、开发桥脚本、生成的胶水源码或构建报告。`ui` 构建另含引擎宿主及其 CLI，开启 IPC 时还带有 Skill，文件名标明系统与架构（`…-webui-macos-arm64`）。macOS 上用 `ditto` 打包，不带资源分叉与扩展属性。新项目的 `app` 包为 0.55 MB（未压缩），11 个文件。
 
 ## 样式、动效与媒体类应用的能力（v0.29）
 
@@ -405,7 +407,7 @@ flowchart LR
 - 共享元素的副本不复制视频与画布，它们只做位置与尺寸的过渡。
 - 内置浏览器面板隐藏时浏览器暂停逐帧回调，动效停在中途、显示后继续；这是浏览器的行为。
 
-- `app` 构建没有外部控制入口：浏览器内的引擎不能监听，设计要求另设明确中继，未实现。
+- `app` 的开发桥可转发单次请求，不支持流式状态订阅。关闭已连接的标签页会移除对应的 CLI 端点。单独部署静态站点不会创建本地控制端点。
 - 多个 WebUI 页面同时登记为媒体执行端时，第一个页面登记即把执行端交给宿主的路由器；页面离开后，它持有的应用级播放器不会自动在其他页面重新加载。
 - 引擎宿主断开时，页面上已显示的媒体状态保留到重连；重连后页面播放器重新加载，播放位置不保留。
 - 宿主只服务 HTTP；HTTPS 与跨源部署需要另行配置，未实现。

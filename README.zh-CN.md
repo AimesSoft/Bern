@@ -7,7 +7,8 @@
 <p><b>一份 Rust 声明，编译成每个平台自己的原生界面。</b></p>
 
 <p>从桌面到手机，为 AI 而建：SwiftUI、WinUI 3、GTK 4、Jetpack Compose 与 Web。<br>
-桌面和手机上没有 JS 引擎，没有内嵌浏览器；Agent 可以通过应用 CLI 按名称操作按钮。</p>
+桌面和手机默认不捆绑 JS 引擎或浏览器。<br>
+<b>Skills + CLI：</b>开启 IPC 后，Agent 从 <code>SKILL.md</code> 查命令，用应用 CLI 按名称操作控件。</p>
 
 <p>
 <img alt="macOS · SwiftUI" src="https://img.shields.io/badge/macOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
@@ -19,7 +20,7 @@
 </p>
 
 <p>
-<img alt="CLI + Skill" src="https://img.shields.io/badge/AI-CLI%20%2B%20Skill-8B5CF6?style=flat-square">
+<img alt="Skills + CLI" src="https://img.shields.io/badge/AI-Skills%20%2B%20CLI-8B5CF6?style=flat-square">
 <img alt="内存约 40 MB" src="https://img.shields.io/badge/%E5%86%85%E5%AD%98-%E7%BA%A6%2040%20MB-0EA5E9?style=flat-square">
 <img alt="无 JS 引擎" src="https://img.shields.io/badge/JS%20%E5%BC%95%E6%93%8E-%E6%97%A0-111827?style=flat-square">
 <img alt="Rust 1.99" src="https://img.shields.io/badge/Rust-1.99-B7410E?style=flat-square&logo=rust&logoColor=white">
@@ -67,7 +68,7 @@
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/why-dark.svg">
-<img alt="为什么是 Bern：编译成原生界面，一份 Rust 声明生成各平台自己的 UI 代码，运行时没有 JS 引擎；为 AI 而建，漏写是编译错误，命令行可以按名称操作按钮；轻到不像跨平台，macOS 内存 39 MB、0.4 秒出窗口、应用包 2.7 MB，Windows 35 MB、0.3 秒、4.2 MB，Web 189 KB" src="Docs/Assets/tables/why-light.svg" width="100%">
+<img alt="为什么是 Bern：编译成原生界面，一份 Rust 声明生成各平台自己的 UI 代码，运行时没有 JS 引擎；为 AI 而建，漏写是编译错误，Agent 从 SKILL.md 查命令，用应用 CLI 按名称操作按钮；轻到不像跨平台，macOS 内存 39 MB、0.4 秒出窗口、应用包 2.7 MB，Windows 35 MB、0.3 秒、4.2 MB，Web 189 KB" src="Docs/Assets/tables/why-light.svg" width="100%">
 </picture>
 
 ## 谁使用了 Bern
@@ -124,7 +125,7 @@ compact: missing
 
 ### AI 用应用：读语义，不读像素
 
-在大多数框架里，让 AI 操作一个桌面应用意味着截图、识别、算坐标、模拟点击。开启控制通道后，Bern 会生成应用 CLI 和说明其命令的 `SKILL.md`：界面上每个控件都有稳定的名字和角色，Agent 读到的是结构，做的事情和用户点击走同一段代码，结果由应用如实答复。
+开启控制通道后，Bern 从应用的命令目录生成 `SKILL.md`。以下面的开关为例：Agent 在 `skills/showcase/SKILL.md` 中查到 `ui set-bool` 的用法，再运行 `showcase ui inspect` 找到当前窗口里开关的名称。把这个名称传给应用 CLI，就能像用户点击一样切换开关，不需要截图或坐标。
 
 ```sh
 $ showcase ui inspect                 # Agent 读到的是语义，不是像素
@@ -140,7 +141,7 @@ $ showcase window confirm-close --window settings#1 --confirmation settings#1:c1
 { "outcome": "Rejected", "reason": "save_failed: invalid_name: a display name has 1 to 40 characters …" }
 ```
 
-生成的 Skill 列出的就是人可以直接执行的命令，从 `showcase ui inspect` 到业务命令 `showcase showcase set-display-name --name Demo`。要操作远端应用，用 SSH 登录控制通道所在的机器，以运行应用的用户执行同一份 CLI。按钮被禁用、被对话框挡住、目标不存在时，Agent 收到的是明确的错误码，而不是一次没有效果的点击。
+你也可以运行同样的命令，包括 `showcase showcase set-display-name --name Demo` 这样的业务命令。请使用与应用同一次构建生成的 CLI；远端操作时，用 SSH 登录控制通道所在的机器，以拥有该端点的账户运行。控件被禁用、被对话框挡住或不存在时，CLI 会返回明确的错误码。
 
 ## 实测数据
 
@@ -374,12 +375,12 @@ iOS 两个前端都留着时，写 `packages = "separate"` 可以打成两个 `.
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/capabilities-dark.svg">
-<img alt="平台与能力：各框架对 macOS、Windows、Linux、移动端、Web 的支持，以及原生外观、CLI + Skill 与编译期检查；Bern 的移动端为部分支持，三项能力都具备" src="Docs/Assets/tables/capabilities-light.svg" width="100%">
+<img alt="平台与能力：各框架对 macOS、Windows、Linux、移动端、Web 的支持，以及原生外观、Skills + CLI 与编译期检查；Bern 的移动端为部分支持，三项能力都具备" src="Docs/Assets/tables/capabilities-light.svg" width="100%">
 </picture>
 
 - **移动端**：iOS 与 Android。React Native 的桌面版本由微软维护，uni-app 另覆盖小程序与鸿蒙；Bern 的 Android 目标已能在真机运行并打包，iOS 目标目前构建模拟器应用，真机打包在规划中。
 - **原生外观**：控件就是平台自己的控件，外观、无障碍与输入法由系统提供。Qt Widgets 与 uni-app x 接近原生，记为部分。
-- **应用 CLI + Skill**：框架为运行中的界面生成命令行，并生成说明这些命令的 Skill。其他框架可以借助无障碍接口或 Playwright、Flutter Driver 等测试工具从外部自动化。
+- **Skills + CLI**：Bern 从同一份命令目录生成应用 CLI 和 `SKILL.md`，人和 Agent 使用相同的命令。其他框架可以借助无障碍接口或 Playwright、Flutter Driver 等测试工具从外部自动化。
 - **编译期检查**：翻译缺失、功能在某个布局没有入口、入口没有登记功能，都由编译器直接报错（见[为 AI 而建](#为-ai-而建)）。其他框架多借助 lint、翻译工具或测试发现这类问题。
 - **成熟度**：Electron 与 Qt 非常成熟；Flutter、React Native、uni-app、Tauri 与 Avalonia 成熟；Dioxus 发展中；GPUI 支撑着 Zed 编辑器，通用组件仍在早期；Bern 是早期预览。
 
@@ -485,7 +486,7 @@ showcase window list                                         # 窗口的实际�
 ssh HOST /path/to/showcase state
 ```
 
-只有目标声明了 `channels = ["ipc"]` 时才会启动控制通道；不声明则应用不监听任何端口。Android 应用在手机上监听，`bern run` 用 `adb forward` 把它接到这台电脑，命令行照常使用。
+目标的 `channels = ["ipc"]` 用于开启外部控制。Android 的 CLI 在开发电脑上运行，连接 `bern run` 通过 `adb forward` 转发的端点，不在手机上执行。独立 Web `app` 开启 IPC 后，`bern run` 会启动本地桥，连接已打开的浏览器标签页；发布的静态站点包不含本机 CLI 和 `SKILL.md`。
 
 ## 路线图
 

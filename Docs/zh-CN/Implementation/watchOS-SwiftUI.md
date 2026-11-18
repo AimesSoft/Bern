@@ -45,6 +45,8 @@
 
 ## 构建与运行
 
+控制模拟器时，在 Mac 上运行应用 CLI。启用 IPC 后，`target/bern/watchos/skills/<程序>/SKILL.md` 说明同级 `bin/` 目录中 CLI 的用法；两者都不在模拟器应用包内。
+
 ```bash
 rustup target add aarch64-apple-watchos aarch64-apple-watchos-sim
 ```

@@ -7,7 +7,8 @@
 <p><b>一つの Rust 宣言を、各プラットフォーム自身のネイティブ UI へコンパイル。</b></p>
 
 <p>デスクトップからスマートフォンまで、AI のために作られた：SwiftUI、WinUI 3、GTK 4、Jetpack Compose、そして Web。<br>
-デスクトップにもスマートフォンにも JS エンジンや組み込みブラウザーはありません。エージェントはアプリの CLI からボタンを名前で操作できます。</p>
+デスクトップでもスマートフォンでも、標準では JS エンジンやブラウザーを同梱しません。<br>
+<b>Skills + CLI：</b>IPC を有効にすると、エージェントは <code>SKILL.md</code> でコマンドを調べ、アプリの CLI からコントロールを名前で操作できます。</p>
 
 <p>
 <img alt="macOS · SwiftUI" src="https://img.shields.io/badge/macOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
@@ -19,7 +20,7 @@
 </p>
 
 <p>
-<img alt="CLI + Skill" src="https://img.shields.io/badge/AI-CLI%20%2B%20Skill-8B5CF6?style=flat-square">
+<img alt="Skills + CLI" src="https://img.shields.io/badge/AI-Skills%20%2B%20CLI-8B5CF6?style=flat-square">
 <img alt="メモリ約 40 MB" src="https://img.shields.io/badge/%E3%83%A1%E3%83%A2%E3%83%AA-%E7%B4%84%2040%20MB-0EA5E9?style=flat-square">
 <img alt="JS エンジンなし" src="https://img.shields.io/badge/JS%20%E3%82%A8%E3%83%B3%E3%82%B8%E3%83%B3-%E3%81%AA%E3%81%97-111827?style=flat-square">
 <img alt="Rust 1.99" src="https://img.shields.io/badge/Rust-1.99-B7410E?style=flat-square&logo=rust&logoColor=white">
@@ -67,7 +68,7 @@
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/why-ja-dark.svg">
-<img alt="Bern を選ぶ理由：ネイティブ UI へコンパイルし、一つの Rust 宣言から各プラットフォーム自身の UI コードを生成、実行時に JS エンジンなし。AI のための設計で、書き漏れはコンパイルエラー、CLI から名前でボタンを操作。クロスプラットフォームとは思えない軽さで、macOS は 39 MB・0.4 秒・2.7 MB、Windows は 35 MB・0.3 秒・4.2 MB、Web は 189 KB" src="Docs/Assets/tables/why-ja-light.svg" width="100%">
+<img alt="Bern を選ぶ理由：ネイティブ UI へコンパイルし、一つの Rust 宣言から各プラットフォーム自身の UI コードを生成、実行時に JS エンジンなし。AI のための設計で、書き漏れはコンパイルエラー、SKILL.md でコマンドを調べ、アプリの CLI から名前でボタンを操作。クロスプラットフォームとは思えない軽さで、macOS は 39 MB・0.4 秒・2.7 MB、Windows は 35 MB・0.3 秒・4.2 MB、Web は 189 KB" src="Docs/Assets/tables/why-ja-light.svg" width="100%">
 </picture>
 
 ## Bern を使っているアプリ
@@ -124,7 +125,7 @@ compact: missing
 
 ### アプリを使う：ピクセルではなく意味を読む
 
-多くのフレームワークでは、AI にデスクトップアプリを操作させるには、スクリーンショット、認識、座標計算、疑似クリックが必要です。制御チャネルを有効にすると、Bern はアプリの CLI と、そのコマンドを説明する `SKILL.md` を生成します。UI のすべてのコントロールに安定した名前と役割があり、エージェントは構造を読み、ユーザーのクリックと同じコードで操作し、アプリは起きたことをそのまま答えます。
+制御チャネルを有効にすると、Bern はアプリのコマンドカタログから `SKILL.md` を生成します。たとえば下のスイッチを切り替えるには、エージェントは `skills/showcase/SKILL.md` で `ui set-bool` の引数を調べ、`showcase ui inspect` でウィンドウ内のスイッチの名前を取得します。その名前をアプリの CLI に渡すと、クリックしたときと同じコードが動きます。スクリーンショットや座標は不要です。
 
 ```sh
 $ showcase ui inspect                 # エージェントが読むのはピクセルではなく意味
@@ -140,7 +141,7 @@ $ showcase window confirm-close --window settings#1 --confirmation settings#1:c1
 { "outcome": "Rejected", "reason": "save_failed: invalid_name: a display name has 1 to 40 characters …" }
 ```
 
-生成されたスキルには、`showcase ui inspect` から業務コマンド `showcase showcase set-display-name --name Demo` まで、人が直接実行できるコマンドが並びます。リモートのアプリを操作するには、制御チャネルのあるマシンに SSH で接続し、アプリを起動したユーザーとして同じ CLI を実行します。ボタンが無効、ダイアログでふさがれている、対象が存在しないといった場合、エージェントが受け取るのは何も起きないクリックではなく、明確なエラーコードです。
+`showcase showcase set-display-name --name Demo` のようなアプリ固有のコマンドも含め、人も同じコマンドを実行できます。CLI はアプリと同じビルドのものを使います。リモートからは制御チャネルのあるマシンに SSH で接続し、接続先を所有するアカウントで実行します。コントロールが無効、ダイアログで操作できない、対象が存在しないといった場合、CLI はエラーコードを返します。
 
 ## 実測値
 
@@ -374,12 +375,12 @@ iOS で両方を残したまま `packages = "separate"` と書くと、`.ipa` �
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/capabilities-ja-dark.svg">
-<img alt="プラットフォームと機能：macOS、Windows、Linux、モバイル、Web への対応と、ネイティブの外観、CLI + Skill、コンパイル時チェック。Bern のモバイルは一部対応で、3 つの機能をすべて備える" src="Docs/Assets/tables/capabilities-ja-light.svg" width="100%">
+<img alt="プラットフォームと機能：macOS、Windows、Linux、モバイル、Web への対応と、ネイティブの外観、Skills + CLI、コンパイル時チェック。Bern のモバイルは一部対応で、3 つの機能をすべて備える" src="Docs/Assets/tables/capabilities-ja-light.svg" width="100%">
 </picture>
 
 - **モバイル**：iOS と Android。React Native のデスクトップ版は Microsoft が保守し、uni-app はミニプログラムと HarmonyOS にも対応します。Bern の Android ターゲットは実機で動作しパッケージも作れます。iOS ターゲットはシミュレータ用アプリをビルドし、実機パッケージは計画中です。
 - **ネイティブの外観**：コントロールがプラットフォーム自身のもので、外観、アクセシビリティ、入力メソッドをシステムが提供します。Qt Widgets と uni-app x はそれに近いため一部対応としました。
-- **アプリ CLI + Skill**：動作中の UI を操作するコマンドラインと、その使い方を説明するスキルをフレームワークが生成します。ほかのフレームワークは、アクセシビリティ API や Playwright、Flutter Driver などのテストツールで外から自動化できます。
+- **Skills + CLI**：Bern はひとつのコマンドカタログからアプリの CLI と `SKILL.md` を生成します。人もエージェントも同じコマンドを使います。ほかのフレームワークは、アクセシビリティ API や Playwright、Flutter Driver などのテストツールで外から自動化できます。
 - **コンパイル時チェック**：翻訳漏れ、あるレイアウトで機能に入口がない、入口が機能に登録されていない、といった問題をコンパイラーが直接エラーにします（[AI のための設計](#ai-のための設計)を参照）。ほかのフレームワークでは多くの場合、リンター、翻訳ツール、テストで見つけます。
 - **成熟度**：Electron と Qt は非常に成熟しています。Flutter、React Native、uni-app、Tauri、Avalonia は成熟、Dioxus は発展中、GPUI は Zed エディターを支えていますが汎用コンポーネントはまだ初期段階、Bern は早期プレビューです。
 
@@ -485,7 +486,7 @@ showcase window list                                         # ウィンドウ�
 ssh HOST /path/to/showcase state
 ```
 
-制御チャネルはターゲットが `channels = ["ipc"]` を宣言したときだけ起動します。宣言しなければアプリはどのポートも待ち受けません。Android アプリはスマートフォン上で待ち受け、`bern run` が `adb forward` でこのコンピューターにつなぐので、CLI はそのまま使えます。
+ターゲットの `channels = ["ipc"]` で外部からの操作が有効になります。Android の CLI は端末上ではなく、`bern run` が `adb forward` を設定した開発用コンピューターで実行します。スタンドアロンの Web `app` で IPC を有効にすると、`bern run` がローカルのブリッジを起動し、開いているブラウザーのタブに接続します。配布用の静的サイトのアーカイブには、この CLI も `SKILL.md` も含まれません。
 
 ## ロードマップ
 

@@ -34,8 +34,8 @@ package = "{{package}}-ui"
 sources = ["{{package}}-ui/src/lib.rs"]
 root = "app"
 
-# `channels = ["ipc"]` lets the generated command line drive
-# the running app. Remove it to ship an app that listens to nothing.
+# `channels = ["ipc"]` lets the app CLI control the running engine and
+# generates skills/<program>/SKILL.md. Omit IPC to disable this control channel.
 
 [targets.macos]
 platform = "macos"
@@ -69,6 +69,8 @@ channels = ["ipc"]
 platform = "android"
 channels = ["ipc"]
 
+# For local CLI control of a browser tab, enable IPC on this target.
+# `bern run` then starts the development bridge; the packaged site stays static.
 [targets.web_app]
 ui = "web"
 platform = "browser"
