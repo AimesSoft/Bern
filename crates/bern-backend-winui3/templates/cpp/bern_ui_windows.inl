@@ -221,6 +221,9 @@ inline std::shared_ptr<Win> OfHwnd(HWND hwnd) {
 void Show(Win& win);
 void RequestCloseSafely(std::shared_ptr<Win> const& win);
 void Ended(std::shared_ptr<Win> const& win);
+#if BERN_WINUI
+inline void SyncIdleCursor(Win& win);
+#endif
 
 /// The window messages both front ends handle the same way. True when the
 /// message is handled and `result` holds its result.
@@ -251,6 +254,9 @@ inline bool Handle(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam, LRESUL
     }
     case WM_ACTIVATE:
         win->focused = LOWORD(wparam) != WA_INACTIVE;
+#if BERN_WINUI
+        SyncIdleCursor(*win);
+#endif
         win->ScheduleReport();
         if (win->focused) {
             Snapshot::Schedule();
@@ -260,6 +266,9 @@ inline bool Handle(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam, LRESUL
     case WM_ENTERSIZEMOVE:
         if (!win->movingOrSizing) {
             win->movingOrSizing = true;
+#if BERN_WINUI
+            SyncIdleCursor(*win);
+#endif
             win->dragMonitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
             win->dragDpi = GetDpiForWindow(hwnd);
             bern::CompositorClock::Acquire();
@@ -717,7 +726,57 @@ inline void SizeBeforeLayout(Win& win, double width, double height) {
     win.isShort.Set(height < app->catalog.compactBelow.value_or(0));
 }
 
-/// Whether the cursor is hidden for an immersive, idle window.
+#if BERN_WINUI
+/// Give XAML a transparent native cursor. A null ProtectedCursor inherits
+/// the default, and a root override loses to a closer element's cursor.
+inline winrt::Microsoft::UI::Input::InputCursor TransparentCursor() {
+    namespace input = winrt::Microsoft::UI::Input;
+    auto factory = winrt::get_activation_factory<input::InputCursor, input::IInputCursorStaticsInterop>();
+    std::array<BYTE, 32 * 32 / 8> andMask, xorMask{};
+    andMask.fill(0xff);
+    auto handle = CreateCursor(GetModuleHandleW(nullptr), 0, 0, 32, 32, andMask.data(), xorMask.data());
+    if (!handle) winrt::throw_last_error();
+    input::InputCursor cursor{nullptr};
+    auto result = factory->CreateFromHCursor(handle, reinterpret_cast<input::IInputCursor**>(winrt::put_abi(cursor)));
+    // The interop copies the cursor; the Win32 handle is ours to destroy.
+    DestroyCursor(handle);
+    winrt::check_hresult(result);
+    return cursor;
+}
+
+inline void SyncIdleCursor(Win& win) {
+    xaml::IUIElementProtected target{nullptr};
+    if (!win.closed && !win.owner && win.focused && !win.movingOrSizing && win.immersive.Peek() && win.idle.Peek()
+        && win.mouse == Win::Mouse::At && win.root.XamlRoot() && !(GetAsyncKeyState(VK_LBUTTON) & 0x8000)
+        && !(GetAsyncKeyState(VK_RBUTTON) & 0x8000) && !(GetAsyncKeyState(VK_MBUTTON) & 0x8000)) {
+        auto hits = media::VisualTreeHelper::FindElementsInHostCoordinates(win.mousePoint, win.root).First();
+        if (hits.HasCurrent()) {
+            // XAML chooses the closest hit-testable FrameworkElement's cursor.
+            for (xaml::DependencyObject node = hits.Current(); node; node = media::VisualTreeHelper::GetParent(node)) {
+                auto element = node.try_as<xaml::FrameworkElement>();
+                if (element && element.IsHitTestVisible()) {
+                    target = element.as<xaml::IUIElementProtected>();
+                    break;
+                }
+            }
+        }
+    }
+    if (target == win.idleCursorTarget) return;
+    if (win.idleCursorTarget) {
+        win.idleCursorTarget.ProtectedCursor(win.previousCursor);
+        win.idleCursorTarget = nullptr;
+        win.previousCursor = nullptr;
+    }
+    if (target) {
+        if (!win.idleCursor) win.idleCursor = TransparentCursor();
+        auto previous = target.ProtectedCursor();
+        target.ProtectedCursor(win.idleCursor);
+        win.idleCursorTarget = target;
+        win.previousCursor = previous;
+    }
+}
+#else
+/// Whether the system XAML front end has hidden the Win32 cursor.
 inline bool cursorHidden = false;
 
 inline void HideCursor(bool hide) {
@@ -731,6 +790,7 @@ inline void HideCursor(bool hide) {
         }
     }
 }
+#endif
 
 /// Whether `element` is on screen in `win`: loaded, and visible with every
 /// element around it up to the window's content.
@@ -830,14 +890,32 @@ inline void TrackIdle(std::shared_ptr<Win> const& win, double seconds, std::func
     // as an immersive one's does, gets moves where the pointer stayed.
     auto last = std::make_shared<POINT>();
     GetCursorPos(last.get());
-    root.AddHandler(xaml::UIElement::PointerMovedEvent(), winrt::box_value(PointerHandler([rest, last, place](auto&&, auto&& args) {
+    root.AddHandler(xaml::UIElement::PointerMovedEvent(), winrt::box_value(PointerHandler([rest, last, place, weak](auto&&, auto&& args) {
         place(args);
         POINT now{};
         GetCursorPos(&now);
-        if (now.x == last->x && now.y == last->y) return;
+        if (now.x == last->x && now.y == last->y) {
+#if BERN_WINUI
+            // The layout can replace the hovered element without moving the mouse.
+            if (auto win = weak.lock()) SyncIdleCursor(*win);
+#endif
+            return;
+        }
         *last = now;
         rest();
     })), true);
+#if BERN_WINUI
+    root.AddHandler(xaml::UIElement::PointerEnteredEvent(), winrt::box_value(PointerHandler([place, weak](auto&&, auto&& args) {
+        if (args.Pointer().PointerDeviceType() != PointerKind::Mouse) return;
+        place(args);
+        if (auto win = weak.lock()) SyncIdleCursor(*win);
+    })), true);
+    // A drag can outlast the idle delay. Start a fresh count on release.
+    root.AddHandler(xaml::UIElement::PointerReleasedEvent(), winrt::box_value(PointerHandler([rest, place](auto&&, auto&& args) {
+        place(args);
+        rest();
+    })), true);
+#endif
     root.AddHandler(xaml::UIElement::PointerPressedEvent(), winrt::box_value(PointerHandler([rest, place](auto&&, auto&& args) {
         place(args);
         rest();
@@ -1187,17 +1265,23 @@ inline void Mount(std::shared_ptr<Win> const& win, controls::Grid const& host, s
             auto immersive = def.immersive;
             Reactive::Run([raw, immersive, ctx] {
                 bool on = immersive(ctx);
-                bool idle = raw->idle.Get();
+                [[maybe_unused]] bool idle = raw->idle.Get();
                 Reactive::Untrack([&] {
                     if (raw->immersive.Peek() != on) {
                         raw->immersive.Set(on);
                         if (!raw->owner) ShowChrome(*raw, on);
                     }
+#if BERN_WINUI
+                    SyncIdleCursor(*raw);
+#else
                     HideCursor(on && idle);
+#endif
                     return 0;
                 });
             });
+#if !BERN_WINUI
             Reactive::OnCleanup([] { HideCursor(false); });
+#endif
         }
         FollowTheme(win, ctx);
     });
@@ -1478,6 +1562,9 @@ inline void ExitIfDone() {
 inline void Ended(std::shared_ptr<Win> const& win) {
     if (win->closed) return;
     win->closed = true;
+#if BERN_WINUI
+    SyncIdleCursor(*win);
+#endif
     if (win->movingOrSizing) {
         win->movingOrSizing = false;
         bern::CompositorClock::Release();

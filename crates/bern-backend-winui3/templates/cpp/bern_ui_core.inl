@@ -1500,6 +1500,8 @@ struct Win {
 #if BERN_WINUI
     xaml::Window window{nullptr};
     controls::TitleBar titleBar{nullptr};
+    xaml::IUIElementProtected idleCursorTarget{nullptr};
+    winrt::Microsoft::UI::Input::InputCursor idleCursor{nullptr}, previousCursor{nullptr};
 #else
     xaml::Hosting::DesktopWindowXamlSource source{nullptr};
     HWND island = nullptr;
