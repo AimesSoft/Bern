@@ -1443,13 +1443,10 @@ inline controls::FontIcon Font(std::string_view name, double size = 16) {
 }
 
 inline media::Geometry PathData(wchar_t const* path) {
-    // Catalog strings have static lifetime. Each XAML thread can share its
-    // parsed geometries between icons without sharing their visual elements.
-    static thread_local std::unordered_map<wchar_t const*, media::Geometry> cache;
-    if (auto found = cache.find(path); found != cache.end()) return found->second;
-    auto data = xaml::Markup::XamlBindingHelper::ConvertValue(
+    // PathIcon.Data checks for an existing owner. Share only the catalog
+    // string: a rebuilt button (or a second icon) needs its own geometry.
+    return xaml::Markup::XamlBindingHelper::ConvertValue(
         winrt::xaml_typename<media::Geometry>(), winrt::box_value(winrt::hstring{path})).as<media::Geometry>();
-    return cache.emplace(path, data).first->second;
 }
 
 inline controls::IconElement Icon(std::string_view name, double size = 16) {
