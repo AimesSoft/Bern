@@ -143,7 +143,8 @@ pub fn show_panel(id: &str, panel: Option<&Panel>) {
         }
     }
     if let Some(host) = host() {
-        return host.panel(id, panel);
+        host.panel(id, panel);
+        return;
     }
     #[cfg(target_os = "macos")]
     super::mac::panel(id.to_owned(), panel.cloned());
