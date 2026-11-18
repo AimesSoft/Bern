@@ -81,6 +81,10 @@ const CHECKS: &[(&str, Check)] = &[
     (feature::PICTURE_FILLS, picture_fills),
     (feature::COVER_IMAGES, cover_images),
     (feature::REVEAL, reveal),
+    (feature::POINTER_EVENTS, pointer_events),
+    (feature::WHEEL, wheel),
+    (feature::SLIDER_HOVER, slider_hover),
+    (feature::PLAYER_STATE, player_state),
 ];
 
 /// Features the application uses that the target does not list.
@@ -1358,6 +1362,76 @@ fn runtime_palette(
     if app.windows.palette.is_some() {
         diagnostics.push(Diagnostic::error(format!(
             "target `{}` does not support WindowSet(palette:)",
+            descriptor.id
+        )));
+    }
+}
+
+fn pointer_events(
+    descriptor: &TargetDescriptor,
+    app: &Application,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some(element) = first_element(app, |element| {
+        element.kind != "Button"
+            && (element.pointer_event("DoubleTap").is_some()
+                || element.pointer_event("ContextMenu").is_some())
+    }) {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` takes `DoubleTap` and `ContextMenu` only on a `Button`, not on `{}`",
+                descriptor.id, element.kind
+            ))
+            .at(element.source.clone()),
+        );
+    }
+}
+
+fn wheel(descriptor: &TargetDescriptor, app: &Application, diagnostics: &mut Vec<Diagnostic>) {
+    if let Some(event) = first_element(app, |element| {
+        matches!(element.kind.as_str(), "WheelUp" | "WheelDown")
+    }) {
+        // The element still shows; nothing on the target scrolls it.
+        diagnostics.push(
+            Diagnostic::warning(format!(
+                "target `{}` has no wheel or trackpad scrolling: `{}` never runs there",
+                descriptor.id, event.kind
+            ))
+            .at(event.source.clone()),
+        );
+    }
+}
+
+fn slider_hover(
+    descriptor: &TargetDescriptor,
+    app: &Application,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some(slider) = first_element(app, |element| {
+        element.kind == "Slider" && element.prop("hover").is_some()
+    }) {
+        diagnostics.push(
+            Diagnostic::warning(format!(
+                "target `{}` has no pointer hovering a slider: `hover` stays `None` there",
+                descriptor.id
+            ))
+            .at(slider.source.clone()),
+        );
+    }
+}
+
+fn player_state(
+    descriptor: &TargetDescriptor,
+    app: &Application,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    // Player bindings can stand in any expression: props, texts,
+    // conditions, actions and component arguments. The serialized
+    // application names each by its tag.
+    let reads = serde_json::to_string(app).is_ok_and(|json| json.contains(r#""scope":"player""#));
+    if reads {
+        diagnostics.push(Diagnostic::error(format!(
+            "target `{}` cannot read a player's state in declarations, such as `players.preview.position`",
             descriptor.id
         )));
     }

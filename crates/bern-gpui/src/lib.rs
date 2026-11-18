@@ -35,6 +35,7 @@ mod native;
 mod navigation;
 mod overlay;
 mod pictures;
+mod pointer;
 mod query;
 mod scene;
 mod scroll;
@@ -93,6 +94,7 @@ pub use navigation::{
     split_view,
 };
 pub use overlay::{ModalProps, PopoverProps, SplitProps, modal, popover_button, split_button};
+pub use pointer::{PointerEvents, pointer_events};
 pub use query::{OwnedQuery, QueryProps, own_query, query};
 pub use scene::{Anchor as RailAnchor, Place, Placement, positioned, rail, scale_box};
 pub use scroll::{ScrollProps, Snap, scroll_items, scroll_key, scroll_view};

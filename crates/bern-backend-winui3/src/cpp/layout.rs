@@ -94,7 +94,7 @@ impl Generator<'_> {
         // window, as on macOS; a backdrop of pictures and fills is not.
         let mut controls = false;
         if under_bars {
-            for child in &element.children {
+            for child in element.content() {
                 child.walk(&mut |node| {
                     if let bern_ir::Node::Element(inner) = node {
                         controls |= bern_ir::spec::component(&inner.kind)

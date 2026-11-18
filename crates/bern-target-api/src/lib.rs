@@ -109,6 +109,16 @@ pub struct TargetDescriptor {
 pub mod feature {
     /// `Button` with a child that it shows instead of its label.
     pub const BUTTON_CONTENT: &str = "button_content";
+    /// `DoubleTap` and `ContextMenu` on an element other than a `Button`.
+    pub const POINTER_EVENTS: &str = "pointer_events";
+    /// `WheelUp` and `WheelDown`: actions for the turns of a mouse wheel
+    /// or trackpad scrolling over an element; without it they never run.
+    pub const WHEEL: &str = "wheel";
+    /// `Slider(hover:)`: where the pointer is along the track; without it
+    /// the field stays `None`.
+    pub const SLIDER_HOVER: &str = "slider_hover";
+    /// Player state read in declarations, such as `players.preview.position`.
+    pub const PLAYER_STATE: &str = "player_state";
     /// `reveal: hover`: content shown while the pointer is over its
     /// container; without it the content always shows.
     pub const REVEAL: &str = "reveal";

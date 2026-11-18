@@ -159,6 +159,16 @@ impl<'a> Generator<'a> {
     }
 
     fn nodes(&self, out: &mut Out, nodes: &[Node], ctx: &Ctx) {
+        // Pointer events are modifiers of the element they stand in, not
+        // views among its content.
+        if nodes.iter().any(is_pointer_event) {
+            let content: Vec<Node> = nodes
+                .iter()
+                .filter(|node| !is_pointer_event(node))
+                .cloned()
+                .collect();
+            return self.nodes(out, &content, ctx);
+        }
         let mut emitted = false;
         let inner = (ctx.snap_level > 0).then(|| Ctx {
             snap_level: ctx.snap_level - 1,
@@ -478,6 +488,9 @@ impl<'a> Generator<'a> {
             "Button" | "IconButton" => {
                 self.button(out, element, ctx);
                 self.context_menu(out, element, ctx);
+                if let Some(events) = self.pointer_modifier(element, false) {
+                    out.line(format!(".modifier({events})"));
+                }
             }
             "Drop" => self.drop_zone(out, element, ctx),
             "TextInput" => self.text_input(out, element, ctx),
@@ -557,12 +570,24 @@ impl<'a> Generator<'a> {
             "LanguagePicker" => self.language_picker(out, element, ctx),
             "Detail" | "Destination" | "Tab" | "Sidebar" | "SidebarItem" | "Toolbar"
             | "WindowSet" | "Window" | "Layout" | "MenuItem" | "MenuBar" | "StatusItem"
-            | "TableColumn" | "TableMenu" | "ContextMenu" | "DoubleTap" | "OnCommit" => {
+            | "TableColumn" | "TableMenu" | "ContextMenu" | "DoubleTap" | "WheelUp"
+            | "WheelDown" | "OnCommit" => {
                 // Realized by their parents.
             }
             other => out.line(format!("SwiftUI.EmptyView() // unsupported {other}")),
         }
+        // A button arbitrates its own taps; a positioned layer takes its
+        // events before it moves to its place.
+        if !matches!(element.kind.as_str(), "Button" | "Positioned")
+            && bern_ir::spec::POINTER_OWNERS.contains(&element.kind.as_str())
+        {
+            self.pointer_events(out, element, ctx);
+        }
     }
+}
+
+fn is_pointer_event(node: &Node) -> bool {
+    matches!(node, Node::Element(event) if bern_ir::spec::POINTER_EVENTS.contains(&event.kind.as_str()))
 }
 
 /// `case .variant(let a, _)` for one arm of a `match`, or `default`.

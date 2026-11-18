@@ -434,6 +434,12 @@ impl Ctx {
         })
     }
 
+    /// Playback state of an application player: one of the fields a
+    /// declaration reads, such as `players.preview.position`.
+    pub fn player(&self, player: &str, field: &str) -> Value {
+        crate::media::player_field(player, field)
+    }
+
     /// The context of a referenced component: its own name and parameters.
     pub fn child(&self, component: &str, site: &str, params: Vec<(&'static str, Value)>) -> Self {
         let mut locals = None;

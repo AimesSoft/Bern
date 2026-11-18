@@ -61,20 +61,12 @@ impl Generator<'_> {
     }
 
     pub(super) fn button(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
-        let double_tap = element
-            .children
-            .iter()
-            .find_map(|node| match node {
-                Node::Element(child) if child.kind == "DoubleTap" => child
-                    .action
-                    .as_ref()
-                    .map(|action| format!(", onDoubleTap = {{ {} }}", self.action(action))),
-                _ => None,
-            })
+        let double_tap = self
+            .event_action(element, "DoubleTap")
+            .map(|action| format!(", onDoubleTap = {{ {action} }}"))
             .unwrap_or_default();
-        let content: Vec<_> = element.children.iter().filter(|node| {
-            !matches!(node, Node::Element(child) if matches!(child.kind.as_str(), "DoubleTap" | "ContextMenu"))
-        }).cloned().collect();
+        let content: Vec<_> = element.content().cloned().collect();
+        let wheel = self.wheel_modifier(element);
         let label = self.text_prop(element, "label").unwrap_or_default();
         let (action, file) = self.pressed(element);
         let enabled = self.enabled(element);
@@ -114,7 +106,7 @@ impl Generator<'_> {
                 _ => "",
             };
             out.open(format!(
-                "BernContentButton({label}, {enabled}, {style}, Modifier{start}{width}.testTag({target}){}{prominent}{double_tap}, onClick = {{ {action} }}) {{",
+                "BernContentButton({label}, {enabled}, {style}, Modifier{start}{width}.testTag({target}){wheel}{}{prominent}{double_tap}, onClick = {{ {action} }}) {{",
                 self.shape_arg(element)
             ));
             self.nodes(out, &content, &ctx.within(Scope::Other));
@@ -164,7 +156,7 @@ impl Generator<'_> {
             ""
         };
         out.line(format!(
-            "BernButton({label}, {}, {prominence}, destructive = {}, enabled = {enabled}{style}{}{fill}, modifier = Modifier{start}{weight}.testTag({target}){double_tap}) {{ {action} }}",
+            "BernButton({label}, {}, {prominence}, destructive = {}, enabled = {enabled}{style}{}{fill}, modifier = Modifier{start}{weight}.testTag({target}){wheel}{double_tap}) {{ {action} }}",
             Self::icon(element.icon("icon")),
             element.keyword("role") == Some("destructive"),
             self.shape_arg(element)
@@ -355,6 +347,16 @@ impl Generator<'_> {
         }
     }
 
+    /// In a row a slider takes what the others leave, as on the other
+    /// targets: measured first, it would leave them nothing.
+    pub(super) fn slider_flex(ctx: &Ctx) -> &'static str {
+        if ctx.scope == Scope::Row {
+            ".weight(1f)"
+        } else {
+            ""
+        }
+    }
+
     pub(super) fn slider(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         let label = self.text_prop(element, "label").unwrap_or_default();
         let min = double(element.number("min").unwrap_or(0.0));
@@ -365,13 +367,13 @@ impl Generator<'_> {
             .unwrap_or_else(|| "null".into());
         let target = self.target(element, ctx);
         let label_hidden = element.keyword("label_hidden") == Some("true");
-        // In a row it takes what the others leave, as on the other targets:
-        // measured first, it would leave them nothing.
-        let weight = if ctx.scope == Scope::Row {
-            ".weight(1f)"
-        } else {
-            ""
-        };
+        let weight = Self::slider_flex(ctx);
+        // Where a mouse or stylus is along the track, into its draft.
+        let hover = self
+            .field(element, "hover")
+            .filter(|_| !self.watch)
+            .map(|field| format!(", onHover = {{ it: Double? -> {field} = it }}"))
+            .unwrap_or_default();
         let icons = format!(
             "{}, {}",
             Self::icon(element.icon("min_icon")),
@@ -392,7 +394,7 @@ impl Generator<'_> {
                 "BernControl({target}, \"slider\", {label}, actions = BernControlActions(setNumber = {{ it: Double -> {change} }}, value = {{ BernText.text({value}) }}))"
             ));
             out.line(format!(
-                "BernControlledSlider({label}, ({value}).toDouble(), {{ it: Double -> {change} }}, {min}, {max}, {step}, {icons}, labelHidden = {label_hidden}, continuous = {}, modifier = Modifier{weight}.testTag({target}))",
+                "BernControlledSlider({label}, ({value}).toDouble(), {{ it: Double -> {change} }}, {min}, {max}, {step}, {icons}, labelHidden = {label_hidden}, continuous = {}, modifier = Modifier{weight}.testTag({target}){hover})",
                 element.keyword("continuous") == Some("true")
             ));
             return;
@@ -421,7 +423,7 @@ impl Generator<'_> {
             "BernControl({target}, \"slider\", {label}, actions = BernControlActions(setNumber = {{ {write}{commit} }}, value = {{ BernText.text({field}) }}))"
         ));
         out.line(format!(
-            "BernSlider({label}, {read}, {{ {write} }}, {min}, {max}, {step}, {}, {icons}, labelHidden = {label_hidden}, modifier = Modifier{weight}.testTag({target}))",
+            "BernSlider({label}, {read}, {{ {write} }}, {min}, {max}, {step}, {}, {icons}, labelHidden = {label_hidden}, modifier = Modifier{weight}.testTag({target}){hover})",
             action
                 .map(|action| format!("{{ {action} }}"))
                 .unwrap_or_else(|| "null".into()),

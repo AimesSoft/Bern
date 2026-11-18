@@ -44,6 +44,10 @@ impl Generator<'_> {
             }
             // `window.idle`, kept by the runtime per window.
             Binding::Window { field } => format!("ctx.win.{field}.get()"),
+            // `players.preview.position`, read from the runtime's media state.
+            Binding::Player { player, field } => {
+                format!("B.playerState({}, {})", string(player), string(field))
+            }
             Binding::Local { name, path, root } => {
                 format!("{}(){}", local(name), self.path(root.clone(), path))
             }

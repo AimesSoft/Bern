@@ -400,19 +400,32 @@ impl Generator<'_> {
         out.open("SwiftUI.ZStack(alignment: .topLeading) {");
         self.nodes(out, &element.children, ctx);
         out.close("}");
+        // Its events take the layer's box, before it moves to its place:
+        // what comes after the move measures where it was laid out.
+        let events = self.pointer_modifier(element, true);
         match element.expr("bleed") {
-            Some(bleed) => out.line(format!(
-                ".modifier(BernBleedingLayer(x: {}, y: {}, width: {}, height: {}, bleed: {}))",
-                self.length(element, "x").unwrap(),
-                self.length(element, "y").unwrap(),
-                self.length(element, "width").unwrap(),
-                self.length(element, "height").unwrap(),
-                self.expr(bleed)
-            )),
+            Some(bleed) => {
+                out.line(format!(
+                    ".modifier(BernBleedingLayer(x: {}, y: {}, width: {}, height: {}, bleed: {}{}))",
+                    self.length(element, "x").unwrap(),
+                    self.length(element, "y").unwrap(),
+                    self.length(element, "width").unwrap(),
+                    self.length(element, "height").unwrap(),
+                    self.expr(bleed),
+                    events
+                        .map(|events| format!(", events: {events}"))
+                        .unwrap_or_default()
+                ));
+                self.context_menu(out, element, ctx);
+            }
             None => {
                 // The layer's own layers are placed in its space.
                 out.line(".environment(\\.bernSceneRoom, nil)");
                 self.frame(out, element);
+                if let Some(events) = events {
+                    out.line(format!(".modifier({events})"));
+                }
+                self.context_menu(out, element, ctx);
                 out.line(format!(
                     ".offset(x: {}, y: {})",
                     self.length(element, "x").unwrap(),

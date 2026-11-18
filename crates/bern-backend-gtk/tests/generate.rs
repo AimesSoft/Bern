@@ -1358,6 +1358,39 @@ pub fn app(app: stage::Client, windows: AppWindows) -> impl View {
 }
 "#;
 
+/// The stage engine the generated application instantiates.
+const STAGE_CORE: &str = r#"
+use stage_protocol::stage::{self, State};
+
+pub struct Engine {
+    state: State,
+}
+
+impl Default for Engine {
+    fn default() -> Self {
+        Self {
+            state: State {
+                count: 0,
+                entries: Vec::new(),
+                pinned: None,
+                mood: stage::Mood::Calm,
+            },
+        }
+    }
+}
+
+impl stage::Commands for Engine {
+    fn add(&mut self) -> Result<(), bern::CommandError> {
+        Ok(())
+    }
+}
+
+impl stage::Engine for Engine {
+    fn state(&self) -> &State {
+        &self.state
+    }
+}
+"#;
 /// A project of the interface `ui` over a small protocol, compiled from
 /// sources written under `dir`.
 fn stage_project(dir: &Path, ui: &str) -> (bern_compiler::Config, bern_compiler::Compiled) {
@@ -1378,15 +1411,21 @@ fn stage_project_with(
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, contents).unwrap();
     }
-    for (package, source) in [
-        ("stage-protocol", STAGE_PROTOCOL),
-        ("stage-ui", ui),
-        ("stage-core", ""),
+    let bern = workspace().join("crates/bern");
+    for (package, source, dependencies) in [
+        ("stage-protocol", STAGE_PROTOCOL, "bern = { path = %q }"),
+        ("stage-ui", ui, ""),
+        (
+            "stage-core",
+            STAGE_CORE,
+            "bern = { path = %q }\nstage-protocol = { path = \"../stage-protocol\" }",
+        ),
     ] {
         std::fs::create_dir_all(dir.join(package).join("src")).unwrap();
+        let dependencies = dependencies.replace("%q", &format!("{:?}", bern.display().to_string()));
         std::fs::write(
             dir.join(package).join("Cargo.toml"),
-            format!("[package]\nname = \"{package}\"\n"),
+            format!("[package]\nname = \"{package}\"\nedition = \"2024\"\n\n[dependencies]\n{dependencies}\n"),
         )
         .unwrap();
         std::fs::write(dir.join(package).join("src/lib.rs"), source).unwrap();
@@ -1858,4 +1897,142 @@ fn navigation_reset_is_generated_only_when_requested() {
         );
         assert!(code[watch..navigation].contains("b::session_set(c,"));
     }
+}
+
+/// Pointer events on a video, a stack, a button and a slider, a slider's
+/// hover and a player's state read in declarations.
+const POINTER_UI: &str = r#"
+use bern::prelude::*;
+
+#[bern::session]
+pub struct Draft {
+    pub level: f64,
+    pub hover: Option<f64>,
+}
+
+#[bern::players]
+pub struct Players {
+    pub preview: Player,
+}
+
+#[component]
+pub fn app(app: stage::Client, windows: AppWindows, players: Players, #[session] draft: Draft) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Stage" }, initial: open) {
+                Column {
+                    Video(id: preview, player: players.preview) {
+                        DoubleTap => players.preview.pause()
+                        ContextMenu {
+                            MenuItem(id: replay, label: tr! { "en" => "Replay" }) => players.preview.seek(0)
+                            Divider
+                        }
+                        WheelUp => players.preview.set_volume(1.0)
+                        WheelDown => players.preview.set_volume(0.0)
+                    }
+                    Stack {
+                        Text(content: tr! { "en" => "Layer" })
+                        DoubleTap => app.add()
+                        ContextMenu {
+                            MenuItem(id: again, label: tr! { "en" => "Again" }) => app.add()
+                        }
+                        WheelUp => app.add()
+                        WheelDown => app.add()
+                    }
+                    Button(id: wheel, label: tr! { "en" => "Wheel" }) {
+                        WheelDown => app.add()
+                    } => app.add()
+                    Slider(id: level, label: tr! { "en" => "Level" }, value: draft.level, hover: draft.hover, min: 0, max: 1) {
+                        WheelUp => app.add()
+                    }
+                    Progress(value: players.preview.progress)
+                    if players.preview.playing {
+                        Text(content: tr! { "en" => "{at} of {length}"; at: players.preview.position_ms, length: players.preview.duration })
+                    }
+                }
+            }
+        }
+    }
+}
+"#;
+
+/// Pointer events go on the widgets their element makes, through
+/// `b::Pointer`; a button keeps its own double tap and menu and takes only
+/// the wheel there; a slider takes the wheel before it scrolls its value.
+#[test]
+fn pointer_events_slider_hover_and_player_state_reach_the_runtime() {
+    let root = workspace();
+    let (config, compiled) = stage_project(
+        &root.join("target/bern-test/gtk-pointer-project"),
+        POINTER_UI,
+    );
+    let problems = GtkLinux.check(&compiled.app, &linux_target(&config));
+    assert!(problems.is_empty(), "{problems:?}");
+    let output = root.join("target/bern-test/gtk-pointer");
+    let _ = std::fs::remove_dir_all(&output);
+    let context = stage_context(&config, &compiled, &output);
+    for file in GtkLinux.generate(&compiled.app, &context).unwrap() {
+        let path = output.join(&file.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, &file.contents).unwrap();
+    }
+    let ui = std::fs::read_to_string(output.join("app/src/ui.rs")).unwrap();
+    assert!(!ui.contains("unsupported"), "{ui}");
+    assert_eq!(ui.matches("b::Pointer(p, c, ").count(), 4, "{ui}");
+    let video = &ui[ui.find("b::Pointer(p, c, ").unwrap()..ui.find("b::Video(p, c,").unwrap()];
+    for expected in [
+        "double_tap: Some(b::act(|c| b::media(c, b::MediaOp::Pause, \"preview\", vec![])))",
+        "menu: vec![Some(b::MenuItem { id: \"replay\"",
+        "b::MediaOp::Seek, \"preview\", vec![V::Int(0)]))), pick: None, paste: None }), None]",
+        "wheel_up: Some(b::act(|c| b::media(c, b::MediaOp::SetVolume, \"preview\", vec![V::Float(1.0)])))",
+        "wheel_down: Some(b::act(|c| b::media(c, b::MediaOp::SetVolume, \"preview\", vec![V::Float(0.0)])))",
+        "capture_wheel: false }, b::build(|p, c| {",
+    ] {
+        assert!(video.contains(expected), "missing `{expected}`:\n{video}");
+    }
+    let second = ui.match_indices("b::Pointer(p, c, ").nth(1).unwrap().0;
+    let stack = &ui[second..ui.find("b::Layers(p, c,").unwrap()];
+    assert!(
+        stack.contains("menu: vec![Some(b::MenuItem { id: \"again\""),
+        "{stack}"
+    );
+    for expected in [
+        // The button's own props carry no double tap or menu, and its
+        // event is no content.
+        "b::PointerProps { double_tap: None, menu: vec![], wheel_up: None, wheel_down: Some(",
+        "b::Button(p, c, b::ButtonProps { id: \"wheel\", ",
+        "menu: vec![], double_tap: None }, Some(b::act(",
+        "capture_wheel: true }",
+        "label_hidden: false, continuous: false, hover: Some(b::Field { session: 0, field: 1 }) }",
+        "b::player_state(\"preview\", \"progress\")",
+        "rt::truthy(&b::player_state(\"preview\", \"playing\"))",
+        "b::player_state(\"preview\", \"position_ms\")",
+        "b::player_state(\"preview\", \"duration\")",
+    ] {
+        assert!(ui.contains(expected), "missing `{expected}`:\n{ui}");
+    }
+    assert!(!ui.contains("b::ContentButton(p, c,"), "{ui}");
+    assert_eq!(ui.matches("capture_wheel: true").count(), 1, "{ui}");
+    // Type-check it against the runtime where GTK is installed.
+    let gtk = Command::new("pkg-config")
+        .args(["--exists", "gtk4 >= 4.14", "libadwaita-1 >= 1.5"])
+        .status()
+        .is_ok_and(|status| status.success());
+    if !gtk {
+        eprintln!("GTK 4.14 and libadwaita 1.5 not installed; skipping the type check");
+        return;
+    }
+    let result = Command::new("cargo")
+        .arg("check")
+        .arg("--manifest-path")
+        .arg(output.join("app/Cargo.toml"))
+        .arg("--target-dir")
+        .arg(root.join("target/bern-glue-linux"))
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "rustc rejected the generated application:\n{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
 }

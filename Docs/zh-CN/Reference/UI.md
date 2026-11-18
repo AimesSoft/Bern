@@ -356,6 +356,43 @@ Stack {
 }
 ```
 
+## 指针事件与播放器状态
+
+双击、右键与滚轮写在所作用的元素里。滚轮每滚一格执行一次动作；触控板的平滑滚动累加起来，每够一格执行一次。元素带有 `WheelUp` 或 `WheelDown` 时，它上面的滚动由它接住，外面的滚动视图不动。下例在视频上滚动滚轮调音量，双击切换全屏，右键打开菜单：
+
+```rust
+Video(id: screen, player: players.main, controls: none, label: tr! { "zh-Hans" => "画面", "en" => "Picture" }) {
+    DoubleTap => app.toggle_full_screen()
+    WheelUp => app.volume_up()
+    WheelDown => app.volume_down()
+    ContextMenu {
+        MenuItem(id: replay, label: tr! { "zh-Hans" => "从头播放", "en" => "Play from the Start" }) => players.main.seek(0)
+    }
+}
+```
+
+在 `Button` 上，指针按下后先等是否还有第二下，再执行按钮的动作或 `DoubleTap` 的动作之一。在其他元素上，单击仍交给里面的控件。
+
+`Slider(hover: draft.at)` 在指针位于滑块上时写入指针沿轨道的位置，`min` 处为 0，`max` 处为 1，离开后为 `None`；它不改变值。配合播放器状态，可以在进度条上显示指针下的时间。
+
+声明直接读取应用播放器的状态，写作 `players.<id>.<字段>`，不经过引擎：
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `position`、`duration` | `f64` | 秒；时长未知时 `duration` 为 0 |
+| `progress` | `f64` | `position` 除以 `duration`，0 到 1；时长未知时为 0 |
+| `position_ms`、`duration_ms` | `i64`、`Option<i64>` | 毫秒；时长未知时 `duration_ms` 为 `None` |
+| `playing`、`paused`、`buffering`、`ended`、`failed` | `bool` | 所处阶段；`buffering` 包括加载与等待数据 |
+| `seekable`、`volume`、`muted` | `bool`、`f64`、`bool` | 能否改变位置、0 到 1 的音量、是否静音 |
+
+秒数可以用 `{t, duration, m:ss}` 写出。下面的进度条中，动作收到的是用户选的比例，替换 `players.main.progress`：
+
+```rust
+Slider(id: seek, label: tr! { "zh-Hans" => "进度", "en" => "Position" }, label_hidden: true,
+    current: players.main.progress, hover: draft.at, min: 0, max: 1
+) => app.seek_fraction(players.main.progress)
+Text(content: tr! { "zh-Hans" => "{at, duration, m:ss} / {length, duration, m:ss}", "en" => "{at, duration, m:ss} / {length, duration, m:ss}"; at: players.main.position, length: players.main.duration })
+```
 ## 其他接口
 
 动画 SVG 是按需使用的独立组件，接口、资源声明、平台依赖与生命周期见[专项文档](../Implementation/Animated-SVG.md)。视频播放器、查询、模块、主题及命令协议的完整语义继续见[设计文档](../Design.md)与对应实现记录。

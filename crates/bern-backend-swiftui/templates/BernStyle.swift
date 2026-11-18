@@ -1019,6 +1019,9 @@ struct BernBleedingLayer: ViewModifier {
     let width: CGFloat
     let height: CGFloat
     let bleed: Bool
+    /// Its pointer events take the layer's box before it moves to its
+    /// place: what comes after the move measures where it was laid out.
+    var events: BernPointerEvents? = nil
     @Environment(\.bernSceneRoom) private var room
 
     func body(content: Content) -> some View {
@@ -1028,10 +1031,14 @@ struct BernBleedingLayer: ViewModifier {
         let right = room.map { x + width >= $0.width - 0.5 ? $0.x : 0 } ?? 0
         let top = room.map { y <= 0.5 ? $0.y : 0 } ?? 0
         let bottom = room.map { y + height >= $0.height - 0.5 ? $0.y : 0 } ?? 0
-        content
+        let layer = content
             .environment(\.bernSceneRoom, nil)
             .frame(width: max(0, width + left + right), height: max(0, height + top + bottom))
-            .offset(x: x - left, y: y - top)
+        if let events {
+            layer.modifier(events).offset(x: x - left, y: y - top)
+        } else {
+            layer.offset(x: x - left, y: y - top)
+        }
     }
 }
 
@@ -5194,6 +5201,109 @@ private struct BernDoubleTap: ViewModifier {
         )
         .accessibilityAction { if enabled { single() } }
     }
+}
+
+/// The pointer events of an element: a double click or tap runs
+/// `doubleTap` while single presses go on to the content, and turns of a
+/// wheel or the two-finger scroll of a trackpad run `wheelUp` and
+/// `wheelDown`, once per notch, where the system has them. `shaped` is
+/// false of a button, whose own shape decides where its presses land.
+/// None of it moves the element in the layout.
+struct BernPointerEvents: ViewModifier {
+    let doubleTap: (@MainActor () -> Void)?
+    let wheelUp: (@MainActor () -> Void)?
+    let wheelDown: (@MainActor () -> Void)?
+    let shaped: Bool
+    @Environment(\.isEnabled) private var enabled
+
+    func body(content: Content) -> some View {
+        content
+            .modifier(BernPointerShape(active: shaped && doubleTap != nil))
+            .simultaneousGesture(
+                TapGesture(count: 2).onEnded { _ in
+                    if enabled { doubleTap?() }
+                },
+                including: doubleTap != nil && enabled ? .all : .none
+            )
+            .background(BernWheelSource(up: wheelUp, down: wheelDown, enabled: enabled))
+    }
+}
+
+/// The whole box of an element hears its double tap, even where it draws
+/// nothing; without a double tap the box hit-tests as it did.
+private struct BernPointerShape: ViewModifier {
+    let active: Bool
+
+    func body(content: Content) -> some View {
+        if active { content.contentShape(Rectangle()) } else { content }
+    }
+}
+
+#if os(tvOS) || os(watchOS)
+/// No wheel or trackpad scrolls on a TV or a watch: nothing to hear.
+private struct BernWheelSource: View {
+    let up: (() -> Void)?
+    let down: (() -> Void)?
+    let enabled: Bool
+
+    var body: some View { SwiftUI.EmptyView() }
+}
+#endif
+
+extension View {
+    /// `hover`: where a mouse or trackpad pointer is along the slider's
+    /// track while it is over it, from 0 at the minimum to 1 at the
+    /// maximum, and nil once it leaves. The thumb's center travels the
+    /// track less a thumb's width, so the ends of the track are 0 and 1.
+    func bernSliderHover(_ hover: SwiftUI.Binding<Double?>) -> some View {
+        modifier(BernSliderHover(hover: hover))
+    }
+}
+
+private struct BernSliderHover: ViewModifier {
+    let hover: SwiftUI.Binding<Double?>
+    @Environment(\.layoutDirection) private var direction
+    @State private var width: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        #if os(macOS) || os(iOS)
+        content
+            .background(GeometryReader { proxy in
+                Color.clear
+                    .onAppear { width = proxy.size.width }
+                    .onChange(of: proxy.size.width) { _, size in width = size }
+            })
+            .onContinuousHover(coordinateSpace: .local) { phase in
+                switch phase {
+                case .active(let at): report(at.x)
+                case .ended: report(nil)
+                }
+            }
+        #else
+        content
+        #endif
+    }
+
+    #if os(macOS) || os(iOS)
+    /// The width of the system slider's thumb: its center travels the
+    /// track less this much, half of it inside each end of the track.
+    private var thumb: CGFloat {
+        #if os(macOS)
+        20
+        #else
+        28
+        #endif
+    }
+
+    private func report(_ at: CGFloat?) {
+        let room = width - thumb
+        let next = at.map { x -> Double in
+            let along = room > 0 ? min(1, max(0, Double((x - thumb / 2) / room))) : 0
+            return direction == .rightToLeft ? 1 - along : along
+        }
+        if hover.wrappedValue != next { hover.wrappedValue = next }
+    }
+    #endif
 }
 
 private struct BernSwipe: ViewModifier {

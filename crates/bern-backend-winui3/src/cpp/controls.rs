@@ -293,6 +293,7 @@ impl Generator<'_> {
                 "labelHidden",
                 (element.keyword("label_hidden") == Some("true")).then(|| "true".to_string()),
             ),
+            ("hover", self.field(element, "hover")),
         ]);
         out.line(format!("B::Slider(p, c, {});", designated(&fields)));
     }
@@ -475,7 +476,49 @@ impl Generator<'_> {
         }
     }
 
-    /// The items of a button's `ContextMenu`, a missing one for each
+    /// The pointer events an element declares, for `B::PointerEvents`; a
+    /// `Button` keeps its double tap and menu among its own props.
+    pub(super) fn pointer_events(&self, element: &Element) -> Option<String> {
+        if !bern_ir::spec::POINTER_OWNERS.contains(&element.kind.as_str())
+            || !element.has_pointer_events()
+        {
+            return None;
+        }
+        let button = element.kind == "Button";
+        let events = [
+            (
+                "doubleTap",
+                if button {
+                    None
+                } else {
+                    self.child_action(element, "DoubleTap")
+                },
+            ),
+            (
+                "menu",
+                if button {
+                    None
+                } else {
+                    self.context_menu_def(element)
+                },
+            ),
+            ("wheelUp", self.child_action(element, "WheelUp")),
+            ("wheelDown", self.child_action(element, "WheelDown")),
+        ];
+        if events.iter().all(|(_, value)| value.is_none()) {
+            return None;
+        }
+        let mut fields = events.to_vec();
+        // The native slider is the element's own: a double tap on its thumb
+        // is the slider's, and the wheel reaches it even where it takes it.
+        fields.push((
+            "own",
+            (element.kind == "Slider").then(|| "true".to_string()),
+        ));
+        Some(designated(&fields))
+    }
+
+    /// The items of an element's `ContextMenu`, a missing one for each
     /// divider.
     fn context_menu_def(&self, element: &Element) -> Option<String> {
         let items = element.context_menu()?;

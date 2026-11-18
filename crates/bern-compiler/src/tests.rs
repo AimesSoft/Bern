@@ -335,6 +335,7 @@ pub struct Draft {{
     pub mode: demo::Mode,
     pub file: MediaSource,
     pub size: f64,
+    pub hover: Option<f64>,
 }}
 
 #[component]
@@ -1180,7 +1181,15 @@ fn video_and_close_diagnostics() {
         ),
         (
             r#"Text(content: players.preview)"#,
-            "players are used by `Video(player: …)`",
+            "read a field of the player, such as `players.preview.position`",
+        ),
+        (
+            r#"Text(content: players.preview.speed)"#,
+            "read a field of the player, such as `players.preview.position`",
+        ),
+        (
+            r#"Text(content: players.extra.position)"#,
+            "player `extra` is not declared",
         ),
     ];
     for (body, expected) in video {
@@ -5560,4 +5569,175 @@ fn gesture_actions_are_metadata_and_stand_directly_in_their_owner() {
         let message = errors(body);
         assert!(message.contains(expected), "{body}: {message}");
     }
+}
+
+#[test]
+fn pointer_events_attach_to_visual_elements() {
+    let compiled = compile_ui(&wrap(
+        r#"Column {
+        Stack {
+            Text(content: app.title)
+            DoubleTap => app.add(1)
+            ContextMenu { MenuItem(id: copy, label: app.title) => app.add(2) }
+            WheelUp => app.add(3)
+            WheelDown => app.add(4)
+        }
+        Text(content: app.title) { WheelUp => app.add(5) }
+        Slider(id: level, label: app.title, value: draft.size, hover: draft.hover, min: 0, max: 1) {
+            WheelUp => app.add(6)
+            WheelDown => app.add(7)
+        }
+        Button(id: b, label: app.title) { WheelUp => app.add(8) } => app.add(9)
+    }"#,
+    ))
+    .unwrap_or_else(|errors| panic!("{errors:?}"));
+    let page = compiled.app.component("page").unwrap();
+    let mut owners = Vec::new();
+    page.body.walk(&mut |node| {
+        if let ir::Node::Element(element) = node
+            && element.has_pointer_events()
+        {
+            let events: Vec<&str> = ir::spec::POINTER_EVENTS
+                .iter()
+                .copied()
+                .filter(|kind| element.pointer_event(kind).is_some())
+                .collect();
+            assert!(!element.content().any(
+                |node| matches!(node, ir::Node::Element(e) if events.contains(&e.kind.as_str()))
+            ));
+            owners.push((element.kind.clone(), events));
+        }
+    });
+    assert_eq!(
+        owners,
+        vec![
+            (
+                "Stack".to_string(),
+                vec!["DoubleTap", "ContextMenu", "WheelUp", "WheelDown"]
+            ),
+            ("Text".to_string(), vec!["WheelUp"]),
+            ("Slider".to_string(), vec!["WheelUp", "WheelDown"]),
+            ("Button".to_string(), vec!["WheelUp"]),
+        ]
+    );
+    let mut hover = None;
+    page.body.walk(&mut |node| {
+        if let ir::Node::Element(slider) = node
+            && slider.kind == "Slider"
+        {
+            hover = slider.props.get("hover").cloned();
+        }
+    });
+    assert!(
+        matches!(&hover, Some(ir::Prop::Field { field }) if field.ty == bern_protocol::Type::optional(bern_protocol::Type::Float)),
+        "{hover:?}"
+    );
+    let errors = |body: &str| match compile_ui(&wrap(body)) {
+        Ok(_) => panic!("expected `{body}` to fail"),
+        Err(errors) => errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    };
+    for (body, expected) in [
+        (
+            r#"TextInput(id: t, label: app.title, value: draft.name) { DoubleTap => app.add(1) }"#,
+            "`TextInput` does not take children",
+        ),
+        (
+            r#"Text(content: app.title) { Spacer }"#,
+            "does not take children other than DoubleTap, ContextMenu, WheelUp, WheelDown",
+        ),
+        (
+            r#"Stack { Spacer WheelUp => app.add(1) WheelUp => app.add(2) }"#,
+            "at most one `WheelUp`",
+        ),
+        (
+            r#"Stack { Spacer ContextMenu { Divider } ContextMenu { Divider } }"#,
+            "at most one `ContextMenu`",
+        ),
+        (
+            r#"Stack { Spacer if draft.on { WheelDown => app.add(1) } }"#,
+            "direct child",
+        ),
+        (r#"Stack { Spacer WheelDown }"#, "B301"),
+        (
+            r#"Button(id: b, label: app.title) { Stack { Spacer DoubleTap => app.add(1) } } => app.add(2)"#,
+            "cannot hold `DoubleTap`",
+        ),
+        (
+            r#"Slider(id: s, label: app.title, value: draft.size, hover: draft.size, min: 0, max: 1)"#,
+            "an `Option<f64>` field",
+        ),
+    ] {
+        let message = errors(body);
+        assert!(message.contains(expected), "{body}: {message}");
+    }
+}
+
+#[test]
+fn declarations_read_player_state() {
+    let compiled = compile_project(
+        MEDIA_PROTOCOL,
+        &media_project(
+            "",
+            "",
+            r#"Column {
+                Video(id: preview, player: players.preview)
+                Progress(value: players.preview.progress)
+                if players.preview.playing {
+                    Text(content: players.preview.position_ms)
+                }
+            }"#,
+        ),
+    )
+    .unwrap_or_else(|errors| {
+        panic!(
+            "{}",
+            errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    });
+    let page = compiled.app.component("page").unwrap();
+    let mut read = Vec::new();
+    let mut visit = |expr: &ir::Expr| {
+        expr.walk(&mut |part| {
+            if let ir::ExprKind::Binding {
+                binding: ir::Binding::Player { player, field },
+            } = &part.kind
+            {
+                read.push((player.clone(), field.clone(), part.ty.clone()));
+            }
+        });
+    };
+    page.body.walk(&mut |node| match node {
+        ir::Node::Element(element) => {
+            for prop in element.props.values() {
+                match prop {
+                    ir::Prop::Expr { expr } => visit(expr),
+                    ir::Prop::Text { text } => text.exprs().into_iter().for_each(&mut visit),
+                    _ => {}
+                }
+            }
+        }
+        ir::Node::If(node) => {
+            for (condition, _) in &node.branches {
+                visit(condition);
+            }
+        }
+        _ => {}
+    });
+    use bern_protocol::Type;
+    assert_eq!(
+        read,
+        vec![
+            ("preview".into(), "progress".into(), Type::Float),
+            ("preview".into(), "playing".into(), Type::Bool),
+            ("preview".into(), "position_ms".into(), Type::Int),
+        ]
+    );
 }

@@ -964,3 +964,143 @@ fn touch_gestures_extract_actions_instead_of_rendering_them() {
         "ctx.win.touch.get()"
     );
 }
+
+#[test]
+fn pointer_events_attach_to_any_owner_without_rendering() {
+    use bern_ir::SessionOp;
+    let mut app = app();
+    app.sessions.push(SessionDef {
+        name: "pointer".into(),
+        fields: vec![
+            SessionFieldDef {
+                name: "flag".into(),
+                ty: Type::Bool,
+                initial: Value::Bool(false),
+            },
+            SessionFieldDef {
+                name: "hover".into(),
+                ty: Type::optional(Type::Float),
+                initial: Value::Optional(None),
+            },
+            SessionFieldDef {
+                name: "value".into(),
+                ty: Type::Float,
+                initial: Value::Float(0.0),
+            },
+        ],
+    });
+    let field = |index, ty| FieldRef {
+        session: "pointer".into(),
+        field: index,
+        ty,
+    };
+    let toggle = Action::Session {
+        field: field(0, Type::Bool),
+        op: SessionOp::Toggle,
+    };
+    let event = |kind: &str| {
+        let mut event = element(kind);
+        event.action = Some(toggle.clone());
+        Node::Element(event)
+    };
+    let mut item = element("MenuItem");
+    item.props.insert(
+        "label".into(),
+        dynamic_text(literal_expr(Value::Text("Remove".into()), Type::Text)),
+    );
+    item.action = Some(toggle.clone());
+    let mut menu = element("ContextMenu");
+    menu.children.push(Node::Element(item));
+    let mut text = element("Text");
+    text.props.insert(
+        "content".into(),
+        dynamic_text(literal_expr(Value::Text("Clip".into()), Type::Text)),
+    );
+    let mut column = element("Column");
+    column.children = vec![
+        Node::Element(text.clone()),
+        event("DoubleTap"),
+        Node::Element(menu),
+        event("WheelUp"),
+        event("WheelDown"),
+    ];
+    let generate = |node: Node| {
+        let mut out = Out::default();
+        Generator::new(&app).nodes(&mut out, &[node]);
+        out.finish()
+    };
+    let code = generate(Node::Element(column));
+    assert!(
+        code.contains("F.PointerEvents(p, ctx, { doubleTap: () =>"),
+        "{code}"
+    );
+    assert!(code.contains("menu: [{ id: \"menuitem\""), "{code}");
+    assert!(code.contains("wheelUp: () =>"), "{code}");
+    assert!(code.contains("wheelDown: () =>"), "{code}");
+    assert!(code.contains("B.Stack(p, ctx,"), "{code}");
+    assert_eq!(code.matches("B.Text(").count(), 1, "{code}");
+    assert!(!code.contains("unsupported"), "{code}");
+    assert!(!code.contains("control: true"), "{code}");
+    assert!(
+        !generate(Node::Element(text.clone())).contains("F.PointerEvents"),
+        "an element without events is built as before"
+    );
+
+    // A button keeps its own exclusive double tap and takes the wheel.
+    let mut button = element("Button");
+    button.children = vec![event("DoubleTap"), event("WheelUp")];
+    let code = generate(Node::Element(button));
+    assert!(
+        code.contains("F.PointerEvents(p, ctx, { wheelUp: () =>"),
+        "{code}"
+    );
+    assert!(code.contains("B.Button(p, ctx,"), "{code}");
+    assert!(!code.contains("ContentButton"), "{code}");
+    assert_eq!(code.matches("doubleTap:").count(), 1, "{code}");
+
+    let mut slider = element("Slider");
+    slider.props.insert(
+        "value".into(),
+        Prop::Field {
+            field: field(2, Type::Float),
+        },
+    );
+    slider.props.insert(
+        "hover".into(),
+        Prop::Field {
+            field: field(1, Type::optional(Type::Float)),
+        },
+    );
+    slider
+        .props
+        .insert("min".into(), Prop::Number { value: 0.0 });
+    slider
+        .props
+        .insert("max".into(), Prop::Number { value: 1.0 });
+    slider.children = vec![event("DoubleTap")];
+    let code = generate(Node::Element(slider));
+    assert!(code.contains("hover: ctx.s.pointer.hover"), "{code}");
+    assert!(code.contains("control: true"), "{code}");
+    assert!(code.contains("B.Slider(p, ctx,"), "{code}");
+
+    assert_eq!(
+        Generator::new(&app).expr(&Expr {
+            ty: Type::Float,
+            kind: ExprKind::Binding {
+                binding: Binding::Player {
+                    player: "preview".into(),
+                    field: "position".into(),
+                },
+            },
+        }),
+        "B.playerState(\"preview\", \"position\")"
+    );
+    for feature in [
+        bern_target_api::feature::POINTER_EVENTS,
+        bern_target_api::feature::WHEEL,
+        bern_target_api::feature::SLIDER_HOVER,
+        bern_target_api::feature::PLAYER_STATE,
+    ] {
+        assert!(crate::FEATURES.contains(&feature), "{feature}");
+    }
+}

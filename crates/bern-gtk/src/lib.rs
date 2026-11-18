@@ -33,6 +33,7 @@ mod palette;
 mod parent;
 mod picture;
 mod pictures;
+mod pointer;
 mod query;
 pub mod reactive;
 mod scene;
@@ -69,10 +70,11 @@ pub use features::{
 pub use glib;
 pub use host::{dispatch, run};
 pub use lazy::LazyGrid;
-pub use media::{MediaOp, Video, VideoProps, media, media_open};
+pub use media::{MediaOp, Video, VideoProps, media, media_open, player_state};
 pub use motion::{Curve, Decor, Decorate, Edge, Num, Transition, TransitionKind, staggered};
 pub use palette::{SearchItem, SearchItemProps, SearchPalette};
 pub use parent::Parent;
+pub use pointer::{Pointer, PointerProps};
 pub use query::{Query, QueryProps, own_query};
 pub use scene::{
     Accordion, AccordionProps, ControlGroup, ControlGroupProps, Flow, FlowProps, Marquee,

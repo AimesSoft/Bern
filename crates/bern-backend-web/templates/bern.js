@@ -1874,10 +1874,15 @@ export function buttonActivation(node, action, doubleTap, enabled = () => !node.
   });
 }
 
-/// A button's `ContextMenu`: a secondary click, a long touch, or the menu
-/// key or Shift+F10 opens `items` where it happened, and the press that
-/// opened it does not also press the button. Each item is a control of its
-/// own, reached while the menu is closed.
+/// Long touches that started the menu of an element, which the elements
+/// around it then leave.
+const heldForMenu = new WeakSet();
+
+/// An element's `ContextMenu`: a secondary click, a long touch, or the
+/// menu key or Shift+F10 opens `items` where it happened, and the press
+/// that opened it does not also press the element. Each item is a control
+/// of its own, reached while the menu is closed. A menu of an element
+/// inside opens instead of this one.
 export function contextMenu(node, ctx, label, items) {
   if (!items?.length) return;
   const list = el("div", { class: "bern-menu", role: "menu", popover: "auto" });
@@ -1931,12 +1936,14 @@ export function contextMenu(node, ctx, label, items) {
     timer = null;
   };
   node.addEventListener("contextmenu", (event) => {
+    if (event.defaultPrevented) return;
     event.preventDefault();
     cancel();
     openAt(event.clientX, event.clientY);
   });
   node.addEventListener("pointerdown", (event) => {
-    if (event.pointerType !== "touch") return;
+    if (event.pointerType !== "touch" || heldForMenu.has(event)) return;
+    heldForMenu.add(event);
     start = [event.clientX, event.clientY];
     timer = setTimeout(() => {
       timer = null;
@@ -1956,6 +1963,7 @@ export function contextMenu(node, ctx, label, items) {
     event.stopImmediatePropagation();
   }, true);
   node.addEventListener("keydown", (event) => {
+    if (event.defaultPrevented) return;
     if (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) {
       event.preventDefault();
       const rect = node.getBoundingClientRect();
@@ -2398,7 +2406,7 @@ export function Switch(p, ctx, { id, label, field, style, labelHidden }) {
   } else p.append(labelled(node, label, false));
 }
 
-export function Slider(p, ctx, { id, label, field, min, max, step, minIcon, maxIcon, labelHidden, controlled, continuous }, commit) {
+export function Slider(p, ctx, { id, label, field, hover, min, max, step, minIcon, maxIcon, labelHidden, controlled, continuous }, commit) {
   const input = el("input", { class: "bern-slider", type: "range", min, max, step: step ?? "any" });
   const fill = () => {
     const ratio = max > min ? (Number(input.value) - min) / (max - min) : 0;
@@ -2419,6 +2427,7 @@ export function Slider(p, ctx, { id, label, field, min, max, step, minIcon, maxI
   });
   input.addEventListener("change", () => { editing = false; if (controlled) field.set(Number(input.value)); commit?.(); });
   input.addEventListener("pointerup", () => { editing = false; });
+  if (hover) sliderHover(input, hover);
   mark(input, ctx, id);
   control(ctx, {
     target: () => target(ctx, id), role: "slider", label,
@@ -2435,6 +2444,35 @@ export function Slider(p, ctx, { id, label, field, min, max, step, minIcon, maxI
     bindAttr(input, "aria-label", label);
     p.append(track);
   } else p.append(labelled(track, label, true, input));
+}
+
+/// `hover`: where a mouse or pen over the slider stands along its track,
+/// from 0 at `min` to 1 at `max`, and `null` once it leaves. The thumb's
+/// center travels the track less a thumb's width.
+function sliderHover(input, hover) {
+  let over = false;
+  const write = (value) => {
+    if (hover.peek() !== value) hover.set(value);
+  };
+  const track = (event) => {
+    if (event.pointerType !== "mouse" && event.pointerType !== "pen") return;
+    over = true;
+    const rect = input.getBoundingClientRect();
+    const style = getComputedStyle(input);
+    const thumb = parseFloat(style.getPropertyValue?.("--bern-slider-thumb")) || 16;
+    const room = rect.width - thumb;
+    const along = room > 0 ? Math.min(1, Math.max(0, (event.clientX - rect.left - thumb / 2) / room)) : 0;
+    write(style.direction === "rtl" ? 1 - along : along);
+  };
+  const leave = () => {
+    if (!over) return;
+    over = false;
+    write(null);
+  };
+  input.addEventListener("pointerenter", track);
+  input.addEventListener("pointermove", track);
+  input.addEventListener("pointerleave", leave);
+  onCleanup(leave);
 }
 
 let typeaheadReset = 0;
@@ -4920,6 +4958,32 @@ const media = {
     host.mediaPost("bern_media_view", writer.finish());
   },
 };
+
+/// A field of a player's state a declaration reads, such as
+/// `players.preview.position`, following the hub's state. Before the hub
+/// reports the player, the state of one that has loaded nothing.
+export function playerState(id, field) {
+  const s = media.players.get().get(id) ?? null;
+  const position = s ? Number(s.positionMs) / 1000 : 0;
+  const duration = s?.durationMs != null ? Number(s.durationMs) / 1000 : 0;
+  const phase = s?.phase ?? PHASE.Idle;
+  switch (field) {
+    case "position": return position;
+    case "duration": return duration;
+    case "progress": return duration > 0 ? Math.min(1, Math.max(0, position / duration)) : 0;
+    case "position_ms": return s?.positionMs ?? 0n;
+    case "duration_ms": return s?.durationMs ?? null;
+    case "playing": return phase === PHASE.Playing;
+    case "paused": return phase === PHASE.Paused;
+    case "buffering": return phase === PHASE.Loading || phase === PHASE.Buffering;
+    case "ended": return phase === PHASE.Ended;
+    case "failed": return phase === PHASE.Failed;
+    case "seekable": return s?.seekable ?? false;
+    case "volume": return s?.volume ?? 1;
+    case "muted": return s?.muted ?? false;
+    default: throw new DecodeError(`unknown player field ${field}`);
+  }
+}
 
 export function mediaOpen(ctx, player, url) {
   media.command(ctx, "open", player, (writer) => writer.text(url));

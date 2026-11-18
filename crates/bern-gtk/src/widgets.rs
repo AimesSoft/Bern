@@ -1734,6 +1734,9 @@ pub struct SliderProps {
     /// The label names the slider for assistive technology only.
     pub label_hidden: bool,
     pub continuous: bool,
+    /// `hover`: where the pointer is along the track while it is over the
+    /// slider, from 0 at `min` to 1 at `max`, and `None` otherwise.
+    pub hover: Option<crate::ctx::Field>,
 }
 
 /// A slider. Bound to a draft, dragging only updates this window's draft
@@ -1826,6 +1829,9 @@ pub fn Slider(p: &Parent, ctx: &Ctx, props: SliderProps, commit: Option<Act>) {
             commit();
         }
     });
+    if let Some(field) = props.hover {
+        hover_track(ctx, &scale, field);
+    }
     let track = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     if let Some(icon) = props.min_icon {
         let image = icons::image(icon);
@@ -1869,6 +1875,48 @@ pub fn Slider(p: &Parent, ctx: &Ctx, props: SliderProps, commit: Option<Act>) {
             ..Actions::default()
         },
     );
+}
+
+/// Keep `field` at where the pointer is along the scale's track while it
+/// is over the scale, and `None` once it leaves. It is this window's draft
+/// only: the value, its preview and the commit are the slider's own.
+fn hover_track(ctx: &Ctx, scale: &gtk::Scale, field: crate::ctx::Field) {
+    let bound = Bound::new(ctx, field);
+    let weak = scale.downgrade();
+    let point: Rc<dyn Fn(Option<f64>)> = Rc::new(move |x| {
+        let fraction = x.and_then(|x| {
+            let scale = weak.upgrade()?;
+            let trough = scale.range_rect();
+            let (start, end) = scale.slider_range();
+            let flipped = scale.is_inverted() != (scale.direction() == gtk::TextDirection::Rtl);
+            Some(crate::gesture_state::track_fraction(
+                x,
+                f64::from(trough.x()),
+                f64::from(trough.width()),
+                f64::from((end - start).max(0)),
+                flipped,
+            ))
+        });
+        bound.set(match fraction {
+            Some(fraction) => Value::some(Value::Float(fraction)),
+            None => Value::none(),
+        });
+    });
+    let motion = gtk::EventControllerMotion::new();
+    {
+        let point = Rc::clone(&point);
+        motion.connect_enter(move |_, x, _| point(Some(x)));
+    }
+    {
+        let point = Rc::clone(&point);
+        motion.connect_motion(move |_, x, _| point(Some(x)));
+    }
+    {
+        let point = Rc::clone(&point);
+        motion.connect_leave(move |_| point(None));
+    }
+    scale.add_controller(motion);
+    scale.connect_unmap(move |_| point(None));
 }
 
 /// One option of a picker: its value, the name of its variant and its

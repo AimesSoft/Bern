@@ -236,15 +236,56 @@ impl WindowRef {
 
 /// A media player declared with `#[bern::players]`. Its methods are the
 /// standard media commands, usable as actions such as
-/// `=> players.preview.open(clip.source)`.
+/// `=> players.preview.open(clip.source)`; its fields are its playback
+/// state, readable in declarations such as `players.preview.position`.
 #[derive(Clone, Copy)]
 pub struct PlayerRef {
-    _private: (),
+    /// Playback position in seconds.
+    pub position: Binding<f64>,
+    /// Duration in seconds; 0 while unknown or for live media.
+    pub duration: Binding<f64>,
+    /// `position` over `duration`, from 0 to 1; 0 while the duration is
+    /// unknown.
+    pub progress: Binding<f64>,
+    /// Playback position in milliseconds.
+    pub position_ms: Binding<i64>,
+    /// Duration in milliseconds; `None` while unknown or for live media.
+    pub duration_ms: Binding<Option<i64>>,
+    /// Whether it is playing.
+    pub playing: Binding<bool>,
+    /// Whether it was paused.
+    pub paused: Binding<bool>,
+    /// Whether it is loading or waiting for data.
+    pub buffering: Binding<bool>,
+    /// Whether it played to the end.
+    pub ended: Binding<bool>,
+    /// Whether the media failed.
+    pub failed: Binding<bool>,
+    /// Whether `seek` can move the position.
+    pub seekable: Binding<bool>,
+    /// Volume between 0 and 1.
+    pub volume: Binding<f64>,
+    /// Whether audio is muted.
+    pub muted: Binding<bool>,
 }
 
 impl PlayerRef {
     pub const fn declared() -> Self {
-        Self { _private: () }
+        Self {
+            position: Binding::declared(),
+            duration: Binding::declared(),
+            progress: Binding::declared(),
+            position_ms: Binding::declared(),
+            duration_ms: Binding::declared(),
+            playing: Binding::declared(),
+            paused: Binding::declared(),
+            buffering: Binding::declared(),
+            ended: Binding::declared(),
+            failed: Binding::declared(),
+            seekable: Binding::declared(),
+            volume: Binding::declared(),
+            muted: Binding::declared(),
+        }
     }
     /// Load a new source (`media.open`).
     #[allow(unused_variables)]

@@ -139,6 +139,7 @@ enum FieldExpect {
     Text,
     Bool,
     Number,
+    OptionalNumber,
     File,
     Position,
     Picker,

@@ -716,6 +716,39 @@ fn state_of(player: &str) -> Option<PlayerState> {
     MEDIA.with(|media| media.players.with(|players| players.get(player).cloned()))
 }
 
+/// `players.<id>.<field>` of a declaration, from the hub's state of the
+/// player; read in an effect, it follows the player.
+pub fn player_state(player: &str, field: &str) -> Value {
+    player_field(state_of(player).as_ref(), field)
+}
+
+/// A field of `players.<id>`; before the hub reports the player, as for
+/// one that has loaded nothing.
+fn player_field(state: Option<&PlayerState>, field: &str) -> Value {
+    let phase = |phase: Phase| state.is_some_and(|state| state.is(phase));
+    let position = state.map_or(0, |state| state.position_ms.max(0));
+    let duration = state.and_then(|state| state.duration_ms);
+    match field {
+        "position" => Value::Float(position as f64 / 1000.0),
+        "duration" => Value::Float(duration.unwrap_or(0).max(0) as f64 / 1000.0),
+        "progress" => Value::Float(match duration {
+            Some(duration) if duration > 0 => (position as f64 / duration as f64).clamp(0.0, 1.0),
+            _ => 0.0,
+        }),
+        "position_ms" => Value::Int(position),
+        "duration_ms" => duration.map_or(Value::none(), |ms| Value::some(Value::Int(ms))),
+        "playing" => Value::Bool(phase(Phase::Playing)),
+        "paused" => Value::Bool(phase(Phase::Paused)),
+        "buffering" => Value::Bool(phase(Phase::Loading) || phase(Phase::Buffering)),
+        "ended" => Value::Bool(phase(Phase::Ended)),
+        "failed" => Value::Bool(phase(Phase::Failed)),
+        "seekable" => Value::Bool(state.is_some_and(|state| state.seekable)),
+        "volume" => Value::Float(state.map_or(1.0, |state| state.volume)),
+        "muted" => Value::Bool(state.is_some_and(|state| state.muted)),
+        _ => Value::Unit,
+    }
+}
+
 fn peek_state(player: &str) -> Option<PlayerState> {
     MEDIA.with(|media| untrack(|| media.players.with(|players| players.get(player).cloned())))
 }
@@ -1342,6 +1375,41 @@ mod tests {
         }
         assert!(state(&player("p", Phase::Loading, source, None)).controllable());
         assert!(!state(&player("p", Phase::Unavailable, source, None)).controllable());
+    }
+
+    #[test]
+    fn declarations_read_player_fields() {
+        let playing = state(&player("p", Phase::Playing, Some("x"), Some(130_000)));
+        let read = |field: &str| player_field(Some(&playing), field);
+        assert_eq!(read("position"), Value::Float(65.0));
+        assert_eq!(read("duration"), Value::Float(130.0));
+        assert_eq!(read("progress"), Value::Float(0.5));
+        assert_eq!(read("position_ms"), Value::Int(65_000));
+        assert_eq!(read("duration_ms"), Value::some(Value::Int(130_000)));
+        assert_eq!(read("playing"), Value::Bool(true));
+        assert_eq!(read("paused"), Value::Bool(false));
+        assert_eq!(read("seekable"), Value::Bool(true));
+        assert_eq!(read("volume"), Value::Float(0.5));
+        assert_eq!(read("muted"), Value::Bool(false));
+        // Past a duration that came short, and without one.
+        let over = state(&player("p", Phase::Buffering, Some("x"), Some(60_000)));
+        assert_eq!(player_field(Some(&over), "progress"), Value::Float(1.0));
+        assert_eq!(player_field(Some(&over), "buffering"), Value::Bool(true));
+        let live = state(&player("p", Phase::Loading, Some("x"), None));
+        assert_eq!(player_field(Some(&live), "duration"), Value::Float(0.0));
+        assert_eq!(player_field(Some(&live), "duration_ms"), Value::none());
+        assert_eq!(player_field(Some(&live), "progress"), Value::Float(0.0));
+        assert_eq!(player_field(Some(&live), "buffering"), Value::Bool(true));
+        for (phase, field) in [(Phase::Ended, "ended"), (Phase::Failed, "failed")] {
+            let shown = state(&player("p", phase, Some("x"), None));
+            assert_eq!(player_field(Some(&shown), field), Value::Bool(true));
+        }
+        // Before the hub reports the player.
+        assert_eq!(player_field(None, "position"), Value::Float(0.0));
+        assert_eq!(player_field(None, "position_ms"), Value::Int(0));
+        assert_eq!(player_field(None, "duration_ms"), Value::none());
+        assert_eq!(player_field(None, "playing"), Value::Bool(false));
+        assert_eq!(player_field(None, "volume"), Value::Float(1.0));
     }
 
     #[test]

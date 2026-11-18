@@ -1478,6 +1478,100 @@ export function Decorate(p, ctx, spec, build) {
   p.append(fragment);
 }
 
+// MARK: - Pointer events
+
+/// Presses that belong to a control inside an element rather than to it.
+const CONTROL_PRESS = 'button, a[href], input, select, textarea, [contenteditable="true"], [role="slider"]';
+/// Double taps an element inside another took first.
+const doubleTaken = new WeakSet();
+/// The wheel deltas of one notch, by `deltaMode`: 100 pixels, what
+/// Chromium reports for a notch and what trackpad scrolling adds up to;
+/// 3 lines, what browsers reporting lines scroll for a notch; one page.
+const WHEEL_NOTCH = [100, 3, 1];
+
+/// `DoubleTap`, `ContextMenu`, `WheelUp` and `WheelDown` of the element
+/// `build` makes, attached to its nodes as they are, so it lays out as it
+/// would without them. A `Button` passes only its wheel; an element inside
+/// another takes an event first.
+export function PointerEvents(p, ctx, { doubleTap, label, menu, wheelUp, wheelDown, control }, build) {
+  const fragment = document.createDocumentFragment();
+  build(fragment, ctx);
+  for (const node of [...fragment.children]) {
+    const inControl = (event) => {
+      if (control) return false;
+      const pressed = event.target?.closest?.(CONTROL_PRESS);
+      return Boolean(pressed && pressed !== node && node.contains(pressed));
+    };
+    if (doubleTap) doubleTapOn(node, doubleTap, inControl);
+    if (menu) B.contextMenu(node, ctx, label ?? (() => null), menu);
+    if (wheelUp || wheelDown) wheelOn(node, wheelUp, wheelDown);
+  }
+  p.append(fragment);
+}
+
+/// A double click, or two touch taps close in time and place, runs
+/// `action`; single presses go on to the content unchanged.
+function doubleTapOn(node, action, inControl) {
+  let down = null;
+  let tap = null;
+  // A browser may follow two touch taps with a dblclick of its own.
+  let quietUntil = -Infinity;
+  const run = (event) => {
+    doubleTaken.add(event);
+    action();
+  };
+  node.addEventListener("dblclick", (event) => {
+    if (doubleTaken.has(event) || inControl(event) || event.timeStamp < quietUntil) return;
+    run(event);
+  });
+  node.addEventListener("pointerdown", (event) => {
+    down = event.pointerType === "touch" && event.isPrimary !== false ? { x: event.clientX, y: event.clientY } : null;
+    if (!down) tap = null;
+  });
+  node.addEventListener("pointerup", (event) => {
+    if (event.pointerType !== "touch" || !down) return;
+    const moved = Math.hypot(event.clientX - down.x, event.clientY - down.y) > 10;
+    down = null;
+    if (moved || doubleTaken.has(event) || inControl(event)) {
+      tap = null;
+      return;
+    }
+    const at = { x: event.clientX, y: event.clientY, time: event.timeStamp };
+    if (tap && at.time - tap.time <= B.DOUBLE_TAP_WINDOW_MS && Math.hypot(at.x - tap.x, at.y - tap.y) <= 20) {
+      tap = null;
+      quietUntil = at.time + B.DOUBLE_TAP_WINDOW_MS;
+      run(event);
+    } else tap = at;
+  });
+  node.addEventListener("pointercancel", () => {
+    down = null;
+    tap = null;
+  });
+}
+
+/// Vertical wheel and trackpad scrolling over `node` runs `up` or `down`
+/// once per notch it adds up to, and scrolls nothing around it.
+function wheelOn(node, up, down) {
+  let notches = 0;
+  node.addEventListener("wheel", (event) => {
+    // With Ctrl, and as a trackpad pinch, the wheel zooms the page.
+    if (event.ctrlKey || event.defaultPrevented || !event.deltaY) return;
+    if (Math.abs(event.deltaY) < Math.abs(event.deltaX ?? 0)) return;
+    if (!(event.deltaY < 0 ? up : down)) return;
+    event.preventDefault();
+    const delta = event.deltaY / (WHEEL_NOTCH[event.deltaMode] ?? WHEEL_NOTCH[0]);
+    if (Math.sign(delta) !== Math.sign(notches)) notches = 0;
+    notches += delta;
+    // Fractions of a notch summed in floating point fall just short.
+    while (Math.abs(notches) >= 1 - 1e-9) {
+      const toward = Math.sign(notches);
+      notches -= toward;
+      if (Math.abs(notches) < 1e-9) notches = 0;
+      (toward < 0 ? up : down)?.();
+    }
+  }, { passive: false });
+}
+
 // MARK: - Reflow
 
 /// Children of `container` slide to new places with `motion` instead of

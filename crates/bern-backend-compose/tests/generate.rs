@@ -1912,3 +1912,205 @@ pub fn app(app: stage::Client, windows: AppWindows) -> impl View {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Pointer events on a video, a stack, a button and a slider, a slider's
+/// hover and a player's state read in declarations.
+const POINTER_UI: &str = r#"
+use bern::prelude::*;
+
+#[bern::session]
+pub struct Draft {
+    pub level: f64,
+    pub hover: Option<f64>,
+}
+
+#[bern::players]
+pub struct Players {
+    pub preview: Player,
+}
+
+#[component]
+pub fn app(app: stage::Client, windows: AppWindows, players: Players, #[session] draft: Draft) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Stage" }, initial: open) {
+                Column {
+                    Video(id: preview, player: players.preview) {
+                        DoubleTap => players.preview.pause()
+                        ContextMenu {
+                            MenuItem(id: replay, label: tr! { "en" => "Replay" }) => players.preview.seek(0)
+                            Divider
+                        }
+                        WheelUp => players.preview.set_volume(1.0)
+                        WheelDown => players.preview.set_volume(0.0)
+                    }
+                    Row {
+                        Stack {
+                            TextInput(id: note, label: tr! { "en" => "Note" }, value: draft.note)
+                            DoubleTap => app.add()
+                            ContextMenu {
+                                MenuItem(id: again, label: tr! { "en" => "Again" }) => app.add()
+                            }
+                            WheelUp => app.add()
+                            WheelDown => app.add()
+                        }
+                        Slider(id: level, label: tr! { "en" => "Level" }, value: draft.level, hover: draft.hover, min: 0, max: 1) {
+                            WheelUp => app.add()
+                        }
+                    }
+                    Button(id: wheel, label: tr! { "en" => "Wheel" }) {
+                        WheelDown => app.add()
+                    } => app.add()
+                    Progress(value: players.preview.progress)
+                    if players.preview.playing {
+                        Text(content: tr! { "en" => "{at} of {length}"; at: players.preview.position_ms, length: players.preview.duration })
+                    }
+                }
+            }
+        }
+    }
+}
+"#;
+
+#[test]
+fn pointer_events_slider_hover_and_player_state() {
+    let dir = workspace().join("target/bern-test/compose-pointer-events");
+    let ui = POINTER_UI.replace(
+        "pub hover: Option<f64>,",
+        "pub hover: Option<f64>,\n    pub note: String,",
+    );
+    let (config, compiled) = stage_project(&dir, &ui);
+    let problems = ComposeAndroid.check(&compiled.app, &android(&config));
+    assert!(problems.is_empty(), "{problems:?}");
+    let kotlin = bern_backend_compose::Generator::new(&compiled.app).generate("dev.bern.stage", 0);
+    // The video's events stand around it; its menu item is a control too.
+    assert!(
+        kotlin.contains("BernControl(\"main.replay\", \"button\""),
+        "{kotlin}"
+    );
+    assert!(
+        kotlin.contains("BernPointerEvents(Modifier, onDoubleTap = { BernMedia.command(BernMediaCommand.Pause, \"preview\", bernWindow.id) }, onWheelUp = { BernMedia.setVolume(\"preview\", 1.0, bernWindow.id) }, onWheelDown = { BernMedia.setVolume(\"preview\", 0.0, bernWindow.id) }, menu = { dismiss ->"),
+        "{kotlin}"
+    );
+    assert!(
+        kotlin.contains("{ dismiss(); BernMedia.seek(\"preview\", 0L, bernWindow.id) }"),
+        "{kotlin}"
+    );
+    let video = kotlin.find("BernVideo(").unwrap();
+    let wrapper = kotlin
+        .find("BernPointerEvents(Modifier, onDoubleTap")
+        .unwrap();
+    assert!(wrapper < video, "{kotlin}");
+    // The box around a stack takes the share of the row the stack would.
+    assert!(
+        kotlin.contains("BernPointerEvents(Modifier.weight(1f), onDoubleTap = { BernEngine.add(bernWindow) }, onWheelUp = { BernEngine.add(bernWindow) }, onWheelDown = { BernEngine.add(bernWindow) }, menu = { dismiss ->"),
+        "{kotlin}"
+    );
+    assert!(
+        kotlin.contains("Box(Modifier, contentAlignment = Alignment.Center) {"),
+        "{kotlin}"
+    );
+    // A slider in a row too, with where the pointer hovers.
+    assert!(
+        kotlin.contains(
+            "BernPointerEvents(Modifier.weight(1f), onWheelUp = { BernEngine.add(bernWindow) }) {"
+        ),
+        "{kotlin}"
+    );
+    assert!(
+        kotlin.contains("modifier = Modifier.testTag(\"main.level\"), onHover = { it: Double? -> session_Draft.hover = it })"),
+        "{kotlin}"
+    );
+    // A button takes its wheel on itself, beside its own action.
+    assert!(
+        kotlin.contains(".testTag(\"main.wheel\").bernWheel(null, { BernEngine.add(bernWindow) })) { BernEngine.add(bernWindow) }"),
+        "{kotlin}"
+    );
+    // Events are not content.
+    for event in ["DoubleTap", "WheelUp", "WheelDown", "ContextMenu"] {
+        assert!(
+            !kotlin.contains(&format!("unsupported {event}")),
+            "{kotlin}"
+        );
+    }
+    assert!(!kotlin.contains("BernContentButton("), "{kotlin}");
+    // Player state is read from the media state.
+    assert!(
+        kotlin.contains("BernProgress((BernMedia.fields(\"preview\").progress).toDouble()"),
+        "{kotlin}"
+    );
+    assert!(
+        kotlin.contains("if (BernMedia.fields(\"preview\").playing) {"),
+        "{kotlin}"
+    );
+    assert!(
+        kotlin.contains("BernMedia.fields(\"preview\").positionMs"),
+        "{kotlin}"
+    );
+    assert!(
+        kotlin.contains("BernMedia.fields(\"preview\").duration"),
+        "{kotlin}"
+    );
+    // A watch keeps the taps and menus, without a wheel or hovering.
+    let watch = bern_backend_compose::Generator::new(&compiled.app.on_watch())
+        .with_watch(true)
+        .generate("dev.bern.stage", 0);
+    assert!(
+        watch.contains("BernPointerEvents(Modifier, onDoubleTap = {"),
+        "{watch}"
+    );
+    assert!(!watch.contains("onWheelUp"), "{watch}");
+    assert!(!watch.contains("bernWheel("), "{watch}");
+    assert!(!watch.contains("onHover"), "{watch}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pointer_runtime_takes_no_room_and_lets_taps_through() {
+    let features = include_str!("../templates/BernFeatures.kt");
+    let views = include_str!("../templates/BernViews.kt");
+    let wear = include_str!("../templates/wear/BernWearPanels.kt");
+    let media = include_str!("../templates/BernMedia.kt");
+    let body = |source: &'static str, name: &str| {
+        let start = source.find(name).unwrap_or_else(|| panic!("{name}"));
+        let rest = &source[start..];
+        &rest[..rest.find("\n}\n").unwrap()]
+    };
+    let layout = body(features, "fun BernPointerBox(");
+    assert!(layout.contains("it.measure(constraints)"), "{layout}");
+    let taps = body(features, "fun Modifier.bernDoubleTapThrough(");
+    assert!(taps.contains("PointerEventPass.Initial"), "{taps}");
+    assert!(!taps.contains("detectTapGestures"), "{taps}");
+    assert_eq!(taps.matches(".consume()").count(), 1, "{taps}");
+    let wheel = body(features, "fun Modifier.bernWheel(");
+    assert!(wheel.contains("PointerEventType.Scroll"), "{wheel}");
+    assert!(wheel.contains("change.scrollDelta.y"), "{wheel}");
+    assert!(wheel.contains("change.consume()"), "{wheel}");
+    let hover = body(features, "fun Modifier.bernSliderHover(");
+    assert!(hover.contains("PointerType.Touch"), "{hover}");
+    assert!(
+        hover.contains("PointerEventType.Exit -> put(null)"),
+        "{hover}"
+    );
+    assert!(hover.contains("if (rtl) 1.0 - along else along"), "{hover}");
+    assert!(body(views, "fun BernPointerEvents(").contains("DropdownMenu("));
+    assert!(body(wear, "fun BernPointerEvents(").contains("BernWearDialog("));
+    let fields = body(media, "class BernPlayerFields(");
+    for field in [
+        "val position: Double",
+        "val duration: Double",
+        "val progress: Double",
+        "val positionMs: Long",
+        "val durationMs: Long?",
+        "val playing: Boolean",
+        "val paused: Boolean",
+        "val buffering: Boolean",
+        "val ended: Boolean",
+        "val failed: Boolean",
+        "val seekable: Boolean",
+        "val volume: Double get() = state?.volume ?: 1.0",
+        "val muted: Boolean",
+    ] {
+        assert!(fields.contains(field), "{field}");
+    }
+}

@@ -235,6 +235,9 @@ impl<'a> Generator<'a> {
             Binding::Window { field } if field == "fold" => literal(&Value::Float(0.0)),
             // `window.idle` and the window's size, `window.compact` …
             Binding::Window { field } => format!("c.WindowFlag({})", string(field)),
+            Binding::Player { player, field } => {
+                format!("c.Player({}, {})", string(player), string(field))
+            }
         }
     }
 

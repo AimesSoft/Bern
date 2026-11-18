@@ -73,6 +73,10 @@
 | `grid_cells` | 按列宽定行高的网格（`Grid(cell_ratio:, cell_extra:)`），格内内容顶对齐、可伸进行间距 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `size_classes` | 四档尺寸适配 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `text_formats` | 文本中的复数分支、日期、时长，以及显示变体字段的枚举标签（见[文本、内容与格式化](UI.md#文本内容与格式化)） | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `pointer_events` | 除 `Button` 外的可见元素上的 `DoubleTap` 与 `ContextMenu` | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `wheel` | 元素上的鼠标滚轮与触控板 `WheelUp`、`WheelDown` | 支持 | 支持 | —（忽略，警告） | 支持 | 支持 | 支持 | 支持 |
+| `slider_hover` | `Slider(hover:)` 写入指针沿轨道的悬停比例 `Option<f64>` | 支持 | 支持 | —（保持 `None`，警告） | 支持 | 支持 | 支持 | 支持 |
+| `player_state` | 在界面声明里直接读取 `players.<id>.<field>` | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 
 ## 不由上述功能标记完整表达的能力
 

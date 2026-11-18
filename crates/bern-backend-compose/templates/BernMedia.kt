@@ -105,6 +105,29 @@ data class BernPlayerState(
     }
 }
 
+/// The playback state a declaration reads of a player, such as
+/// `players.preview.position`: before the player reports, nothing has
+/// played and the volume is the hub's default.
+class BernPlayerFields(private val state: BernPlayerState?) {
+    val positionMs: Long get() = state?.positionMs ?: 0L
+    val durationMs: Long? get() = state?.durationMs
+    val position: Double get() = positionMs / 1000.0
+    val duration: Double get() = (durationMs ?: 0L) / 1000.0
+    val progress: Double
+        get() {
+            val total = durationMs ?: 0L
+            return if (total <= 0L) 0.0 else (positionMs.toDouble() / total).coerceIn(0.0, 1.0)
+        }
+    val playing: Boolean get() = state?.phase == BernMediaPhase.Playing
+    val paused: Boolean get() = state?.phase == BernMediaPhase.Paused
+    val buffering: Boolean get() = state?.phase == BernMediaPhase.Loading || state?.phase == BernMediaPhase.Buffering
+    val ended: Boolean get() = state?.phase == BernMediaPhase.Ended
+    val failed: Boolean get() = state?.phase == BernMediaPhase.Failed
+    val seekable: Boolean get() = state?.seekable ?: false
+    val volume: Double get() = state?.volume ?: 1.0
+    val muted: Boolean get() = state?.muted ?: false
+}
+
 /// Media commands, in the order of the media catalog.
 enum class BernMediaCommand { Players, State, Open, Play, Pause, Seek, SetVolume, SetMuted }
 
@@ -112,6 +135,8 @@ enum class BernMediaCommand { Players, State, Open, Play, Pause, Seek, SetVolume
 object BernMedia {
     val players = mutableStateMapOf<String, BernPlayerState>()
     private var revision = 0L
+
+    fun fields(player: String) = BernPlayerFields(players[player])
     lateinit var backend: BernMediaBackend
         private set
     private val surfaces = HashMap<String, Pair<PlayerView, String>>()

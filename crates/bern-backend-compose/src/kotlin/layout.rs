@@ -274,9 +274,10 @@ impl Generator<'_> {
         modifiers
     }
 
-    pub(super) fn column_or_row(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+    /// The share of the column or row it stands in that a `Column` or `Row`
+    /// takes there.
+    pub(super) fn line_flex(&self, element: &Element, ctx: &Ctx) -> &'static str {
         let column = element.kind == "Column";
-        let gap_dp = self.length(element, "gap").unwrap_or_else(|| "8.dp".into());
         // A column in a column (a row in a row) holding a spacer takes the
         // room its siblings leave, as on the other targets, instead of all
         // of it: a foot after it stays on screen.
@@ -296,17 +297,22 @@ impl Generator<'_> {
         let fills_row = ctx.scope == Scope::Row
             && element.prop("width").is_none()
             && self.element_fills_width(element, &mut HashSet::new());
-        let along = match (spaced, fills_row, column, ctx.scope) {
+        match (spaced, fills_row, column, ctx.scope) {
             (true, _, true, Scope::Column)
             | (_, true, _, Scope::Row)
             | (true, _, false, Scope::Row) => ".weight(1f)",
             (true, _, true, Scope::Other) => ".bernFlexible(row = false)",
             (true, _, false, Scope::Other) => ".bernFlexible(column = false)",
             _ => "",
-        };
+        }
+    }
+
+    pub(super) fn column_or_row(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let column = element.kind == "Column";
+        let gap_dp = self.length(element, "gap").unwrap_or_else(|| "8.dp".into());
         let modifier = format!(
             "Modifier{}{}{}{}",
-            along,
+            self.line_flex(element, ctx),
             self.reflow(element),
             self.size_modifiers(element),
             self.padding(element)
@@ -384,6 +390,21 @@ impl Generator<'_> {
         }
     }
 
+    /// Whether a stack takes the room the others in its row or column leave.
+    /// In a row, a stack around a field does, as the field would on its own.
+    /// In a column, a stack around a scroll view does too, as on the other
+    /// targets: it fills what it is given, and what follows the stack would
+    /// get nothing.
+    pub(super) fn stack_weighted(&self, element: &Element, ctx: &Ctx) -> bool {
+        (ctx.scope == Scope::Row
+            && element.prop("width").is_none()
+            && self.element_fills_width(element, &mut HashSet::new()))
+            || (ctx.scope == Scope::Column
+                && !ctx.scroll_content
+                && element.prop("height").is_none()
+                && self.fills_height(&element.children, &mut HashSet::new()))
+    }
+
     pub(super) fn stack(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         let alignment = stack_alignment(element.keyword("align"));
         // A styled stack draws its surface; a disabled one takes no
@@ -410,19 +431,7 @@ impl Generator<'_> {
             (false, true) => ".fillMaxWidth()",
             (false, false) => "",
         };
-        // In a row, a stack around a field takes the room its neighbours
-        // leave, as the field would on its own.
-        // In a column, a stack around a scroll view does too, as on the
-        // other targets: it fills what it is given, and what follows the
-        // stack would get nothing.
-        let under_bars = if (ctx.scope == Scope::Row
-            && element.prop("width").is_none()
-            && self.element_fills_width(element, &mut HashSet::new()))
-            || (ctx.scope == Scope::Column
-                && !ctx.scroll_content
-                && element.prop("height").is_none()
-                && self.fills_height(&element.children, &mut HashSet::new()))
-        {
+        let under_bars = if self.stack_weighted(element, ctx) {
             format!("{under_bars}.weight(1f)")
         } else {
             under_bars.to_string()

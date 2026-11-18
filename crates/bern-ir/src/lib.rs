@@ -854,6 +854,50 @@ pub enum Binding {
     },
     /// UI state of the hosting window, such as `window.idle`.
     Window { field: String },
+    /// Playback state of an application player, such as
+    /// `players.preview.position`: one of [`PLAYER_FIELDS`], which the
+    /// frontend reads from its own media state.
+    Player { player: String, field: String },
+}
+
+/// The fields of a player a declaration reads, and their types, derived
+/// from the player state the media hub reports:
+///
+/// - `position`, `duration`: seconds; `duration` is 0 while unknown.
+/// - `progress`: `position` over `duration`, from 0 to 1; 0 while the
+///   duration is unknown.
+/// - `position_ms`, `duration_ms`: milliseconds, as the hub reports them;
+///   `duration_ms` is `None` while unknown.
+/// - `playing`, `paused`, `buffering` (loading or buffering), `ended`,
+///   `failed`: the phase.
+/// - `seekable`, `volume` (0 to 1), `muted`.
+pub const PLAYER_FIELDS: &[&str] = &[
+    "position",
+    "duration",
+    "progress",
+    "position_ms",
+    "duration_ms",
+    "playing",
+    "paused",
+    "buffering",
+    "ended",
+    "failed",
+    "seekable",
+    "volume",
+    "muted",
+];
+
+/// The type of a player field of [`PLAYER_FIELDS`].
+pub fn player_field_type(field: &str) -> Option<Type> {
+    Some(match field {
+        "position" | "duration" | "progress" | "volume" => Type::Float,
+        "position_ms" => Type::Int,
+        "duration_ms" => Type::optional(Type::Int),
+        "playing" | "paused" | "buffering" | "ended" | "failed" | "seekable" | "muted" => {
+            Type::Bool
+        }
+        _ => return None,
+    })
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1146,7 +1190,28 @@ impl Element {
     pub fn has_content(&self) -> bool {
         self.children
             .iter()
-            .any(|node| !matches!(node, Node::Element(menu) if matches!(menu.kind.as_str(), "ContextMenu" | "DoubleTap" | "OnCommit")))
+            .any(|node| !matches!(node, Node::Element(event) if event.kind == "OnCommit" || spec::POINTER_EVENTS.contains(&event.kind.as_str())))
+    }
+
+    /// Its pointer event declaration of `kind`, one of
+    /// [`spec::POINTER_EVENTS`], if it has one.
+    pub fn pointer_event(&self, kind: &str) -> Option<&Element> {
+        self.children.iter().find_map(|node| match node {
+            Node::Element(event) if event.kind == kind => Some(event),
+            _ => None,
+        })
+    }
+
+    /// Whether it declares any of [`spec::POINTER_EVENTS`].
+    pub fn has_pointer_events(&self) -> bool {
+        self.children.iter().any(
+            |node| matches!(node, Node::Element(event) if spec::POINTER_EVENTS.contains(&event.kind.as_str())),
+        )
+    }
+
+    /// Its visual children: the nodes besides menus and event declarations.
+    pub fn content(&self) -> impl Iterator<Item = &Node> {
+        self.children.iter().filter(|node| !matches!(node, Node::Element(event) if event.kind == "OnCommit" || spec::POINTER_EVENTS.contains(&event.kind.as_str())))
     }
 
     pub fn keyword(&self, name: &str) -> Option<&str> {
@@ -1715,8 +1780,9 @@ pub fn lazy_grid_items(grid: &Element) -> Option<&Element> {
     if grid.kind != "Grid" || grid.keyword("masonry") == Some("true") {
         return None;
     }
-    match grid.children.as_slice() {
-        [Node::Element(each)]
+    let mut content = grid.content();
+    match (content.next(), content.next()) {
+        (Some(Node::Element(each)), None)
             if each.kind == "ForEach"
                 && each.template.is_some()
                 && each.expr("items").is_some()
@@ -2366,5 +2432,24 @@ mod tests {
         let mut count = 0;
         tree.walk(&mut |_| count += 1);
         assert_eq!(count, seen.len());
+    }
+
+    #[test]
+    fn a_lazy_grid_with_pointer_events_stays_lazy() {
+        let Node::Element(grid) = element(
+            "Grid",
+            vec![
+                keyed_rows(),
+                element("DoubleTap", vec![]),
+                element("ContextMenu", vec![]),
+                element("WheelUp", vec![]),
+            ],
+        ) else {
+            unreachable!()
+        };
+        assert!(
+            lazy_grid_items(&grid).is_some(),
+            "pointer events stand beside the grid, not among its cells"
+        );
     }
 }

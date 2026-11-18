@@ -103,6 +103,7 @@ impl Checker<'_> {
                     FieldExpect::Text => ty == Type::Text,
                     FieldExpect::Bool => ty == Type::Bool,
                     FieldExpect::Number => ty == Type::Float,
+                    FieldExpect::OptionalNumber => ty == Type::optional(Type::Float),
                     FieldExpect::File => {
                         let source = Type::Record {
                             name: bern_media::MEDIA_SOURCE.into(),
@@ -124,6 +125,7 @@ impl Checker<'_> {
                         FieldExpect::Text => "a `String` field",
                         FieldExpect::Bool => "a `bool` field",
                         FieldExpect::Number => "an `f64` field",
+                        FieldExpect::OptionalNumber => "an `Option<f64>` field",
                         FieldExpect::File => "a `MediaSource` or `Option<MediaSource>` field",
                         FieldExpect::Position => {
                             "an `i64` or `String` field, like the keys of the items"
@@ -367,11 +369,20 @@ impl Checker<'_> {
                 return None;
             }
             Root::Players => {
-                self.error(
-                    path.span(),
-                    "players are used by `Video(player: …)` and in actions such as `players.preview.play()`",
-                );
-                return None;
+                let id = self.player_ref(&path.segments[..path.segments.len().min(2)], scope)?;
+                let field = rest.get(1).map(ToString::to_string);
+                let ty = field.as_deref().and_then(ir::player_field_type);
+                let (Some(field), Some(ty), 3) = (field, ty, path.segments.len()) else {
+                    self.error(
+                        path.span(),
+                        format!(
+                            "read a field of the player, such as `players.{id}.position`: {}",
+                            ir::PLAYER_FIELDS.join(", ")
+                        ),
+                    );
+                    return None;
+                };
+                (ir::Binding::Player { player: id, field }, ty)
             }
             Root::Session(session) => {
                 let Some(first) = rest.first() else {

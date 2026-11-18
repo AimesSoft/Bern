@@ -2,6 +2,7 @@
 //! components and windows.
 
 use super::{Generator, Out, float, some, string};
+use bern_ir::spec::POINTER_OWNERS;
 use bern_ir::{
     Action, ComponentArg, ComponentDef, Element, IfLetNode, IfNode, MatchNode, Node, ParamKind,
     WindowDef,
@@ -87,10 +88,10 @@ impl Generator<'_> {
                 match decoration {
                     Some(decor) => {
                         out.open(format!("b::Decorate(p, c, {decor}, b::build(|p, c| {{"));
-                        self.element(out, element);
+                        self.pointer_element(out, element);
                         out.close("}));");
                     }
-                    None => self.element(out, element),
+                    None => self.pointer_element(out, element),
                 }
                 if placement.is_some() {
                     out.close("}));");
@@ -222,6 +223,45 @@ impl Generator<'_> {
         })
     }
 
+    /// An element with the pointer events it declares, on the widgets it
+    /// makes. A `Button` takes its double tap and menu itself.
+    fn pointer_element(&self, out: &mut Out, element: &Element) {
+        // `self.action` is already the `Some(b::act(..))` or `None` text.
+        let event_action = |kind: &str| {
+            element
+                .pointer_event(kind)
+                .map(|event| self.action(event))
+                .unwrap_or_else(|| "None".into())
+        };
+        let props = match element.kind.as_str() {
+            "Button"
+                if ["WheelUp", "WheelDown"]
+                    .iter()
+                    .any(|kind| element.pointer_event(kind).is_some()) =>
+            {
+                format!(
+                    "b::PointerProps {{ double_tap: None, menu: vec![], wheel_up: {}, wheel_down: {}, capture_wheel: false }}",
+                    event_action("WheelUp"),
+                    event_action("WheelDown"),
+                )
+            }
+            "Button" => return self.element(out, element),
+            kind if POINTER_OWNERS.contains(&kind) && element.has_pointer_events() => format!(
+                "b::PointerProps {{ double_tap: {}, menu: {}, wheel_up: {}, wheel_down: {}, capture_wheel: {} }}",
+                event_action("DoubleTap"),
+                self.context_menu(element),
+                event_action("WheelUp"),
+                event_action("WheelDown"),
+                // A slider scrolls its value by default.
+                kind == "Slider",
+            ),
+            _ => return self.element(out, element),
+        };
+        out.open(format!("b::Pointer(p, c, {props}, b::build(|p, c| {{"));
+        self.element(out, element);
+        out.close("}));");
+    }
+
     fn element(&self, out: &mut Out, element: &Element) {
         match element.kind.as_str() {
             "Text" => self.text_element(out, element),
@@ -317,7 +357,7 @@ impl Generator<'_> {
             | "MenuBar" | "CommandMenu" | "CommandItem"
             // The application builds the status item's menu.
             | "StatusItem"
-            | "Pattern" | "TabAccessory" | "PickerOption" | "TableColumn" | "TableMenu" | "ContextMenu" | "DoubleTap" | "OnCommit" => {
+            | "Pattern" | "TabAccessory" | "PickerOption" | "TableColumn" | "TableMenu" | "ContextMenu" | "DoubleTap" | "WheelUp" | "WheelDown" | "OnCommit" => {
                 // Realized by their parents.
             }
             other => out.line(format!("/* unsupported {other} */")),

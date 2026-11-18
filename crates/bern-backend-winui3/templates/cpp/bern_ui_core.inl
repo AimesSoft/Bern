@@ -211,6 +211,9 @@ struct Ctx {
 
     /// `window.idle`, `window.compact` and the window's other sizes.
     Value WindowFlag(std::string_view name) const;
+    /// `players.<id>.<field>`: the hub's state of the player, as this
+    /// front end last received it.
+    Value Player(std::string_view player, std::string_view field) const;
 
     Value Read(Field field) const;
     Value Peek(Field field) const;
@@ -1630,6 +1633,27 @@ inline Value Ctx::WindowFlag(std::string_view name) const {
     // A Windows PC has a keyboard.
     if (name == "keyboard") return Value::Bool(true);
     return Value::Bool(win->size.Get() == name);
+}
+inline Value Ctx::Player(std::string_view player, std::string_view field) const {
+    // Before the hub reports the player: nothing playing, the hub's
+    // default volume.
+    auto state = Media::State(std::string(player)).value_or(PlayerState{});
+    double position = static_cast<double>(state.positionMs) / 1000;
+    double duration = state.durationMs ? static_cast<double>(*state.durationMs) / 1000 : 0.0;
+    if (field == "position") return Value::Float(position);
+    if (field == "duration") return Value::Float(duration);
+    if (field == "progress") return Value::Float(duration > 0 ? (std::clamp)(position / duration, 0.0, 1.0) : 0.0);
+    if (field == "position_ms") return Value::Int(state.positionMs);
+    if (field == "duration_ms") return state.durationMs ? Value::Some(Value::Int(*state.durationMs)) : Value::None();
+    if (field == "playing") return Value::Bool(state.Is(Phase::Playing));
+    if (field == "paused") return Value::Bool(state.Is(Phase::Paused));
+    if (field == "buffering") return Value::Bool(state.Is(Phase::Loading) || state.Is(Phase::Buffering));
+    if (field == "ended") return Value::Bool(state.Is(Phase::Ended));
+    if (field == "failed") return Value::Bool(state.Is(Phase::Failed));
+    if (field == "seekable") return Value::Bool(state.seekable);
+    if (field == "volume") return Value::Float(state.volume);
+    if (field == "muted") return Value::Bool(state.muted);
+    return Value::Unit();
 }
 inline double B::Len::Now(Ctx const& ctx) const {
     if (fixed) return *fixed;

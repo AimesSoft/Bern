@@ -82,6 +82,42 @@ struct BernPlayerState: Equatable {
     }
 }
 
+/// The fields of one player a declaration reads, such as
+/// `players.preview.position`: the hub's state for it, or, while the hub
+/// has not reported the player, the state of one that has loaded nothing.
+struct BernPlayerReading {
+    let state: BernPlayerState?
+
+    init(_ state: BernPlayerState?) {
+        self.state = state
+    }
+
+    /// Seconds played.
+    var position: Double { Double(state?.positionMs ?? 0) / 1000 }
+    /// Seconds in total; 0 while unknown.
+    var duration: Double { Double(state?.durationMs ?? 0) / 1000 }
+    /// `position` over `duration`, from 0 to 1; 0 while the duration is
+    /// unknown.
+    var progress: Double {
+        guard let duration = state?.durationMs, duration > 0 else { return 0 }
+        return min(1, max(0, Double(state?.positionMs ?? 0) / Double(duration)))
+    }
+    /// Milliseconds played, as the hub reports them.
+    var positionMs: Int64 { state?.positionMs ?? 0 }
+    /// Milliseconds in total; nil while unknown.
+    var durationMs: Int64? { state?.durationMs }
+    var playing: Bool { state?.phase == .playing }
+    var paused: Bool { state?.phase == .paused }
+    /// Loading or buffering.
+    var buffering: Bool { state?.phase == .loading || state?.phase == .buffering }
+    var ended: Bool { state?.phase == .ended }
+    var failed: Bool { state?.phase == .failed }
+    var seekable: Bool { state?.seekable ?? false }
+    /// From 0 to 1; 1 before the hub reports the player.
+    var volume: Double { state?.volume ?? 1 }
+    var muted: Bool { state?.muted ?? false }
+}
+
 /// Media commands, in the order of the media catalog.
 enum BernMediaCommand: UInt32 {
     case players, state, open, play, pause, seek, setVolume, setMuted

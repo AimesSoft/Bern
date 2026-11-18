@@ -57,6 +57,9 @@ pub enum PropKind {
     BoolField,
     /// Writable session float field.
     NumberField,
+    /// Writable session `Option<f64>` field, written by the element and
+    /// cleared to `None` when what it reports ends.
+    OptionalNumberField,
     /// Writable session enum field whose variants all carry labels.
     PickerField,
     /// Writable session enum field selecting among child items.
@@ -203,6 +206,8 @@ impl ComponentSpec {
                 | "QueryStatusHeader"
                 | "ContextMenu"
                 | "DoubleTap"
+                | "WheelUp"
+                | "WheelDown"
                 | "OnCommit"
                 | "ScreenBrightness"
         )
@@ -210,6 +215,33 @@ impl ComponentSpec {
 }
 
 pub use bern_protocol::shortcut::{SHORTCUT_KEYS, parse_shortcut};
+
+/// Pointer events an element declares as children: a double click or
+/// tap, a secondary-click menu and wheel turns. They are not visual
+/// content, and an element has at most one of each.
+pub const POINTER_EVENTS: &[&str] = &["DoubleTap", "ContextMenu", "WheelUp", "WheelDown"];
+
+/// The elements that take [`POINTER_EVENTS`]: a `Button`, the visual
+/// leaves and the layout containers. Menus, pickers, text input and
+/// structure keep their own pointer behaviour; wrap such content in a
+/// `Stack` to give it events.
+pub const POINTER_OWNERS: &[&str] = &[
+    "Button",
+    "Video",
+    "Slider",
+    "Image",
+    "Svg",
+    "Text",
+    "Label",
+    "Progress",
+    "Column",
+    "Row",
+    "Grid",
+    "Stack",
+    "Flow",
+    "ScaleBox",
+    "Positioned",
+];
 
 /// File categories a control may accept besides `.ext` extensions.
 pub const FILE_KINDS: &[&str] = &["any", "video", "audio", "picture", "folder"];
@@ -1242,12 +1274,32 @@ pub const COMPONENTS: &[ComponentSpec] = &[
     },
     ComponentSpec {
         action: ActionRule::Required,
-        placement: Placement::Within(&["Button"]),
+        placement: Placement::Within(POINTER_OWNERS),
         ..spec(
             "DoubleTap",
             &[],
             Children::None,
-            "An exclusive double-click or double-tap action of its Button; it is not visual content",
+            "A double-click or double-tap action of the element it stands in; on a `Button` it is exclusive with the button's own action. It is not visual content",
+        )
+    },
+    ComponentSpec {
+        action: ActionRule::Required,
+        placement: Placement::Within(POINTER_OWNERS),
+        ..spec(
+            "WheelUp",
+            &[],
+            Children::None,
+            "An action run once for each notch the wheel or trackpad scrolls up over the element it stands in, the way that would move a scroll view toward its top; the element then takes that scrolling. It is not visual content",
+        )
+    },
+    ComponentSpec {
+        action: ActionRule::Required,
+        placement: Placement::Within(POINTER_OWNERS),
+        ..spec(
+            "WheelDown",
+            &[],
+            Children::None,
+            "An action run once for each notch the wheel or trackpad scrolls down over the element it stands in; the element then takes that scrolling. It is not visual content",
         )
     },
     ComponentSpec {
@@ -1261,12 +1313,12 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         )
     },
     ComponentSpec {
-        placement: Placement::Within(&["Button"]),
+        placement: Placement::Within(POINTER_OWNERS),
         ..spec(
             "ContextMenu",
             &[],
             Children::Only(&["MenuItem", "Divider"]),
-            "The menu its `Button` opens with a secondary click or a long press, such as what can be done with a song in a list; it is not part of the button's content",
+            "The menu the element it stands in opens with a secondary click or a long press, such as what can be done with a song in a list; it is not part of the element's content",
         )
     },
     ComponentSpec {
@@ -1658,6 +1710,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("value", PropKind::NumberField),
                 opt("current", PropKind::NumberValue),
                 opt("continuous", PropKind::Flag),
+                opt("hover", PropKind::OptionalNumberField),
                 req("min", PropKind::Number),
                 req("max", PropKind::Number),
                 opt("step", PropKind::Number),
@@ -1666,7 +1719,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 FEATURE,
             ],
             Children::None,
-            "Range value previewed in the session; the action runs on commit",
+            "Range value previewed in the session; the action runs on commit. `hover` holds where the pointer is along the track, from 0 at `min` to 1 at `max`, while it is over the slider, and `None` otherwise",
         )
     },
     ComponentSpec {
@@ -1858,7 +1911,7 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
     let content = shape.children.as_deref().map(|children| {
         children
             .iter()
-            .filter(|child| !matches!(child, ChildShape::Element("ContextMenu" | "DoubleTap")))
+            .filter(|child| !matches!(child, ChildShape::Element(name) if POINTER_EVENTS.contains(name)))
             .count()
     });
     if spec.name == "Button" && content.is_some_and(|count| count > 0) {
@@ -2141,16 +2194,34 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
         _ => {}
     }
     let children = shape.children.as_deref().unwrap_or(&[]);
+    // Pointer events stand beside an owner's content, not in it.
+    let events = POINTER_OWNERS.contains(&spec.name);
+    let is_event = |child: &ChildShape<'_>| {
+        events && matches!(child, ChildShape::Element(name) if POINTER_EVENTS.contains(name))
+    };
     match spec.children {
-        Children::None if shape.children.is_some() => errors.push(ShapeError {
-            prop: None,
-            message: format!("`{}` does not take children", spec.name),
-        }),
+        Children::None
+            if shape.children.is_some() && !(events && children.iter().all(is_event)) =>
+        {
+            errors.push(ShapeError {
+                prop: None,
+                message: if events {
+                    format!(
+                        "`{}` does not take children other than {}",
+                        spec.name,
+                        POINTER_EVENTS.join(", ")
+                    )
+                } else {
+                    format!("`{}` does not take children", spec.name)
+                },
+            })
+        }
         Children::One
             if children
                 .iter()
                 .filter(|child| {
                     !(spec.name == "Swipe" && matches!(child, ChildShape::Element("OnCommit")))
+                        && !is_event(child)
                 })
                 .count()
                 != 1 =>
@@ -2191,11 +2262,17 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
             .filter(|child| matches!(child, ChildShape::Element(name) if *name == kind))
             .count()
     };
-    for (parent, event) in [("Button", "DoubleTap"), ("Swipe", "OnCommit")] {
-        if spec.name == parent && count(event) > 1 {
+    if spec.name == "Swipe" && count("OnCommit") > 1 {
+        errors.push(ShapeError {
+            prop: None,
+            message: "a `Swipe` has at most one `OnCommit`".into(),
+        });
+    }
+    for event in POINTER_EVENTS {
+        if events && count(event) > 1 {
             errors.push(ShapeError {
                 prop: None,
-                message: format!("a `{parent}` has at most one `{event}`"),
+                message: format!("`{}` has at most one `{event}`", spec.name),
             });
         }
     }
@@ -2215,12 +2292,6 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
         errors.push(ShapeError {
             prop: None,
             message: "a `Table` needs at least one `TableColumn`".into(),
-        });
-    }
-    if count("ContextMenu") > 1 {
-        errors.push(ShapeError {
-            prop: None,
-            message: "a `Button` has at most one `ContextMenu`".into(),
         });
     }
     if spec.name == "Table" && count("TableMenu") > 1 {

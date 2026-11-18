@@ -34,6 +34,9 @@ pub struct SliderProps {
     pub label_hidden: bool,
     pub min_icon: Option<&'static str>,
     pub max_icon: Option<&'static str>,
+    /// Where the pointer is along the track while it is over it, from 0 at
+    /// `min` to 1 at `max`; `None` otherwise.
+    pub hover: Option<crate::Field>,
 }
 
 /// The value at a fraction of the track, on a step.
@@ -56,6 +59,8 @@ struct Track {
     /// Show a value while dragging, and commit one when the drag ends.
     preview: Rc<dyn Fn(f64)>,
     commit: Rc<dyn Fn(f64)>,
+    /// Report where the pointer is along the track, or that it left.
+    hover: Option<Rc<dyn Fn(Option<f64>)>>,
     colors: [gpui::Rgba; 3],
 }
 
@@ -115,6 +120,25 @@ impl RenderOnce for Track {
                     .border_color(fill)
                     .shadow_sm(),
             );
+        let element = match self.hover {
+            Some(hover) => {
+                let (moving, left) = (Rc::clone(&hover), hover);
+                let measured = Rc::clone(&bounds);
+                element
+                    .on_mouse_move(move |event: &MouseMoveEvent, _, _| {
+                        let bounds = measured.get();
+                        let width = f64::from(bounds.size.width).max(1.0);
+                        let fraction = f64::from(event.position.x - bounds.origin.x) / width;
+                        moving(Some(fraction.clamp(0.0, 1.0)));
+                    })
+                    .on_hover(move |hovered, _, _| {
+                        if !*hovered {
+                            left(None);
+                        }
+                    })
+            }
+            None => element,
+        };
         if !self.enabled {
             return element.opacity(0.5);
         }
@@ -228,6 +252,19 @@ pub fn slider(c: &Ctx, id: &'static str, label: String, model: Model, props: Sli
         c.color("surface.raised"),
     ];
     let icon_color = c.color("icon.secondary");
+    // A draft of the window, written only when the place changes.
+    let hover = props.hover.map(|field| {
+        let c = c.clone();
+        Rc::new(move |fraction: Option<f64>| {
+            let value = match fraction {
+                Some(fraction) => Value::some(Value::Float(fraction)),
+                None => Value::none(),
+            };
+            if c.read(field) != value {
+                c.write(field, value);
+            }
+        }) as Rc<dyn Fn(Option<f64>)>
+    });
     let track = Track {
         key: c.element_id(id),
         props,
@@ -235,6 +272,7 @@ pub fn slider(c: &Ctx, id: &'static str, label: String, model: Model, props: Sli
         enabled,
         preview,
         commit: set,
+        hover,
         colors,
     };
     let row = div()

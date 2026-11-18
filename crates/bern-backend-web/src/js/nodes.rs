@@ -76,10 +76,10 @@ impl Generator<'_> {
                 match self.decoration(element) {
                     Some(spec) => {
                         out.open(format!("F.Decorate(p, ctx, {spec}, (p, ctx) => {{"));
-                        self.element(out, element);
+                        self.element_with_events(out, element);
                         out.close("});");
                     }
-                    None => self.element(out, element),
+                    None => self.element_with_events(out, element),
                 }
                 if placement.is_some() {
                     out.close("});");
@@ -114,6 +114,19 @@ impl Generator<'_> {
             Node::If(node) => self.if_node(out, node),
             Node::IfLet(node) => self.if_let(out, node),
             Node::Match(node) => self.match_node(out, node),
+        }
+    }
+
+    /// An element and the pointer events it declares, which
+    /// `F.PointerEvents` attaches to the nodes the element makes.
+    fn element_with_events(&self, out: &mut Out, element: &Element) {
+        match self.pointer_events(element) {
+            Some(spec) => {
+                out.open(format!("F.PointerEvents(p, ctx, {spec}, (p, ctx) => {{"));
+                self.element(out, element);
+                out.close("});");
+            }
+            None => self.element(out, element),
         }
     }
 
@@ -287,7 +300,7 @@ impl Generator<'_> {
             "LanguagePicker" => self.language_picker(out, element),
             "Detail" | "Destination" | "TabAccessory" | "Sidebar" | "SidebarHeader"
             | "SidebarFooter" | "WindowSet" | "Window" | "Layout" | "MenuItem" | "PickerOption"
-            | "TableColumn" | "TableMenu" | "ContextMenu"
+            | "TableColumn" | "TableMenu" | "ContextMenu" | "DoubleTap" | "WheelUp" | "WheelDown"
             // A page has no menu bar.
             | "MenuBar" | "CommandMenu" | "CommandItem"
             // Nor a status area.

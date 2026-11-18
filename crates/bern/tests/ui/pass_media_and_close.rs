@@ -18,6 +18,7 @@ pub mod demo {
 #[bern::session]
 pub struct Draft {
     pub name: String,
+    pub hover: Option<f64>,
 }
 
 /// Media players owned by the application.
@@ -50,7 +51,18 @@ fn page(app: demo::Client, players: Players, #[session] draft: Draft) -> impl Vi
     ui! {
         Column {
             Video(id: clip, source: app.clip, fit: contain)
-            Video(id: preview, player: players.preview, controls: none, label: tr! { "en" => "Preview" })
+            Video(id: preview, player: players.preview, controls: none, label: tr! { "en" => "Preview" }) {
+                DoubleTap => players.preview.pause()
+                ContextMenu {
+                    MenuItem(id: replay, label: tr! { "en" => "Replay" }) => players.preview.seek(0)
+                }
+                WheelUp => players.preview.set_volume(1.0)
+                WheelDown => players.preview.set_volume(0.0)
+            }
+            Slider(id: seek, label: tr! { "en" => "Position" }, current: players.preview.progress, hover: draft.hover, min: 0, max: 1) => players.preview.play()
+            if players.preview.playing {
+                Text(content: tr! { "en" => "{at} of {length}"; at: players.preview.position_ms, length: players.preview.duration })
+            }
             if let Some(clip) = app.clip {
                 Button(id: open, label: tr! { "en" => "Open" }) => players.preview.open(clip)
             }

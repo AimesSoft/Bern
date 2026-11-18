@@ -1277,6 +1277,88 @@ inline void ButtonClicks(controls::Button const& button, std::function<void()> c
     Reactive::OnCleanup([state] { state->live = false; state->taps.Cancel(); state->pointer = state->contact = false; });
 }
 
+struct PointerEventsProps {
+    Act doubleTap;
+    std::vector<std::optional<MenuItemDef>> menu;
+    Act wheelUp;
+    Act wheelDown;
+    /// The element is a native control (a slider): its parts are its own,
+    /// and it may handle the pointer before its events do.
+    bool own = false;
+};
+
+/// Whether a double tap on `source` is a control's inside `owner`, such
+/// as twice on a button of a video's control bar, rather than the owner's.
+inline bool TapInControl(IInspectable const& source, xaml::DependencyObject const& owner) {
+    try {
+        for (auto node = source.try_as<xaml::DependencyObject>(); node && node != owner; node = media::VisualTreeHelper::GetParent(node))
+            if (node.try_as<controls::Primitives::ButtonBase>() || node.try_as<controls::Slider>() || node.try_as<controls::ToggleSwitch>() ||
+                node.try_as<controls::TextBox>() || node.try_as<controls::Primitives::Selector>())
+                return true;
+    } catch (winrt::hresult_error const&) {
+    }
+    return false;
+}
+
+/// The pointer events an element declares, on the elements `build` makes:
+/// a double click or tap, a context menu, and turns of the wheel. The
+/// handlers go on those elements themselves, so the layout stays as it is
+/// and single clicks still reach what they show.
+inline void PointerEvents(Parent const& p, Ctx const& ctx, PointerEventsProps props, Build const& build) {
+    if (!p.region) return build(p, ctx);
+    auto before = p.region->items.size();
+    build(p, ctx);
+    std::vector<xaml::UIElement> made;
+    for (auto i = before; i < p.region->items.size(); ++i)
+        if (auto const& element = p.region->items[i].element) made.push_back(element);
+    auto live = std::make_shared<bool>(true);
+    Reactive::OnCleanup([live] { *live = false; });
+    auto twice = Run(ctx, props.doubleTap);
+    auto up = Run(ctx, props.wheelUp), down = Run(ctx, props.wheelDown);
+    bool own = props.own;
+    for (auto const& element : made) {
+        // An owner inside takes the event first and marks it handled; only
+        // a native control's own handling is looked past.
+        if (twice)
+            element.AddHandler(xaml::UIElement::DoubleTappedEvent(), winrt::box_value(xaml::Input::DoubleTappedEventHandler([live, twice, own](IInspectable const& sender, xaml::Input::DoubleTappedRoutedEventArgs const& args) {
+                if (!*live || (!own && TapInControl(args.OriginalSource(), sender.as<xaml::DependencyObject>()))) return;
+                args.Handled(true);
+                twice();
+            })), own);
+        if (!props.menu.empty()) ContextMenuOn(ctx, element, props.menu);
+        if (!up && !down) continue;
+        auto rest = std::make_shared<int32_t>(0);
+        element.AddHandler(xaml::UIElement::PointerWheelChangedEvent(), winrt::box_value(xaml::Input::PointerEventHandler([live, up, down, rest](IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args) {
+            if (!*live) return;
+            // A touchpad pinch arrives as a wheel with Control, which is
+            // `Pinch`'s; the key state shows it where the modifiers do not.
+            bool control = (args.KeyModifiers() & winrt::Windows::System::VirtualKeyModifiers::Control) == winrt::Windows::System::VirtualKeyModifiers::Control ||
+                GetKeyState(VK_CONTROL) < 0;
+            auto properties = args.GetCurrentPoint(sender.as<xaml::UIElement>()).Properties();
+            if (control || properties.IsHorizontalMouseWheel()) return;
+            int32_t delta = properties.MouseWheelDelta();
+            if (delta == 0) return;
+            auto const& action = delta > 0 ? up : down;
+            if (!action) return;
+            // The element takes the turn: an enclosing scroll view does not
+            // scroll as well.
+            args.Handled(true);
+            if ((delta > 0) != (*rest > 0)) *rest = 0;
+            *rest += delta;
+            // A touchpad turns in small steps; a notch of a wheel is one
+            // action, however many steps make it.
+            while (*live && *rest >= WHEEL_DELTA) {
+                *rest -= WHEEL_DELTA;
+                if (up) up();
+            }
+            while (*live && *rest <= -WHEEL_DELTA) {
+                *rest += WHEEL_DELTA;
+                if (down) down();
+            }
+        })), own);
+    }
+}
+
 struct ButtonProps {
     char const* id = "";
     Str label;
@@ -2187,7 +2269,30 @@ struct SliderProps {
     char const* maxIcon = nullptr;
     Act commit;
     bool labelHidden = false;
+    /// `hover`: where the pointer is along the track while it is over the
+    /// slider, and none otherwise.
+    std::optional<Field> hover;
 };
+
+/// Where the pointer is along a slider's travel, from 0 at its minimum to
+/// 1 at its maximum. The thumb's centre travels the track less one thumb.
+/// Positions relative to the track already run from its minimum end, the
+/// right one when it flows right to left.
+inline double SliderFraction(controls::Slider const& slider, xaml::Input::PointerRoutedEventArgs const& args) {
+    xaml::UIElement track = slider;
+    double width = slider.ActualWidth(), inset = 0;
+    if (auto thumb = TemplatePart(slider, L"HorizontalThumb")) {
+        inset = thumb.ActualWidth();
+        if (auto frame = media::VisualTreeHelper::GetParent(thumb).try_as<xaml::FrameworkElement>()) {
+            track = frame;
+            width = frame.ActualWidth();
+        }
+    }
+    double travel = width - inset;
+    double x = args.GetCurrentPoint(track).Position().X;
+    double fraction = travel > 0 ? (std::clamp)((x - inset / 2) / travel, 0.0, 1.0) : 0.0;
+    return slider.IsDirectionReversed() ? 1 - fraction : fraction;
+}
 
 /// A slider: dragging only updates this window's draft as a preview, and
 /// releasing commits once; keyboard changes commit at once. A slider
@@ -2249,6 +2354,26 @@ inline void Slider(Parent const& p, Ctx const& ctx, SliderProps props) {
         give(snap(args.NewValue()), !*dragging || continuous);
     });
     BindName(slider, text);
+    if (props.hover) {
+        auto hover = *props.hover;
+        auto set = [ctx, hover](std::optional<double> at) { SetDraft(ctx, hover, at ? Value::Some(Value::Float(*at)) : Value::None()); };
+        // Entering and leaving bubble from the slider's parts, and a drag's
+        // capture ends over it too: only a pointer outside the slider has
+        // left it. A touch does not hover.
+        auto follow = [set](IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args) {
+            if (args.Pointer().PointerDeviceType() == PointerKind::Touch) return;
+            auto slider = sender.as<controls::Slider>();
+            auto at = args.GetCurrentPoint(slider).Position();
+            bool over = at.X >= 0 && at.Y >= 0 && at.X < slider.ActualWidth() && at.Y < slider.ActualHeight();
+            set(over ? std::optional<double>(SliderFraction(slider, args)) : std::nullopt);
+        };
+        using Handler = xaml::Input::PointerEventHandler;
+        for (auto const& routed : {xaml::UIElement::PointerEnteredEvent(), xaml::UIElement::PointerMovedEvent(), xaml::UIElement::PointerExitedEvent(),
+                 xaml::UIElement::PointerCaptureLostEvent()})
+            slider.AddHandler(routed, winrt::box_value(Handler(follow)), true);
+        slider.AddHandler(xaml::UIElement::PointerCanceledEvent(), winrt::box_value(Handler([set](auto&&, auto&&) { set(std::nullopt); })), true);
+        Reactive::OnCleanup([set] { set(std::nullopt); });
+    }
     controls::Grid track;
     track.ColumnSpacing(8);
     track.ColumnDefinitions().Append(Column(AutoLength()));
