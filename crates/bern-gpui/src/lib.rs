@@ -93,7 +93,7 @@ pub use navigation::{
     split_view,
 };
 pub use overlay::{ModalProps, PopoverProps, SplitProps, modal, popover_button, split_button};
-pub use query::{QueryProps, query};
+pub use query::{OwnedQuery, QueryProps, own_query, query};
 pub use scene::{Anchor as RailAnchor, Place, Placement, positioned, rail, scale_box};
 pub use scroll::{ScrollProps, Snap, scroll_items, scroll_key, scroll_view};
 pub use search::{SearchItemProps, SearchProps, search, search_item, toolbar};

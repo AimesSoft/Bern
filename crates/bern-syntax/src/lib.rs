@@ -31,6 +31,17 @@ pub fn parse_ui(tokens: proc_macro2::TokenStream) -> syn::Result<UiBody> {
     syn::parse2(tokens)
 }
 
+/// Split a query body at its only binding boundary. The header declaration
+/// itself (including its shape and child) must be checked in the outer scope.
+pub fn query_children(nodes: &[Node]) -> (Option<&Node>, &[Node]) {
+    match nodes.split_first() {
+        Some((header @ Node::Element(e), body)) if e.name == "QueryStatusHeader" => {
+            (Some(header), body)
+        }
+        _ => (None, nodes),
+    }
+}
+
 /// Parse a standalone `tr!` invocation body.
 pub fn parse_tr(tokens: proc_macro2::TokenStream) -> syn::Result<Tr> {
     syn::parse2::<expr::TrBody>(tokens).map(|body| body.0)

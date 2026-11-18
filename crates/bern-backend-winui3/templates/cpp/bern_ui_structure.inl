@@ -23,10 +23,10 @@ struct Slot : std::enable_shared_from_this<Slot> {
     }
 
     /// Replace the content with what `build` makes, outside any effect.
-    void Fill(std::function<void(Parent const&)> const& build) {
+    void Fill(std::function<void(Parent const&)> const& build, bool immediate = false) {
         Reactive::Untrack([&] {
             End();
-            region.Clear();
+            region.Clear(immediate);
             auto next = std::make_unique<Scope>();
             next->Run([&] { build(region); });
             owner = std::move(next);
@@ -34,10 +34,10 @@ struct Slot : std::enable_shared_from_this<Slot> {
         });
     }
 
-    void Clear() {
+    void Clear(bool immediate = false) {
         Reactive::Untrack([&] {
             End();
-            region.Clear();
+            region.Clear(immediate);
             return 0;
         });
     }
@@ -46,11 +46,11 @@ struct Slot : std::enable_shared_from_this<Slot> {
 /// Conditional content: `branch` picks an arm, or none. Only a change of
 /// arm rebuilds; the arm's own bindings update in place. What a change
 /// after the first display mounts plays its `appear` transition.
-inline void When(Parent const& p, Ctx const& ctx, Branch branch, std::vector<Build> arms) {
+inline void When(Parent const& p, Ctx const& ctx, Branch branch, std::vector<Build> arms, bool immediate = false) {
     auto slot = Slot::In(p.Sub());
     auto state = std::make_shared<std::pair<bool, std::optional<int>>>(false, std::nullopt);
     auto shared = std::make_shared<std::vector<Build>>(std::move(arms));
-    Reactive::Run([slot, state, shared, branch, ctx] {
+    Reactive::Run([slot, state, shared, branch, ctx, immediate] {
         auto next = branch(ctx);
         if (state->first && state->second == next) return;
         bool animated = state->first;
@@ -59,11 +59,18 @@ inline void When(Parent const& p, Ctx const& ctx, Branch branch, std::vector<Bui
         Structure::Scope structural(animated);
         if (next && *next >= 0 && *next < static_cast<int>(shared->size())) {
             auto arm = (*shared)[*next];
-            slot->Fill([&](Parent const& region) { arm(region, ctx); });
+            slot->Fill([&](Parent const& region) { arm(region, ctx); }, immediate);
         } else {
-            slot->Clear();
+            slot->Clear(immediate);
         }
     });
+}
+
+inline void PresentWhen(Parent const& p, Ctx const& ctx, Get condition, Build view) {
+    When(p, ctx, [condition](Ctx const& c) -> std::optional<int> {
+        if (R::Truthy(condition(c))) return 0;
+        return std::nullopt;
+    }, {std::move(view)}, true);
 }
 
 /// An arm builder that runs in a fixed context.
@@ -1289,6 +1296,8 @@ struct QueryProps {
     Str empty;
     char const* icon = nullptr;
     char const* variable = "item";
+    bool grouped = false;
+    Build statusHeader;
 };
 
 inline std::optional<QueryState> ReadQueryState(Bytes const& bytes, BType const& result) {
@@ -1317,12 +1326,14 @@ inline std::optional<Value> ShownData(Value const& data, BType const& result, bo
     return data;
 }
 
-inline void Query(Parent const& p, Ctx const& ctx, QueryProps props, Build const& templ) {
+inline void PresentQuery(Parent const&, Ctx const&, QueryProps const&, Build const&, BType const&, Cell<QueryState> const&, std::function<void()> const&);
+
+// The calling scope owns the subscription. Only the returned builder mounts UI.
+inline Build OwnQuery(Ctx const& ctx, QueryProps props, Build const& templ) {
     auto const& commands = app->catalog.commands;
-    if (props.query < 0 || props.query >= static_cast<int>(commands.size())) return;
+    if (props.query < 0 || props.query >= static_cast<int>(commands.size())) return [](Parent const&, Ctx const&) {};
     auto const& spec = commands[props.query];
     auto result = spec.result;
-    bool hasEmpty = static_cast<bool>(props.empty);
     Cell<QueryState> state;
     auto receive = [state, result](Bytes const& bytes) mutable {
         if (auto next = ReadQueryState(bytes, result); next && next->version >= state.Peek().version) state.Set(*next);
@@ -1374,6 +1385,27 @@ inline void Query(Parent const& p, Ctx const& ctx, QueryProps props, Build const
         request(bytes);
     };
 
+    return [props = std::move(props), templ, result, state, retry](Parent const& p, Ctx const& c) {
+        if (!props.grouped) {
+            PresentQuery(p, c, props, templ, result, state, retry);
+            return;
+        }
+        // Place and Decorate attach to what a builder adds on mount. The
+        // status and data regions keep updating inside that same element.
+        controls::StackPanel group;
+        SetRole(group, L"bern-column");
+        auto inside = p.isList ? Parent::OfList(group) : Parent::Of(group);
+        PresentQuery(inside, c, props, templ, result, state, retry);
+        p.Add(group);
+    };
+}
+
+inline void Query(Parent const& p, Ctx const& ctx, QueryProps props, Build const& templ) {
+    OwnQuery(ctx, std::move(props), templ)(p, ctx);
+}
+
+inline void PresentQuery(Parent const& p, Ctx const& ctx, QueryProps const& props, Build const& templ, BType const& result, Cell<QueryState> const& state, std::function<void()> const& retry) {
+    bool hasEmpty = static_cast<bool>(props.empty);
     // Which status to show, and whether the template shows data.
     auto key = [state, result, hasEmpty]() -> std::string {
         auto const& current = state.Get();
@@ -1391,10 +1423,9 @@ inline void Query(Parent const& p, Ctx const& ctx, QueryProps props, Build const
     auto loadingText = textOf(props.loading, "bern.query.loading");
     auto failedText = textOf(props.failed, "bern.query.failed");
     auto emptyText = textOf(props.empty, "");
-    bool inList = p.isList;
     std::string iconName = props.icon ? props.icon : "tray";
-    auto add = [inList](Parent const& target, xaml::FrameworkElement const& element) {
-        if (inList) target.Add(Card(element));
+    auto add = [](Parent const& target, xaml::FrameworkElement const& element) {
+        if (target.isList) target.Add(Card(element));
         else target.Add(element);
     };
     auto retryButton = [retry] {
@@ -1478,7 +1509,7 @@ inline void Query(Parent const& p, Ctx const& ctx, QueryProps props, Build const
             add(target, line);
         },
     };
-    When(p, ctx, [key, state](Ctx const&) -> std::optional<int> {
+    Branch statusBranch = [key, state](Ctx const&) -> std::optional<int> {
         auto name = key();
         auto phase = state.Get().phase;
         if (name == "loading") return 0;
@@ -1487,15 +1518,38 @@ inline void Query(Parent const& p, Ctx const& ctx, QueryProps props, Build const
         if (name == "data" && phase == 3) return 3;
         if (name == "data" && phase == 4) return 4;
         return std::nullopt;
-    }, std::move(arms));
+    };
+    Build drawStatus = [arms = std::move(arms), statusBranch](Parent const& target, Ctx const& c) {
+        When(target, c, statusBranch, arms);
+    };
 
     auto inner = ctx.WithLocal(props.variable, [state, result, hasEmpty] {
         auto const& current = state.Get();
         if (!current.data) return Value::Unit();
         return ShownData(*current.data, result, hasEmpty).value_or(Value::Unit());
     });
-    When(p, ctx, [key](Ctx const&) -> std::optional<int> { if (key() == "data") return 0; return std::nullopt; },
-        {[templ, inner](Parent const& target, Ctx const&) { templ(target, inner); }});
+    Build answered = [drawStatus, key, templ, inner](Parent const& target, Ctx const& c) {
+        drawStatus(target, c);
+        When(target, c, [key](Ctx const&) -> std::optional<int> { if (key() == "data") return 0; return std::nullopt; },
+            {In(templ, inner)});
+    };
+    if (auto header = props.statusHeader) {
+        Build cold = [header, drawStatus, add](Parent const& target, Ctx const& c) {
+            controls::StackPanel group;
+            SetRole(group, L"bern-column");
+            auto inside = Parent::Of(group);
+            header(inside, c);
+            drawStatus(inside, c);
+            add(target, group);
+        };
+        When(p, ctx, [state](Ctx const&) -> std::optional<int> {
+            auto const& current = state.Get();
+            bool needsHeader = !current.data && (current.phase == 0 || current.phase == 1 || current.phase == 4);
+            return needsHeader ? 0 : 1;
+        }, {std::move(cold), std::move(answered)}, true);
+    } else {
+        answered(p, ctx);
+    }
 
     if (props.id)
         Controls::Register(ctx, props.id, "query", [] { return winrt::hstring(); }, nullptr,

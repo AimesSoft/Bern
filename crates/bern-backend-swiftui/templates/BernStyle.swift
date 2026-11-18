@@ -5640,13 +5640,17 @@ private struct BernAccordionLayout: Layout {
 }
 
 struct BernAccordionCell<Content: View>: View {
-    let corner: CGFloat
+    let corner: CGFloat?
     @ViewBuilder let content: Content
     var body: some View {
-        GeometryReader { geometry in
+        if let corner {
+            GeometryReader { geometry in
+                content
+                    .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
+                    .clipShape(RoundedRectangle(cornerRadius: max(0, corner), style: .continuous))
+            }
+        } else {
             content
-                .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
-                .clipShape(RoundedRectangle(cornerRadius: max(0, corner), style: .continuous))
         }
     }
 }

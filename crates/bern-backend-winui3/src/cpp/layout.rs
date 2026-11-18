@@ -442,6 +442,16 @@ impl Generator<'_> {
             return;
         };
         let params: Vec<_> = binding.args.iter().map(|arg| self.getter(arg)).collect();
+        let (header, body) = element.query_children();
+        let condition = element.query_presentation();
+        if condition.is_some() || header.is_some() {
+            out.open("{");
+        }
+        if let Some(header) = header {
+            self.children(out, "auto statusHeader = ", header, ";");
+        }
+        let decoration = self.decoration(element);
+        let placement = self.placement(element);
         let props = designated(&[
             ("id", element.id.as_ref().map(|_| self.id(element))),
             ("query", Some(binding.query.to_string())),
@@ -454,7 +464,28 @@ impl Generator<'_> {
             ("empty", self.text_prop(element, "empty")),
             ("icon", Self::icon(element, "icon")),
             ("variable", Some(string(&template.var))),
+            (
+                "grouped",
+                (decoration.is_some() || placement.is_some()).then(|| "true".into()),
+            ),
+            ("statusHeader", header.map(|_| "statusHeader".into())),
         ]);
-        self.call(out, &format!("B::Query(p, c, {props}, "), &element.children);
+        if let Some(condition) = condition {
+            self.call(out, &format!("auto draw = B::OwnQuery(c, {props}, "), body);
+            for (wrap, spec) in [("Decorate", decoration), ("Place", placement)] {
+                if let Some(spec) = spec {
+                    out.line(format!("draw = [draw](Parent const& p, Ctx const& c) {{ B::{wrap}(p, c, {spec}, draw); }};"));
+                }
+            }
+            out.line(format!(
+                "B::PresentWhen(p, c, {}, draw);",
+                self.getter(condition)
+            ));
+        } else {
+            self.call(out, &format!("B::Query(p, c, {props}, "), body);
+        }
+        if condition.is_some() || header.is_some() {
+            out.close("}");
+        }
     }
 }

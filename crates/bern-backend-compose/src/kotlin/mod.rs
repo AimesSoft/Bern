@@ -97,6 +97,8 @@ struct Ctx {
     /// The nodes are direct children of `Row(align: baseline)`: each
     /// lines up on its first baseline.
     baseline: bool,
+    /// A call-site modifier forwarded to the presentation, not its owner.
+    query_modifier: Option<&'static str>,
     /// Several spacers must keep their equal shares of the row.
     fold_row_spacer: bool,
     /// The nodes are direct children of a row of a given height, aligned
@@ -213,6 +215,25 @@ impl<'a> Generator<'a> {
     }
 
     fn node(&self, out: &mut Out, node: &Node, ctx: &Ctx) {
+        if let Node::Element(element) = node
+            && element.kind == "Query"
+        {
+            self.query_scope(out, element, ctx);
+            self.node_view(
+                out,
+                node,
+                &Ctx {
+                    query_modifier: None,
+                    ..ctx.clone()
+                },
+            );
+            out.close("}");
+        } else {
+            self.node_view(out, node, ctx);
+        }
+    }
+
+    fn node_view(&self, out: &mut Out, node: &Node, ctx: &Ctx) {
         match node {
             Node::Element(element) => {
                 // Written in the window itself, the element takes the
@@ -457,7 +478,7 @@ impl<'a> Generator<'a> {
             }
             Node::Component(reference) => {
                 let component = self.app.component(&reference.component).expect("component");
-                let args: Vec<_> = component
+                let mut args: Vec<_> = component
                     .params
                     .iter()
                     .filter_map(|param| match &param.kind {
@@ -474,6 +495,16 @@ impl<'a> Generator<'a> {
                         _ => None,
                     })
                     .collect();
+                // A baseline box is a real row child (including its gap).
+                // Apply it only if the called query root actually emits a view.
+                let query_baseline =
+                    ctx.baseline && self.app.has_query_presentation_root(&component.body);
+                if let Some(modifier) = ctx
+                    .query_modifier
+                    .or(query_baseline.then_some("Modifier.alignByBaseline()"))
+                {
+                    args.push(format!("__bernRootModifier = {modifier}"));
+                }
                 let call = format!("{}({})", names::component(&component.name), args.join(", "));
                 let fills = ctx.scope == Scope::Row
                     && self.fills_width(
@@ -528,7 +559,7 @@ impl<'a> Generator<'a> {
                 } else {
                     "bernRowYields()"
                 };
-                match (ctx.baseline && !fills, yields) {
+                match (ctx.baseline && !fills && !query_baseline, yields) {
                     (true, true) => out.line(format!(
                         "Box(Modifier.alignByBaseline().{yield_mod}) {{ {call} }}"
                     )),

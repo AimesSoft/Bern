@@ -68,7 +68,7 @@ impl Generator<'_> {
     }
 
     /// Where an element sits on its `Rail`, for `B::Place`.
-    fn placement(&self, element: &Element) -> Option<String> {
+    pub(super) fn placement(&self, element: &Element) -> Option<String> {
         let fraction = |name: &str| self.len(element, name);
         let (at, from, to) = (fraction("at"), fraction("from"), fraction("to"));
         (at.is_some() || from.is_some()).then(|| {
@@ -82,7 +82,7 @@ impl Generator<'_> {
     }
 
     /// The motion and appearance props of an element, for `B::Decorate`.
-    fn decoration(&self, element: &Element) -> Option<String> {
+    pub(super) fn decoration(&self, element: &Element) -> Option<String> {
         let transition = |name: &str| {
             element
                 .keyword(name)
@@ -158,6 +158,11 @@ impl Generator<'_> {
 
     pub(super) fn node(&self, out: &mut Out, node: &Node) {
         match node {
+            // The query owns its subscription outside both the condition and
+            // any layout/appearance wrappers of the presentation.
+            Node::Element(element) if element.query_presentation().is_some() => {
+                self.query(out, element);
+            }
             Node::Element(element) => {
                 let placement = self.placement(element);
                 if let Some(spec) = &placement {

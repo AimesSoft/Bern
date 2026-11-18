@@ -200,6 +200,7 @@ impl ComponentSpec {
                 | "CommandItem"
                 | "TableColumn"
                 | "TableMenu"
+                | "QueryStatusHeader"
                 | "ContextMenu"
                 | "DoubleTap"
                 | "OnCommit"
@@ -1694,13 +1695,23 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             &[
                 req("id", PropKind::Id),
                 req("query", PropKind::Query),
+                opt("presented", PropKind::Bool),
                 opt("loading", PropKind::DisplayText),
                 opt("empty", PropKind::DisplayText),
                 opt("failed", PropKind::DisplayText),
                 opt("icon", PropKind::Icon),
             ],
             Children::Any,
-            "Result of an asynchronous query: loading, ready, refreshing, failed and empty states; the template shows the data",
+            "Result of an asynchronous query: loading, ready, refreshing, failed and empty states; the template shows the data; `presented: false` keeps the subscription but builds no views",
+        )
+    },
+    ComponentSpec {
+        placement: Placement::Within(&["Query"]),
+        ..spec(
+            "QueryStatusHeader",
+            &[],
+            Children::One,
+            "Optional first child of a Query: its content precedes the native loading or failure/retry state when there is no previous answer; it sees the surrounding scope, not the result variable",
         )
     },
     ComponentSpec {

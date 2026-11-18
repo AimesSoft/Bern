@@ -306,8 +306,17 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
     ("ForEach", &["items", "key"]),
     (
         "Query",
-        &["id", "query", "loading", "empty", "failed", "icon"],
+        &[
+            "id",
+            "query",
+            "presented",
+            "loading",
+            "empty",
+            "failed",
+            "icon",
+        ],
     ),
+    ("QueryStatusHeader", &[]),
     ("Toolbar", &[]),
     (
         "Video",
@@ -539,6 +548,7 @@ pub const COMPONENT_NAMES: &[&str] = &[
     "Layout",
     "ForEach",
     "Query",
+    "QueryStatusHeader",
     "Toolbar",
     "Video",
     "Search",
@@ -765,7 +775,7 @@ impl<'a> Generator<'a> {
         // the body is keeps the space its caller gives it. A body that
         // plays `disappear` is also built as it leaves.
         let mut out = format!(
-            "pub fn c_{}(c: &b::Ctx) -> b::El {{\n    {}\n}}\n",
+            "pub fn c_{}(c: &b::Ctx) -> Option<b::El> {{\n    {}\n}}\n",
             component.name,
             self.root(&component.body)
         );
@@ -777,7 +787,7 @@ impl<'a> Generator<'a> {
 
     fn window_content(&self, window: &WindowDef) -> String {
         let mut out = format!(
-            "fn window_{}(c: &b::Ctx) -> b::El {{\n    {}\n}}\n",
+            "fn window_{}(c: &b::Ctx) -> b::El {{\n    ({}).unwrap_or_else(|| b::column(c, b::Flex::default(), Vec::new()))\n}}\n",
             window.id,
             self.root(&window.content)
         );
@@ -796,19 +806,29 @@ impl<'a> Generator<'a> {
         out
     }
 
-    /// The element a component's or window's body is, built in the
-    /// caller's context; control flow at the top becomes a column.
+    /// A component may contribute no element at all. Only a window needs a
+    /// concrete (possibly empty) content root.
     fn root(&self, node: &Node) -> String {
         match node {
-            Node::Element(element) if element.kind != "ForEach" => self
-                .element(element, "c")
-                .unwrap_or_else(|| "b::column(c, b::Flex::default(), Vec::new())".into()),
-            // What a condition shows fills the body, on all its corners.
-            _ => format!(
-                "b::column(c, b::Flex::default(), {})",
-                self.children_along(std::slice::from_ref(node), Axis::Column, Along::Layers)
-            ),
+            Node::Element(element) if element.kind != "ForEach" => {
+                let Some(code) = self.element(element, "c") else {
+                    return "None::<b::El>".into();
+                };
+                self.present_element(element, &code)
+                    .unwrap_or_else(|| format!("Some({code})"))
+            }
+            _ => Self::root_column(&self.children_along(
+                std::slice::from_ref(node),
+                Axis::Column,
+                Along::Layers,
+            )),
         }
+    }
+
+    fn root_column(children: &str) -> String {
+        format!(
+            "{{ let children = {children}; (!children.is_empty()).then(|| b::column(c, b::Flex::default(), children)) }}"
+        )
     }
 
     /// Window properties beyond the size, the title and the chrome are not
@@ -1856,7 +1876,7 @@ pub fn app() -> b::AppDef {{
                         ),
                         None => code,
                     };
-                    out.push_str(&format!("v.push({code}); "));
+                    self.push_element(out, element, &code);
                 }
             }
             Node::Component(reference) => {
@@ -1891,7 +1911,7 @@ pub fn app() -> b::AppDef {{
                 } else {
                     "c"
                 };
-                let code = format!(
+                let call = format!(
                     "{prefix}_{}(&c.child({}, {}, vec![{}]).grown({}){})",
                     component.name,
                     string(&component.name),
@@ -1902,17 +1922,19 @@ pub fn app() -> b::AppDef {{
                 );
                 let code = match self.reflow_now.borrow().clone() {
                     Some(curve) => format!(
-                        "b::reflowed(c, {}, {curve}, {code})",
+                        "b::reflowed(c, {}, {curve}, child)",
                         string(&format!("{}@{site}", component.name))
                     ),
-                    None => code,
+                    None => "child".into(),
                 };
                 let code = if self.layers.get() && self.covers(node) {
                     format!("b::cover({code})")
                 } else {
                     code
                 };
-                out.push_str(&format!("v.push({code}); "));
+                out.push_str(&format!(
+                    "if let Some(child) = {call} {{ v.push({code}); }} "
+                ));
             }
             Node::If(node)
                 if node.branches.iter().any(|(_, body)| self.leaves(body))
@@ -2157,6 +2179,39 @@ pub fn app() -> b::AppDef {{
             None => code,
         };
         Some(format!("{{ let c = {scope}; {code} }}"))
+    }
+
+    /// A query's lease belongs to the page even when the element (including
+    /// any placement or decoration around it) is absent. Used at roots too.
+    fn present_element(&self, element: &Element, item: &str) -> Option<String> {
+        if element.kind != "Query" {
+            return None;
+        }
+        let call = element.query("query").expect("typed query");
+        let args = call
+            .args
+            .iter()
+            .map(|arg| self.expr(arg, Some(&element.source)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let id = string(element.id.as_deref().unwrap_or(&element.path));
+        let guard = element
+            .query_presentation()
+            .map_or_else(String::new, |when| {
+                format!(".filter(|_| {})", self.condition(when))
+            });
+        Some(format!(
+            "b::own_query(c, {id}, {}, vec![{args}]){guard}.map(|bern_owned_query| {item})",
+            call.query
+        ))
+    }
+
+    fn push_element(&self, out: &mut String, element: &Element, item: &str) {
+        if let Some(optional) = self.present_element(element, item) {
+            out.push_str(&format!("v.extend({optional}); "));
+        } else {
+            out.push_str(&format!("v.push({item}); "));
+        }
     }
 
     /// An element built in context `c`.
@@ -2576,27 +2631,27 @@ pub fn app() -> b::AppDef {{
                 }
             ),
             "Query" => {
-                let (Some(binding), Some(template)) = (element.query("query"), &element.template)
-                else {
-                    return None;
-                };
-                format!(
-                    "b::query(c, {}, {}, vec![{}], b::QueryProps {{ loading: {}, failed: {}, empty: {}, icon: {} }}, |c: &b::Ctx, data: V| {{ let c = &c.with_local({}, data); {} }})",
-                    id(),
-                    binding.query,
-                    binding
-                        .args
-                        .iter()
-                        .map(|arg| self.expr(arg, at))
-                        .collect::<Vec<_>>()
-                        .join(", "),
+                let template = element.template.as_ref()?;
+                let (header, body) = element.query_children();
+                let props = format!(
+                    "b::QueryProps {{ loading: {}, failed: {}, empty: {}, icon: {} }}",
                     optional_text("loading"),
                     optional_text("failed"),
                     optional_text("empty"),
-                    self.icon(element.icon("icon")),
+                    self.icon(element.icon("icon"))
+                );
+                let success = format!(
+                    "|c: &b::Ctx, data: V| {{ let c = &c.with_local({}, data); {} }}",
                     string(&template.var),
-                    column(&element.children)
-                )
+                    column(body)
+                );
+                match header {
+                    Some(header) => format!(
+                        "bern_owned_query.present_with_header(c, {props}, |c: &b::Ctx| {}, {success})",
+                        column(header)
+                    ),
+                    None => format!("bern_owned_query.present(c, {props}, {success})"),
+                }
             }
             "Text" => format!(
                 "b::text(c, {}, b::TextProps {{ style: b::TextStyle::{}, emphasis: b::Emphasis::{}, lines: {}, size: {}, color: {}, line_height: {}, markdown: {}, mark: {}, bold: {}, ruby: {} }})",
@@ -3123,7 +3178,7 @@ pub fn app() -> b::AppDef {{
                             self.element_greed(child, axis).grow(axis, false)
                         );
                         if let Some(code) = self.element(child, &ctx) {
-                            out.push_str(&format!("v.push(({code}, {placement})); "));
+                            self.push_element(out, child, &format!("({code}, {placement})"));
                         }
                     });
                 format!("b::rail(c, {vertical}, b::RailAnchor::{anchor}, {children})")

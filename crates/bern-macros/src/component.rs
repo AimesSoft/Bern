@@ -604,11 +604,6 @@ impl<'a> Gen<'a> {
                         let mut var = self.fresh("query");
                         var.set_span(span);
                         pre.push(quote_spanned!(span=> let #var = #tokens;));
-                        if let Some(template) = &element.template {
-                            pre.push(quote_spanned!(span=> let #template = ::bern::__private::query_result(&#var);));
-                            self.scope.push(template.to_string());
-                            pushed += 1;
-                        }
                         query = Some(var);
                     }
                     other => self.error(
@@ -962,6 +957,32 @@ impl<'a> Gen<'a> {
         }
 
         let children = match (&element.children, name.as_str()) {
+            (Some(children), "Query") => {
+                let (header, body) = bern_syntax::query_children(children);
+                let mut header_ids = None;
+                let header = header.map(|node| {
+                    let before = self.ids.clone();
+                    let tokens = self.node(node, &child_ctx);
+                    header_ids = Some(std::mem::replace(&mut self.ids, before));
+                    tokens
+                });
+                let binding = if let (Some(var), Some(template)) = (&query, &element.template) {
+                    self.scope.push(template.to_string());
+                    pushed += 1;
+                    // A command used as a query is an error at the method, not the result name.
+                    let span = var.span();
+                    quote_spanned!(span=> let #template = ::bern::__private::query_result(&#var);)
+                } else {
+                    TokenStream::new()
+                };
+                let body = self.nodes(body, &child_ctx);
+                if let Some(ids) = header_ids {
+                    self.ids.extend(ids);
+                }
+                // A result may shadow a name from the enclosing declaration;
+                // keep the actual Rust binding out of the header as well.
+                quote!(#header { #binding #body })
+            }
             // The layouts of one `Adaptive` are alternatives: the same
             // control id in two of them names the same control.
             (Some(children), "Adaptive") => {

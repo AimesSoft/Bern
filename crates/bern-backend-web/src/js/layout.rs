@@ -485,12 +485,41 @@ impl Generator<'_> {
             ("count", Some(count.into())),
             ("shown", Some(shown.into())),
         ]);
+        let condition = element.query_presentation();
+        let open = if condition.is_some() {
+            out.open("{");
+            "const draw = B.ownQuery(ctx,"
+        } else {
+            "B.Query(p, ctx,"
+        };
         out.open(format!(
-            "B.Query(p, ctx, {props}, (p, ctx, {}) => {{",
+            "{open} {props}, (p, ctx, {}) => {{",
             local(&template.var)
         ));
-        self.nodes(out, &element.children);
+        let (header, body) = element.query_children();
+        self.nodes(out, body);
+        if let Some(header) = header {
+            out.close("}, (p, ctx) => {");
+            out.indent += 1;
+            self.nodes(out, header);
+        }
         out.close("});");
+        if let Some(condition) = condition {
+            let mut draw = "draw".to_string();
+            for (wrap, spec) in [
+                ("Decorate", self.decoration(element)),
+                ("Place", self.placement(element)),
+            ] {
+                if let Some(spec) = spec {
+                    draw = format!("(p, ctx) => F.{wrap}(p, ctx, {spec}, {draw})");
+                }
+            }
+            out.line(format!(
+                "B.presentWhen(p, ctx, () => {}, {draw});",
+                self.expr(condition)
+            ));
+            out.close("}");
+        }
     }
 
     /// One builder per layout size; the runtime picks one by the available

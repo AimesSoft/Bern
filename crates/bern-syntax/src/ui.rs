@@ -5,15 +5,25 @@ use syn::{Ident, Token, braced, parenthesized, token};
 
 impl Parse for UiBody {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
-        let nodes = parse_nodes(input)?;
+        let nodes = parse_nodes(input, false)?;
         Ok(UiBody { nodes })
     }
 }
 
-fn parse_nodes(input: ParseStream<'_>) -> syn::Result<Vec<Node>> {
+fn parse_nodes(input: ParseStream<'_>, query_body: bool) -> syn::Result<Vec<Node>> {
     let mut nodes = Vec::new();
     while !input.is_empty() {
-        nodes.push(parse_node(input)?);
+        let node = parse_node(input)?;
+        if let Node::Element(element) = &node
+            && element.name == "QueryStatusHeader"
+            && !(query_body && nodes.is_empty())
+        {
+            return Err(syn::Error::new(
+                element.span,
+                "write `QueryStatusHeader` once, as the first direct child of `Query`; put conditions inside the header",
+            ));
+        }
+        nodes.push(node);
         // Children are separated by line breaks; a stray comma is tolerated
         // only to give a precise message.
         if input.peek(Token![,]) {
@@ -26,7 +36,7 @@ fn parse_nodes(input: ParseStream<'_>) -> syn::Result<Vec<Node>> {
 fn parse_block(input: ParseStream<'_>) -> syn::Result<Vec<Node>> {
     let content;
     braced!(content in input);
-    parse_nodes(&content)
+    parse_nodes(&content, false)
 }
 
 fn parse_node(input: ParseStream<'_>) -> syn::Result<Node> {
@@ -115,7 +125,9 @@ fn parse_element(input: ParseStream<'_>) -> syn::Result<Element> {
         None
     };
     let children = if input.peek(token::Brace) {
-        Some(parse_block(input)?)
+        let content;
+        braced!(content in input);
+        Some(parse_nodes(&content, name == "Query")?)
     } else {
         None
     };

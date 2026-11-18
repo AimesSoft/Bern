@@ -37,6 +37,7 @@ pub mod library {
 #[bern::session]
 pub struct Draft {
     pub text: String,
+    pub show_results: bool,
 }
 
 use bern::prelude::*;
@@ -49,11 +50,16 @@ fn page(app: library::Client, #[session] draft: Draft) -> impl View {
             Query(
                 id: results,
                 query: app.search(draft.text, 20),
+                presented: draft.show_results,
                 loading: tr! { "en" => "Searching…" },
                 empty: tr! { "en" => "No books match {text}"; text: draft.text },
                 failed: tr! { "en" => "Search failed" },
                 icon: "magnifyingglass"
             ) |books| {
+                QueryStatusHeader {
+                    if draft.show_results { Switch(id: view, label: draft.text, value: draft.show_results) }
+                }
+                Switch(id: view, label: draft.text, value: draft.show_results)
                 ForEach(items: books, key: id) |book| {
                     Text(content: book.title)
                 }
@@ -61,8 +67,9 @@ fn page(app: library::Client, #[session] draft: Draft) -> impl View {
             Query(id: first, query: app.book(1), empty: tr! { "en" => "No first book" }) |book| {
                 Text(content: book.title)
             }
-            Query(id: total, query: app.count()) |count| {
-                Text(content: tr! { "en" => "{count} books"; count: count })
+            Query(id: total, query: app.count()) |draft| {
+                QueryStatusHeader { Text(content: draft.text) }
+                Text(content: tr! { "en" => "{count} books"; count: draft })
             }
         }
     }

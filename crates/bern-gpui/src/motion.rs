@@ -778,6 +778,12 @@ thread_local! {
     static GOING: Cell<bool> = const { Cell::new(false) };
 }
 
+/// An outgoing branch may be drawn for its transition, but no longer owns
+/// subscriptions. This also covers components nested inside the leaving item.
+pub(crate) fn drawing_exit() -> bool {
+    GOING.with(Cell::get)
+}
+
 /// The branch of the condition `id` that is leaving, with the value its
 /// bindings had: the branch shown before, while elements of it play their
 /// `disappear`. `shown` is the branch shown now, with its value; `leaves`

@@ -135,7 +135,22 @@ impl Slot {
 /// arm rebuilds; the arm's own bindings update in place.
 #[allow(non_snake_case)]
 pub fn When(p: &Parent, ctx: &Ctx, branch: Branch, arms: Vec<Build>) {
-    let slot = Slot::new(p.region());
+    when(p, ctx, branch, arms, false);
+}
+
+/// A presentation that does not leave its layout/focusable widgets behind
+/// for an exit transition. The owner of `view` lives in the calling scope.
+pub fn present_when(p: &Parent, ctx: &Ctx, condition: Get, view: Build) {
+    let branch = Rc::new(move |c: &Ctx| crate::value::truthy(&condition(c)).then_some(0));
+    when(p, ctx, branch, vec![view], true);
+}
+
+pub(crate) fn when(p: &Parent, ctx: &Ctx, branch: Branch, arms: Vec<Build>, immediate: bool) {
+    let slot = Slot::new(if immediate {
+        p.presentation_region()
+    } else {
+        p.region()
+    });
     let current: Rc<std::cell::Cell<Option<Option<usize>>>> = Rc::new(std::cell::Cell::new(None));
     let ctx = ctx.clone();
     effect(move || {

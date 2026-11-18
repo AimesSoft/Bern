@@ -243,12 +243,32 @@ impl<'a> Generator<'a> {
     }
 
     fn node(&self, out: &mut Out, node: &Node, ctx: &Ctx) {
+        if let Node::Element(element) = node
+            && element.kind == "Query"
+        {
+            self.query_scope(out, element, ctx);
+            self.node_view(out, node, ctx);
+            out.close("}");
+        } else {
+            self.node_view(out, node, ctx);
+        }
+    }
+
+    fn node_view(&self, out: &mut Out, node: &Node, ctx: &Ctx) {
         if let Some(corner) = &ctx.accordion_corner
             && (matches!(node, Node::Component(_))
                 || matches!(node, Node::Element(element) if element.kind != "ForEach"))
         {
+            if let Node::Component(reference) = node
+                && self.app.has_query_presentation_root(node)
+            {
+                // Forward the cell to the emitted presentation. A GeometryReader
+                // wrapped around an absent component root would still take a slot.
+                out.line(self.component_call_with_corner(reference, Some(corner)));
+                return;
+            }
             out.open(format!("BernAccordionCell(corner: {corner}) {{"));
-            self.node(
+            self.node_view(
                 out,
                 node,
                 &Ctx {
@@ -329,8 +349,12 @@ impl<'a> Generator<'a> {
     /// Values are passed explicitly; engines, sessions and windows come from
     /// the environment for views and container modifiers alike.
     fn component_call(&self, reference: &ComponentRef) -> String {
+        self.component_call_with_corner(reference, None)
+    }
+
+    fn component_call_with_corner(&self, reference: &ComponentRef, corner: Option<&str>) -> String {
         let component = self.app.component(&reference.component).expect("component");
-        let args: Vec<_> = component
+        let mut args: Vec<_> = component
             .params
             .iter()
             .filter_map(|param| match &param.kind {
@@ -347,6 +371,9 @@ impl<'a> Generator<'a> {
                 _ => None,
             })
             .collect();
+        if let Some(corner) = corner {
+            args.push(format!("__bernCellCorner: {corner}"));
+        }
         format!("{}({})", names::component(&component.name), args.join(", "))
     }
 

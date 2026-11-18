@@ -1766,6 +1766,35 @@ enum BernQueryPhase<Data> {
     case refreshing(Data)
     /// The last request failed; data from the last success stays visible.
     case failed(previous: Data?, code: String, message: String)
+
+    var needsStatusHeader: Bool {
+        switch self {
+        case .idle, .loading, .failed(previous: .none, code: _, message: _): return true
+        default: return false
+        }
+    }
+}
+
+/// A query nested in a ZStack or HStack still places its initial status
+/// below its header. Once answered, the success layout stands on its own.
+struct BernQueryStatusLayout<Header: View, Content: View>: View {
+    let active: Bool
+    @ViewBuilder let header: () -> Header
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        Group {
+            if active {
+                VStack(alignment: .leading, spacing: 0) {
+                    header()
+                    content()
+                }
+            } else {
+                content()
+            }
+        }
+        .animation(nil, value: active)
+    }
 }
 
 /// Releases a query subscription and its control registration when the
@@ -1800,7 +1829,8 @@ final class BernQuery<Data: BernCodable> {
     @ObservationIgnored private let owner = BernQueryOwner()
     @ObservationIgnored private var generation: UInt64 = 0
     @ObservationIgnored private var requested: [UInt8]?
-    @ObservationIgnored private var wanted: (window: BernWindowContext, params: [UInt8], target: String)?
+    @ObservationIgnored private var wanted: (window: BernWindowContext, params: [UInt8])?
+    @ObservationIgnored private var registeredTarget: String?
     @ObservationIgnored private var scheduled = false
     @ObservationIgnored var count: ((Data) -> Int)?
 
@@ -1810,13 +1840,24 @@ final class BernQuery<Data: BernCodable> {
 
     /// Called while the view renders: remember the parameters it shows and
     /// request them after the update, never during it.
-    func want(_ window: BernWindowContext, params: [UInt8], target: String) {
+    func want(_ window: BernWindowContext, params: [UInt8], target: String?) {
         guard window.generation > 0 else { return }
+        // A retry target belongs to the presentation, not to the request.
+        if let target {
+            if registeredTarget != target || window.generation != generation {
+                register(window, target: target)
+                registeredTarget = target
+            }
+        } else if let token = owner.control {
+            BernHost.shared.controls.remove(token)
+            owner.control = nil
+            registeredTarget = nil
+        }
         if window.generation == generation, params == requested, owner.subscription != nil {
             wanted = nil
             return
         }
-        wanted = (window, params, target)
+        wanted = (window, params)
         guard !scheduled else { return }
         scheduled = true
         DispatchQueue.main.async { [weak self] in
@@ -1826,7 +1867,7 @@ final class BernQuery<Data: BernCodable> {
 
     private func flush() {
         scheduled = false
-        guard let (window, params, target) = wanted else { return }
+        guard let (window, params) = wanted else { return }
         wanted = nil
         let host = BernHost.shared
         do {
@@ -1838,7 +1879,6 @@ final class BernQuery<Data: BernCodable> {
                     self?.receive(bytes)
                 }
                 generation = window.generation
-                register(window, target: target)
             }
             if params != requested { request(params) }
         } catch let problem as BernCommandFailure {
@@ -1924,36 +1964,25 @@ final class BernQuery<Data: BernCodable> {
     }
 }
 
-/// A `Query` declaration: owns its subscription and shows each state with
-/// standard controls. `shown` maps the data to what the template shows,
-/// or `nil` when it is empty.
-struct BernQueryView<Data: BernCodable, Shown, Content: View>: View {
+/// The page owns this state. Only the presentation (including layout
+/// modifiers and controls) is conditional; no placeholder view is needed.
+struct BernQueryScope<Data: BernCodable, Content: View>: View {
     let target: String
     let params: [UInt8]
-    let loading: String
-    let empty: String?
-    let emptyIcon: String
-    let failed: String
-    let shown: (Data) -> Shown?
-    let content: (Shown) -> Content
+    let isPresented: Bool
+    let content: (BernQueryPhase<Data>, @escaping () -> Void) -> Content
     @Environment(BernWindowContext.self) private var window
-    #if os(iOS)
-    @Environment(\.bernSearchEmpty) private var searchEmpty
-    #endif
+    @Environment(\.bernItemKeys) private var keys
     @State private var query: BernQuery<Data>
 
     init(
-        query index: UInt32, target: String, params: [UInt8], loading: String, empty: String?,
-        emptyIcon: String, failed: String, count: ((Data) -> Int)?, shown: @escaping (Data) -> Shown?,
-        @ViewBuilder content: @escaping (Shown) -> Content
+        _ type: Data.Type, query index: UInt32, target: String, params: [UInt8], presented: Bool,
+        count: ((Data) -> Int)?,
+        @ViewBuilder content: @escaping (BernQueryPhase<Data>, @escaping () -> Void) -> Content
     ) {
         self.target = target
         self.params = params
-        self.loading = loading
-        self.empty = empty
-        self.emptyIcon = emptyIcon
-        self.failed = failed
-        self.shown = shown
+        self.isPresented = presented
         self.content = content
         let query = BernQuery<Data>(index: index)
         query.count = count
@@ -1961,8 +1990,49 @@ struct BernQueryView<Data: BernCodable, Shown, Content: View>: View {
     }
 
     var body: some View {
-        let _ = query.want(window, params: params, target: target)
-        switch query.phase {
+        let _ = query.want(window, params: params, target: isPresented ? target + keys : nil)
+        Group {
+            if isPresented {
+                content(query.phase, query.retry)
+            }
+        }
+        // An animated page switch must not leave the old query rows in the
+        // hierarchy for an exit transition. Phase changes keep their own motion.
+        .animation(nil, value: isPresented)
+    }
+}
+
+/// Standard controls for one presentation of a query, without owning it.
+struct BernQueryView<Data: BernCodable, Shown, Content: View>: View {
+    let phase: BernQueryPhase<Data>
+    let retry: () -> Void
+    let loading: String
+    let empty: String?
+    let emptyIcon: String
+    let failed: String
+    let shown: (Data) -> Shown?
+    let content: (Shown) -> Content
+    #if os(iOS)
+    @Environment(\.bernSearchEmpty) private var searchEmpty
+    #endif
+
+    init(
+        phase: BernQueryPhase<Data>, retry: @escaping () -> Void, loading: String,
+        empty: String?, emptyIcon: String, failed: String, shown: @escaping (Data) -> Shown?,
+        @ViewBuilder content: @escaping (Shown) -> Content
+    ) {
+        self.phase = phase
+        self.retry = retry
+        self.loading = loading
+        self.empty = empty
+        self.emptyIcon = emptyIcon
+        self.failed = failed
+        self.shown = shown
+        self.content = content
+    }
+
+    var body: some View {
+        switch phase {
         case .idle, .loading:
             BernQueryProgress(text: loading)
         case .ready(let data), .refreshing(let data):
@@ -1970,13 +2040,13 @@ struct BernQueryView<Data: BernCodable, Shown, Content: View>: View {
             // keyed grids retain their cells, scroll position and reflow.
             presented(data)
                 .overlay(alignment: .topTrailing) {
-                    if case .refreshing = query.phase {
+                    if case .refreshing = phase {
                         ProgressView().controlSize(.small).accessibilityLabel(Text(verbatim: loading))
                     }
                 }
         case .failed(let previous, _, let message):
             if let previous {
-                BernQueryFailureRow(title: failed, message: message) { query.retry() }
+                BernQueryFailureRow(title: failed, message: message) { retry() }
                 presented(previous)
             } else {
                 ContentUnavailableView {
@@ -1984,7 +2054,7 @@ struct BernQueryView<Data: BernCodable, Shown, Content: View>: View {
                 } description: {
                     Text(verbatim: message)
                 } actions: {
-                    Button(BernText.string("bern.query.retry")) { query.retry() }
+                    Button(BernText.string("bern.query.retry")) { retry() }
                 }
                 .frame(maxWidth: .infinity)
             }

@@ -920,7 +920,9 @@ struct Region {
     struct Entry {
         xaml::UIElement element{nullptr};
         std::shared_ptr<Region> region;
-        bool leaving = false;
+        // The one-shot hook identifies this departure, even if the same
+        // native element is mounted again before its animation finishes.
+        winrt::com_ptr<LeaveHook> leaving;
     };
     std::vector<Entry> items;
     /// The enclosing region, which outlives this one: the panel keeps the
@@ -951,12 +953,12 @@ struct Region {
         }
         return before;
     }
-    /// Remove the entry of `element`, wherever it is below this region.
-    bool Forget(xaml::UIElement const& element) {
+    /// Claim this departure once, even after an enclosing region moved it.
+    bool FinishLeave(LeaveHook* hook) {
         for (auto it = items.begin(); it != items.end(); ++it) {
             if (it->region) {
-                if (it->region->Forget(element)) return true;
-            } else if (it->element == element) {
+                if (it->region->FinishLeave(hook)) return true;
+            } else if (it->leaving.get() == hook) {
                 items.erase(it);
                 return true;
             }
@@ -1154,7 +1156,7 @@ struct Parent {
                 Detach(entry.element);
                 continue;
             }
-            entry.leaving = true;
+            entry.leaving = hook;
             kept.push_back(entry);
             auto element = entry.element;
             auto items = Items();
@@ -1162,10 +1164,11 @@ struct Parent {
             // Leaving once: the hook goes with the element.
             auto leave = std::move(hook->leave);
             hook->leave = nullptr;
-            leaves.push_back([leave, element, items, weak] {
-                leave([element, items, weak] {
+            leaves.push_back([leave, hook, element, items, weak] {
+                leave([hook, element, items, weak] {
+                    auto region = weak.lock();
+                    if (!region || !region->FinishLeave(hook.get())) return;
                     if (auto index = items->find(element)) items->remove(*index);
-                    if (auto region = weak.lock()) region->Forget(element);
                 });
             });
         }
@@ -1173,7 +1176,14 @@ struct Parent {
 
     /// Remove every element of this region; elements with a `disappear`
     /// transition stay until it has played.
-    void Clear() const {
+    void Clear(bool immediate = false) const {
+        if (immediate) {
+            std::vector<xaml::UIElement> elements;
+            region->Elements(elements);
+            region->items.clear();
+            for (auto const& element : elements) Detach(element);
+            return;
+        }
         std::vector<Region::Entry> kept;
         std::vector<std::function<void()>> leaves;
         Let(region->items, kept, leaves);

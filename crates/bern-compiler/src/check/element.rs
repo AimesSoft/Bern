@@ -127,7 +127,39 @@ impl Checker<'_> {
                 "`display: icon` is for `Search(style: palette)`, whose trigger is a button",
             );
         }
-        let children = self.children(element, path, &parts.child_ctx, scope);
+        let children = if parts.kind == "Query" {
+            let (header, body) =
+                ast::query_children(element.children.as_deref().unwrap_or_default());
+            let mut lowered = Vec::new();
+            // The two layouts never coexist. A control may use the same id in
+            // both, but never twice within one, or anywhere else on the page.
+            let header_ids = header.map(|header| {
+                let before = self.ids.clone();
+                lowered.extend(self.node(
+                    header,
+                    &format!("{path}.status"),
+                    &parts.child_ctx,
+                    scope,
+                ));
+                std::mem::replace(&mut self.ids, before)
+            });
+            if let (Some(ir::Prop::Query { query }), Some(var)) =
+                (parts.props.get("query"), &element.template)
+            {
+                let shown = match &query.result {
+                    Type::Optional { inner } => (**inner).clone(),
+                    other => other.clone(),
+                };
+                parts.bind(var.to_string(), shown, scope);
+            }
+            lowered.extend(self.nodes(body, path, &parts.child_ctx, scope));
+            if let Some(mut ids) = header_ids {
+                self.ids.append(&mut ids);
+            }
+            lowered
+        } else {
+            self.children(element, path, &parts.child_ctx, scope)
+        };
         if parts.kind == "Tabs" {
             self.tab_accessory(element, &children);
         }
@@ -340,15 +372,11 @@ impl Checker<'_> {
         &mut self,
         element: &ast::Element,
         prop: &ast::Prop,
-        scope: &mut Scope,
+        scope: &Scope,
         parts: &mut Parts,
     ) {
         let Some(query) = self.query(&prop.value, scope) else {
             return;
-        };
-        let shown = match &query.result {
-            Type::Optional { inner } => (**inner).clone(),
-            other => other.clone(),
         };
         if let Some(empty) = element.prop("empty")
             && !matches!(query.result, Type::Optional { .. } | Type::List { .. })
@@ -361,9 +389,6 @@ impl Checker<'_> {
                     query.result.display()
                 ),
             );
-        }
-        if let Some(var) = &element.template {
-            parts.bind(var.to_string(), shown, scope);
         }
         parts
             .props

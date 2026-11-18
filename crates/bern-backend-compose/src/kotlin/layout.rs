@@ -1215,14 +1215,9 @@ impl Generator<'_> {
         }
     }
 
-    /// A `Query`: the runtime view owns the subscription and shows the
-    /// loading, refreshing, failed and empty states; the template shows the
-    /// data. Its parameters are encoded on every composition; the runtime
-    /// requests them only when they change.
-    pub(super) fn query(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
-        let (Some(binding), Some(template)) = (element.query("query"), &element.template) else {
-            return;
-        };
+    /// Open the owner before any row/window/motion wrappers are emitted.
+    pub(super) fn query_scope(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let binding = element.query("query").expect("typed query");
         let data = kotlin_type(&binding.result);
         let encode: Vec<_> = binding
             .args
@@ -1233,6 +1228,30 @@ impl Generator<'_> {
             "run {{ val writer = BernWriter(); {}; writer.bytes() }}",
             encode.join("; ")
         );
+        let count = match &binding.result {
+            Type::List { .. } => format!("{{ data: {data} -> data.size }}"),
+            Type::Optional { .. } => format!("{{ data: {data} -> if (data == null) 0 else 1 }}"),
+            _ => "null".into(),
+        };
+        let presented = element
+            .query_presentation()
+            .map(|e| self.expr(e))
+            .unwrap_or_else(|| "true".into());
+        let modifier = ctx
+            .query_modifier
+            .map(|m| format!(", modifier = {m}"))
+            .unwrap_or_default();
+        out.open(format!(
+            "BernQueryScope({}, {}, {params}, {presented}, {{ reader -> {} }}, {count}{modifier}) {{ __bernQuery ->",
+            binding.query, self.target(element, ctx), decode(&binding.result, "reader")
+        ));
+    }
+
+    pub(super) fn query(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let (Some(binding), Some(template)) = (element.query("query"), &element.template) else {
+            return;
+        };
+        let data = kotlin_type(&binding.result);
         let framework = |key: &str| format!("BernText.string({})", string(key));
         let loading = self
             .text_prop(element, "loading")
@@ -1243,36 +1262,31 @@ impl Generator<'_> {
         let empty = self.text_prop(element, "empty");
         let icon = element.icon("icon").unwrap_or("tray");
         // The declared empty rule: an empty list or a missing optional.
-        let (shown, count) = match &binding.result {
-            Type::List { .. } if empty.is_some() => (
-                "if (data.isEmpty()) null else data",
-                format!("{{ data: {data} -> data.size }}"),
-            ),
-            Type::List { .. } => ("data", format!("{{ data: {data} -> data.size }}")),
-            Type::Optional { .. } => (
-                "data",
-                format!("{{ data: {data} -> if (data == null) 0 else 1 }}"),
-            ),
-            _ => ("data", "null".to_string()),
+        let shown = match &binding.result {
+            Type::List { .. } if empty.is_some() => "if (data.isEmpty()) null else data",
+            _ => "data",
         };
-        out.open("BernQueryView(");
-        out.line(format!("{}, {},", binding.query, self.target(element, ctx)));
-        out.line(format!("{params},"));
+        let (header, body) = element.query_children();
+        if let Some(header) = header {
+            out.open("BernQueryStatusLayout(__bernQuery.phase.needsStatusHeader, header = {");
+            self.nodes(out, header, &ctx.within(Scope::Column));
+            out.close("}) {");
+            out.indent += 1;
+        }
+        out.open("BernQueryView(__bernQuery,");
         out.line(format!(
             "{loading}, {}, {}, {failed},",
             empty.unwrap_or_else(|| "null".into()),
             string(icon)
         ));
-        out.line(format!(
-            "{{ reader -> {} }},",
-            decode(&binding.result, "reader")
-        ));
-        out.line(format!("{count},"));
         out.line(format!("{{ data: {data} -> {shown} }},"));
         out.close(format!(") {{ {} ->", member(&template.var)));
         out.indent += 1;
-        self.nodes(out, &element.children, ctx);
+        self.nodes(out, body, ctx);
         out.close("}");
+        if header.is_some() {
+            out.close("}");
+        }
     }
 
     pub(super) fn adaptive(&self, out: &mut Out, element: &Element, ctx: &Ctx) {

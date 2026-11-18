@@ -1970,7 +1970,12 @@ sealed class BernQueryPhase<out T> {
     /// New parameters are loading; the previous data stays visible.
     data class Refreshing<T>(val data: T) : BernQueryPhase<T>()
     /// The last request failed; data from the last success stays visible.
-    data class Failed<T>(val previous: T?, val code: String, val message: String) : BernQueryPhase<T>()
+    data class Failed<T>(
+        val previous: T?, val code: String, val message: String, val hasPrevious: Boolean,
+    ) : BernQueryPhase<T>()
+
+    val needsStatusHeader: Boolean
+        get() = this is Idle || this is Loading || (this is Failed<*> && !hasPrevious)
 }
 
 /// One subscription to a catalog query. Every parameter change is a new
@@ -1985,28 +1990,20 @@ class BernQuery<T>(private val index: Int, private val decode: (BernReader) -> T
     private var subscription: Long? = null
     private var generation = 0L
     private var requested: ByteArray? = null
-    private val control = Any()
 
     /// After each composition: open the subscription for the window and
     /// request the parameters it shows, if they changed.
-    fun want(window: BernWindowContext, params: ByteArray, target: String) {
+    fun want(window: BernWindowContext, params: ByteArray) {
         if (window.generation == 0L) return
         try {
             if (subscription != null && generation != window.generation) close()
             if (subscription == null) {
                 subscription = BernHost.queryOpen(window, index) { receive(it) }
                 generation = window.generation
-                BernHost.controls.register(
-                    control,
-                    BernControlEntry(
-                        target, window.id, "query", "", true,
-                        BernControlActions(activate = { retry() }, value = { summary }),
-                    ),
-                )
             }
             if (!params.contentEquals(requested)) request(params)
         } catch (problem: BernCommandFailure) {
-            phase = BernQueryPhase.Failed(null, problem.code, problem.message)
+            phase = BernQueryPhase.Failed(null, problem.code, problem.message, hasPrevious = false)
         }
     }
 
@@ -2015,7 +2012,7 @@ class BernQuery<T>(private val index: Int, private val decode: (BernReader) -> T
         requested = params
         val reader = BernReader(BernNative.queryRequest(BernHost.handle, subscription, params))
         if (reader.u8() != 0) {
-            phase = BernQueryPhase.Failed(null, reader.text(), reader.text())
+            phase = BernQueryPhase.Failed(null, reader.text(), reader.text(), hasPrevious = false)
             return
         }
         receive(reader)
@@ -2031,7 +2028,6 @@ class BernQuery<T>(private val index: Int, private val decode: (BernReader) -> T
         subscription = null
         requested = null
         version = 0
-        BernHost.controls.remove(control)
     }
 
     private fun receive(bytes: ByteArray) = receive(BernReader(bytes))
@@ -2046,15 +2042,17 @@ class BernQuery<T>(private val index: Int, private val decode: (BernReader) -> T
                 2 -> BernQueryPhase.Ready(decode(reader))
                 3 -> BernQueryPhase.Refreshing(decode(reader))
                 4 -> {
-                    val previous = if (reader.u8() == 1) decode(reader) else null
-                    BernQueryPhase.Failed(previous, reader.text(), reader.text())
+                    // A previous successful optional can itself be null.
+                    val hasPrevious = reader.u8() == 1
+                    val previous = if (hasPrevious) decode(reader) else null
+                    BernQueryPhase.Failed(previous, reader.text(), reader.text(), hasPrevious)
                 }
                 else -> throw BernDecodeError("unknown query phase")
             }
             version = next
             this.phase = phase
         } catch (error: Exception) {
-            phase = BernQueryPhase.Failed(null, "invalid_state", error.toString())
+            phase = BernQueryPhase.Failed(null, "invalid_state", error.toString(), hasPrevious = false)
         }
     }
 
@@ -2073,27 +2071,50 @@ class BernQuery<T>(private val index: Int, private val decode: (BernReader) -> T
         }
 }
 
-/// A `Query` declaration: owns its subscription and shows each state with
-/// standard components. `shown` maps the data to what the template shows,
-/// or null when it is empty.
+/// Own one subscription in the composition independently of its UI. A hidden
+/// presentation emits no layout node or semantics and registers no retry target.
+@Composable
+fun <T> BernQueryScope(
+    query: Int, target: String, params: ByteArray, presented: Boolean,
+    decode: (BernReader) -> T, count: ((T) -> Int)?, modifier: Modifier = Modifier,
+    content: @Composable (BernQuery<T>) -> Unit,
+) {
+    val window = LocalBernWindow.current
+    val state = remember(query) { BernQuery(query, decode).also { it.count = count } }
+    SideEffect { state.want(window, params) }
+    DisposableEffect(state) { onDispose { state.close() } }
+    if (presented) {
+        BernControl(target, "query", "", actions = BernControlActions(activate = { state.retry() }, value = { state.summary }))
+        if (modifier == Modifier) content(state) else Box(modifier) { content(state) }
+    }
+}
+
+/// Only an unanswered query with a header needs its own vertical layout.
+@Composable
+fun BernQueryStatusLayout(
+    active: Boolean, header: @Composable ColumnScope.() -> Unit, content: @Composable () -> Unit,
+) {
+    if (active) {
+        Column {
+            header()
+            content()
+        }
+    } else {
+        content()
+    }
+}
+
+/// The existing query phases, rendered only when the owner presents them.
 @Composable
 fun <T, S> BernQueryView(
-    query: Int,
-    target: String,
-    params: ByteArray,
+    state: BernQuery<T>,
     loading: String,
     empty: String?,
     emptyIcon: String,
     failed: String,
-    decode: (BernReader) -> T,
-    count: ((T) -> Int)?,
     shown: (T) -> S?,
     content: @Composable (S) -> Unit,
 ) {
-    val window = LocalBernWindow.current
-    val state = remember { BernQuery(query, decode).also { it.count = count } }
-    SideEffect { state.want(window, params, target) }
-    DisposableEffect(state) { onDispose { state.close() } }
     val searchEmpty = LocalBernSearchEmpty.current
     val presented: @Composable (T) -> Unit = { data ->
         val value = shown(data)

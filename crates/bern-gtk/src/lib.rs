@@ -73,7 +73,7 @@ pub use media::{MediaOp, Video, VideoProps, media, media_open};
 pub use motion::{Curve, Decor, Decorate, Edge, Num, Transition, TransitionKind, staggered};
 pub use palette::{SearchItem, SearchItemProps, SearchPalette};
 pub use parent::Parent;
-pub use query::{Query, QueryProps};
+pub use query::{Query, QueryProps, own_query};
 pub use scene::{
     Accordion, AccordionProps, ControlGroup, ControlGroupProps, Flow, FlowProps, Marquee,
     MarqueeProps, Modal, ModalProps, Positioned, PositionedProps, ScaleBox, ScaleBoxProps, Timer,

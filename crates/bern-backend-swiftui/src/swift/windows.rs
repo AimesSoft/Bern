@@ -60,6 +60,10 @@ impl Generator<'_> {
                 ParamKind::Windows | ParamKind::Players => {}
             }
         }
+        let query_root = self.app.has_query_presentation_root(&component.body);
+        if query_root {
+            out.line("var __bernCellCorner: CGFloat? = nil");
+        }
         if client || self.uses_engine(&[&component.body]) {
             out.line("@Environment(BernEngine.self) private var bernEngine");
         }
@@ -80,6 +84,7 @@ impl Generator<'_> {
         });
         let ctx = Ctx {
             component: component.name.clone(),
+            accordion_corner: query_root.then(|| "__bernCellCorner".into()),
             ..Ctx::default()
         };
         if toolbar {
