@@ -177,7 +177,7 @@ Buffering, ending, audio track changes and system-forced pauses observed by the 
 
 **Version constraints.** With target API 35 and above, requesting audio focus requires being the top app or running a foreground service. Android 17 tightens background audio further, and target API 37 should be validated against the current while-in-use and other requirements; having a resident Rust engine does not mean having authorization for background playback. [Audio focus](https://developer.android.com/media/optimize/audio-focus), [Android 17 background audio](https://developer.android.com/about/versions/17/changes/bg-audio)
 
-**Bern decision.** The UI, CLI, JSON and MCP receive the same structured results, such as "foreground interaction/permission required" and "playback capability unavailable". Background restrictions, device loss or user refusal must not be downgraded to "command succeeded".
+**Bern decision.** The UI, CLI and JSON receive the same structured results, such as "foreground interaction/permission required" and "playback capability unavailable". Background restrictions, device loss or user refusal must not be downgraded to "command succeeded".
 
 Some Android 17 background audio APIs fail silently, so the backend must first validate the lifecycle conditions that can be known, then distinguish "request accepted" from "state confirmed"; when audio output cannot be confirmed, no evidence of success may be faked. Diagnostic tests should cover the officially provided audio hardening test mode. [Silent failures and verification methods](https://developer.android.com/about/versions/17/changes/bg-audio)
 

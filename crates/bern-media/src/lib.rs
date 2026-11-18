@@ -6,8 +6,7 @@
 //! that really loads and plays media, such as AVFoundation in a macOS app.
 //! Nothing here depends on a UI SDK or a decoder.
 //!
-//! Every player has a stable `player_id`. The UI, the CLI, JSON clients and
-//! the MCP server all address it through the same commands; the hub routes
+//! Every player has a stable `player_id`. The UI, the CLI and JSON clients all address it through the same commands; the hub routes
 //! them to the executor that holds the player and merges what the executor
 //! reports back into one state that every entry observes.
 

@@ -17,7 +17,7 @@
 | --- | --- | --- |
 | 平台解析 | 完成 | `platform = "watchos"` 默认对应 `ui = "swiftui"`；`bern doctor`、`bern check`、`bern build`、`bern run` 与 `bern package` 均识别该目标 |
 | 显式手表布局与功能契约 | 完成 | 所有可达的 `Adaptive` 必须声明 `Layout(size: watch)`（`B401`）；`Application::on_watch` 在检查前裁剪非手表分支，`#[bern::features]` 单独证明 `watch` 覆盖 |
-| 生成代码与模拟器构建 | 完成 | `bern build --target watchos` 编译 `aarch64-apple-watchos-sim` 静态库、Mac 端 CLI 与 MCP 工具，以及 Swift 6 watchOS 应用包（`WKApplication`、`WKWatchOnly`、`UIDeviceFamily = 4`） |
+| 生成代码与模拟器构建 | 完成 | `bern build --target watchos` 编译 `aarch64-apple-watchos-sim` 静态库、Mac 端 CLI，以及 Swift 6 watchOS 应用包（`WKApplication`、`WKWatchOnly`、`UIDeviceFamily = 4`） |
 | 手表原生控件适配 | 完成 | 针对 watchOS 不提供 `SwiftUI.Menu` 与 `.menu` / `.segmented` 选择器的限制，由 `BernWatchMenu` 与 `BernWatchPicker` 以支持表冠滚动的原生 sheet 呈现；`Form` 行避免双层底板嵌套 |
 | 引擎平台能力 | 完成 | `bern-command` 在 watchOS 上支持 `Application Support` / `Caches` 存储、钥匙串 `secrets`、`MPNowPlayingInfoCenter` `now_playing`，以及 `javascript = true` 时的 Boa 引擎 |
 | 应用图标 | 完成 | `[app.icon].watchos` 支持方形 PNG、`.appiconset` 目录与 Icon Composer `.icon` 目录 |

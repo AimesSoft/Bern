@@ -375,7 +375,7 @@ pub fn session_catalog() -> (TypeTable, Vec<CommandSpec>) {
                 "TraceCommand",
                 &[
                     ("id", Type::Text, "Command id"),
-                    ("entry", Type::Text, "ui, cli, json, mcp or test"),
+                    ("entry", Type::Text, "ui, cli, json, web or test"),
                     (
                         "total_us",
                         distribution(),

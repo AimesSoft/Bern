@@ -48,7 +48,7 @@ platform = "windows"
 channels = ["ipc"]
 
 # The WebUI build: the page connects to a separate engine host, which also
-# serves the CLI, JSON and MCP entries through its IPC channel.
+# serves the CLI and JSON entries through its IPC channel.
 [targets.web_ui]
 ui = "web"
 platform = "browser"

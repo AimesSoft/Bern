@@ -72,10 +72,10 @@ class BridgeTest(unittest.TestCase):
         second=self.post('register',{'engine':'second'})['page']
         page=self.server.pages[first]
         results=[]
-        thread=threading.Thread(target=lambda:results.append(page.request('mcp',{'type':'state','request_id':'1'})))
+        thread=threading.Thread(target=lambda:results.append(page.request('cli',{'type':'state','request_id':'1'})))
         thread.start()
         task=self.post('next',{'page':first})['tasks'][0]
-        self.assertEqual(task['entry'],'mcp')
+        self.assertEqual(task['entry'],'cli')
         with self.assertRaises(urllib.error.HTTPError) as wrong:
             self.post('reply',{'page':second,'id':task['id'],'message':{'type':'state'}})
         self.assertEqual(wrong.exception.code,404)
@@ -97,7 +97,7 @@ class BridgeTest(unittest.TestCase):
     def test_timed_out_queued_commands_are_not_later_executed(self):
         page=self.server.pages[self.post('register',{'engine':'first'})['page']]
         previous=bridge.TIMEOUT; bridge.TIMEOUT=0.01
-        try: result=page.request('mcp',{'type':'command','request_id':'1'})
+        try: result=page.request('cli',{'type':'command','request_id':'1'})
         finally: bridge.TIMEOUT=previous
         self.assertEqual(result['error']['code'],'page_timeout')
         self.assertEqual(page.next(),[])

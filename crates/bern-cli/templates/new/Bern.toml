@@ -34,7 +34,7 @@ package = "{{package}}-ui"
 sources = ["{{package}}-ui/src/lib.rs"]
 root = "app"
 
-# `channels = ["ipc"]` lets the generated command line and MCP server drive
+# `channels = ["ipc"]` lets the generated command line drive
 # the running app. Remove it to ship an app that listens to nothing.
 
 [targets.macos]

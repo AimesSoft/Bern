@@ -60,7 +60,6 @@ pub unsafe extern "C" fn bern_app_control(
         };
         let entry = match envelope["entry"].as_str() {
             Some("cli") => Entry::Cli,
-            Some("mcp") => Entry::Mcp,
             _ => Entry::Json,
         };
         let request_id = envelope["message"]["request_id"]

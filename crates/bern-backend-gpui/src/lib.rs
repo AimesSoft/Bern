@@ -270,7 +270,7 @@ pub fn product_name(app: &Application) -> String {
 
 /// The macOS product: `<Product>.app` with the program in
 /// `Contents/MacOS`, the resources in `Contents/Resources/resources`, the
-/// command line and the MCP server in `Contents/Helpers` with the agent
+/// command line in `Contents/Helpers` with the agent
 /// skill in `Contents/Resources/skills`, so a copy moved or installed
 /// anywhere carries them; `bin/` beside it links to the helpers. The
 /// helpers are signed before the app, whose signature seals them.
@@ -280,7 +280,7 @@ fn mac_bundle_plan(
     build: BuildStep,
     shipped: Vec<(PathBuf, PathBuf)>,
     built: &std::path::Path,
-    [program, cli, mcp]: [&String; 3],
+    program: &str,
 ) -> BuildPlan {
     let output = &context.output_dir;
     let product = product_name(app);
@@ -313,27 +313,22 @@ fn mac_bundle_plan(
             from: built.join(format!("{program}-ui")),
             to: contents.join("MacOS").join(program),
         },
-        BuildStep::CreateDir {
-            path: helpers.clone(),
-        },
+        BuildStep::program_dir(helpers.clone(), [program]),
     ];
-    for helper in [cli, mcp] {
-        steps.push(BuildStep::Copy {
-            from: built.join(helper),
-            to: helpers.join(helper),
-        });
-        steps.push(sign(
-            helpers.join(helper),
-            "Sign the command line tools for local use",
-        ));
-    }
+    steps.push(BuildStep::Copy {
+        from: built.join(program),
+        to: helpers.join(program),
+    });
+    steps.push(sign(
+        helpers.join(program),
+        "Sign the command line for local use",
+    ));
     let listens = skill::listens(&context.target.channels);
     if listens {
         let inside = skill::Place {
-            cli: format!("../../../Helpers/{cli}"),
-            mcp: format!("../../../Helpers/{mcp}"),
+            cli: format!("../../../Helpers/{program}"),
             installed: Some(format!(
-                "/Applications/{product}.app/Contents/Helpers/{cli}"
+                "/Applications/{product}.app/Contents/Helpers/{program}"
             )),
             connect: None,
         };
@@ -414,31 +409,23 @@ fn mac_bundle_plan(
             cwd: output.clone(),
             env: vec![],
         },
-        BuildStep::CreateDir {
-            path: output.join("bin"),
-        },
+        BuildStep::program_dir(output.join("bin"), [program]),
     ]);
-    for helper in [cli, mcp] {
-        steps.push(BuildStep::Run {
-            description: "Link the command line tools in bin/".into(),
-            program: "ln".into(),
-            args: vec![
-                "-sf".into(),
-                format!("../{product}.app/Contents/Helpers/{helper}"),
-                output.join("bin").join(helper).display().to_string(),
-            ],
-            cwd: output.clone(),
-            env: vec![],
-        });
-    }
+    steps.push(BuildStep::Run {
+        description: "Link the command line in bin/".into(),
+        program: "ln".into(),
+        args: vec![
+            "-sf".into(),
+            format!("../{product}.app/Contents/Helpers/{program}"),
+            output.join("bin").join(program).display().to_string(),
+        ],
+        cwd: output.clone(),
+        env: vec![],
+    });
     // The agent skill beside `bin/` too, where the app listens.
     let place = listens.then(|| skill::Place::beside_bin(app, false));
     steps.extend(skill::steps(app, output, place.as_ref()));
-    let mut products = vec![
-        bundle.clone(),
-        output.join("bin").join(cli),
-        output.join("bin").join(mcp),
-    ];
+    let mut products = vec![bundle.clone(), output.join("bin").join(program)];
     if listens {
         products.push(output.join(skill::path(app)));
     }
@@ -793,7 +780,6 @@ impl Target for Gpui {
             GeneratedFile::text("app/src/main.rs", glue::main_rs(context, app)),
             GeneratedFile::text("app/src/ui.rs", ui),
             GeneratedFile::text("app/src/cli.rs", glue::cli_rs(context, app)),
-            GeneratedFile::text("app/src/mcp.rs", glue::mcp_rs(context, app)),
         ];
         bern_target_api::script::configure(&mut files, context);
         // The workspace's versions of the shared crates, so the application
@@ -842,7 +828,7 @@ impl Target for Gpui {
 
     /// Build the application crate, then lay the product out as every
     /// target does: the program in `<Product>/` with its resources, the
-    /// command line and the MCP server in `bin/`, the agent skill in
+    /// command line in `bin/`, the agent skill in
     /// `skills/`.
     fn plan(
         &self,
@@ -867,8 +853,6 @@ impl Target for Gpui {
             cargo.push("--release".into());
         }
         let program = self.program(&executable);
-        let cli = self.program(&executable);
-        let mcp = self.program(&format!("{executable}-mcp"));
         let build = BuildStep::Run {
             description: "Build the GPUI application, the engine and the entries".into(),
             program: "cargo".into(),
@@ -895,12 +879,7 @@ impl Target for Gpui {
             .collect();
         if self.platform == "macos" {
             return Ok(mac_bundle_plan(
-                app,
-                context,
-                build,
-                shipped,
-                &built,
-                [&program, &cli, &mcp],
+                app, context, build, shipped, &built, &program,
             ));
         }
         let mut steps = vec![
@@ -919,27 +898,17 @@ impl Target for Gpui {
                 from: built.join(self.program(&format!("{executable}-ui"))),
                 to: bundle.join(&program),
             },
-            BuildStep::CreateDir {
-                path: output.join("bin"),
-            },
+            BuildStep::program_dir(output.join("bin"), [&program]),
             BuildStep::Copy {
-                from: built.join(&cli),
-                to: output.join("bin").join(&cli),
-            },
-            BuildStep::Copy {
-                from: built.join(&mcp),
-                to: output.join("bin").join(&mcp),
+                from: built.join(&program),
+                to: output.join("bin").join(&program),
             },
         ];
         // The agent skill beside `bin/`, where the app listens.
         let listens = skill::listens(&context.target.channels);
         let place = listens.then(|| skill::Place::beside_bin(app, self.platform == "windows"));
         steps.extend(skill::steps(app, output, place.as_ref()));
-        let mut products = vec![
-            bundle.join(&program),
-            output.join("bin").join(&cli),
-            output.join("bin").join(&mcp),
-        ];
+        let mut products = vec![bundle.join(&program), output.join("bin").join(&program)];
         if listens {
             products.push(output.join(skill::path(app)));
         }

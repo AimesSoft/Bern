@@ -241,17 +241,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bern-adapter-mcp"
-version = "0.1.20"
-dependencies = [
- "bern-adapter-json",
- "bern-media",
- "bern-protocol",
- "bern-transport-ipc",
- "serde_json",
-]
-
-[[package]]
 name = "bern-backend-compose"
 version = "0.1.20"
 dependencies = [

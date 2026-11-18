@@ -104,7 +104,7 @@ fn selected_features(path: &Path, config: &Config) -> Result<Option<Vec<String>>
     Ok(Some(selected.into_iter().collect()))
 }
 
-/// Every generated Cargo manifest, including CLI/MCP, Web page and host,
+/// Every generated Cargo manifest, including CLI, Web page and host,
 /// gets the same selected features and a reproducible local environment.
 pub fn configure(files: &mut Vec<GeneratedFile>, config: &Config) -> Result<(), String> {
     let mut cache = BTreeMap::new();

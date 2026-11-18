@@ -52,9 +52,9 @@ channels = ["ipc"]
   - `host`：经 `bern_ffi::start_app` 启动引擎。回调在引擎与通道线程上，字节复制进一个通道，由 GPUI 主线程上的任务按到达顺序处理。
   - `windows`：每个 `Window` 一个原生窗口，打开与关闭都告诉会话运行时；最后一个窗口关闭时退出，退出前停掉引擎。
   - 元素：`layout`（行列、层叠、网格、滚动、标签页、预览列表、手风琴）、`content`（文字、标签、图片）、`controls`（按钮、开关、选择器、输入框）、`overlay`（弹层、菜单、对话框、分体按钮）、`search`（搜索、搜索面板、工具栏）、`scroll`（停靠与定位）、`query`（异步查询）、`media`（视频）、`spin`（转动的图片）、`navigation`、`form`、`scene`、`canvas`、`behaviors`、`menus`；`look` 是 `style!` 规则，`theme`、`text`、`session`（外部入口）、`native`（平台接口）、`chrome`（Windows 与 Linux 上由应用画的窗口框架）。
-- 生成的应用与其他目标的布局相同：Windows 与 Linux 上是 `<产品>/<程序>`（旁边是 `resources/`），macOS 上是 `<产品>.app`（见下）；`bin/` 里的应用 CLI 与 MCP 服务器、`skills/` 里的 Agent skill。
-- **Windows 程序的资源**：应用 crate 里生成 `app.ico`（声明的 `.ico` 原样，或由 PNG、Bern 标志做成）、`app.rc`（图标作资源 1，版本信息写应用在默认语言里的名字与版本）与 `build.rs`，每个程序（界面、CLI、MCP 服务器）都带上。GPUI 把资源 1 给每个窗口，资源管理器、任务栏与任务管理器显示图标与名字。Linux 上还没有桌面文件与图标。
-- **macOS 应用包**：与 SwiftUI 目标相同，`Info.plist` 写名字、版本、标识与 `CFBundleIconFile`，各语言的名字在 `<语言>.lproj/InfoPlist.strings`；图标是声明的 PNG（或 Bern 标志）做成的 `.icns`，由系统裁成它的形状、套上底板，声明 `.icns` 时原样使用；声明 Icon Composer 文档时与 SwiftUI 目标相同，文档放在包外，由 `actool` 编译进 `Contents/Resources`（`Assets.car`，以及给旧系统的 `AppIcon.icns`），`Info.plist` 加上 `CFBundleIconName`；程序在 `Contents/MacOS`，资源在 `Contents/Resources/resources`，CLI 与 MCP 服务器在 `Contents/Helpers`、skill 在 `Contents/Resources/skills`，先签它们再临时签名整个包，然后 `touch` 并 `lsregister -f` 让 Finder 与 Dock 读新图标；`bin/` 里是指向包内程序的链接。运行时在包里不再用 `setApplicationIconImage` 设应用自己的图标（那样 Dock 显示的是没有底板的原图）。`WindowSet(icon:)` 的备用图标与 SwiftUI 目标相同：Icon Composer 文档由 `actool` 以 `--alternate-app-icon AppIcon-<名字>` 编进包，`.icns` 或 PNG 放进 `Contents/Resources`，运行时按名字取（`NSImage(named:)`），系统画上底板；不在包里运行时用资源里的图片。
+- 生成的应用与其他目标的布局相同：Windows 与 Linux 上是 `<产品>/<程序>`（旁边是 `resources/`），macOS 上是 `<产品>.app`（见下）；`bin/` 里的应用 CLI、`skills/` 里的 Agent skill。
+- **Windows 程序的资源**：应用 crate 里生成 `app.ico`（声明的 `.ico` 原样，或由 PNG、Bern 标志做成）、`app.rc`（图标作资源 1，版本信息写应用在默认语言里的名字与版本）与 `build.rs`，每个程序（界面、CLI）都带上。GPUI 把资源 1 给每个窗口，资源管理器、任务栏与任务管理器显示图标与名字。Linux 上还没有桌面文件与图标。
+- **macOS 应用包**：与 SwiftUI 目标相同，`Info.plist` 写名字、版本、标识与 `CFBundleIconFile`，各语言的名字在 `<语言>.lproj/InfoPlist.strings`；图标是声明的 PNG（或 Bern 标志）做成的 `.icns`，由系统裁成它的形状、套上底板，声明 `.icns` 时原样使用；声明 Icon Composer 文档时与 SwiftUI 目标相同，文档放在包外，由 `actool` 编译进 `Contents/Resources`（`Assets.car`，以及给旧系统的 `AppIcon.icns`），`Info.plist` 加上 `CFBundleIconName`；程序在 `Contents/MacOS`，资源在 `Contents/Resources/resources`，CLI在 `Contents/Helpers`、skill 在 `Contents/Resources/skills`，先签 CLI，再临时签名整个包，然后 `touch` 并 `lsregister -f` 让 Finder 与 Dock 读新图标；`bin/` 里是指向包内程序的链接。运行时在包里不再用 `setApplicationIconImage` 设应用自己的图标（那样 Dock 显示的是没有底板的原图）。`WindowSet(icon:)` 的备用图标与 SwiftUI 目标相同：Icon Composer 文档由 `actool` 以 `--alternate-app-icon AppIcon-<名字>` 编进包，`.icns` 或 PNG 放进 `Contents/Resources`，运行时按名字取（`NSImage(named:)`），系统画上底板；不在包里运行时用资源里的图片。
 
 窗口内容在 GPUI 每次渲染时重新构建：生成的代码给每个窗口与组件各一个 `fn(&Ctx) -> El`，直接读引擎状态。引擎状态变化后，各窗口的根视图收到 `notify`，下一帧重画。所以这个目标不需要 GTK 运行时那样逐字段的响应式绑定。
 
@@ -188,7 +188,7 @@ GPUI 的图片加载器会记住一次加载的结果，失败也记住，而且
 同一份声明不改，测试副本另设 `bundle_id`，运行时把 `HOME` 指向空目录，数据目录因此与真实应用分开。
 
 - 检查报错从 1749 处降到 0（只剩动效等警告）。
-- 构建：应用、CLI、MCP 服务器与 skill 都产出；引擎与它自带的媒体内核一起编译。
+- 构建：应用、CLI 与 skill 都产出；引擎与它自带的媒体内核一起编译。
 - 在 `BERN_WINDOW_OFFSCREEN` 下运行并截图，经应用 CLI 操作：
   - 首次启动的引导对话框四步：欢迎页（格纹图案、矢量吉祥物、字标、换行的说明）、选择起点（选项卡片、选中描边与对勾、模块开关胶囊、跟着变的小窗口预览）、外观（四个主题色圆点、明暗分段）、准备好了；
   - 主窗口的侧栏与工具栏（搜索面板入口、“打开”按钮），首页的今日更新（http 海报、时间线与“现在”线、横向滚动按 `open_center` 打开），新番页的一周手风琴与每天的预览列表，媒体库页（分段、筛选胶囊、滑块、排序菜单、空状态），下载页；
@@ -239,7 +239,7 @@ Apple M4、16 GB、macOS 27.2，Rust 1.99。
 | --- | --- |
 | 编译时间 | 3 分 27 秒，冷编译，包括 GPUI |
 | 应用程序 | 6.6 MB |
-| CLI、MCP 服务器 | 各 0.9 MB |
+| CLI | 0.9 MB |
 | 内存（`footprint`） | 第一次启动 73 MB（在编译着色器），之后 29 MB |
 
 **探针**：只用 GPUI 的计数器窗口与加上 `gpui-component` 的窗口，都是 LTO release，编译时没开 `font-kit`，所以不画文字，体积和内存都不含文字系统。

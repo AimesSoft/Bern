@@ -428,7 +428,6 @@ impl Target for WinUi3Windows {
             GeneratedFile::text("glue/.cargo/config.toml", glue::cargo_config()),
             GeneratedFile::text("glue/src/lib.rs", glue::lib_rs(context, app)),
             GeneratedFile::text("glue/src/cli.rs", glue::cli_rs(context, app)),
-            GeneratedFile::text("glue/src/mcp.rs", glue::mcp_rs(context, app)),
             GeneratedFile::text(
                 "app/build.bat",
                 glue::build_script(&glue::Script {
@@ -593,16 +592,10 @@ impl Target for WinUi3Windows {
                     .collect(),
                 keep: vec![],
             },
-            BuildStep::CreateDir {
-                path: output.join("bin"),
-            },
+            BuildStep::program_dir(output.join("bin"), [exe(&executable)]),
             BuildStep::Copy {
                 from: built.join(exe(&executable)),
                 to: output.join("bin").join(exe(&executable)),
-            },
-            BuildStep::Copy {
-                from: built.join(exe(&format!("{executable}-mcp"))),
-                to: output.join("bin").join(exe(&format!("{executable}-mcp"))),
             },
         ];
         // The agent skill beside `bin\`, where the app listens: in the
@@ -618,7 +611,6 @@ impl Target for WinUi3Windows {
         let mut products = vec![
             bundle.join(exe(&executable)),
             output.join("bin").join(exe(&executable)),
-            output.join("bin").join(exe(&format!("{executable}-mcp"))),
         ];
         if listens {
             products.push(output.join(skill::path(app)));
@@ -633,9 +625,8 @@ impl Target for WinUi3Windows {
 
     /// An installer (`setup.exe`) that installs for the current user
     /// without administrator rights, and a `.zip` of the same folder for
-    /// people who do not install. Both carry the command line and the MCP
-    /// server in `bin\`, and the agent skill listing their commands in
-    /// `skills\`. Signed with the certificate from [`Signing`].
+    /// people who do not install. Both carry the CLI in `bin\` and its generated skill
+    /// in `skills\`. Signed with the certificate from [`Signing`].
     fn package(
         &self,
         app: &Application,
@@ -657,13 +648,11 @@ impl Target for WinUi3Windows {
                 bundle.display()
             ))]
         })?;
-        for program in [executable.clone(), format!("{executable}-mcp")] {
-            let name = exe(&program);
-            files.push((
-                output.join("bin").join(&name),
-                PathBuf::from("bin").join(&name),
-            ));
-        }
+        let name = exe(&executable);
+        files.push((
+            output.join("bin").join(&name),
+            PathBuf::from("bin").join(&name),
+        ));
         if skill::listens(&context.target.channels) {
             files.push((output.join(skill::path(app)), skill::path(app)));
         }

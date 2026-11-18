@@ -189,14 +189,13 @@ fn hello_generates_a_gpui_application() {
         bern_target_api::BuildStep::Copy { to, .. } if to == &output.join("Hello.app/Contents/Helpers/hello"))));
     // Windows programs carry their extension.
     let windows = Gpui::WINDOWS.plan(&compiled.app, &context).unwrap();
-    assert!(
-        windows
-            .products
-            .iter()
-            .any(|product| product == &output.join("bin/hello-mcp.exe")),
-        "{:?}",
-        windows.products
-    );
+    let bin = output.join("bin");
+    let cli_programs: Vec<_> = windows
+        .products
+        .iter()
+        .filter(|p| p.parent() == Some(bin.as_path()))
+        .collect();
+    assert_eq!(cli_programs, [&bin.join("hello.exe")]);
     // Windows programs carry the icon, which GPUI gives every window, and
     // the version, from a resource script the build script compiles.
     let windows_files = Gpui::WINDOWS.generate(&compiled.app, &context).unwrap();

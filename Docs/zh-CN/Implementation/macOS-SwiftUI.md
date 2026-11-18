@@ -9,7 +9,7 @@
 - 部署：最低 macOS 14，构建本机架构，本地临时签名
 - 补记：2026-10-12，[架构设计 v0.25–v0.27](../Design.md) 的样式覆盖、动效、自绘与模块化应用（见“样式、动效、自绘与模块化”一节；工具链 Xcode 27.0，SDK 27.0，Swift 6.4）
 
-本文记录阶段一（编译边界验证）、阶段二（macOS SwiftUI 与四入口闭环，含 Video、窗口关闭协议、窗口最小化与恢复、声明式异步查询与随包资源）与阶段四（本地化与功能契约）在 macOS 上的实际完成情况。当前声明接口见[组件参考](../Reference/UI.md)，后端覆盖见[平台能力表](../Reference/Platforms.md)；下文保留各阶段的验收记录与未完成项。
+本文记录阶段一（编译边界验证）、阶段二（macOS SwiftUI 与多入口闭环，含 Video、窗口关闭协议、窗口最小化与恢复、声明式异步查询与随包资源）与阶段四（本地化与功能契约）在 macOS 上的实际完成情况。当前声明接口见[组件参考](../Reference/UI.md)，后端覆盖见[平台能力表](../Reference/Platforms.md)；下文保留各阶段的验收记录与未完成项。
 
 ## 完成情况
 
@@ -23,19 +23,19 @@
 | 带版本的描述原型，用独立依赖 crate 验证引用与配置匹配 | 完成 | 组件库有自己的 `Bern.toml`；编译器生成带描述版本、IR 版本、包版本和源码指纹的描述，并检查库是否覆盖应用要求的全部语言；示例 `showcase-widgets` |
 | 公共目标接口，独立测试目标消费同一 IR，注册新目标无需改动解析器 | 完成 | `bern-target-api`；编译器测试中从外部注册的目标消费展示应用 IR |
 | 业务核心与 UI 分离，命令和状态可在无 UI 环境运行 | 完成 | `showcase-core` 只依赖协议；其测试通过共享 `Host` 无界面运行 |
-| 注册命令目录并生成各入口描述；重复标识、未知命令、参数不匹配无法通过 | 完成 | 命令描述含 ID、目录版本、参数和结果 schema、作用域、策略、错误码和显式 CLI/MCP 名称；名称冲突报错 |
+| 注册命令目录并生成各入口描述；重复标识、未知命令、参数不匹配无法通过 | 完成 | 命令描述含 ID、目录版本、参数和结果 schema、作用域、策略、错误码和显式 CLI 名称；名称冲突报错 |
 | 标准控件自动生成会话命令，业务动作缺失绑定编译失败（B301） | 完成 | 输入框、开关、滑块、选择器等写会话字段；按钮缺少命令报 B301 |
 | 窗口目录检查 | 部分 | 已检查重复 ID、主窗口、窗口命令引用、呈现能力和关闭检查（只能读本窗口拥有的草稿，存储动作必须是引擎命令）；首版只支持单实例窗口，多实例参数与 key 未实现 |
 | 本地化文本类型与严格诊断 | 完成 | 本地化文本、运行时文本、普通字符串分开；缺少语言（B102）、展示属性直接写字面量（B103）、插值不一致均报错 |
 | 目标能力描述中声明颜色来源 | 完成 | `ColorSource::Native` / `BernTheme`；macOS 为 Native |
 
-### 阶段二 macOS SwiftUI 与四入口闭环
+### 阶段二 macOS SwiftUI 与多入口闭环
 
 | 设计要求 | 状态 | 说明 |
 | --- | --- | --- |
 | 控件展示示例：侧边栏与详情、标题与文字层级、按钮、开关、滑块、输入框、侧边栏搜索、列表到详情的推入导航、工具栏分段选择器；设置窗口使用页签；至少两种语言 | 完成 | `examples/showcase`，中文与英文 |
 | 引擎与会话运行时在应用进程内运行 | 完成 | Rust 静态库链接进应用 |
-| 显式装配本地 IPC 通道，提供 CLI、JSON、MCP，连接同一引擎 | 完成 | `channels = ["ipc"]`；生成 `Contents/Helpers/showcase` 与 `showcase-mcp`，包旁的 `bin/` 链接到它们 |
+| 显式装配本地 IPC 通道，提供 CLI、JSON，连接同一引擎 | 完成 | `channels = ["ipc"]`；生成 `Contents/Helpers/showcase`，包旁的 `bin/showcase` 是指向它的相对链接 |
 | 未装配外部入口时无辅助进程、无监听；本地调用不经过 JSON | 完成 | 桥接使用类型化二进制值；`ipc = false` 由单元测试覆盖；装配 IPC 时实测无子进程、无 TCP 端口 |
 | 未声明样式覆盖时只用标准 SwiftUI 组件与系统样式 | 完成 | 生成测试检查展示应用（没有样式覆盖）生成的视图代码不含 `Color(`、`.background(`、`glassEffect`；运行时模板按功能需要分系统版本，例如视频控制条的媒体进度条在 macOS 26 以下绘制回退（见 [Apple 适配](../Adaptation/Apple.md) 第 8 节） |
 | 浅色与深色截图，与系统自带应用对照 | 部分 | 浅色、深色、英文截图已检查；与“系统设置”的并排对照未做（见验证记录） |
@@ -43,8 +43,8 @@
 | 版本不兼容、外部入口断开、结果未知 | 部分 | 协议版本、目录指纹、前端与引擎指纹不匹配均明确失败；会话请求超时返回 `ui_timeout`（结果未知），不重放 |
 | 状态变化只更新相关展示，批次内一致 | 完成 | 引擎按修订号发布字段差异；Swift 侧为按字段观察的 `@Observable` |
 | 滑块产生带参数命令 | 完成 | 拖动只改会话预览，松开提交 `showcase.set_volume(value)` |
-| 四入口驱动同一实例；无 UI 引擎可运行；缺少会话返回明确错误 | 完成 | 无会话返回 `requires_ui_session`，多会话未指定返回 `session_required` |
-| 标准编辑、选择动作由会话命令驱动，CLI/MCP 可调用 | 完成 | `ui.edit`、`ui.set_bool`、`ui.set_number`、`ui.select`、`ui.activate`、`ui.back` 等，经真实控件闭包执行 |
+| 多入口驱动同一实例；无 UI 引擎可运行；缺少会话返回明确错误 | 完成 | 无会话返回 `requires_ui_session`，多会话未指定返回 `session_required` |
+| 标准编辑、选择动作由会话命令驱动，CLI 可调用 | 完成 | `ui.edit`、`ui.set_bool`、`ui.set_number`、`ui.select`、`ui.activate`、`ui.back` 等，经真实控件闭包执行 |
 | 已接受与完成结果可区分 | 部分 | 引擎命令同步完成；媒体命令在播放器状态的 `request` 中区分已接受（Accepted）、执行端已执行（Executed）与失败（Failed），实际播放只看执行端回报的 `phase` |
 | 会话命令写回控件不触发重复动作 | 完成 | 写入通过同一 setter；SwiftUI 对程序写回不调用绑定 setter；开关使用幂等的设置而非翻转 |
 | 条件分支挂载与卸载、订阅清理 | 完成 | `if` / `if let` / `match`；控件登记随视图出现与消失 |
@@ -53,7 +53,7 @@
 | 不写深浅色分支，控件跟随系统 | 完成 | 未设置任何颜色 |
 | “搜索列表 → 详情 → 播放 → 返回” | 完成 | 侧边栏搜索经引擎查询 `showcase.search_library` 筛选列表 → 详情 → 在应用级播放器中打开并播放 → 返回，经真实控件驱动，返回后搜索结果与播放都保留 |
 | 可控时钟与异步顺序场景 | 完成 | 查询在协议中声明、在 `ui!` 中以 `Query` 绑定（见“异步查询”与“查询订阅与答复”）；`showcase-core` 的场景测试用 `ManualClock` 驱动真实引擎、宿主与会话订阅，较早的慢搜索不会覆盖较新的结果；C ABI 测试覆盖同一路径 |
-| 主窗口与设置窗口：四入口打开/关闭/激活、重复打开复用、独立草稿 | 完成 | 窗口实例带代次，重开后旧引用被拒绝；启动时总是打开 `initial: open` 的主窗口，主窗口关闭后点 Dock 图标重新打开 |
+| 主窗口与设置窗口：多入口打开/关闭/激活、重复打开复用、独立草稿 | 完成 | 窗口实例带代次，重开后旧引用被拒绝；启动时总是打开 `initial: open` 的主窗口，主窗口关闭后点 Dock 图标重新打开 |
 | 关闭确认、模态阻挡、确认失效 | 完成 | 见“窗口关闭协议”；系统关闭按钮与 File > Close 先走关闭检查 |
 | 最后一个窗口关闭后保留引擎 | 完成 | `applicationShouldTerminateAfterLastWindowClosed` 返回 false；应用级播放器继续播放；声明了 `StatusItem` 时没有窗口就收起 Dock 图标，见“状态栏项” |
 | 最小化后恢复 | 完成 | `window.minimize`、`window.restore`、`window.maximize`、`window.move`、`window.resize` 与查询 `window.list`；系统完成的最小化、缩放、移动与聚焦以带来源和代次的事实同步，不派发命令（见“窗口呈现”）；最小化不释放草稿、导航与查询订阅 |
@@ -99,7 +99,7 @@
 | `bern-backend-swiftui` | `swiftui + macos` 目标：生成 Swift、Rust 胶水 crate 与资源。Swift 运行时分为与 iOS 共用的 `BernRuntime.swift`、`BernMedia.swift` 和 macOS 专用的 `BernAppKit.swift`（窗口事实与命令、关闭守卫、开发快照、`AVPlayerView`）；iOS 见 [iOS SwiftUI 实现记录](iOS-SwiftUI.md) |
 | `bern-ffi` | 进程内 C ABI |
 | `bern-adapter-json` / `bern-transport-ipc` | JSON 编码与本地控制通道 |
-| `bern-adapter-cli` / `bern-adapter-mcp` | 从命令目录派生的应用 CLI 与 MCP 服务器 |
+| `bern-adapter-cli` | 从命令目录派生的应用 CLI |
 | `bern-cli` | 构建工具 `bern` |
 
 ## 声明语法
@@ -141,7 +141,7 @@ pub mod showcase {
 }
 ```
 
-协议模块自包含：只含 `use`、`#[value]` 类型、一个 `#[state]`、一个 `#[commands]` 和可选的 `#[queries]`。宏生成描述、引擎适配器 `Adapter<E>`、需要实现的 `Engine` trait（同时要求命令与查询 trait），以及 UI 声明用的类型化客户端 `Client`。命令 ID 为 `命名空间.名称`；CLI 名称为 `showcase set-volume`，MCP 工具名为 `showcase_set_volume`，冲突时报错。跨边界类型限于 `bool`、`i64`、`f64`、`String`、`Option`、`Vec`、枚举与记录；`i32`、引用、泛型等会给出替代建议。
+协议模块自包含：只含 `use`、`#[value]` 类型、一个 `#[state]`、一个 `#[commands]` 和可选的 `#[queries]`。宏生成描述、引擎适配器 `Adapter<E>`、需要实现的 `Engine` trait（同时要求命令与查询 trait），以及 UI 声明用的类型化客户端 `Client`。命令 ID 为 `命名空间.名称`；CLI 名称为 `showcase set-volume`，冲突时报错。跨边界类型限于 `bool`、`i64`、`f64`、`String`、`Option`、`Vec`、枚举与记录；`i32`、引用、泛型等会给出替代建议。
 
 ### 会话状态与组件
 
@@ -274,7 +274,6 @@ flowchart LR
     IPC -->|会话命令| RT
     RT -->|转发到真实控件| UI
     CLI[应用 CLI] --> IPC
-    MCP[MCP 服务器] --> IPC
     JSON[JSON 客户端] --> IPC
 ```
 
@@ -296,7 +295,7 @@ flowchart LR
 ```mermaid
 flowchart LR
     Bar[标准控制条] -->|media.* 命令| Hub[MediaHub]
-    Ext[CLI / JSON / MCP] -->|media.* 命令| Hub
+    Ext[CLI / JSON] -->|media.* 命令| Hub
     Decl[Video source 绑定] -->|源版本加载| Hub
     Hub -->|带源版本的请求| AV[AVFoundation 执行端]
     AV -->|执行结果| Hub
@@ -305,7 +304,7 @@ flowchart LR
     Hub -->|归并后的播放器状态| Ext
 ```
 
-- **媒体契约**（`bern-media`，契约版本 1）：命令 `media.players`、`media.state`（查询），`media.open`、`media.play`、`media.pause`、`media.seek`、`media.set_volume`、`media.set_muted`；CLI 为 `showcase media play --player-id …`，MCP 工具为 `media_play` 等。播放器状态 `MediaPlayer` 含 `owner`、`source_bound`、`source`、`source_version`、`phase`（Idle、Loading、Ready、Playing、Paused、Buffering、Ended、Failed、Unavailable）、`position_ms`、`duration_ms`（未知或直播时为空）、`seekable`、`volume`、`muted`、`error`、`views` 与最近一次请求 `request`。
+- **媒体契约**（`bern-media`，契约版本 1）：命令 `media.players`、`media.state`（查询），`media.open`、`media.play`、`media.pause`、`media.seek`、`media.set_volume`、`media.set_muted`；CLI 为 `showcase media play --player-id …`。播放器状态 `MediaPlayer` 含 `owner`、`source_bound`、`source`、`source_version`、`phase`（Idle、Loading、Ready、Playing、Paused、Buffering、Ended、Failed、Unavailable）、`position_ms`、`duration_ms`（未知或直播时为空）、`seekable`、`volume`、`muted`、`error`、`views` 与最近一次请求 `request`。
 - **路由与归并**：命令先在 `MediaHub` 校验（`player_not_found`、`no_source`、`media_failed`、`not_seekable`、`out_of_range`、`source_bound`、`executor_unavailable`），再带当前源版本交给执行端；执行端按版本拒绝过期请求（`stale_source`）。执行端回报的是事实，只有与当前源版本一致时才归并；合并事实不会产生任何命令。命令在执行端完成后才返回结果；外部入口等待 10 秒仍无结果时返回 `media_timeout`（结果未知）。
 - **执行端与呈现**：应用启动时 AVFoundation 执行端登记到 hub；每个 `player_id` 一个 `AVPlayer`，周期观察 0.5 秒。视频由 `AVPlayerView` 呈现，`controlsStyle = .none`、不接收键鼠、不接入 Now Playing，因此播放状态只会因 Bern 命令改变。新源加载后保持暂停，等待播放命令。
 - **标准控制条**：系统控件（无边框按钮、`Slider`、系统文字样式），位于视频下方而非覆盖在画面上，颜色全部来自系统；拖动进度和音量只改本地预览，松开时提交一次命令，状态更新不会回调成命令。控件登记为 `目标.play_pause`、`目标.position`、`目标.mute`、`目标.volume`，可由 `ui.*` 驱动；视频区域登记为角色 `video`，值为当前阶段与时间。无媒体、加载、失败、不可用时显示系统 `ContentUnavailableView` 或 `ProgressView`，不在视频上叠加文字。
@@ -334,11 +333,11 @@ sequenceDiagram
     Note over R: 丢弃，不覆盖版本 2
 ```
 
-- **目录**：查询排在命令之后，`kind: query`、`concurrency: overlapping`（按到达顺序启动、答复可以乱序）、`retry: idempotent`、`cancellable: true`，`reads` 列出依赖的状态字段。CLI 名称、MCP 工具与 JSON 调用和命令一样从同一目录派生（`showcase showcase search-library --text mo`、`showcase_search_library`）；CLI 帮助把查询单独列出，MCP 工具标为 `readOnlyHint`。
+- **目录**：查询排在命令之后，`kind: query`、`concurrency: overlapping`（按到达顺序启动、答复可以乱序）、`retry: idempotent`、`cancellable: true`，`reads` 列出依赖的状态字段。CLI 名称与 JSON 调用和命令一样从同一目录派生（`showcase showcase search-library --text mo`）；CLI 帮助把查询单独列出。
 - **宿主**：提供器在引擎线程上按到达顺序启动，看到之前命令留下的状态，然后通过 `Answer<T>` 在任意时刻、任意线程作答；答复按结果 schema 校验（`invalid_result`）。请求取消后才作答的返回 `cancelled`，提供器丢弃未答复的请求返回 `query_dropped`，排队时已被取消的请求不会启动提供器；提供器 panic 与命令一样使引擎拒绝后续请求。查询不发布新的修订号。
 - **会话订阅**：生成的 `Query` 视图为自己的窗口实例打开订阅（`bern_query_open`），每次渲染编码参数，参数变化后在本次更新之外调用 `bern_query_request`。运行时（`QuerySubscriptions`，基于 `bern_runtime::query::Query`）为每次请求分配新版本并取消上一请求，只把当前版本的答复经 `on_query` 回调交给视图；Swift 侧同样忽略比已显示状态更旧的版本。视图身份结束（例如切换到其他页面）时订阅结束，窗口关闭时运行时结束该窗口的全部订阅，在途请求随之取消；导航栈覆盖页面时订阅保留。
 - **随状态刷新**：引擎修订中有字段属于某个查询的 `#[reads]` 时，该查询的每个订阅以相同参数重新请求，界面保留数据并显示“刷新”；例如添加或删除项目后搜索结果自动更新。
-- **外部入口**：CLI、JSON 与 MCP 的每次调用是一次请求，最多等待 10 秒，超时返回 `query_timeout` 并取消请求；查询没有副作用，可以直接再次调用。
+- **外部入口**：CLI 与 JSON 的每次调用是一次请求，最多等待 10 秒，超时返回 `query_timeout` 并取消请求；查询没有副作用，可以直接再次调用。
 - **示例提供器**：`showcase-core` 的搜索按类别的全部译名（中文与英文）匹配，`!` 开头返回 `invalid_search`。宽泛的搜索比精确的搜索慢（0 个字符 250 ms，1 个 900 ms，2 个 450 ms，更多 150 ms），因此快速输入时答复会乱序到达；计时来自注入的时钟，应用中是 `SystemClock`，测试中是 `ManualClock`。
 
 ### 窗口关闭协议
@@ -377,7 +376,7 @@ target/bern/macos/bin/showcase window close --window settings#1
 target/bern/macos/bin/showcase window confirm-close --window settings#1 --confirmation settings#1:c1 --decision Save
 ```
 
-退出码：0 成功，1 命令失败，2 用法错误，3 无法连接。CLI 只连接已运行的引擎，不会另起一份。`showcase-mcp` 通过 stdio 实现 MCP（JSON-RPC 2.0，协议版本 2025-06-18 / 2025-03-26 / 2024-11-05），工具来自引擎命令目录（含只读查询）、媒体命令目录与框架会话命令目录，另有 `bern_state` 与 `bern_sessions`。JSON 客户端订阅后除引擎状态更新外，还会收到完整的 `media` 播放器状态（新修订号覆盖旧的）。`MediaSource` 参数在 CLI 中可以直接写 URL。
+退出码：0 成功，1 命令失败，2 用法错误，3 无法连接。CLI 只连接已运行的引擎，不会另起一份。JSON 客户端订阅后除引擎状态更新外，还会收到完整的 `media` 播放器状态（新修订号覆盖旧的）。`MediaSource` 参数在 CLI 中可以直接写 URL。
 
 ## 本地化、主题与视觉规则
 
@@ -396,9 +395,9 @@ cargo run -p bern-cli -- build --manifest examples/showcase/Bern.toml
 open target/bern/macos/Showcase.app
 ```
 
-产物位于 `target/bern/macos/`：`Showcase.app`、调试符号 `Showcase.app.dSYM`、`bin/showcase`、`bin/showcase-mcp`、`skills/showcase/SKILL.md`、生成源码 `Sources/`、胶水 crate `glue/`、构建清单 `build.json`（启用视频时记录媒体契约、媒体后端 `avfoundation` 与呈现适配 `avplayerview` 的版本及应用级播放器，并记录随包资源名称）。组件库描述写到 `target/bern/libraries/`。`bern check` 只做检查，`bern ir` 输出 IR JSON。`bern` 使用最近一层 Cargo workspace，因此嵌套在另一个 workspace 里的检出（例如 Git worktree）只用自己的 crate 与 `target/`。
+产物位于 `target/bern/macos/`：`Showcase.app`、调试符号 `Showcase.app.dSYM`、`bin/showcase`、`skills/showcase/SKILL.md`、生成源码 `Sources/`、胶水 crate `glue/`、构建清单 `build.json`（启用视频时记录媒体契约、媒体后端 `avfoundation` 与呈现适配 `avplayerview` 的版本及应用级播放器，并记录随包资源名称）。组件库描述写到 `target/bern/libraries/`。`bern check` 只做检查，`bern ir` 输出 IR JSON。`bern` 使用最近一层 Cargo workspace，因此嵌套在另一个 workspace 里的检出（例如 Git worktree）只用自己的 crate 与 `target/`。
 
-应用 CLI 与 MCP 服务器在包里的 `Contents/Helpers`，Agent skill 在 `Contents/Resources/skills/<程序>/SKILL.md`（程序路径相对它写成 `../../../Helpers/…`，并写出装进“应用程序”后的位置）；两个程序先做临时签名，再签应用，应用的签名封住它们与 skill。所以把 `.app` 拖到别处或装进“应用程序”，Agent 仍能调用它们，例如 `/Applications/Showcase.app/Contents/Helpers/showcase state`。包旁的 `bin/showcase`、`bin/showcase-mcp` 是指向包内程序的相对链接，`skills/showcase/SKILL.md` 经 `bin/` 找到它们，所以开发时的命令不变。此前（2026-10-30 之前）两个程序只复制到包旁的 `bin/`，skill 也只在包旁，只有 `bern package` 生成的磁盘映像里的应用才带着它们，直接拿走构建出的 `.app` 时 Agent 无从调用。
+应用 CLI 位于包内的 `Contents/Helpers`，生成的 Skill 位于 `Contents/Resources/skills/<程序>/SKILL.md`，其中的 `../../../Helpers/<程序>` 指向 CLI。构建先签 CLI，再签整个应用；移动应用包时，两者都会保留。安装后可运行 `/Applications/Showcase.app/Contents/Helpers/showcase state`。开发时，包旁的 `bin/showcase` 是指向同一个 CLI 的相对链接，外部的 `skills/showcase/SKILL.md` 使用这个链接。
 
 应用图标为 `Contents/Resources/AppIcon.icns`（`CFBundleIconFile`）。没有声明 `[app].icon` 时是 Bern 标志铺满方形画布的版本，16 到 1024 像素各一张 PNG，由系统裁成圆角方形；圆形图标会被 macOS 放进灰色底板，所以 macOS 不用圆形版。资源同步保留这个文件，随包资源不能与它同名。`[app.icon].macos` 为 `.icns` 时原样使用。为 Icon Composer 的 `.icon` 文件夹时，它以 `AppIcon.icon` 放在包旁，由 `actool` 编译进 `Contents/Resources/Assets.car`，同时写出给更早系统的 `AppIcon.icns`；`Info.plist` 另加 `CFBundleIconName`，随包资源也不能叫 `Assets.car`。macOS 26 起显示液态玻璃图标，macOS 14、15 用 `Assets.car` 中从它画出的平面图（1024 像素以内各尺寸）。macOS 26 起，自带底板的旧式图标只有在底板正是苹果模板的形状时才按原样显示：1024 画布中 (100, 100) 起的 824 方块、圆角 185.4 的连续圆角矩形（与 `RoundedRectangle(style: .continuous)` 同一条路径）。底板是别的形状（例如指数 5 的超椭圆，轮廓相差约 4000 像素）或根本没有底板时，系统把整个图标缩小放进灰色底板；铺满方形的画面被裁成系统形状。以上为 macOS 27.0.1 实测：以 `NSWorkspace.icon(forFile:)` 渲染访达图标，比较本机多个只带 `.icns` 的应用，并交换图标排除构建所用 SDK 的影响。
 
@@ -412,7 +411,7 @@ open target/bern/macos/Showcase.app
 
 `bern package --target macos` 按 release 构建，生成 `target/bern/dist/<产品>-<版本>-macos-<架构>.dmg`：
 
-- 应用复制到暂存目录，构建时已放进包里的应用 CLI、MCP 服务器（`Contents/Helpers`）与 Agent skill（`Contents/Resources/skills`）随之复制；先签工具、再签应用；磁盘映像里另有指向“应用程序”的链接。
+- 应用复制到暂存目录，构建时已放进包里的应用 CLI（`Contents/Helpers`）与 Agent skill（`Contents/Resources/skills`）随之复制；先签工具、再签应用；磁盘映像里另有指向“应用程序”的链接。
 - 有 `BERN_MACOS_SIGNING_IDENTITY` 时以强化运行时与安全时间戳签名，并签磁盘映像；再有 `BERN_MACOS_NOTARY_PROFILE` 时经 `notarytool` 公证并装订。没有时做临时签名，只能在本机打开，并提示 Gatekeeper 会拒绝。
 - 磁盘映像打开后是一个专门的窗口：左边是应用，右边是“应用程序”，中间一支细箭头，背景安静，卷图标用应用的图标。访达把这种布局存在 `.DS_Store` 里，`src/dmg.rs` 自己写这个文件，所以打包不需要访达，也不需要图形会话，构建服务器上得到同样的映像。背景的别名不含目录编号（此时还不存在），访达按路径找到文件。背景是 `templates/dmg/background.tiff`，含两种密度，所有应用共用。
 - 卷先做成可写的：系统有 `diskutil image` 时用它（`hdiutil` 在 macOS 27 上已显示弃用提示），否则用 `hdiutil`。挂载后再放入 `.DS_Store` 和图标标记，因为 `diskutil image create` 会漏掉 `.DS_Store`，`hdiutil create` 会漏掉标记；最后压缩成 `UDZO`。
@@ -445,13 +444,13 @@ open target/bern/macos/Showcase.app
 2026-10-10，声明式异步查询，本机 macOS 27.0.1（arm64）：
 
 - `cargo test --workspace`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo fmt --check` 均通过；`bern build` 无警告，生成的 Swift 以 `-swift-version 6` 类型检查零错误零警告。
-- 新增测试：协议描述（只有查询声明读取的字段，字段必须存在）；宿主 4 项（查询看到之前命令的状态且不产生修订、答复从其他线程乱序到达、取消/丢弃/非法结果/超时、提供器 panic 使引擎拒绝后续请求）；运行时 2 项（订阅随窗口结束、读取的字段变化时以相同参数刷新；系统时钟按到期顺序触发）；解析 3 项与组件规格 1 项；编译器正反用例各 1 组；rustc 用例 1 个通过（声明、引擎、宿主端到端）与 5 个失败（查询写成动作、`query:` 写命令、参数类型错误、标量结果写 `empty:`、查询取 `&mut self`）；C ABI 1 项（乱序答复只显示当前版本、状态变化刷新、失败保留旧数据、关窗后订阅结束）；IPC 与 CLI、MCP 的查询用例；`showcase-core` 场景 3 项（`ManualClock` 下“m”慢、“mo”快时页面保持“mo”的结果并计入 1 次丢弃；中文类别名匹配、添加项目后刷新、失败保留旧数据、空结果；外部入口得到同样的答复）。
+- 新增测试：协议描述（只有查询声明读取的字段，字段必须存在）；宿主 4 项（查询看到之前命令的状态且不产生修订、答复从其他线程乱序到达、取消/丢弃/非法结果/超时、提供器 panic 使引擎拒绝后续请求）；运行时 2 项（订阅随窗口结束、读取的字段变化时以相同参数刷新；系统时钟按到期顺序触发）；解析 3 项与组件规格 1 项；编译器正反用例各 1 组；rustc 用例 1 个通过（声明、引擎、宿主端到端）与 5 个失败（查询写成动作、`query:` 写命令、参数类型错误、标量结果写 `empty:`、查询取 `&mut self`）；C ABI 1 项（乱序答复只显示当前版本、状态变化刷新、失败保留旧数据、关窗后订阅结束）；IPC 与 CLI 的查询用例；`showcase-core` 场景 3 项（`ManualClock` 下“m”慢、“mo”快时页面保持“mo”的结果并计入 1 次丢弃；中文类别名匹配、添加项目后刷新、失败保留旧数据、空结果；外部入口得到同样的答复）。
 - 实机（隔离实例，`-ApplePersistenceIgnoreState YES`，CLI 用 `--engine` 指定）：
   - 列表页登记查询控件 `library_page.library_results`，`ui.inspect` 为 `ready v1 (5)`。经真实搜索框 `ui edit` 相隔约 20 ms 输入“m”与“mo”：立即 `refreshing v3 (5)`，0.52 s 后 `ready v3 (1)`（影片），直到 1.6 s 仍不变，“m”在 0.9 s 时的答复没有出现。
   - 截图（中文浅色）：刷新时进度行在旧数据上方；“zzz”显示居中的“没有与“zzz”匹配的项目”；“!x”在有旧数据时显示错误行与“重试”，离开页面再回来（新订阅 `v1`）时显示 `ContentUnavailableView` 与“重试”。英文深色下空结果文案为英文，颜色全部来自系统。
   - 搜索“影”“下载”分别得到影片与下载。在列表打开时用 CLI `showcase add-item --kind Downloads`：0.01 s `refreshing v3 (1)`，0.43 s `ready v3 (2)`。`ui activate --target library_page.library_results` 以当前参数重新请求。离开列表页后查询控件消失（订阅结束），回来后是新订阅。
   - 搜索进行中关闭主窗口：直接关闭、无错误；重新打开的 `main#2` 草稿为新，查询 `ready v1 (5)`。
-  - CLI：`showcase search-library --text mo` 约 0.47 s 返回影片；`--text '!x'` 退出码 1（`invalid_search`）；帮助单独列出“Queries”。JSON：目录中 `kind: query`、`concurrency: overlapping`、`reads: [items]`，原始套接字调用返回音乐。MCP：29 个工具，`showcase_search_library` 带 `readOnlyHint`、`idempotentHint`，调用“照片”返回照片，“!”返回 `isError`。
+  - CLI：`showcase search-library --text mo` 约 0.47 s 返回影片；`--text '!x'` 退出码 1（`invalid_search`）；帮助单独列出“Queries”。JSON：目录中 `kind: query`、`concurrency: overlapping`、`reads: [items]`，原始套接字调用返回音乐。
 
 未完成的验证：真实键盘在搜索框里输入（用 `ui.edit` 走同一个 setter 代替）、真实点按“重试”（用 `ui.activate` 代替）、VoiceOver 读出进度行。
 
@@ -461,7 +460,7 @@ open target/bern/macos/Showcase.app
 - 新增测试：`bern-media` 12 项（路由与执行后才回复、事实不产生命令、旧源版本回报被忽略、源绑定不重复加载与拒绝外部换源、未知时长与失败、超时结果未知、执行端断开、组件与窗口释放、版本化快照）；`bern-runtime` 关闭协议 3 项与查询场景 3 项；C ABI 与 IPC 的媒体及关闭用例；编译器 Video、播放器与关闭检查的正反用例；rustc 失败用例 4 个（Video 缺少来源、来源类型错误、播放器动作参数类型错误、关闭检查缺少文案）。
 - 实机（隔离实例，不与其他运行中的 Showcase 共用窗口恢复状态）：
   - 页面播放器：经真实控件播放，CLI 暂停、跳转到 4000 ms，`ui set-bool`/`ui set-number` 静音和调音量，状态与实际播放一致。重复 `showcase feature --clip Pattern` 不重新加载；换为色条后源版本 2、时长 6000；换为损坏文件后 `Failed`（系统错误“无法打开”），`media play` 返回 `media_failed`；外部 `media open` 返回 `source_bound`。
-  - 应用级播放器：MCP `media_open`、`media_play` 生效；列表 → 详情 →“在预览播放器中打开”→ 控制条播放 → 返回后仍为 `Playing`，附着视图数从 1 变为 0；回到“视频”页重新附着。关闭主窗口后页面播放器被释放，应用级播放器继续播放。
+  - 应用级播放器：列表 → 详情 →“在预览播放器中打开”→ 控制条播放 → 返回后仍为 `Playing`，附着视图数从 1 变为 0；回到“视频”页重新附着。关闭主窗口后页面播放器被释放，应用级播放器继续播放。
   - 直播 HLS（本机 HTTP）：`Playing`，`duration_ms` 为空，进度条禁用并显示“直播”，`media seek` 返回 `not_seekable`。
   - 关闭协议：备注有内容时 `window close` 与系统关闭（SIGUSR1 → `performClose`）返回同一个确认，系统警告框以窗口 sheet 显示，窗口控件对 CLI 返回 `target_blocked`；`Cancel` → `Rejected`，之后修改草稿再用旧确认 `Discard` → `stale_confirmation`；新确认 `Discard` → 窗口关闭、引擎继续运行；关闭后旧窗口 ID 返回 `target_not_found`。设置窗口以空白名称 `Save` → `Rejected`（`save_failed: invalid_name`）窗口保留，有效名称 `Save` → 关闭且引擎状态更新。没有未存储内容时，系统关闭直接关闭窗口。
   - 截图：浅色与深色下视频页与控制条使用系统控件与系统颜色，视频画面保持原色；关闭确认为标准系统警告框。
@@ -486,7 +485,7 @@ open target/bern/macos/Showcase.app
   - 设置窗口（固定尺寸）为 `Normal`，可用动作为激活、关闭、移动；最小化与调整尺寸返回 `target_unavailable`。
   - 系统路径：`BERN_DEV_WINDOW_SIGNALS=main` 下 SIGUSR2（`performMiniaturize`，与黄色按钮相同）后，`window.list` 为 `Minimized`、来源 `System`，没有派发命令；对应用发送重新打开事件（与点 Dock 图标相同）后恢复为 `Visible`，来源 `System`。
   - 刚打开的设置窗口起初报告为隐藏：AppKit 在窗口上屏前发出移动与尺寸通知，上屏本身在应用未激活时不发出所观察的通知。改为同时以键值观察跟踪 `isVisible` 后为 `Visible`。
-  - 关闭已最小化的主窗口直接关闭；MCP 共 35 个工具，`window_list` 带 `readOnlyHint`，`window_restore` 不幂等。
+  - 关闭已最小化的主窗口直接关闭。
   - `window activate` 后 `focused` 仍为 false：macOS 14 起激活是协作式的，后台应用不能从前台应用（本次为 Claude）抢走焦点；事实如实反映。
 
 未完成的验证：真实点按黄色、绿色按钮与双击标题栏（以 `performMiniaturize(_:)` 代替黄色按钮）；进入全屏后恢复（没有全屏命令，系统路径需要屏幕访问）；应用隐藏（Cmd-H）时为 `Hidden`；多显示器下的坐标与标题栏检查。
@@ -496,9 +495,8 @@ open target/bern/macos/Showcase.app
 - `cargo test --workspace` 全部通过，`cargo clippy --workspace --all-targets -- -D warnings` 无警告，`cargo fmt --check` 通过。
 - 编译失败用例覆盖：按钮无命令、任意回调、控件写引擎状态、命令参数类型错误、未知命令、显示 bool、静态文本、未知组件、未知绑定、match 不完整、缺少组件参数、函数调用、不支持的类型。
 - 生成的 Swift 以 `-swift-version 6` 类型检查，零错误零警告。
-- `bern build` 完成 Rust 静态库、Swift 编译、签名，生成 CLI 与 MCP。
+- `bern build` 完成 Rust 静态库、Swift 编译、签名，生成 CLI。
 - CLI 驱动：切换侧边栏页面；激活按钮后引擎计数增加；禁用按钮返回 `target_unavailable`；开关、滑块提交（引擎音量变为 72）、文本编辑生效；推入详情页；打开和关闭设置窗口；`showcase set-volume --value 140` 返回 `out_of_range`。
-- MCP：`initialize`、`tools/list`（17 个工具）、调用引擎命令、`window_open`、`bern_state` 均成功。
 - 装配 IPC 时，`lsof` 显示应用无 TCP/UDP 套接字、无子进程，只有一个 0600 的 Unix 套接字；正常退出后套接字被删除。
 - 截图（开发快照）：浅色、深色、英文界面下各页面与设置窗口均为原生分组表单、系统控件与工具栏样式。
 

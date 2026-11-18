@@ -40,7 +40,7 @@
 <text x="520.0" y="340.1" font-size="13.5" fill="#9198A1">ム</text>
 <line x1="0" y1="360.0" x2="960" y2="360.0" stroke="#30363D"/>
 <text x="0.0" y="387.9" font-size="13" fill="#6EA2F5" font-weight="700">入口とツール</text>
-<text x="132.0" y="388.1" font-size="13.5" fill="#F0F6FC"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#79C0FF">crates/bern-adapter-cli</tspan> · <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#79C0FF">-mcp</tspan> · <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#79C0FF">-json</tspan></text>
+<text x="132.0" y="388.1" font-size="13.5" fill="#F0F6FC"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#79C0FF">crates/bern-adapter-cli</tspan> · <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#79C0FF">-json</tspan></text>
 <text x="520.0" y="388.1" font-size="13.5" fill="#9198A1">コマンドカタログから派生する入口</text>
 <text x="132.0" y="414.1" font-size="13.5" fill="#F0F6FC"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#79C0FF">crates/bern-cli</tspan></text>
 <text x="520.0" y="414.1" font-size="13.5" fill="#9198A1">ビルドツール <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#79C0FF">bern</tspan>：作成、チェック、ビルド、実行、環境の確認</text>

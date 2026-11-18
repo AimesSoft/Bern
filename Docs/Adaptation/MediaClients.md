@@ -88,7 +88,7 @@ The table below is Bern's product design recommendation, with features declared 
 | Playback target | The current local or remote target shown explicitly | Target list and state can be queried | Targets can still be viewed and switched on the big screen, not just a vague casting icon |
 | Settings | Category navigation or a virtual window | A native settings window or an in-app panel | Grouped by task; full-screen virtual window and a clear way back |
 
-Resume and play from the beginning are different commands; switching views must not dispatch playback again. Operations such as restoring progress, favoriting, marking as watched, subtitle selection and remote control all go into the unified engine catalog. The four-entry-point contract cannot be bypassed by calling an external player's private callbacks.
+Resume and play from the beginning are different commands; switching views must not dispatch playback again. Operations such as restoring progress, favoriting, marking as watched, subtitle selection and remote control all go into the unified engine catalog. The shared command contract cannot be bypassed by calling an external player's private callbacks.
 
 Authentication, the media catalog, playback history, server preferences and the service protocol live in the app's business modules. The Bern core provides only the generic command, state, navigation, Window, Video, theme and accessibility mechanisms.
 
@@ -113,7 +113,7 @@ Local network and background playback requirements vary with the target platform
 - [ ] The remote can complete sign-in, search, episode selection, playback, subtitle selection and exit, and focus has no dead ends.
 - [ ] Returning from details to a long list restores the correct item; after the list refreshes or reflows, a different item at the same position is not restored instead.
 - [ ] Closing the settings window does not stop the app-level player, and switching the device layout does not start playback again.
-- [ ] UI, CLI, JSON and MCP operations on the same player_id go through the same command handling and result synchronization.
+- [ ] UI, CLI and JSON operations on the same player_id go through the same command handling and result synchronization.
 - [ ] Remote requests do not pose as local playback, and reports from old sessions and expired sign-in codes do not pollute the new state.
 - [ ] Test separately: directly playable, container change needed, audio/video transcoding needed, subtitles changing the method, and completely unsupported.
 - [ ] Playback started/progress/stopped matches the real executor; protocol tests are not replaced by UI screenshots.

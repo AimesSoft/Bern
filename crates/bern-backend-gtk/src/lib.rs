@@ -185,7 +185,7 @@ pub fn product_name(app: &Application) -> String {
     bern_target_api::names::pascal(&app.app.id)
 }
 
-/// Where the agent skill finds the programs: in `bin/` beside it, in the
+/// Where the agent skill finds the CLI: in `bin/` beside it, in the
 /// build, the `.tar.gz` and the folder the `.deb` installs.
 fn skill_place(app: &Application) -> skill::Place {
     skill::Place::beside_bin(app, false).installed(format!(
@@ -378,7 +378,6 @@ impl Target for GtkLinux {
                 ),
             ),
             GeneratedFile::text("app/src/cli.rs", glue::cli_rs(context, app)),
-            GeneratedFile::text("app/src/mcp.rs", glue::mcp_rs(context, app)),
             GeneratedFile::text(
                 PathBuf::from(&product).join(format!("{}.desktop", app.app.bundle_id)),
                 glue::desktop_entry(
@@ -579,16 +578,10 @@ impl Target for GtkLinux {
                 from: built.join(format!("{executable}-ui")),
                 to: bundle.join(&executable),
             },
-            BuildStep::CreateDir {
-                path: output.join("bin"),
-            },
+            BuildStep::program_dir(output.join("bin"), [&executable]),
             BuildStep::Copy {
                 from: built.join(&executable),
                 to: output.join("bin").join(&executable),
-            },
-            BuildStep::Copy {
-                from: built.join(format!("{executable}-mcp")),
-                to: output.join("bin").join(format!("{executable}-mcp")),
             },
         ];
         // The agent skill beside `bin/`, where the app listens.
@@ -598,7 +591,6 @@ impl Target for GtkLinux {
         let mut products = vec![
             bundle.join(&executable),
             output.join("bin").join(&executable),
-            output.join("bin").join(format!("{executable}-mcp")),
         ];
         if listens {
             products.push(output.join(skill::path(app)));
@@ -614,8 +606,7 @@ impl Target for GtkLinux {
     /// A Debian package (with `dpkg-deb`, where the system has it) that
     /// installs into `/opt/<bundle id>` with a menu entry, an icon in the
     /// icon theme and a launcher in `/usr/bin`, and a `.tar.gz` of the same
-    /// folder to run without installing. Both carry the command line and
-    /// the MCP server in `bin/`, and the agent skill listing their commands
+    /// folder to run without installing. Both carry the CLI in `bin/` and its generated skill
     /// in `skills/`. With `Svg`, the `.deb` also installs the
     /// AppArmor profile WebKitGTK's sandbox needs (`glue::apparmor_files`).
     fn package(
@@ -646,12 +637,10 @@ impl Target for GtkLinux {
             .into_iter()
             .filter(|(_, path)| path != std::path::Path::new(&desktop))
             .collect();
-        for program in [executable.clone(), format!("{executable}-mcp")] {
-            files.push((
-                output.join("bin").join(&program),
-                PathBuf::from("bin").join(&program),
-            ));
-        }
+        files.push((
+            output.join("bin").join(&executable),
+            PathBuf::from("bin").join(&executable),
+        ));
         if skill::listens(&context.target.channels) {
             files.push((output.join(skill::path(app)), skill::path(app)));
         }

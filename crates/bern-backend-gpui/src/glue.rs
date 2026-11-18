@@ -1,13 +1,12 @@
 //! The generated application crate around `bern-gpui`: the interface, the
-//! engine and the session runtime in one program, with the command line
-//! and the MCP server beside it.
+//! engine and the session runtime in one program, with the command line beside it.
 
 use bern_ir::Application;
+pub use bern_target_api::glue::cli_rs;
 use bern_target_api::glue::{
     WindowPresentation, engine_expr, module_dependencies, path, players_expr, resources_expr,
     session_spec,
 };
-pub use bern_target_api::glue::{cli_rs, mcp_rs};
 use bern_target_api::{BuildContext, Framework};
 
 fn listens(context: &BuildContext) -> bool {
@@ -39,16 +38,11 @@ path = "src/main.rs"
 name = "{executable}"
 path = "src/cli.rs"
 
-[[bin]]
-name = "{executable}-mcp"
-path = "src/mcp.rs"
-
 {build}
 [dependencies]
 bern-gpui = {{ {gpui}, features = ["{platform}"] }}
 bern-ffi = {{ {ffi}{ipc} }}
 bern-adapter-cli = {{ {cli_adapter} }}
-bern-adapter-mcp = {{ {mcp_adapter} }}
 {protocol} = {{ path = "{protocol_path}" }}
 {engine} = {{ path = "{engine_path}" }}
 {modules}
@@ -67,7 +61,6 @@ bern-adapter-mcp = {{ {mcp_adapter} }}
             ", default-features = false"
         },
         cli_adapter = bern("bern-adapter-cli"),
-        mcp_adapter = bern("bern-adapter-mcp"),
         protocol = context.protocol_package,
         protocol_path = path(&context.protocol_path),
         engine = context.engine_package,

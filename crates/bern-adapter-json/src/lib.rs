@@ -1,6 +1,6 @@
 //! JSON encoding for control channels.
 //!
-//! JSON is an encoding, not a transport and not MCP. This crate maps
+//! JSON is an encoding, not a transport. This crate maps
 //! schema-typed values to JSON and back, defines the control messages and
 //! derives JSON Schema for tool descriptions. Mappings are explicit:
 //!

@@ -7,7 +7,7 @@ use bern_target_api::glue::{
     WindowPresentation, engine_expr, module_dependencies, path, players_expr, resources_expr,
     session_spec,
 };
-pub use bern_target_api::glue::{cli_rs, mcp_rs, tools_cargo_toml};
+pub use bern_target_api::glue::{cli_rs, tools_cargo_toml};
 
 pub fn cargo_toml(context: &BuildContext, app: &Application) -> String {
     format!(

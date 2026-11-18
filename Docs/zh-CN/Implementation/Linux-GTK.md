@@ -15,7 +15,7 @@
 
 | 设计要求 | 状态 | 说明 |
 | --- | --- | --- |
-| 生成代码可构建 | 完成 | `bern build --target linux` 生成应用 crate 并构建出界面程序、CLI 与 MCP 服务器；生成测试在装有 GTK 4.14 与 libadwaita 1.5 的环境中对生成的应用做类型检查 |
+| 生成代码可构建 | 完成 | `bern build --target linux` 生成应用 crate 并构建出界面程序、CLI；生成测试在装有 GTK 4.14 与 libadwaita 1.5 的环境中对生成的应用做类型检查 |
 | 新目标不改解析器、公共 IR 与业务核心 | 完成 | 新增 `bern-backend-gtk`（生成器）与 `bern-gtk`（运行时）；其余改动只有构建工具注册目标、`bern-ffi` 公开查询与媒体模块、示例增加目标配置 |
 | 目标禁用后其他构建独立可用；具体框架 SDK 不是全局前置条件 | 完成 | `bern-gtk` 不是工作区成员，只在生成的 Linux 应用里编译；macOS 上 `cargo test --workspace` 与 clippy 不需要 GTK |
 | 省略 UI 技术时的默认解析，默认目标不可用时明确失败 | 完成 | `platform = "linux"` 解析为 `gtk-linux`；显式 `ui = "flutter"` 报 “the `flutter + linux` backend is not available”（测试） |
@@ -39,7 +39,7 @@
 | --- | --- |
 | `bern-backend-gtk` | `gtk + linux` 目标：描述、检查、从 IR 生成 Rust 源码、生成应用 crate 与构建计划。工作区成员，不依赖 GTK |
 | `bern-gtk` | GTK 4 运行时：响应式单元、控件、窗口、会话命令、查询与媒体执行端。不是工作区成员（`exclude`），只在生成的应用中编译 |
-| 生成的应用 crate | `target/bern/linux/app/`：`ui.rs`（组件、窗口、文案表与 `AppDef`）、`main.rs`（启动引擎）、`cli.rs`、`mcp.rs` |
+| 生成的应用 crate | `target/bern/linux/app/`：`ui.rs`（组件、窗口、文案表与 `AppDef`）、`main.rs`（启动引擎）、`cli.rs` |
 
 生成的代码不另写一套 UI 运行时，而是调用 `bern-gtk` 的标准组件，形式与 Web 目标相同：每个组件生成一个函数，表达式生成在上下文 `c` 中求值的 Rust 表达式，局部变量（组件参数、行变量、模式绑定）放在上下文里，闭包不捕获任何东西，绑定只在读过的单元变化时重新求值。值以协议的 `Value` 表示，编码与解码直接使用 `bern-protocol`。
 
@@ -94,7 +94,7 @@
 - **窗口与草稿**：窗口出现时向会话运行时登记，获得代次与外部 ID（`main#1`），草稿单元由运行时返回的初值创建；写入先经运行时，再更新单元。窗口关闭即释放草稿、控件登记与查询订阅，应用级播放器继续。
 - **控件登记与会话命令**：可操作控件挂载时登记目标 ID（`组件.控件id`，列表行附加 `[键]`）、角色、名称、可用性与动作闭包，外部的 `ui.*` 命令经这些闭包执行；禁用、被关闭确认阻挡、多处挂载分别返回 `target_unavailable`、`target_blocked`、`target_ambiguous`；密码框不暴露值。
 - **应用生命周期**：`AdwApplication` 以 `bundle_id` 为应用 ID，同一用户只运行一个实例；最后一个窗口关闭后应用保持运行（引擎与外部入口仍可用），再次启动应用会打开主窗口；声明了 `StatusItem` 时它在桌面的状态区，从那里打开窗口或退出（见“状态栏项”）。Ctrl+Q 退出（与 macOS 的 Cmd-Q 一样不经过关闭检查），Ctrl+W 关闭当前窗口，设置窗口按 Esc 关闭。
-- **外部入口**：与 macOS 相同的本地控制通道（`channels = ["ipc"]`），CLI 与 MCP 服务器从同一命令目录生成。
+- **外部入口**：与 macOS 相同的本地控制通道（`channels = ["ipc"]`），CLI从同一命令目录生成。
 
 ## 窗口
 
@@ -241,7 +241,7 @@ cargo run -p bern-cli -- build --manifest examples/showcase/Bern.toml --target l
 target/bern/linux/Showcase/showcase
 ```
 
-需要 GTK 4.14、libadwaita 1.5 与 libsoup 3 的开发包（Ubuntu：`libgtk-4-dev`、`libadwaita-1-dev`、`libsoup-3.0-dev`）。产物位于 `target/bern/linux/`：`Showcase/showcase`（界面程序）、`Showcase/resources/`（随包资源，程序按自身位置查找）、`Showcase/dev.bern.showcase.desktop`、`bin/showcase` 与 `bin/showcase-mcp`、应用 crate `app/`、构建清单 `build.json`（记录 GTK 与 libadwaita 最低版本、媒体后端与呈现、资源名称）。Rust 编译目录为 `target/bern-glue-linux/`。
+需要 GTK 4.14、libadwaita 1.5 与 libsoup 3 的开发包（Ubuntu：`libgtk-4-dev`、`libadwaita-1-dev`、`libsoup-3.0-dev`）。产物位于 `target/bern/linux/`：`Showcase/showcase`（界面程序）、`Showcase/resources/`（随包资源，程序按自身位置查找）、`Showcase/dev.bern.showcase.desktop`、`bin/showcase`、应用 crate `app/`、构建清单 `build.json`（记录 GTK 与 libadwaita 最低版本、媒体后端与呈现、资源名称）。Rust 编译目录为 `target/bern-glue-linux/`。
 
 应用图标在 `Showcase/icons/dev.bern.showcase.png`（没有声明 `[app].icon` 时为 512 像素的 Bern 标志）。启动时这个目录加入图标主题的搜索路径，窗口的默认图标名为 `bundle_id`；找不到时在标准错误报告。生成的 `.desktop` 文件以绝对路径指向它。`[app.icon].linux` 为图标主题文件夹时，其中最大的 PNG 作为这个文件，全部图标改名为 `bundle_id` 后放在 `Showcase/icons/hicolor/` 下，`.deb` 把它们装进 `/usr/share/icons/hicolor`。GNOME 在 Wayland 下从已安装的 `.desktop` 文件取程序坞图标，把生成的文件复制到 `~/.local/share/applications/` 后程序坞显示标志；构建不会写入用户目录。
 
@@ -251,7 +251,7 @@ target/bern/linux/Showcase/showcase
 
 `bern package --target linux` 按 release 构建，生成 `<程序>_<版本>_<架构>.deb`（系统有 `dpkg-deb` 时）与 `<产品>-<版本>-linux-<架构>.tar.gz`：
 
-- `.deb` 把应用、图标与 `bin/` 中的 CLI、MCP 服务器装到 `/opt/<bundle_id>`，另有 `/usr/share/applications/<bundle_id>.desktop`、`hicolor` 图标主题中的图标与 `/usr/bin/<程序>` 启动器；依赖 `libgtk-4-1 (>= 4.14)` 与 `libadwaita-1-0 (>= 1.5)`，使用媒体时另加 `libgtk-4-media-gstreamer` 与 `gstreamer1.0-plugins-good`，并推荐 `gstreamer1.0-libav`。维护者取自 `[app].publisher`。
+- `.deb` 把应用、图标与 `bin/` 中的 CLI装到 `/opt/<bundle_id>`，另有 `/usr/share/applications/<bundle_id>.desktop`、`hicolor` 图标主题中的图标与 `/usr/bin/<程序>` 启动器；依赖 `libgtk-4-1 (>= 4.14)` 与 `libadwaita-1-0 (>= 1.5)`，使用媒体时另加 `libgtk-4-media-gstreamer` 与 `gstreamer1.0-plugins-good`，并推荐 `gstreamer1.0-libav`。维护者取自 `[app].publisher`。
 - 用到 `Svg` 时，`.deb` 另带 AppArmor 配置 `/etc/apparmor.d/<bundle_id>`。WebKitGTK 用 bubblewrap 为网页进程建沙箱，需要建立用户命名空间；Ubuntu 24.04 起（`kernel.apparmor_restrict_unprivileged_userns = 1`）只有 AppArmor 配置里有 `userns` 的程序能建立，沙箱失败时 WebKitGTK 中止整个应用。配置与 Ubuntu 为自带的 WebKitGTK 应用（epiphany、devhelp 等）提供的相同：`flags=(unconfined)`，只给程序一个名字和 `userns` 权限，不另加限制，并包含可选的 `local/<bundle_id>` 供管理员补充；附着路径是 `/opt/<bundle_id>/<程序>`（`/usr/bin/<程序>` 是指向它的链接，AppArmor 按解析后的路径匹配）。配置列为 conffile，`dpkg` 保留管理员的修改，卸载（remove）后保留、彻底卸载（purge）时删除。`postinst` 只在 AppArmor 启用时（`aa-enabled`）以 `apparmor_parser -r -T -W` 立即载入，载入失败不影响安装；`postrm` 在 purge 时删去编译缓存。配置使用 AppArmor 4 的语法（`abi <abi/4.0>`、`userns`），更早的 AppArmor 不能解析它（载入失败，安装照常完成）。没有 `Svg` 的应用不带配置，也没有维护脚本。
 - `.tar.gz` 与开发构建不带配置。在限制用户命名空间的系统上运行用到 `Svg` 的应用，需要为解开后的界面程序添加同样的配置（需要 root；路径含空格时加引号），`bern package` 会提示这一点：
 
@@ -368,7 +368,7 @@ target/bern/linux/Showcase/showcase
 2026-10-18，页面级布局、场景与控件形态（上一节），同一虚拟机，GTK 4.14.5、libadwaita 1.5.0，应用经 Broadway 显示在内置浏览器中；目标是一个真实的媒体类应用，它的桌面与手机布局用到了上述大部分能力：
 
 - 测试：`bern-backend-gtk` 的测试在 macOS 与虚拟机上通过；新增测试给 showcase 加上场景、手风琴、换行行、格子网格、模态、表单版式、纯图标标签与菜单、胶囊控件与搜索项，检查生成代码，并在虚拟机上对生成的应用做类型检查。`bern-gtk` 带与不带 `svg` 特性都能编译。
-- 构建：该应用 `bern check --target linux` 由 67 个错误变为 0；`bern build --target linux` 构建出界面程序、CLI 与 MCP 服务器。
+- 构建：该应用 `bern check --target linux` 由 67 个错误变为 0；`bern build --target linux` 构建出界面程序、CLI。
 - **测试环境**：虚拟机装有 WebKitGTK 6 的运行库但没有开发包（sudo 需要密码）；构建时用 `PKG_CONFIG_PATH` 指向手写的 `webkitgtk-6.0`、`javascriptcoregtk-6.0`、`libsoup-3.0` pkg-config 文件，链接已装的库。Ubuntu 24.04 默认限制非特权用户命名空间（`kernel.apparmor_restrict_unprivileged_userns = 1`），WebKitGTK 的沙箱（bwrap）因此失败并中止整个应用（`Failed to fully launch dbus-proxy`）；测试时以 `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` 运行；安装包为此附带 AppArmor 配置，见“打包”。Broadway 下，被点击的控件随即在指针下被替换后，GTK 报 “Broken accounting of active state”，此后的点击都丢失；一个纯 PyGObject 的 GTK 4 程序同样如此，所以这是 GTK/Broadway 与合成点击的问题，在窗口外的页面空白处点一下即可恢复。部分操作改用应用 CLI 的 `ui activate`（与点击执行同一个控件闭包）。
 - 修正（实测中发现并已改）：层叠在子层第一次插入时按当时是否扩展定下对齐，之后内容变为撑满（如换成滚动视图）时不再更新，现在每次排布时决定；有声明尺寸的层叠以声明尺寸为排布区域；带声明尺寸的图片框与 WebView 不再把扩展传给外面；轨道不再让所在层叠横向扩展；Toast 自定义标题省略过长文字，不再把窗口撑宽。
 - 引导模态（实测）：960×600 的卡片居中、圆角与阴影，背景变暗；格纹插画与居中的动画标志；“跳过”到最后一步时内容居中、底栏在底部。

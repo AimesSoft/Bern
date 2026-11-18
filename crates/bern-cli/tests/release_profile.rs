@@ -45,12 +45,28 @@ fn every_generated_crate_optimizes_its_releases_across_crates() {
             release: true,
         };
         for file in target.generate(&compiled.app, &context).unwrap() {
+            assert!(
+                !file.path.ends_with("src/mcp.rs"),
+                "{name}: {:?}",
+                file.path
+            );
             if !file.path.ends_with("Cargo.toml") {
                 continue;
             }
             let shown = format!("{name}: {}", file.path.display());
             let manifest: toml::Table =
                 toml::from_str(std::str::from_utf8(&file.contents).unwrap()).unwrap();
+            assert!(
+                manifest["dependencies"].get("bern-adapter-mcp").is_none(),
+                "{shown}"
+            );
+            if let Some(bins) = manifest.get("bin").and_then(toml::Value::as_array) {
+                assert!(
+                    bins.iter()
+                        .all(|bin| !bin["name"].as_str().unwrap().ends_with("-mcp")),
+                    "{shown}"
+                );
+            }
             let release = &manifest["profile"]["release"];
             assert_eq!(release["lto"].as_bool(), Some(true), "{shown}");
             assert_eq!(release["codegen-units"].as_integer(), Some(1), "{shown}");
@@ -58,7 +74,7 @@ fn every_generated_crate_optimizes_its_releases_across_crates() {
             manifests.push(shown);
         }
     }
-    // The command line and MCP server of Android and iOS, and the WebUI's
+    // The command line of Android and iOS, and the WebUI's
     // engine host, are crates of their own beside the engine's.
     assert_eq!(
         manifests,

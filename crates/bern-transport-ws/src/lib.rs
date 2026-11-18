@@ -2,8 +2,8 @@
 //!
 //! A WebUI engine host runs the engine natively and serves its page over
 //! HTTP on the loopback interface, together with a WebSocket channel that
-//! carries the same JSON control messages as the local IPC channel. The CLI,
-//! JSON clients and the MCP server keep using the IPC channel; every entry
+//! carries the same JSON control messages as the local IPC channel. The CLI and
+//! JSON clients keep using the IPC channel; every entry
 //! reaches the same engine instance and the same live UI sessions.
 //!
 //! Access rules:

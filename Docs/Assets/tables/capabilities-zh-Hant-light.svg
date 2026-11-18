@@ -28,7 +28,7 @@
 <text x="519.0" y="92.2" font-size="12.5" fill="#59636E" font-weight="600" text-anchor="middle">行動端</text>
 <text x="617.0" y="92.2" font-size="12.5" fill="#59636E" font-weight="600" text-anchor="middle">Web</text>
 <text x="715.0" y="92.2" font-size="12.5" fill="#59636E" font-weight="600" text-anchor="middle">原生外觀</text>
-<text x="813.0" y="92.2" font-size="12.5" fill="#59636E" font-weight="600" text-anchor="middle">內建 MCP</text>
+<text x="813.0" y="92.2" font-size="12.5" fill="#59636E" font-weight="600" text-anchor="middle">CLI + Skill</text>
 <text x="911.0" y="92.2" font-size="12.5" fill="#59636E" font-weight="600" text-anchor="middle">編譯期檢查</text>
 <text x="0.0" y="92.0" font-size="12.5" font-weight="700" fill="#59636E">框架</text>
 <line x1="0" y1="107.0" x2="960" y2="107.0" stroke="#D0D7DE"/>

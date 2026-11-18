@@ -15,7 +15,7 @@ This document records what was actually completed for the `swiftui + ios` target
 
 | Design requirement | Status | Notes |
 | --- | --- | --- |
-| Generated code builds | Done | `bern build --target ios` generates Swift and the glue crate, and builds the simulator app bundle plus the CLI and MCP server on the Mac; the generation tests type-check the generated Swift against the iOS simulator SDK |
+| Generated code builds | Done | `bern build --target ios` generates Swift and the glue crate, and builds the simulator app bundle plus the CLI on the Mac; the generation tests type-check the generated Swift against the iOS simulator SDK |
 | Windows, navigation, menus and lifecycle differ by platform | Done | The runtime is split into the shared `BernRuntime.swift` and `BernMedia.swift` and the platform files `BernAppKit.swift` (macOS) and `BernUIKit.swift` (iOS); a build compiles only the one for its own platform |
 | Virtual windows when native multiple windows are not supported | Done | iPhone: one scene, the main window fills it, other windows are sheets stacked on top; window facts report `Virtual` |
 | Environments that support multiple windows choose by verified native capability | Done | iPad: every window kind except settings is an independent native window (a `WindowGroup` scene), reported as `Native`; settings is a sheet on the main window |
@@ -72,11 +72,11 @@ On iPad the same app bundle handles windows as Apple's documentation describes:
 
 ## Local control channel
 
-The app in the simulator is a process on the Mac and can share the file system with the Mac, so the CLI, the JSON client and the MCP server (built for the Mac) can connect to it over the IPC channel. The app's own temporary directory is in a deep container path, and the socket path exceeds the length limit of Unix sockets; `bern run` therefore hands the Mac's temporary directory to the app through `BERN_IPC_DIR` (via `simctl`'s `SIMCTL_CHILD_` variables), and the channel creates its socket there. On iOS the channel listens only when this variable is set: when the app is launched by tapping it on the Home Screen or is installed on a device, no other process can connect to it, so the channel does not start.
+The app in the simulator is a process on the Mac and can share the file system with the Mac, so the CLI and the JSON client (built for the Mac) can connect to it over the IPC channel. The app's own temporary directory is in a deep container path, and the socket path exceeds the length limit of Unix sockets; `bern run` therefore hands the Mac's temporary directory to the app through `BERN_IPC_DIR` (via `simctl`'s `SIMCTL_CHILD_` variables), and the channel creates its socket there. On iOS the channel listens only when this variable is set: when the app is launched by tapping it on the Home Screen or is installed on a device, no other process can connect to it, so the channel does not start.
 
 `BERN_IPC_DIR` works on other platforms too: it replaces the temporary directory as the parent of each app's socket directory.
 
-When the app in the simulator has the same bundle identifier as the macOS version, the engines of both are in the same directory, and the CLI lists both engines with their systems and requires `--engine` to pick one: `--engine ios` picks the simulator's, `--engine macos` the Mac's. The MCP server is started with the same `--engine`; without it, its tool calls fail with the same list.
+When the app in the simulator has the same bundle identifier as the macOS version, the engines of both are in the same directory, and the CLI lists both engines with their systems and requires `--engine` to pick one: `--engine ios` picks the simulator's, `--engine macos` the Mac's.
 
 iOS suspends apps that are fully in the background, and a suspended engine does not respond. The client's handshake therefore has a 5-second timeout; on timeout it reports "engine not responding" instead of waiting forever; commands after the handshake are not subject to this timeout.
 
@@ -97,7 +97,7 @@ bern run --target ios
 
 `bern run --target ios` installs the app into the running iOS simulator and launches it; the app's output appears in the terminal until the app exits; `BERN_*` environment variables (for example `BERN_APPEARANCE=dark`) are passed to the app as well. When no simulator is running it reports an error and explains how to start one. `bern run` without `--target` prefers the target matching the host system, so on a Mac it still launches the macOS version. `bern doctor` checks the iOS simulator SDK and Rust's simulator target; whether a runnable simulator exists affects only `bern run`, not builds (after an Xcode update the simulator devices take a while to finish loading, and builds should not fail in the meantime).
 
-Build steps: build the engine static library for the simulator (`IPHONEOS_DEPLOYMENT_TARGET=17.0`) and the CLI and MCP server for the Mac; mirror the bundled resources to the top level of the bundle; compile the icon with `actool`; compile the UI with `xcrun --sdk iphonesimulator swiftc`; move the dSYM next to the bundle; sign ad hoc.
+Build steps: build the engine static library for the simulator (`IPHONEOS_DEPLOYMENT_TARGET=17.0`) and the CLI for the Mac; mirror the bundled resources to the top level of the bundle; compile the icon with `actool`; compile the UI with `xcrun --sdk iphonesimulator swiftc`; move the dSYM next to the bundle; sign ad hoc.
 
 ## Verification log
 
@@ -111,7 +111,6 @@ Build steps: build the engine static library for the simulator (`IPHONEOS_DEPLOY
 - **Lifecycle**: after pressing the Home button the main window is `Hidden` with no focus, and the CLI can still read state; after returning to the foreground it is `Visible` with focus again.
 - **Media**: the preview player plays the color bars clip, seeks and ends (`Ended 6000 / 6000`); after leaving the video page and coming back the state is unchanged; when the app enters the background during playback it keeps playing to the end in the simulator; entering the background after playback has finished reports `Paused 0`, and playing again starts from the beginning. On narrow screens the clip selection on the video page is a "Change Clip" menu.
 - **Images**: bundled images and Grid work; PQ PNGs are tone-mapped. JPEGs with a gain map decode as HDR in the simulator into all-black pixels (drawing the decoded result into an 8-bit context reads back 0), so simulator builds decode only the SDR version and show the SDR image the author provided.
-- **MCP**: `showcase-mcp` completes `initialize`, and `window_list` returns the `Virtual` windows of the app in the simulator.
 - **macOS unaffected**: after the runtime split the macOS version was rebuilt and run; the settings window, the close protocol, minimize and restore were measured through the CLI and work.
 
 iPad, same day, iPad Pro 13-inch (M5) simulator (iOS 26.5, full-screen mode). The showcase app has only a main window and a settings window, so an ordinary "Inspector" window was added temporarily to test multiple windows (not committed):

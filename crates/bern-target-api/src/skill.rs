@@ -1,12 +1,12 @@
 //! The agent skill a build ships beside its command line: a `SKILL.md`
 //! that tells an agent how to reach the running application and lists
 //! every command, query, state field and UI action of this build, from
-//! the same catalog the command line and the MCP server derive theirs from.
+//! the same catalog as the command line.
 //!
 //! It goes into `skills/<program>/SKILL.md`, beside `bin/`, so the folder
 //! can be copied as it is into an agent's skills directory. Targets write
 //! it only when the application listens on the control channel; without
-//! one the programs cannot reach it.
+//! one the CLI cannot reach it.
 
 use crate::BuildStep;
 use crate::glue::program;
@@ -28,32 +28,27 @@ pub fn path(app: &Application) -> PathBuf {
     PathBuf::from(DIR).join(program(app)).join("SKILL.md")
 }
 
-/// How one copy of the skill finds the programs, and what reaching the
+/// How one copy of the skill finds the CLI, and what reaching the
 /// application takes on its target.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Place {
     /// The command line, relative to the skill's folder.
     pub cli: String,
-    /// The MCP server, relative to the skill's folder.
-    pub mcp: String,
     /// Where an installed copy of the application keeps the command line,
     /// when its packages install to a known place.
     pub installed: Option<String>,
-    /// What the programs need before they reach the application, besides
+    /// What the CLI needs before it reaches the application, besides
     /// it running, as Markdown.
     pub connect: Option<String>,
 }
 
 impl Place {
-    /// The programs in `bin/` beside `skills/`, as every build lays them
-    /// out; `windows` spells the paths as Windows does, with `.exe`.
+    /// The CLI in `bin/` beside `skills/`; `windows` spells the paths as Windows does, with `.exe`.
     pub fn beside_bin(app: &Application, windows: bool) -> Place {
         let program = program(app);
         let (separator, suffix) = if windows { ("\\", ".exe") } else { ("/", "") };
-        let path = |name: &str| ["..", "..", "bin", &format!("{name}{suffix}")].join(separator);
         Place {
-            cli: path(&program),
-            mcp: path(&format!("{program}-mcp")),
+            cli: ["..", "..", "bin", &format!("{program}{suffix}")].join(separator),
             installed: None,
             connect: None,
         }
@@ -91,14 +86,14 @@ pub fn listens(channels: &[String]) -> bool {
     channels.iter().any(|channel| channel == "ipc")
 }
 
-/// What an Android app needs: the programs run on this computer and reach
+/// What an Android app needs: the CLI runs on this computer and reaches
 /// the device through `adb forward`.
 pub fn android_connect(app: &Application) -> String {
     android_connect_for(app, false)
 }
 
-/// What an Android or Wear OS app needs: the programs run on this computer
-/// and reach the device through `adb forward`.
+/// What an Android or Wear OS app needs: the CLI runs on this computer
+/// and reaches the device through `adb forward`.
 pub fn android_connect_for(app: &Application, watch: bool) -> String {
     let id = &app.app.bundle_id;
     let dir = format!(
@@ -116,7 +111,7 @@ pub fn android_connect_for(app: &Application, watch: bool) -> String {
         ("android", "android.sock", "Android device", "")
     };
     format!(
-        "The app runs on the {device} and the programs run on this computer, which reaches the device through `adb`. `bern run --target {target}` forwards the control channel; when the app was started otherwise, forward it first:\n\n\
+        "The app runs on the {device} and the CLI runs on this computer, which reaches the device through `adb`. `bern run --target {target}` forwards the control channel; when the app was started otherwise, forward it first:\n\n\
          ```bash\n\
          dir=\"${{BERN_IPC_DIR:-${{TMPDIR:-/tmp}}}}/{dir}\"\n\
          mkdir -p \"$dir\" && chmod 700 \"$dir\" && rm -f \"$dir/{socket}\"\n\
@@ -127,12 +122,12 @@ pub fn android_connect_for(app: &Application, watch: bool) -> String {
 }
 
 /// What an app in the iOS, tvOS or watchOS simulator needs: it listens only
-/// when started with the directory the programs use. `system` is the one it
+/// when started with the directory the CLI uses. `system` is the one it
 /// runs on, `ios`, `tvos` or `watchos`.
 pub fn simulator_connect(app: &Application, system: &str) -> String {
     let id = &app.app.bundle_id;
     format!(
-        "The app runs in the simulator and listens only when it was started with `BERN_IPC_DIR` naming the directory the programs use. `bern run` starts it so; otherwise launch it with:\n\n\
+        "The app runs in the simulator and listens only when it was started with `BERN_IPC_DIR` naming the directory the CLI uses. `bern run` starts it so; otherwise launch it with:\n\n\
          ```bash\n\
          SIMCTL_CHILD_BERN_IPC_DIR=\"${{BERN_IPC_DIR:-${{TMPDIR:-/tmp}}}}\" xcrun simctl launch booted {id}\n\
          ```\n\n\
@@ -197,7 +192,7 @@ fn names(app: &Application) -> Vec<String> {
 /// it, followed by as many of the commands as fit.
 fn description(app: &Application, names: &[String], cli: &str) -> String {
     let mut text = format!(
-        "Operate {} ({}) while it runs, through its command line `{cli}` and its MCP server `{cli}-mcp`: every command, query, state field and UI action of this build, with their parameters. Use when asked to use, inspect, test or automate {}.",
+        "Operate {} ({}) while it runs, through its command line `{cli}`: every command, query, state field and UI action of this build, with their parameters. Use when asked to use, inspect, test or automate {}.",
         names.join(" / "),
         app.app.bundle_id,
         names[0],
@@ -299,14 +294,7 @@ fn codes(errors: &[String]) -> String {
         .join(", ")
 }
 
-fn command(
-    out: &mut String,
-    cli: &str,
-    spec: &CommandSpec,
-    types: &TypeTable,
-    session: bool,
-    common: &[String],
-) {
+fn command(out: &mut String, cli: &str, spec: &CommandSpec, types: &TypeTable, common: &[String]) {
     let _ = writeln!(out, "### `{cli} {}`\n", spec.external.cli.join(" "));
     let doc = spec.doc.trim();
     if !doc.is_empty() {
@@ -353,16 +341,9 @@ fn command(
     if spec.policy.retry == Retry::Idempotent && !spec.is_query() {
         facts.push("Repeating it leaves the same state.".into());
     }
-    let mcp = if session {
-        format!(
-            "MCP tool: `{}` (with an optional `session_id`).",
-            spec.external.mcp
-        )
-    } else {
-        format!("MCP tool: `{}`.", spec.external.mcp)
-    };
-    facts.push(mcp);
-    let _ = writeln!(out, "{}\n", facts.join(" "));
+    if !facts.is_empty() {
+        let _ = writeln!(out, "{}\n", facts.join(" "));
+    }
 }
 
 fn type_section(out: &mut String, name: &str, types: &TypeTable) {
@@ -439,34 +420,26 @@ pub fn markdown(app: &Application, place: &Place) -> String {
     let _ = writeln!(out, "# {}\n", names[0]);
     let _ = writeln!(
         out,
-        "{} (`{}`, version {}) is built with Bern: everything it does is a command of one catalog, and its command line and MCP server reach the running app through the same catalog its own controls use. This file lists every command of this build and was generated with it; a new build brings a new copy.\n",
+        "{} (`{}`, version {}) is built with Bern: everything it does is a command of one catalog, and its command line reaches the running app through the same catalog its own controls use. This file lists every command of this build and was generated with it; a new build brings a new copy.\n",
         names.join(" / "),
         app.app.bundle_id,
         one_line(&app.app.version)
     );
 
-    out.push_str(
-        "## Programs\n\n| Program | Relative to this file | What it is |\n| --- | --- | --- |\n",
-    );
     let _ = writeln!(
         out,
-        "| `{cli}` | `{}` | Command line: one command per run |",
+        "## Command line\n\nRelative to this file: `{}`.\n",
         place.cli
-    );
-    let _ = writeln!(
-        out,
-        "| `{cli}-mcp` | `{}` | MCP server on standard input and output |\n",
-        place.mcp
     );
     if let Some(installed) = &place.installed {
         let _ = writeln!(
             out,
-            "An installed copy of the app keeps the command line at `{installed}`, the MCP server beside it.\n"
+            "An installed copy of the app keeps the command line at `{installed}`.\n"
         );
     }
     let _ = writeln!(
         out,
-        "Below, `{cli}` stands for the command line's path. Both programs talk to the app that is already running and never start it or a second copy: start the app first. `{cli} state` shows whether they reach it.\n"
+        "Below, `{cli}` stands for the path to this executable. Start the app first; `{cli} state` reads its state without launching another copy.\n"
     );
     if let Some(connect) = &place.connect {
         let _ = writeln!(out, "{}\n", connect.trim_end());
@@ -484,18 +457,9 @@ pub fn markdown(app: &Application, place: &Place) -> String {
          - `{cli} state` prints the state below, `{cli} sessions` the open UI sessions and windows, `{cli} catalog` the whole catalog as JSON, `{cli} --help` the commands.\n"
     );
 
-    let mcp_file = place.mcp.rsplit(['/', '\\']).next().unwrap_or(&place.mcp);
     let _ = writeln!(
         out,
-        "## MCP server\n\n`{cli}-mcp` speaks MCP over standard input and output. Register it with its absolute path, for example:\n\n```json\n{{ \"mcpServers\": {{ \"{cli}\": {{ \"command\": \"/absolute/path/to/{mcp_file}\" }} }} }}\n```\n"
-    );
-    let _ = writeln!(
-        out,
-        "When several copies of the app run, its tools fail with an error listing them: start it with `--engine` and the system or id, as the command line takes it, to bind it to one. Name the system in a registration, for example `\"args\": [\"--engine\", \"macos\"]`; the id is new each time the app starts.\n"
-    );
-    let _ = writeln!(
-        out,
-        "Its tools are the commands below under their **MCP tool** names, taking the parameters as a JSON object with the names written with `_`. `bern_state` reads the state and `bern_sessions` lists the UI sessions.\n"
+        "Over SSH, run the same CLI on the machine that hosts the control channel, as the user who owns that channel. Replace the host and CLI path in `ssh HOST /path/to/{cli} state`. If the app uses a custom `BERN_IPC_DIR`, set it in the remote shell too. The app needs no additional network listener.\n"
     );
 
     let mut types = Types { seen: Vec::new() };
@@ -536,13 +500,13 @@ pub fn markdown(app: &Application, place: &Place) -> String {
             "## Commands\n\nThese change the app's state, with or without a window open.\n\n",
         );
         for spec in &commands {
-            command(&mut out, &cli, spec, &protocol.types, false, &[]);
+            command(&mut out, &cli, spec, &protocol.types, &[]);
         }
     }
     if !queries.is_empty() {
         out.push_str("## Queries\n\nThese only read and change nothing.\n\n");
         for spec in &queries {
-            command(&mut out, &cli, spec, &protocol.types, false, &[]);
+            command(&mut out, &cli, spec, &protocol.types, &[]);
         }
     }
 
@@ -564,7 +528,7 @@ pub fn markdown(app: &Application, place: &Place) -> String {
             let _ = writeln!(out, "Each of them may fail with {}.\n", codes(&common));
         }
         for spec in &media_specs {
-            command(&mut out, &cli, spec, &media_types, false, &common);
+            command(&mut out, &cli, spec, &media_types, &common);
         }
     }
 
@@ -608,7 +572,7 @@ pub fn markdown(app: &Application, place: &Place) -> String {
         let _ = writeln!(out, "Each of them may fail with {}.\n", codes(&common));
     }
     for spec in &session_specs {
-        command(&mut out, &cli, spec, &session_types, true, &common);
+        command(&mut out, &cli, spec, &session_types, &common);
     }
 
     if !types.seen.is_empty() {
@@ -774,7 +738,7 @@ mod tests {
     }
 
     #[test]
-    fn the_skill_lists_every_command_with_its_cli_and_mcp_names() {
+    fn the_skill_lists_every_command_by_its_cli_path() {
         let app = app();
         let text = markdown(&app, &Place::beside_bin(&app, false));
         let front = text
@@ -797,15 +761,13 @@ mod tests {
             "{front}"
         );
 
-        assert!(text.contains("| `my-planner` | `../../bin/my-planner` |"));
-        assert!(text.contains("| `my-planner-mcp` | `../../bin/my-planner-mcp` |"));
-        assert!(text.contains("`\"args\": [\"--engine\", \"macos\"]`"));
+        assert!(text.contains("Relative to this file: `../../bin/my-planner`."));
+        assert!(!text.to_ascii_lowercase().contains("mcp"));
+        assert!(text.contains("`ssh HOST /path/to/my-planner state`"));
         assert!(text.contains("### `my-planner planner rename`\n\nDoc of rename.\nSecond line.\n"));
         assert!(text.contains("- `--new-title <text>`: The new_title\n"));
         assert!(text.contains("- `--priority <Low|High>`: The priority\n"));
-        assert!(text.contains(
-            "Errors: `empty_title`. Repeating it leaves the same state. MCP tool: `planner_rename`."
-        ));
+        assert!(text.contains("Errors: `empty_title`. Repeating it leaves the same state."));
         // Queries apart from commands, optional parameters marked.
         let queries = text.find("## Queries").unwrap();
         assert!(text.find("planner rename`").unwrap() < queries);
@@ -815,16 +777,12 @@ mod tests {
         // State, the framework's UI commands, and the types they use.
         assert!(text.contains("| `title` | `text` | Title of the plan. |"));
         assert!(text.contains("### `my-planner ui inspect`"));
-        assert!(text.contains("MCP tool: `ui_activate` (with an optional `session_id`)."));
+        assert!(text.contains("### `my-planner ui activate`"));
         // The errors every UI command shares are said once.
         assert!(
             text.contains("Each of them may fail with `requires_ui_session`, `target_not_found`")
         );
-        assert!(
-            text.contains(
-                "Errors: also `invalid_url`, `unsupported_file`. MCP tool: `ui_set_file`"
-            )
-        );
+        assert!(text.contains("Errors: also `invalid_url`, `unsupported_file`."));
         assert_eq!(text.matches("`requires_ui_session`").count(), 2, "{text}");
         assert!(text.contains("Interface languages, for `ui set-language`: `zh-Hans`, `en`."));
         assert!(text.contains("### `Note`\n\nA JSON object"));
@@ -847,8 +805,7 @@ mod tests {
             .installed("%LOCALAPPDATA%\\Programs\\Planner\\bin\\my-planner.exe")
             .connect(android_connect(&app));
         let text = markdown(&app, &place);
-        assert!(text.contains("| `my-planner` | `..\\..\\bin\\my-planner.exe` |"));
-        assert!(text.contains("\"command\": \"/absolute/path/to/my-planner-mcp.exe\""));
+        assert!(text.contains("Relative to this file: `..\\..\\bin\\my-planner.exe`."));
         assert!(text.contains("at `%LOCALAPPDATA%\\Programs\\Planner\\bin\\my-planner.exe`"));
         assert!(text.contains("localabstract:bern.dev.bern.planner"));
         assert!(text.contains("## Media\n\nThe app's players, which these commands act on by `player_id`:\n\n- `main`: The video\n"));

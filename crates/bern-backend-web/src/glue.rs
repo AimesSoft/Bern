@@ -7,8 +7,8 @@
 //!   build links only the protocol crate and reaches the engine through
 //!   the engine host's channel.
 //! * The engine host (`ui` build): a native program running the engine,
-//!   the local IPC channel for the CLI, JSON and MCP entries, and the
-//!   page's HTTP and WebSocket channel; plus the CLI and MCP programs.
+//!   the local IPC channel for the CLI and JSON entries, and the
+//!   page's HTTP and WebSocket channel; plus the CLI.
 
 use bern_ir::Application;
 use bern_target_api::BuildContext;
@@ -16,7 +16,7 @@ use bern_target_api::glue::{
     WindowPresentation, descriptor_expr, engine_expr, module_dependencies, path, players_expr,
     resources_expr, session_spec,
 };
-pub use bern_target_api::glue::{cli_rs, mcp_rs, program};
+pub use bern_target_api::glue::{cli_rs, program};
 
 pub fn page_cargo_toml(context: &BuildContext, app: &Application, remote: bool) -> String {
     let ffi = context.framework.dependency("bern-ffi");
@@ -229,12 +229,8 @@ publish = false
 [[bin]]
 name = "{program}"
 path = "src/cli.rs"
-[[bin]]
-name = "{program}-mcp"
-path = "src/mcp.rs"
 [dependencies]
 bern-adapter-cli = {{ {cli} }}
-bern-adapter-mcp = {{ {mcp} }}
 {protocol} = {{ path = "{protocol_path}" }}
 {modules}
 [workspace]
@@ -242,7 +238,6 @@ bern-adapter-mcp = {{ {mcp} }}
         program = program(app),
         version = app.app.version,
         cli = context.framework.dependency("bern-adapter-cli"),
-        mcp = context.framework.dependency("bern-adapter-mcp"),
         protocol = context.protocol_package,
         protocol_path = path(&context.protocol_path),
         modules = module_dependencies(context, false),
@@ -269,10 +264,6 @@ path = "src/host.rs"
 name = "{program}"
 path = "src/cli.rs"
 
-[[bin]]
-name = "{program}-mcp"
-path = "src/mcp.rs"
-
 [dependencies]
 bern-command = {{ {command} }}
 bern-media = {{ {media} }}
@@ -280,7 +271,6 @@ bern-runtime = {{ {runtime} }}
 bern-transport-ipc = {{ {ipc} }}
 bern-transport-ws = {{ {ws} }}
 bern-adapter-cli = {{ {cli} }}
-bern-adapter-mcp = {{ {mcp} }}
 {protocol} = {{ path = "{protocol_path}" }}
 {engine} = {{ path = "{engine_path}" }}
 {modules}
@@ -295,7 +285,6 @@ bern-adapter-mcp = {{ {mcp} }}
         ipc = bern("bern-transport-ipc"),
         ws = bern("bern-transport-ws"),
         cli = bern("bern-adapter-cli"),
-        mcp = bern("bern-adapter-mcp"),
         protocol = context.protocol_package,
         protocol_path = path(&context.protocol_path),
         engine = context.engine_package,
@@ -316,7 +305,7 @@ pub fn host_rs(context: &BuildContext, app: &Application) -> String {
 //!
 //! The WebUI engine host: runs the `{namespace}` engine and serves the page
 //! from the directory above `bin/` on 127.0.0.1, with its WebSocket channel.
-//! The CLI, JSON and MCP entries reach the same engine instance{ipc_doc}.
+//! The CLI and JSON entries reach the same engine instance{ipc_doc}.
 //!
 //! Usage: `{program}-host [--port N] [--root DIR]`
 

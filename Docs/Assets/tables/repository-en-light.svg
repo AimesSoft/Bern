@@ -41,7 +41,7 @@
 <line x1="0" y1="360.0" x2="960" y2="360.0" stroke="#D0D7DE"/>
 <text x="0.0" y="387.9" font-size="13" fill="#4A8BEF" font-weight="700">Entries and</text>
 <text x="0.0" y="407.9" font-size="13" fill="#4A8BEF" font-weight="700">tools</text>
-<text x="132.0" y="388.1" font-size="13.5" fill="#1F2328"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">crates/bern-adapter-cli</tspan> · <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">-mcp</tspan> · <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">-json</tspan></text>
+<text x="132.0" y="388.1" font-size="13.5" fill="#1F2328"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">crates/bern-adapter-cli</tspan> · <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">-json</tspan></text>
 <text x="520.0" y="388.1" font-size="13.5" fill="#59636E">Entries derived from the command catalog</text>
 <text x="132.0" y="414.1" font-size="13.5" fill="#1F2328"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">crates/bern-cli</tspan></text>
 <text x="520.0" y="414.1" font-size="13.5" fill="#59636E">The build tool <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">bern</tspan>: create, check, build, run and check the</text>

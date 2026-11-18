@@ -140,7 +140,7 @@ pub mod entry {
     pub const UI: u32 = 0;
     pub const CLI: u32 = 1;
     pub const JSON: u32 = 2;
-    pub const MCP: u32 = 3;
+    // Entry id 3 is retired; do not reuse it in persisted traces.
     pub const TEST: u32 = 4;
     /// A query subscription of the UI: `origin` subscription, `aux`
     /// version.
@@ -152,7 +152,6 @@ pub mod entry {
             UI => "ui",
             CLI => "cli",
             JSON => "json",
-            MCP => "mcp",
             WEB => "web",
             TEST => "test",
             QUERY => "query",
@@ -423,7 +422,6 @@ pub(crate) fn job(catalog: u16, command: usize, context: &CallContext) -> Option
                 Entry::Ui => entry::UI,
                 Entry::Cli => entry::CLI,
                 Entry::Json => entry::JSON,
-                Entry::Mcp => entry::MCP,
                 Entry::Web => entry::WEB,
                 Entry::Test => entry::TEST,
             },

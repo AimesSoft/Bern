@@ -3,7 +3,7 @@
 //! [`Host`] owns the application engine on a dedicated thread, validates
 //! every invocation against the catalog at the receiving boundary, runs
 //! commands one after another and publishes consistent, versioned state
-//! updates. The UI, CLI, JSON channel and MCP server all call the same
+//! updates. The UI, CLI and JSON channel all call the same
 //! host; none of them re-implements business logic.
 //!
 //! On WebAssembly there are no threads: the engine runs on the calling
@@ -99,7 +99,6 @@ pub enum Entry {
     Ui,
     Cli,
     Json,
-    Mcp,
     /// A WebUI page, in a browser.
     Web,
     Test,
@@ -111,7 +110,6 @@ impl Entry {
             Entry::Ui => "ui",
             Entry::Cli => "cli",
             Entry::Json => "json",
-            Entry::Mcp => "mcp",
             Entry::Web => "web",
             Entry::Test => "test",
         }
