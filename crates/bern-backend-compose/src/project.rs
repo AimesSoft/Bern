@@ -28,8 +28,14 @@ pub fn settings(product: &str) -> String {
 pluginManagement {{
     repositories {{
         google()
-        mavenCentral()
+        val central = mavenCentral()
         gradlePluginPortal()
+        // Kotlin publishes both its plugin markers and implementation to
+        // Maven Central. Do not query Google Maven or the portal for them.
+        exclusiveContent {{
+            forRepositories(central)
+            filter {{ includeGroupAndSubgroups("org.jetbrains.kotlin") }}
+        }}
     }}
 }}
 dependencyResolutionManagement {{
