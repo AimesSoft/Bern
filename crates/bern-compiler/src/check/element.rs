@@ -511,6 +511,9 @@ impl Checker<'_> {
             PropKind::TextField => self.field_prop(value, scope, FieldExpect::Text),
             PropKind::BoolField => self.field_prop(value, scope, FieldExpect::Bool),
             PropKind::NumberField => self.field_prop(value, scope, FieldExpect::Number),
+            PropKind::OptionalNumberField => {
+                self.field_prop(value, scope, FieldExpect::OptionalNumber)
+            }
             PropKind::FileField => self.field_prop(value, scope, FieldExpect::File),
             PropKind::PositionField => self.field_prop(value, scope, FieldExpect::Position),
             PropKind::KeysField => self.field_prop(value, scope, FieldExpect::Keys),

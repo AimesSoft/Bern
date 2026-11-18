@@ -55,6 +55,8 @@ pub fn bool_field(_: &SessionField<bool>) {}
 
 pub fn number_field(_: &SessionField<f64>) {}
 
+pub fn optional_number_field(_: &SessionField<Option<f64>>) {}
+
 pub fn file_field<T: FileValue>(_: &SessionField<T>) {}
 
 pub fn position_field<T: PositionValue>(_: &SessionField<T>) {}

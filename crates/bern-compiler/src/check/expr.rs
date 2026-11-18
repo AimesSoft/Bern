@@ -520,7 +520,7 @@ impl Checker<'_> {
                     let whole = matches!(scope.get(name), Some(Root::Local(_, true)));
                     self.path_content(root, path, whole)
                 }
-                ir::Binding::Window { .. } => false,
+                ir::Binding::Window { .. } | ir::Binding::Player { .. } => false,
             },
             ir::ExprKind::If {
                 then, otherwise, ..

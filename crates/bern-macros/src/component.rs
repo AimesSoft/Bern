@@ -814,6 +814,9 @@ impl<'a> Gen<'a> {
                 PropKind::NumberField => {
                     pre.push(self.writable(&prop.value, quote!(::bern::__private::number_field)))
                 }
+                PropKind::OptionalNumberField => pre.push(
+                    self.writable(&prop.value, quote!(::bern::__private::optional_number_field)),
+                ),
                 PropKind::FileField => {
                     pre.push(self.writable(&prop.value, quote!(::bern::__private::file_field)))
                 }

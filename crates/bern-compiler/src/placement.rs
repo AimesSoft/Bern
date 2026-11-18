@@ -29,20 +29,21 @@ pub fn check(
     check_inspectors(&trees, diagnostics);
 }
 
+/// Whether `kind` declares an event of the element it stands in, rather
+/// than content.
+fn is_event(kind: &str) -> bool {
+    kind == "OnCommit" || ir::spec::POINTER_EVENTS.contains(&kind)
+}
+
 /// Event declarations must be direct, unconditional children of their owner.
 fn check_gesture_actions(trees: &[&ir::Node], diagnostics: &mut Vec<Diagnostic>) {
     for body in trees {
         let mut direct = BTreeSet::new();
         body.walk(&mut |node| {
             if let ir::Node::Element(owner) = node {
-                let event = match owner.kind.as_str() {
-                    "Button" => "DoubleTap",
-                    "Swipe" => "OnCommit",
-                    _ => return,
-                };
                 for child in &owner.children {
                     if let ir::Node::Element(child) = child
-                        && child.kind == event
+                        && is_event(&child.kind)
                     {
                         direct.insert(child.path.clone());
                     }
@@ -51,7 +52,7 @@ fn check_gesture_actions(trees: &[&ir::Node], diagnostics: &mut Vec<Diagnostic>)
         });
         body.walk(&mut |node| {
             if let ir::Node::Element(event) = node
-                && matches!(event.kind.as_str(), "DoubleTap" | "OnCommit")
+                && is_event(&event.kind)
                 && !direct.contains(&event.path)
             {
                 diagnostics.push(Diagnostic::error(format!(
@@ -82,7 +83,7 @@ fn check_buttons(
             let content: Vec<ir::Node> = button
                 .children
                 .iter()
-                .filter(|child| !matches!(child, ir::Node::Element(menu) if matches!(menu.kind.as_str(), "ContextMenu" | "DoubleTap")))
+                .filter(|child| !matches!(child, ir::Node::Element(event) if ir::spec::POINTER_EVENTS.contains(&event.kind.as_str())))
                 .cloned()
                 .collect();
             if let Some(control) = control_inside(&content, bodies) {
@@ -358,7 +359,9 @@ fn control_inside<'a>(
         node.walk(&mut |node| match node {
             ir::Node::Element(element)
                 if found.is_none()
-                    && ir::spec::component(&element.kind).is_some_and(|spec| spec.interactive)
+                    && (ir::spec::component(&element.kind)
+                        .is_some_and(|spec| spec.interactive)
+                        || ir::spec::POINTER_EVENTS.contains(&element.kind.as_str()))
                     && !passive_video(element) =>
             {
                 found = Some(element);
