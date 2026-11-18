@@ -7,6 +7,7 @@
 
 import AppKit
 import AVKit
+import QuartzCore
 import ServiceManagement
 import SwiftUI
 
@@ -164,6 +165,7 @@ final class BernWindowPlatform {
     var closeGuard: BernCloseGuard?
     var observers: [NSObjectProtocol] = []
     var visibility: NSKeyValueObservation?
+    let toolbarBackdrop = BernFullScreenToolbarBackdrop()
     /// The frame `window.maximize` left, for `window.restore`.
     var restoreFrame: NSRect?
     /// Whether the pointer is currently hidden for an idle, immersive window.
@@ -1197,6 +1199,117 @@ extension View {
 /// under a transparent title bar; `immersive` hides the title bar, its
 /// controls and the toolbar, and the pointer once it rests; `idleAfter`
 /// turns `idle` on after that many seconds without input in the window.
+// MARK: - Full-screen toolbar backdrop
+
+/// AppKit can move the native toolbar into a separate window that does not honor
+/// the main window's transparent titlebar. The backdrop moves with the buttons;
+/// AppKit can unhide it before the new host even has a parent window.
+@MainActor
+final class BernFullScreenToolbarBackdrop: NSObject {
+    // AppKit exposes no role or public appearance setting for this decoration.
+    // Match just this class; leave an unfamiliar titlebar implementation alone.
+    private let backdropClass: AnyClass?
+    private weak var window: NSWindow?
+    private weak var button: NSButton?
+    private var hostChange: NSKeyValueObservation?
+    private var observingUpdates = false
+    private var transitioning = false
+    private let originalAlpha = NSMapTable<NSView, NSNumber>.weakToStrongObjects()
+
+    init(backdropClass: AnyClass? = NSClassFromString("NSTitlebarBackgroundView")) {
+        self.backdropClass = backdropClass
+    }
+
+    func follow(_ next: NSWindow?) {
+        if window !== next {
+            NotificationCenter.default.removeObserver(self)
+            endTrackingButton()
+            restore()
+            window = next
+            transitioning = false
+            if let next, backdropClass != nil {
+                let center = NotificationCenter.default
+                for name in [NSWindow.willEnterFullScreenNotification, NSWindow.willExitFullScreenNotification] {
+                    center.addObserver(self, selector: #selector(willTransition), name: name, object: next)
+                }
+                for name in [NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification] {
+                    center.addObserver(self, selector: #selector(didTransition), name: name, object: next)
+                }
+                center.addObserver(self, selector: #selector(closed(_:)), name: NSWindow.willCloseNotification, object: next)
+            }
+        }
+        refresh()
+    }
+
+    @objc private func closed(_ note: Notification) { follow(nil) }
+    @objc private func willTransition(_ note: Notification) { transitioning = true; refresh() }
+    @objc private func didTransition(_ note: Notification) { transitioning = false; refresh() }
+    @objc private func updated(_ note: Notification) { refresh() }
+
+    private func refresh() {
+        guard let window, let backdropClass, transitioning || window.styleMask.contains(.fullScreen) else {
+            endTrackingButton()
+            restore()
+            return
+        }
+        if !observingUpdates {
+            // SwiftUI may replace the toolbar while staying in the same Space.
+            NotificationCenter.default.addObserver(self, selector: #selector(updated(_:)),
+                name: NSApplication.willUpdateNotification, object: NSApp)
+            observingUpdates = true
+        }
+        guard window.toolbar?.isVisible == true, let close = window.standardWindowButton(.closeButton) else { return }
+        if button !== close {
+            button = close
+            hostChange = close.observe(\.window) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.refresh() }
+            }
+        }
+        // Search the real button's decoration ancestors, not the content view
+        // (which SwiftUI can wrap), application views, or other windows.
+        var branch: NSView = close
+        while let container = branch.superview {
+            for view in container.subviews where view !== branch && view.isMember(of: backdropClass) {
+                if originalAlpha.object(forKey: view) == nil {
+                    originalAlpha.setObject(NSNumber(value: Double(view.alphaValue)), forKey: view)
+                }
+                // Pre-arm even hidden backdrops: the system changes isHidden in flight.
+                setAlpha(0, on: view)
+            }
+            branch = container
+        }
+    }
+
+    private func endTrackingButton() {
+        if observingUpdates {
+            NotificationCenter.default.removeObserver(self, name: NSApplication.willUpdateNotification, object: NSApp)
+            observingUpdates = false
+        }
+        hostChange = nil
+        button = nil
+    }
+
+    private func restore() {
+        guard originalAlpha.count != 0 else { return }
+        for case let view as NSView in originalAlpha.keyEnumerator() where view.alphaValue == 0 {
+            if let alpha = originalAlpha.object(forKey: view) { setAlpha(CGFloat(alpha.doubleValue), on: view) }
+        }
+        originalAlpha.removeAllObjects()
+    }
+
+    private func setAlpha(_ alpha: CGFloat, on view: NSView) {
+        guard view.alphaValue != alpha else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0
+            context.allowsImplicitAnimation = false
+            view.alphaValue = alpha
+        }
+        CATransaction.commit()
+    }
+}
+
 private struct BernUnifiedBarAppearance: ViewModifier {
     let enabled: Bool
     @ViewBuilder func body(content: Content) -> some View {
@@ -1285,6 +1398,7 @@ struct BernWindowBehavior: ViewModifier {
         window.titleVisibility = underTitle ? .hidden : .visible
         window.titlebarSeparatorStyle = underTitle ? .none : .automatic
         window.toolbar?.isVisible = !immersive
+        context.platform.toolbarBackdrop.follow(unified && !immersive ? window : nil)
         for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
             window.standardWindowButton(kind)?.isHidden = immersive && context.idle
         }
