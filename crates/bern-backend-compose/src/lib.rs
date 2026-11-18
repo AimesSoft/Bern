@@ -502,7 +502,6 @@ impl Target for ComposeAndroid {
             files.extend([
                 GeneratedFile::text("tools/Cargo.toml", glue::tools_cargo_toml(context, app)),
                 GeneratedFile::text("tools/src/cli.rs", glue::cli_rs(context, app)),
-                GeneratedFile::text("tools/src/mcp.rs", glue::mcp_rs(context, app)),
             ]);
         }
         if !watch && project::for_television(app) {
@@ -791,7 +790,7 @@ impl Target for ComposeAndroid {
         let mut products = vec![product_apk.clone()];
         let mut forward = None;
         if glue::ipc(context) {
-            // The command line and MCP server run on this computer.
+            // The command line runs on this computer.
             let tools_target = context.workspace_dir.join("target/bern-tools");
             let mut cargo = vec![
                 "build".to_string(),
@@ -804,24 +803,20 @@ impl Target for ComposeAndroid {
                 cargo.push("--release".into());
             }
             steps.push(BuildStep::Run {
-                description: "Build the command line and MCP server".into(),
+                description: "Build the command line".into(),
                 program: "cargo".into(),
                 args: cargo,
                 cwd: output.join("tools"),
                 env: Vec::new(),
             });
-            steps.push(BuildStep::CreateDir {
-                path: output.join("bin"),
-            });
             let cli = app.app.id.replace('_', "-");
-            for program in [cli.clone(), format!("{cli}-mcp")] {
-                let program = format!("{program}{}", std::env::consts::EXE_SUFFIX);
-                steps.push(BuildStep::Copy {
-                    from: tools_target.join(profile).join(&program),
-                    to: output.join("bin").join(&program),
-                });
-                products.push(output.join("bin").join(&program));
-            }
+            let program = format!("{cli}{}", std::env::consts::EXE_SUFFIX);
+            steps.push(BuildStep::program_dir(output.join("bin"), [&program]));
+            steps.push(BuildStep::Copy {
+                from: tools_target.join(profile).join(&program),
+                to: output.join("bin").join(&program),
+            });
+            products.push(output.join("bin").join(&program));
             forward = Some((
                 bern_transport_ipc::socket_dir(&app.app.bundle_id).join(if watch {
                     bern_transport_ipc::WEAROS_FORWARD
@@ -831,6 +826,10 @@ impl Target for ComposeAndroid {
                 bern_transport_ipc::android_socket(&app.app.bundle_id),
             ));
             products.push(context.output_dir.join(skill::path(app)));
+        } else {
+            steps.push(BuildStep::RemoveIfExists {
+                path: output.join("bin"),
+            });
         }
         // The agent skill beside `bin/`, where the app listens.
         let place = glue::ipc(context).then(|| {

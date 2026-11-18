@@ -391,7 +391,6 @@ fn serve(stream: UnixStream, host: Host, sessions: Sessions, media: MediaHub) ->
             }
             match entry.as_str() {
                 "cli" => Entry::Cli,
-                "mcp" => Entry::Mcp,
                 _ => Entry::Json,
             }
         }

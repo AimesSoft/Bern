@@ -20,7 +20,7 @@
 <circle cx="64" cy="285" r="5.5" fill="#FFFFFF" stroke="#9A6700" stroke-width="2.5"/>
 <circle cx="64" cy="369" r="6" fill="#1A7F37"/>
 <text x="40" y="18" font-size="15" font-weight="700" text-anchor="end" fill="#1F2328">1 · 2</text>
-<text x="92.0" y="17.4" font-size="14.5" fill="#1F2328">コンパイル境界の検証。macOS SwiftUI で UI・CLI・JSON・MCP が同じエンジンを動かす</text>
+<text x="92.0" y="17.4" font-size="14.5" fill="#1F2328">コンパイル境界の検証。macOS SwiftUI で UI・CLI・JSON が同じエンジンを動かす</text>
 <text x="960.0" y="18.0" font-size="13.5" font-weight="700" fill="#1A7F37" text-anchor="end">完了</text>
 <line x1="92" y1="40.0" x2="960" y2="40.0" stroke="#E6EAEF"/>
 <text x="40" y="72" font-size="15" font-weight="700" text-anchor="end" fill="#1F2328">3</text>

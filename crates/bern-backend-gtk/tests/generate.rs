@@ -201,7 +201,6 @@ fn showcase_generates_a_gtk_application() {
         [
             output.join("Showcase/showcase"),
             output.join("bin/showcase"),
-            output.join("bin/showcase-mcp"),
             output.join("skills/showcase/SKILL.md"),
         ]
     );
@@ -1030,12 +1029,11 @@ fn the_build_carries_an_agent_skill_where_the_app_listens() {
         .expect("the plan writes the skill");
     for expected in [
         "---\nname: planner\ndescription: \"Operate 计划 / Planner (dev.bern.planner)",
-        "| `planner` | `../../bin/planner` |",
+        "Relative to this file: `../../bin/planner`.",
         "at `/opt/dev.bern.planner/bin/planner`",
         "### `planner planner rename`\n\nRename the plan.\n\n- `--title <text>`",
         "Errors: `empty_title`.",
         "### `planner notes add`\n\nAdd a note and return its id.",
-        "MCP tool: `notes_add`.",
         "### `planner modules set-enabled`",
         "| `title` | `text` | Title of the plan, shown above the notes. |",
         "### `planner ui activate`",

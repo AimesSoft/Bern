@@ -265,11 +265,10 @@ fn showcase_generates_a_winui3_application() {
         [
             output.join("Showcase/showcase.exe"),
             output.join("bin/showcase.exe"),
-            output.join("bin/showcase-mcp.exe"),
             output.join("skills/showcase/SKILL.md"),
         ]
     );
-    // The agent skill spells the programs' paths as Windows does.
+    // The agent skill spells the CLI path as Windows does.
     let skill = plan
         .steps
         .iter()
@@ -281,7 +280,7 @@ fn showcase_generates_a_winui3_application() {
         })
         .expect("the plan writes the skill");
     assert!(
-        skill.contains("| `showcase` | `..\\..\\bin\\showcase.exe` |"),
+        skill.contains("Relative to this file: `..\\..\\bin\\showcase.exe`."),
         "{skill}"
     );
     assert!(skill.contains("at `%LOCALAPPDATA%\\Programs\\Showcase\\bin\\showcase.exe`"));

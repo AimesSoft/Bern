@@ -111,7 +111,6 @@ pub fn tokens(descriptor: &ProtocolDescriptor) -> TokenStream {
         };
         let cancellable = command.policy.cancellable;
         let cli = command.external.cli.iter().map(|word| string(word));
-        let mcp = string(&command.external.mcp);
         let reads = command.reads.iter().map(|field| string(field));
         let on = match &command.on {
             Some(event) => {
@@ -135,7 +134,7 @@ pub fn tokens(descriptor: &ProtocolDescriptor) -> TokenStream {
                     retry: #retry,
                     cancellable: #cancellable,
                 },
-                external: #p::ExternalNames { cli: ::std::vec![#(#cli),*], mcp: #mcp },
+                external: #p::ExternalNames { cli: ::std::vec![#(#cli),*] },
                 reads: ::std::vec![#(#reads),*],
                 on: #on,
             }

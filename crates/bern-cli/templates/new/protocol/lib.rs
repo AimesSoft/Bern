@@ -1,5 +1,5 @@
 //! The protocol of {{name}}: the state the interface shows, and the commands
-//! that change it. The interface, the command line and the MCP server all go
+//! that change it. The interface and command line both go
 //! through these commands.
 
 #[bern::protocol(namespace = "{{id}}", version = 1)]

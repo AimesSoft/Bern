@@ -177,7 +177,7 @@ Google TV / Android TV Live tab 合作接入有额外 direct-back 要求，且�
 
 **版本约束。** target API 35 及以上请求音频焦点需要处于顶层应用或运行前台服务。Android 17 对后台音频进一步收紧，target API 37 应按当前 while-in-use 等要求校验；拥有一个常驻 Rust 引擎不代表有后台播放授权。[音频焦点](https://developer.android.com/media/optimize/audio-focus)、[Android 17 后台音频](https://developer.android.com/about/versions/17/changes/bg-audio)
 
-**Bern 决策。** UI、CLI、JSON 和 MCP 收到同样的“需要前台交互/权限”“播放能力不可用”等结构化结果。后台限制、设备丢失或用户拒绝不能降格成“命令成功”。
+**Bern 决策。** UI、CLI 和 JSON 收到同样的“需要前台交互/权限”“播放能力不可用”等结构化结果。后台限制、设备丢失或用户拒绝不能降格成“命令成功”。
 
 Android 17 部分后台音频 API 会静默失效，因此后端需先校验可知的生命周期条件，再区分请求已接受和已确认状态；无法确认音频输出时不得伪造成功证据。诊断测试应覆盖官方提供的音频强化测试模式。[静默失败与验证方法](https://developer.android.com/about/versions/17/changes/bg-audio)
 

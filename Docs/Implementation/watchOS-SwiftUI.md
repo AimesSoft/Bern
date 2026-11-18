@@ -17,7 +17,7 @@ This document records what is implemented and verified for the `swiftui + watcho
 | --- | --- | --- |
 | Platform resolution | Done | `platform = "watchos"` defaults to `ui = "swiftui"`; `bern doctor`, `bern check`, `bern build`, `bern run` and `bern package` recognize this target |
 | Explicit watch layout & contracts | Done | Every reachable `Adaptive` must declare `Layout(size: watch)` (`B401`); `Application::on_watch` prunes non-watch branches before checking, and `#[bern::features]` proves `watch` coverage separately |
-| Generated code & simulator build | Done | `bern build --target watchos` compiles the Rust staticlib for `aarch64-apple-watchos-sim`, the CLI and MCP tools for the Mac, and the Swift 6 watchOS app bundle (`WKApplication`, `WKWatchOnly`, `UIDeviceFamily = 4`) |
+| Generated code & simulator build | Done | `bern build --target watchos` compiles the Rust staticlib for `aarch64-apple-watchos-sim`, the CLI for the Mac, and the Swift 6 watchOS app bundle (`WKApplication`, `WKWatchOnly`, `UIDeviceFamily = 4`) |
 | Watch-native controls | Done | `BernWatchPicker` and `BernWatchMenu` present Crown-scrollable watch sheets where `.menu` / `.segmented` pickers and `SwiftUI.Menu` do not exist on watchOS; `Form` rows avoid nested card platters |
 | Engine capabilities | Done | `bern-command` provides `Application Support` / `Caches` storage, Keychain `secrets`, `MPNowPlayingInfoCenter` `now_playing`, and Boa JavaScript when `javascript = true` |
 | App icon | Done | `[app.icon].watchos` accepts a square PNG, an `.appiconset` folder or an Icon Composer `.icon` folder |

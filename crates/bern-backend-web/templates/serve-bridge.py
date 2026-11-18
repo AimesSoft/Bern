@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Serve a pure Web app and relay its command catalog to local CLI/MCP clients.
+"""Serve a pure Web app and relay its command catalog to local CLI clients.
 
 No engine runs here. Each authenticated page owns an IPC socket; every request
 is forwarded to that page and is answered only by its WASM runtime.

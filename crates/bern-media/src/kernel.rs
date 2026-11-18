@@ -10,7 +10,7 @@
 //! it from `attach_surface` until `detach_surface` returns.
 //!
 //! The standard media commands reach the kernel through the hub like any
-//! executor, so the UI, the CLI, JSON clients and the MCP server keep
+//! executor, so the UI, the CLI and JSON clients keep
 //! addressing one player. What the kernel offers beyond them (subtitle
 //! tracks, overlays, filters) is the application's own business: its
 //! engine holds the kernel and calls it directly.

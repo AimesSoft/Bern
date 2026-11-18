@@ -1227,11 +1227,19 @@ mod tests {
                 write_if_changed(&context.output_dir.join(&file.path), &file.contents).unwrap();
             }
             write_if_changed(&context.output_dir.join("icons/site.webmanifest"), b"{}").unwrap();
+            // Simulate an incremental build over an older distribution.
+            write_if_changed(
+                &context
+                    .output_dir
+                    .join(format!("bin/planner-mcp{}", std::env::consts::EXE_SUFFIX)),
+                b"old helper",
+            )
+            .unwrap();
             place_files(&web.plan(&compiled.app, &context).unwrap().steps);
             built = Some((compiled, context));
         }
         let (compiled, context) = built.unwrap();
-        let programs: Vec<String> = ["planner", "planner-host", "planner-mcp"]
+        let programs: Vec<String> = ["planner", "planner-host"]
             .iter()
             .map(|name| format!("{name}{}", std::env::consts::EXE_SUFFIX))
             .collect();
@@ -1324,11 +1332,9 @@ mod tests {
             write_if_changed(&context.output_dir.join(file.path), &file.contents).unwrap();
         }
         place_files(&web.plan(&compiled.app, &context).unwrap().steps);
-        assert!(
-            context
-                .output_dir
-                .join(format!("bin/planner-mcp{}", std::env::consts::EXE_SUFFIX))
-                .is_file()
+        assert_eq!(
+            files_below(&context.output_dir.join("bin")),
+            [format!("planner{}", std::env::consts::EXE_SUFFIX)]
         );
         write_if_changed(
             &context.output_dir.join("bindgen/snippets/local/inline0.js"),

@@ -231,7 +231,7 @@ Using standard components does not make accessibility automatically compliant; t
 
 ## 8. Commands, system facts and media boundaries
 
-**Bern decision.** The navigation, menus, icons, focus movement and playback controls that Bern itself provides must be bound to registered commands; UI, CLI, JSON and MCP drive the same engine and an explicit target session.
+**Bern decision.** The navigation, menus, icons, focus movement and playback controls that Bern itself provides must be bound to registered commands; UI, CLI and JSON drive the same engine and an explicit target session.
 
 Window size changes, system focus transfers, media decoding and lifecycle changes that the system has already carried out are received as trusted events. A "user command" must not be fabricated after the fact, and the same operation must not be performed again in response to the event, which would form a loop.
 

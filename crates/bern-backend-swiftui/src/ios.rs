@@ -3,8 +3,8 @@
 //! The same generated SwiftUI as on macOS, in the one scene an iOS app has:
 //! windows are virtual, the primary filling the scene and the others shown
 //! as sheets over it. The engine runs in the app process, linked as a
-//! static library built for the iOS simulator; the application CLI and MCP
-//! server are built for the Mac and reach the app in the simulator through
+//! static library built for the iOS simulator; the application CLI
+//! is built for the Mac and reaches the app in the simulator through
 //! the IPC channel. The package builds the app again for devices.
 
 use crate::swift::{Generator, Platform};
@@ -219,9 +219,7 @@ impl Target for SwiftUiIos {
             GeneratedFile::text("glue/src/lib.rs", glue::lib_rs(context, app, Platform::Ios)),
             GeneratedFile::text("tools/Cargo.toml", glue::tools_cargo_toml(context, app)),
             GeneratedFile::text("tools/src/cli.rs", glue::cli_rs(context, app)),
-            GeneratedFile::text("tools/src/mcp.rs", glue::mcp_rs(context, app)),
             GeneratedFile::text("glue/src/cli.rs", glue::cli_rs(context, app)),
-            GeneratedFile::text("glue/src/mcp.rs", glue::mcp_rs(context, app)),
             GeneratedFile::text(
                 bundle.join("Info.plist"),
                 resources::info_plist_ios(app, &product, frontends.minimum()),
@@ -628,16 +626,10 @@ impl Target for SwiftUiIos {
             ));
         }
         steps.extend([
-            BuildStep::CreateDir {
-                path: output.join("bin"),
-            },
+            BuildStep::program_dir(output.join("bin"), [&cli]),
             BuildStep::Copy {
                 from: host_output.join(&cli),
                 to: output.join("bin").join(&cli),
-            },
-            BuildStep::Copy {
-                from: host_output.join(format!("{cli}-mcp")),
-                to: output.join("bin").join(format!("{cli}-mcp")),
             },
         ]);
         if frontends == FrontEnds::Both {
@@ -663,12 +655,7 @@ impl Target for SwiftUiIos {
             skill::Place::beside_bin(app, false).connect(skill::simulator_connect(app, "ios"))
         });
         steps.extend(skill::steps(app, output, place.as_ref()));
-        let mut products = vec![
-            bundle.clone(),
-            output.join("bin").join(&cli),
-            output.join("bin").join(format!("{cli}-mcp")),
-            symbols,
-        ];
+        let mut products = vec![bundle.clone(), output.join("bin").join(&cli), symbols];
         if listens {
             products.push(output.join(skill::path(app)));
         }

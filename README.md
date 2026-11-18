@@ -7,7 +7,7 @@
 <p><b>One Rust declaration, compiled into each platform's own native UI.</b></p>
 
 <p>From the desktop to the phone, built for AI: SwiftUI, WinUI 3, GTK 4, Jetpack Compose and the Web.<br>
-No JS engine and no embedded browser on the desktop or the phone; every button is an MCP tool an AI can call.</p>
+No JS engine and no embedded browser on the desktop or the phone; an agent can activate buttons by name through the app CLI.</p>
 
 <p>
 <img alt="macOS · SwiftUI" src="https://img.shields.io/badge/macOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
@@ -19,7 +19,7 @@ No JS engine and no embedded browser on the desktop or the phone; every button i
 </p>
 
 <p>
-<img alt="AI native: MCP built in" src="https://img.shields.io/badge/AI%20native-MCP%20built%20in-8B5CF6?style=flat-square">
+<img alt="CLI + Skill" src="https://img.shields.io/badge/AI-CLI%20%2B%20Skill-8B5CF6?style=flat-square">
 <img alt="Memory about 40 MB" src="https://img.shields.io/badge/memory-about%2040%20MB-0EA5E9?style=flat-square">
 <img alt="No JS engine" src="https://img.shields.io/badge/JS%20engine-none-111827?style=flat-square">
 <img alt="Rust 1.99" src="https://img.shields.io/badge/Rust-1.99-B7410E?style=flat-square&logo=rust&logoColor=white">
@@ -67,7 +67,7 @@ No JS engine and no embedded browser on the desktop or the phone; every button i
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/why-en-dark.svg">
-<img alt="Why Bern: compiled into native UI, one Rust declaration generating each platform's own UI code with no JS engine at runtime; built for AI, where omissions are compile errors and every button is an MCP tool; too light to feel cross-platform, 39 MB, 0.4 s and 2.7 MB on macOS, 35 MB, 0.3 s and 4.2 MB on Windows, 189 KB on the web" src="Docs/Assets/tables/why-en-light.svg" width="100%">
+<img alt="Why Bern: compiled into native UI, one Rust declaration generating each platform's own UI code with no JS engine at runtime; built for AI, where omissions are compile errors and buttons can be activated by name from the CLI; too light to feel cross-platform, 39 MB, 0.4 s and 2.7 MB on macOS, 35 MB, 0.3 s and 4.2 MB on Windows, 189 KB on the web" src="Docs/Assets/tables/why-en-light.svg" width="100%">
 </picture>
 
 ## Who uses Bern
@@ -124,7 +124,7 @@ Every build also writes a full feature coverage report per target (`features.jso
 
 ### Using the app: meaning, not pixels
 
-In most frameworks, letting an AI operate a desktop app means screenshots, recognition, coordinates and synthetic clicks. A Bern app ships with an MCP server: every control has a stable name and role, the agent reads structure, its actions take the same code path as a user's click, and the app answers with what actually happened.
+In most frameworks, letting an AI operate a desktop app means screenshots, recognition, coordinates and synthetic clicks. With the control channel enabled, Bern generates an app CLI and a `SKILL.md` that describes its commands: every control has a stable name and role, the agent reads structure, its actions take the same code path as a user's click, and the app answers with what actually happened.
 
 ```sh
 $ showcase ui inspect                 # the agent reads meaning, not pixels
@@ -140,7 +140,7 @@ $ showcase window confirm-close --window settings#1 --confirmation settings#1:c1
 { "outcome": "Rejected", "reason": "save_failed: invalid_name: a display name has 1 to 40 characters …" }
 ```
 
-The same operations are MCP tools for agents (`ui_inspect`, `ui_activate`, `window_close`, …), and each business command is a tool too (for example `showcase_set_display_name`). When a button is disabled, blocked by a dialog or missing, the agent gets a clear error code rather than a click that does nothing.
+The generated skill gives agents the same commands a person can run, from `showcase ui inspect` to `showcase showcase set-display-name --name Demo`. To operate a remote app, use SSH to run its CLI on the machine hosting the control channel, as the user running the app. When a button is disabled, blocked by a dialog or missing, the agent gets a clear error code rather than a click that does nothing.
 
 ## Measured
 
@@ -207,7 +207,7 @@ flowchart LR
     K <--> N["Native UI"]
     K <--> L["App CLI"]
     K <--> J["JSON channel"]
-    K <--> M["MCP server"]
+    K --> S["SKILL.md"]
 ```
 
 1. **Protocol** – `#[bern::protocol]` declares value types, the read-only state and the command and query traits.
@@ -293,7 +293,7 @@ pub fn counter_view(app: counter::Client) -> impl View {
 counter ui inspect
 counter ui activate --target counter_view.add
 counter counter add --by 5
-counter-mcp   # the same catalog for AI agents
+counter catalog
 ```
 
 `Bern.toml` declares languages, theme, sources, bundled resources and targets. See the full [showcase](examples/showcase): a sidebar app with text styles, buttons, switches, sliders, text fields, an engine-backed search, list-to-detail navigation, video, and a settings window with tabs and a close confirmation. The [planner](examples/planner) is a modular app with style overrides, motion and `Canvas`. The [gallery](examples/gallery) shows the media app components: a poster wall that enters in turn, a timeline placed by fraction, a volume popover, margins and layouts that follow the four sizes, and a dropped video whose name, format and size the engine reads from the file.
@@ -374,12 +374,12 @@ The chart is a sketch by architecture, not a ranking: the horizontal axis is whe
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/capabilities-en-dark.svg">
-<img alt="Platforms and capabilities: support for macOS, Windows, Linux, mobile and the web, plus native look, built-in MCP and compile-time checks; Bern's mobile support is partial and it has all three capabilities" src="Docs/Assets/tables/capabilities-en-light.svg" width="100%">
+<img alt="Platforms and capabilities: support for macOS, Windows, Linux, mobile and the web, plus native look, app CLI + Skill and compile-time checks; Bern's mobile support is partial and it has all three capabilities" src="Docs/Assets/tables/capabilities-en-light.svg" width="100%">
 </picture>
 
 - **Mobile**: iOS and Android. React Native's desktop versions are maintained by Microsoft; uni-app also covers mini programs and HarmonyOS; Bern's Android target runs on devices and makes packages, its iOS target builds simulator apps, and iOS device packages are planned.
 - **Native look**: the controls are the platform's own, with look, accessibility and input methods from the system. Qt Widgets and uni-app x come close and count as partly.
-- **Built-in MCP**: an MCP server and command line that come with the framework and act on the running interface. Other frameworks can be automated from outside through accessibility APIs or test tools such as Playwright and Flutter Driver.
+- **App CLI + Skill**: the framework generates a command line for the running interface and a skill that documents it. Other frameworks can be automated from outside through accessibility APIs or test tools such as Playwright and Flutter Driver.
 - **Compile-time checks**: a missing translation, a feature without an entry in some layout, or an entry not registered to a feature is a compiler error (see [Built for AI](#built-for-ai)). Other frameworks mostly find these with linters, translation tools or tests.
 - **Maturity**: Electron and Qt are very mature; Flutter, React Native, uni-app, Tauri and Avalonia are mature; Dioxus is developing quickly; GPUI powers the Zed editor while its general-purpose components are early; Bern is an early preview.
 
@@ -426,7 +426,7 @@ cd my_app
 bern run
 ```
 
-The new app is a window with a counter, with one crate each for the protocol, the engine and the interface, and all six targets declared in `Bern.toml`. `bern run` builds the target for this computer and starts it: SwiftUI on macOS, WinUI 3 on Windows, GTK on Linux; `bern run --target web_app` opens it in the browser, `bern run --target ios` installs it in the running iOS simulator, and `bern run --target android` installs it on the Android phone connected with USB debugging (or an emulator) and starts it. Every build also produces the application CLI and MCP server in `target/bern/<target>/bin/`.
+The new app is a window with a counter, with one crate each for the protocol, the engine and the interface, and all six targets declared in `Bern.toml`. `bern run` builds the target for this computer and starts it: SwiftUI on macOS, WinUI 3 on Windows, GTK on Linux; `bern run --target web_app` opens it in the browser, `bern run --target ios` installs it in the running iOS simulator, and `bern run --target android` installs it on the Android phone connected with USB debugging (or an emulator) and starts it. For a target with `channels = ["ipc"]`, look for the app CLI in `target/bern/<target>/bin/` and its `SKILL.md` under the adjacent `skills/` directory.
 
 `bern doctor` lists what this computer still needs for each target, and how to install it:
 
@@ -462,7 +462,7 @@ bern 0.1.0 on macOS (aarch64)
 bern package
 ```
 
-Builds every target this computer can in release and writes packages to `target/bern/dist/`: a `.dmg` for macOS, an installer (per user, no administrator rights) and a `.zip` for Windows, a `.deb` and a `.tar.gz` for Linux, an `.apk` and an `.aab` for stores for Android, and an archive of the static site for the Web. Every package but Android's carries the app's CLI and MCP server. Signing comes from the environment, so certificates stay out of the repository: `BERN_MACOS_SIGNING_IDENTITY` and `BERN_MACOS_NOTARY_PROFILE` (sign and notarize), `BERN_WINDOWS_CERTIFICATE` (a certificate thumbprint or a `.pfx`), `BERN_ANDROID_KEYSTORE`, `BERN_ANDROID_KEYSTORE_PASSWORD` and `BERN_ANDROID_KEY_ALIAS` (the release key). Without them the packages are still made, with a note on what being unsigned means.
+Builds every target this computer can in release and writes packages to `target/bern/dist/`: a `.dmg` for macOS, an installer (per user, no administrator rights) and a `.zip` for Windows, a `.deb` and a `.tar.gz` for Linux, an `.apk` and an `.aab` for stores for Android, and an archive of the static site for the Web. Desktop and WebUI packages carry the app CLI and, when IPC is enabled, its skill. A static Web package contains only the site; the Android CLI runs on the development computer, not inside the APK. Signing comes from the environment, so certificates stay out of the repository: `BERN_MACOS_SIGNING_IDENTITY` and `BERN_MACOS_NOTARY_PROFILE` (sign and notarize), `BERN_WINDOWS_CERTIFICATE` (a certificate thumbprint or a `.pfx`), `BERN_ANDROID_KEYSTORE`, `BERN_ANDROID_KEYSTORE_PASSWORD` and `BERN_ANDROID_KEY_ALIAS` (the release key). Without them the packages are still made, with a note on what being unsigned means.
 
 ### Run the showcase
 
@@ -482,10 +482,10 @@ showcase ui set-bool --target controls_page.sync --value true
 showcase showcase search-library --text mo                   # an engine query
 showcase window open --kind settings
 showcase window list                                         # actual window state
-showcase-mcp                                                 # MCP server over stdio
+ssh HOST /path/to/showcase state
 ```
 
-The control channel starts only when the target declares `channels = ["ipc"]`; without it the app listens on nothing. An Android app listens on the phone; `bern run` joins it to this computer with `adb forward`, so the CLI and MCP server work as usual.
+The control channel starts only when the target declares `channels = ["ipc"]`; without it the app listens on nothing. An Android app listens on the phone; `bern run` joins it to this computer with `adb forward`, so the CLI works as usual.
 
 ## Roadmap
 

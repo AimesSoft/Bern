@@ -18,7 +18,6 @@ members = [
     "crates/bern-transport-ws",
     "crates/bern-ffi",
     "crates/bern-adapter-cli",
-    "crates/bern-adapter-mcp",
     "crates/bern-cli",
     "crates/bern-macros",
     "crates/bern",
@@ -96,7 +95,6 @@ bern-adapter-json = { version = "=0.1.20", path = "crates/bern-adapter-json" }
 bern-transport-ipc = { version = "=0.1.20", path = "crates/bern-transport-ipc" }
 bern-transport-ws = { version = "=0.1.20", path = "crates/bern-transport-ws" }
 bern-adapter-cli = { version = "=0.1.20", path = "crates/bern-adapter-cli" }
-bern-adapter-mcp = { version = "=0.1.20", path = "crates/bern-adapter-mcp" }
 bern-ffi = { version = "=0.1.20", path = "crates/bern-ffi" }
 syn = { version = "2.0.117", features = ["full", "extra-traits"] }
 quote = "1.0.45"

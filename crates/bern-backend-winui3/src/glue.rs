@@ -1,17 +1,17 @@
 //! The generated build inputs around the C++ frontend: the Rust glue crate
 //! that links the engine, the session runtime and the C ABI into the static
-//! library `bern_app.lib`, the application CLI and MCP server from the same
+//! library `bern_app.lib`, the application CLI from the same
 //! command catalog, and the script that compiles the runtime and the
 //! generated interface with MSVC and links them with the engine into one
 //! executable.
 
 use bern_ir::Application;
 use bern_target_api::BuildContext;
+pub use bern_target_api::glue::cli_rs;
 use bern_target_api::glue::{
     WindowPresentation, engine_expr, module_dependencies, path, players_expr, resources_expr,
     session_spec,
 };
-pub use bern_target_api::glue::{cli_rs, mcp_rs};
 use std::path::Path;
 
 /// Windows App SDK release the runtime is written against: the newest. Its
@@ -58,14 +58,9 @@ path = "src/lib.rs"
 name = "{executable}"
 path = "src/cli.rs"
 
-[[bin]]
-name = "{executable}-mcp"
-path = "src/mcp.rs"
-
 [dependencies]
 bern-ffi = {{ {ffi}{ipc}, features = ["picture"] }}
 bern-adapter-cli = {{ {cli_adapter} }}
-bern-adapter-mcp = {{ {mcp_adapter} }}
 {protocol} = {{ path = "{protocol_path}" }}
 {engine} = {{ path = "{engine_path}" }}
 {modules}
@@ -85,7 +80,6 @@ bern-adapter-mcp = {{ {mcp_adapter} }}
             ", default-features = false"
         },
         cli_adapter = bern("bern-adapter-cli"),
-        mcp_adapter = bern("bern-adapter-mcp"),
         protocol = context.protocol_package,
         protocol_path = path(&context.protocol_path),
         engine = context.engine_package,

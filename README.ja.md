@@ -7,7 +7,7 @@
 <p><b>一つの Rust 宣言を、各プラットフォーム自身のネイティブ UI へコンパイル。</b></p>
 
 <p>デスクトップからスマートフォンまで、AI のために作られた：SwiftUI、WinUI 3、GTK 4、Jetpack Compose、そして Web。<br>
-デスクトップにもスマートフォンにも JS エンジンや組み込みブラウザーはありません。どのボタンも、生まれながらに AI が呼べる MCP ツールです。</p>
+デスクトップにもスマートフォンにも JS エンジンや組み込みブラウザーはありません。エージェントはアプリの CLI からボタンを名前で操作できます。</p>
 
 <p>
 <img alt="macOS · SwiftUI" src="https://img.shields.io/badge/macOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
@@ -19,7 +19,7 @@
 </p>
 
 <p>
-<img alt="AI ネイティブ：MCP 内蔵" src="https://img.shields.io/badge/AI%20%E3%83%8D%E3%82%A4%E3%83%86%E3%82%A3%E3%83%96-MCP%20%E5%86%85%E8%94%B5-8B5CF6?style=flat-square">
+<img alt="CLI + Skill" src="https://img.shields.io/badge/AI-CLI%20%2B%20Skill-8B5CF6?style=flat-square">
 <img alt="メモリ約 40 MB" src="https://img.shields.io/badge/%E3%83%A1%E3%83%A2%E3%83%AA-%E7%B4%84%2040%20MB-0EA5E9?style=flat-square">
 <img alt="JS エンジンなし" src="https://img.shields.io/badge/JS%20%E3%82%A8%E3%83%B3%E3%82%B8%E3%83%B3-%E3%81%AA%E3%81%97-111827?style=flat-square">
 <img alt="Rust 1.99" src="https://img.shields.io/badge/Rust-1.99-B7410E?style=flat-square&logo=rust&logoColor=white">
@@ -67,7 +67,7 @@
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/why-ja-dark.svg">
-<img alt="Bern を選ぶ理由：ネイティブ UI へコンパイルし、一つの Rust 宣言から各プラットフォーム自身の UI コードを生成、実行時に JS エンジンなし。AI のための設計で、書き漏れはコンパイルエラー、どのボタンも MCP ツール。クロスプラットフォームとは思えない軽さで、macOS は 39 MB・0.4 秒・2.7 MB、Windows は 35 MB・0.3 秒・4.2 MB、Web は 189 KB" src="Docs/Assets/tables/why-ja-light.svg" width="100%">
+<img alt="Bern を選ぶ理由：ネイティブ UI へコンパイルし、一つの Rust 宣言から各プラットフォーム自身の UI コードを生成、実行時に JS エンジンなし。AI のための設計で、書き漏れはコンパイルエラー、CLI から名前でボタンを操作。クロスプラットフォームとは思えない軽さで、macOS は 39 MB・0.4 秒・2.7 MB、Windows は 35 MB・0.3 秒・4.2 MB、Web は 189 KB" src="Docs/Assets/tables/why-ja-light.svg" width="100%">
 </picture>
 
 ## Bern を使っているアプリ
@@ -124,7 +124,7 @@ compact: missing
 
 ### アプリを使う：ピクセルではなく意味を読む
 
-多くのフレームワークでは、AI にデスクトップアプリを操作させるには、スクリーンショット、認識、座標計算、疑似クリックが必要です。Bern のアプリは MCP サーバーを備えています。UI のすべてのコントロールに安定した名前と役割があり、エージェントは構造を読み、ユーザーのクリックと同じコードで操作し、アプリは起きたことをそのまま答えます。
+多くのフレームワークでは、AI にデスクトップアプリを操作させるには、スクリーンショット、認識、座標計算、疑似クリックが必要です。制御チャネルを有効にすると、Bern はアプリの CLI と、そのコマンドを説明する `SKILL.md` を生成します。UI のすべてのコントロールに安定した名前と役割があり、エージェントは構造を読み、ユーザーのクリックと同じコードで操作し、アプリは起きたことをそのまま答えます。
 
 ```sh
 $ showcase ui inspect                 # エージェントが読むのはピクセルではなく意味
@@ -140,7 +140,7 @@ $ showcase window confirm-close --window settings#1 --confirmation settings#1:c1
 { "outcome": "Rejected", "reason": "save_failed: invalid_name: a display name has 1 to 40 characters …" }
 ```
 
-同じ操作が MCP ツール（`ui_inspect`、`ui_activate`、`window_close`…）としてエージェントに提供され、業務コマンドもそれぞれツールになります（例：`showcase_set_display_name`）。ボタンが無効、ダイアログでふさがれている、対象が存在しないといった場合、エージェントが受け取るのは何も起きないクリックではなく、明確なエラーコードです。
+生成されたスキルには、`showcase ui inspect` から業務コマンド `showcase showcase set-display-name --name Demo` まで、人が直接実行できるコマンドが並びます。リモートのアプリを操作するには、制御チャネルのあるマシンに SSH で接続し、アプリを起動したユーザーとして同じ CLI を実行します。ボタンが無効、ダイアログでふさがれている、対象が存在しないといった場合、エージェントが受け取るのは何も起きないクリックではなく、明確なエラーコードです。
 
 ## 実測値
 
@@ -207,7 +207,7 @@ flowchart LR
     K <--> N["ネイティブ UI"]
     K <--> L["アプリ CLI"]
     K <--> J["JSON チャネル"]
-    K <--> M["MCP サーバー"]
+    K --> S["SKILL.md"]
 ```
 
 1. **プロトコル**：`#[bern::protocol]` で値の型、読み取り専用の状態、コマンドとクエリのトレイトを宣言します。
@@ -293,7 +293,7 @@ pub fn counter_view(app: counter::Client) -> impl View {
 counter ui inspect
 counter ui activate --target counter_view.add
 counter counter add --by 5
-counter-mcp   # 同じカタログを AI エージェントへ
+counter catalog
 ```
 
 `Bern.toml` では言語、テーマ、ソース、同梱リソース、ビルドターゲットを宣言します。完全な例は[ショーケース](examples/showcase)をご覧ください。文字スタイル、ボタン、スイッチ、スライダー、テキストフィールド、エンジンのクエリによる検索、リストから詳細へのナビゲーション、動画、そしてタブと閉じる確認を持つ設定ウィンドウを備えたサイドバー型アプリです。[プランナー](examples/planner)は、スタイルの上書き、モーション、`Canvas` を使ったモジュール化アプリです。[パターン集](examples/gallery)はメディアアプリ向けのコンポーネントを示します。ポスターウォールの時間差の登場、タイムラインの比率での配置、音量のポップオーバーボタン、4 段階のサイズに応じて変わる余白とレイアウト、そしてドロップした動画のファイル名・形式・サイズをエンジンがファイルから読み取る例です。
@@ -374,12 +374,12 @@ iOS で両方を残したまま `packages = "separate"` と書くと、`.ipa` �
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/capabilities-ja-dark.svg">
-<img alt="プラットフォームと機能：macOS、Windows、Linux、モバイル、Web への対応と、ネイティブの外観、MCP 内蔵、コンパイル時チェック。Bern のモバイルは一部対応で、3 つの機能をすべて備える" src="Docs/Assets/tables/capabilities-ja-light.svg" width="100%">
+<img alt="プラットフォームと機能：macOS、Windows、Linux、モバイル、Web への対応と、ネイティブの外観、CLI + Skill、コンパイル時チェック。Bern のモバイルは一部対応で、3 つの機能をすべて備える" src="Docs/Assets/tables/capabilities-ja-light.svg" width="100%">
 </picture>
 
 - **モバイル**：iOS と Android。React Native のデスクトップ版は Microsoft が保守し、uni-app はミニプログラムと HarmonyOS にも対応します。Bern の Android ターゲットは実機で動作しパッケージも作れます。iOS ターゲットはシミュレータ用アプリをビルドし、実機パッケージは計画中です。
 - **ネイティブの外観**：コントロールがプラットフォーム自身のもので、外観、アクセシビリティ、入力メソッドをシステムが提供します。Qt Widgets と uni-app x はそれに近いため一部対応としました。
-- **MCP 内蔵**：フレームワークに付属し、動作中の UI を操作する MCP サーバーとコマンドライン。ほかのフレームワークは、アクセシビリティ API や Playwright、Flutter Driver などのテストツールで外から自動化できます。
+- **アプリ CLI + Skill**：動作中の UI を操作するコマンドラインと、その使い方を説明するスキルをフレームワークが生成します。ほかのフレームワークは、アクセシビリティ API や Playwright、Flutter Driver などのテストツールで外から自動化できます。
 - **コンパイル時チェック**：翻訳漏れ、あるレイアウトで機能に入口がない、入口が機能に登録されていない、といった問題をコンパイラーが直接エラーにします（[AI のための設計](#ai-のための設計)を参照）。ほかのフレームワークでは多くの場合、リンター、翻訳ツール、テストで見つけます。
 - **成熟度**：Electron と Qt は非常に成熟しています。Flutter、React Native、uni-app、Tauri、Avalonia は成熟、Dioxus は発展中、GPUI は Zed エディターを支えていますが汎用コンポーネントはまだ初期段階、Bern は早期プレビューです。
 
@@ -426,7 +426,7 @@ cd my_app
 bern run
 ```
 
-新しいアプリはカウンター付きのウィンドウで、プロトコル、エンジン、UI がそれぞれ一つの crate になり、6 つのターゲットすべてが `Bern.toml` に宣言されています。`bern run` はこのコンピューターのターゲットをビルドして起動します。macOS では SwiftUI、Windows では WinUI 3、Linux では GTK です。`bern run --target web_app` はブラウザーで開き、`bern run --target ios` は起動中の iOS シミュレータに、`bern run --target android` は USB デバッグで接続した Android スマートフォン（またはエミュレータ）にインストールして起動します。どのビルドでも `target/bern/<ターゲット>/bin/` にアプリの CLI と MCP サーバーが生成されます。
+新しいアプリはカウンター付きのウィンドウで、プロトコル、エンジン、UI がそれぞれ一つの crate になり、6 つのターゲットすべてが `Bern.toml` に宣言されています。`bern run` はこのコンピューターのターゲットをビルドして起動します。macOS では SwiftUI、Windows では WinUI 3、Linux では GTK です。`bern run --target web_app` はブラウザーで開き、`bern run --target ios` は起動中の iOS シミュレータに、`bern run --target android` は USB デバッグで接続した Android スマートフォン（またはエミュレータ）にインストールして起動します。ターゲットに `channels = ["ipc"]` がある場合、アプリの CLI は `target/bern/<ターゲット>/bin/` に、`SKILL.md` は隣の `skills/` ディレクトリに生成されます。
 
 `bern doctor` は、このコンピューターで各ターゲットをビルドするのに足りないものと、そのインストール方法を示します。
 
@@ -462,7 +462,7 @@ bern 0.1.0 on macOS (aarch64)
 bern package
 ```
 
-このコンピューターでビルドできるターゲットを release でビルドし、`target/bern/dist/` にパッケージを書き出します。macOS は `.dmg`、Windows はインストーラー（ユーザーごと、管理者権限不要）と `.zip`、Linux は `.deb` と `.tar.gz`、Android は `.apk` とストア向けの `.aab`、Web は静的サイトのアーカイブです。Android 以外のパッケージにはアプリの CLI と MCP サーバーが入ります。署名は環境変数で設定し、証明書はリポジトリに入れません：`BERN_MACOS_SIGNING_IDENTITY` と `BERN_MACOS_NOTARY_PROFILE`（署名と公証）、`BERN_WINDOWS_CERTIFICATE`（証明書の拇印または `.pfx`）、`BERN_ANDROID_KEYSTORE`・`BERN_ANDROID_KEYSTORE_PASSWORD`・`BERN_ANDROID_KEY_ALIAS`（リリース鍵）。設定がなくてもパッケージは作られ、未署名の影響を知らせます。
+このコンピューターでビルドできるターゲットを release でビルドし、`target/bern/dist/` にパッケージを書き出します。macOS は `.dmg`、Windows はインストーラー（ユーザーごと、管理者権限不要）と `.zip`、Linux は `.deb` と `.tar.gz`、Android は `.apk` とストア向けの `.aab`、Web は静的サイトのアーカイブです。デスクトップと WebUI のパッケージにはアプリの CLI が入り、IPC が有効ならスキルも入ります。静的 Web パッケージにはサイトのファイルだけが入り、Android の CLI は APK の中ではなく開発用コンピューターで動作します。署名は環境変数で設定し、証明書はリポジトリに入れません：`BERN_MACOS_SIGNING_IDENTITY` と `BERN_MACOS_NOTARY_PROFILE`（署名と公証）、`BERN_WINDOWS_CERTIFICATE`（証明書の拇印または `.pfx`）、`BERN_ANDROID_KEYSTORE`・`BERN_ANDROID_KEYSTORE_PASSWORD`・`BERN_ANDROID_KEY_ALIAS`（リリース鍵）。設定がなくてもパッケージは作られ、未署名の影響を知らせます。
 
 ### ショーケースを動かす
 
@@ -482,10 +482,10 @@ showcase ui set-bool --target controls_page.sync --value true
 showcase showcase search-library --text mo                   # エンジンへのクエリ
 showcase window open --kind settings
 showcase window list                                         # ウィンドウの実際の状態
-showcase-mcp                                                 # stdio の MCP サーバー
+ssh HOST /path/to/showcase state
 ```
 
-制御チャネルはターゲットが `channels = ["ipc"]` を宣言したときだけ起動します。宣言しなければアプリはどのポートも待ち受けません。Android アプリはスマートフォン上で待ち受け、`bern run` が `adb forward` でこのコンピューターにつなぐので、CLI と MCP サーバーはそのまま使えます。
+制御チャネルはターゲットが `channels = ["ipc"]` を宣言したときだけ起動します。宣言しなければアプリはどのポートも待ち受けません。Android アプリはスマートフォン上で待ち受け、`bern run` が `adb forward` でこのコンピューターにつなぐので、CLI はそのまま使えます。
 
 ## ロードマップ
 

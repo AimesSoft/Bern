@@ -16,7 +16,7 @@ This document records what was actually completed for the `swiftui + tvos` targe
 | Design requirement | Status | Notes |
 | --- | --- | --- |
 | Platform resolution | Done | `platform = "tvos"` defaults to `ui = "swiftui"`; `bern doctor`, `bern build` and `bern run` recognize this target |
-| Generated code builds | Done | `bern build --target tvos` generates Swift and the glue crate, and builds the Apple TV simulator app bundle plus the CLI and MCP server on the Mac; the generation tests type-check against the tvOS simulator SDK |
+| Generated code builds | Done | `bern build --target tvos` generates Swift and the glue crate, and builds the Apple TV simulator app bundle plus the CLI on the Mac; the generation tests type-check against the tvOS simulator SDK |
 | Build only the part the TV shows | Done | When `Adaptive` has a `Layout(size: tv)`, only that one is kept, `window.tv` is true, and the window size class is determined by the screen; branches and components that are never shown are not generated and do not take part in the capability check (see "TV layout") |
 | Focus and remote navigation | Done | The system focus engine and system focus effects; `default_focus` sets the starting focus; a slider is a focusable track |
 | Remote buttons | Partial | `Shortcut` and a control's `shortcut:` map to back, play/pause and the edges of the touch surface; the arrow keys were measured in the simulator, back and play/pause are not verified (see "Verification log") |
@@ -103,7 +103,7 @@ The `tvos` key of `[app.icon]`:
 
 ## Local control channel
 
-Same as iOS: `bern run` hands the Mac's temporary directory to the app through `SIMCTL_CHILD_BERN_IPC_DIR`, and the CLI, JSON client and MCP server on the Mac connect over IPC to the app in the simulator; when the app is launched from the Home screen, the channel does not listen. When a macOS, iOS or Android engine with the same bundle identifier is running at the same time, pick one with `--engine`: `--engine tvos` picks the simulator's.
+Same as iOS: `bern run` hands the Mac's temporary directory to the app through `SIMCTL_CHILD_BERN_IPC_DIR`, and the CLI and JSON client on the Mac connect over IPC to the app in the simulator; when the app is launched from the Home screen, the channel does not listen. When a macOS, iOS or Android engine with the same bundle identifier is running at the same time, pick one with `--engine`: `--engine tvos` picks the simulator's.
 
 ## Build and run
 
@@ -119,7 +119,7 @@ bern build --target tvos
 bern run --target tvos
 ```
 
-`bern run --target tvos` looks only for a running tvOS simulator (one whose runtime identifier contains `.tvOS-`); when there is none, it reports an error with a hint on how to start one. Build steps: build the engine static library for the simulator (`TVOS_DEPLOYMENT_TARGET=18.0`) and the CLI and MCP server for the Mac; mirror the bundled resources to the top level of the bundle; compile the icon with `actool`; compile the UI with `xcrun --sdk appletvsimulator swiftc` for `arm64-apple-tvos18.0-simulator`; move the dSYM next to the bundle; sign ad hoc.
+`bern run --target tvos` looks only for a running tvOS simulator (one whose runtime identifier contains `.tvOS-`); when there is none, it reports an error with a hint on how to start one. Build steps: build the engine static library for the simulator (`TVOS_DEPLOYMENT_TARGET=18.0`) and the CLI for the Mac; mirror the bundled resources to the top level of the bundle; compile the icon with `actool`; compile the UI with `xcrun --sdk appletvsimulator swiftc` for `arm64-apple-tvos18.0-simulator`; move the dSYM next to the bundle; sign ad hoc.
 
 ## Verification log
 

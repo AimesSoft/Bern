@@ -134,7 +134,7 @@ The following is a design yet to be implemented; it does not extend GNOME conven
 - **Theme**: following "native first", the light and dark styles of GTK and of supported desktop themes are used; when the chosen environment cannot provide full light and dark mode, Bern's semantic role mapping is used instead according to the capability description; high contrast takes priority. For now, development-branch CSS media queries are not listed as the minimum usable implementation.
 - **Accessibility**: GTK's accessibility tree, editing roles and focus behavior are kept; generated custom controls must supply the same protocol.
 - **Windows**: dedicated window declarations explicitly distinguish main windows, secondary windows, parents and modal scopes; closing one of several main windows does not destroy the others along with it.
-- **Close confirmation**: the close button, Ctrl+W, the CLI and MCP use the same `window.request_close`; the unsaved-changes check can return a pending-confirmation result, rather than only showing a dialog and leaving the external caller waiting forever.
+- **Close confirmation**: the close button, Ctrl+W, the CLI use the same `window.request_close`; the unsaved-changes check can return a pending-confirmation result, rather than only showing a dialog and leaving the external caller waiting forever.
 - **Window system**: requests and observed results are recorded separately; minimize, activate, size and position capabilities are verified per compositor/backend, and Linux cannot be treated as one uniform window manager.
 - **Video**: a simple preview and a full player are different capability tiers; the latter has its own acceptance for the media core, the Paintable/texture path, subtitle overlays, color and hardware decoding.
 
@@ -155,7 +155,7 @@ The following are Bern protocol requirements; they cannot be inferred to be impl
 | Native multi-window capability available | Window declarations map to native windows; each instance has its own logical identity and lifecycle |
 | Only a single host surface | The in-app virtual window is used automatically; semantic commands do not change, and the actual presentation mode can be queried |
 | Virtual window limits | Does not claim a system taskbar entry, independent windows across displays, or system-wide always-on-top |
-| External close request | UI, CLI, JSON and MCP share the close check and confirmation protocol; a confirmation is tied to the instance and the state version |
+| External close request | UI, CLI and JSON share the close check and confirmation protocol; a confirmation is tied to the instance and the state version |
 | Facts that already happened in the OS | Trusted adapters report observation events; a command cannot be faked as having been executed first, and external state injection cannot be allowed |
 | Host forcibly terminated | Child windows disappear with the host; relies on the recovery strategy and cannot guarantee a chance to show the close confirmation every time |
 | Engine sharing | Multiple windows bind the same engine_id; closing a window only releases the resources it owns, and whether playback stops is decided by ownership |
@@ -193,7 +193,7 @@ The following scenarios must be run on real targets. For the first round of resu
 
 ### Cross-capability acceptance
 
-- [ ] Drive the same engine instance from the same fixture with the UI, CLI, JSON and MCP separately; business state and versions stay continuous and consistent.
+- [ ] Drive the same engine instance from the same fixture with the UI, CLI and JSON separately; business state and versions stay continuous and consistent.
 - [ ] Run the same declaration with native and virtual windows; the conclusions on window identity, close confirmation, navigation and feature coverage are consistent, and system capability differences can be queried clearly.
 - [ ] Record results for GNOME and Plasma environments separately; passing in one environment cannot sign off support for another.
 - [ ] After pinning the toolchain, record the OS, desktop environment, window system, SDK/GTK/libadwaita and media backend versions, and only then decide the scope of release support.

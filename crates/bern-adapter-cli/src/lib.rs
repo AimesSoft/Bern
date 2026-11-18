@@ -1,7 +1,6 @@
 //! Application CLI derived from the command catalog.
 //!
-//! Sub-commands, parameters and help come from the same descriptor the UI
-//! and MCP server use. The CLI connects to an engine that is already
+//! Sub-commands, parameters and help come from the same descriptor as the UI. The CLI connects to an engine that is already
 //! running; it never creates a second engine. Exit codes: 0 success,
 //! 1 command failed, 2 usage error, 3 no connection.
 

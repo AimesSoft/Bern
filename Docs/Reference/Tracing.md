@@ -14,7 +14,7 @@ The rules are written the same way in all three places:
 | --- | --- |
 | Environment variable | `BERN_TRACE=engine,ui,slow:16ms`, read when the app starts |
 | `bern run --trace <rules>` | Malformed rules are reported as an error before the build. Desktop programs and the WebUI engine host get it as `BERN_TRACE`; iOS and tvOS simulators receive it through `SIMCTL_CHILD_BERN_TRACE`; on Android it is passed to the app with `am start --es bern.trace '<rules>'`; pages with `web_mode = "app"` get `#bern-trace=<rules>` appended to the address. The last two must be read by the frontend and handed to the runtime, so they have no effect until the frontends are wired in; Android currently uses the system property below |
-| Session commands | `trace.start`, `trace.stop`, `trace.report` while running; in the CLI, `trace start --rules …`; the MCP tools have the same names |
+| Session commands | `trace.start`, `trace.stop`, `trace.report` while running; in the CLI, `trace start --rules …` |
 
 When Android is not started through `bern run`, you can use `adb shell setprop debug.bern.trace '<rules>'` (at most 91 bytes, also read by release builds); it applies to apps started afterwards, and `adb shell setprop debug.bern.trace ''` clears it. Pages with `web_mode = "app"` have no control channel; while running, only the browser console can be used (provided once the frontend is wired in). The WebUI engine host, on receiving `trace.*`, records the engine side itself and forwards the command to the page to record the UI side.
 
@@ -85,7 +85,7 @@ bern-trace: showcase.set_volume x42 more within a second, total p50 0.40, p95 0.
 
 ### trace.report
 
-Returns a `TraceReport` (the CLI prints it as JSON, MCP hands it to the caller as is). Times are in microseconds:
+Returns a `TraceReport` (the CLI prints it as JSON). Times are in microseconds:
 
 | Field | Contents |
 | --- | --- |

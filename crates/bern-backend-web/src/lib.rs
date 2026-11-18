@@ -10,8 +10,8 @@
 //!   run in the page as one WebAssembly module.
 //! * `web_mode = "ui"`: the page runs the UI session runtime only and
 //!   reaches the engine of a separate engine host over WebSocket; the build
-//!   also produces that host, which serves the page, and the CLI and MCP
-//!   programs that reach the same engine through its IPC channel.
+//!   also produces that host, which serves the page, and the CLI that reaches the same
+//!   engine through its IPC channel.
 
 mod glue;
 pub mod icons;
@@ -354,16 +354,12 @@ fn nested_optional(ty: &Type) -> bool {
     }
 }
 
-/// The engine host, the command line and the MCP server of a `ui` build,
+/// The engine host and command line of a `ui` build,
 /// as their files in `bin/` are named on this machine.
-fn programs(app: &Application) -> [String; 3] {
+fn programs(app: &Application) -> [String; 2] {
     let program = glue::program(app);
-    [
-        format!("{program}-host"),
-        program.clone(),
-        format!("{program}-mcp"),
-    ]
-    .map(|name| format!("{name}{}", std::env::consts::EXE_SUFFIX))
+    [format!("{program}-host"), program]
+        .map(|name| format!("{name}{}", std::env::consts::EXE_SUFFIX))
 }
 
 impl Target for WebBrowser {
@@ -592,7 +588,6 @@ impl Target for WebBrowser {
                     glue::control_cargo_toml(context, app),
                 ),
                 GeneratedFile::text("glue/control/src/cli.rs", glue::cli_rs(context, &tools_app)),
-                GeneratedFile::text("glue/control/src/mcp.rs", glue::mcp_rs(context, &tools_app)),
             ]);
             crates.push("glue/control");
         }
@@ -601,7 +596,6 @@ impl Target for WebBrowser {
                 GeneratedFile::text("glue/host/Cargo.toml", glue::host_cargo_toml(context, app)),
                 GeneratedFile::text("glue/host/src/host.rs", glue::host_rs(context, app)),
                 GeneratedFile::text("glue/host/src/cli.rs", glue::cli_rs(context, app)),
-                GeneratedFile::text("glue/host/src/mcp.rs", glue::mcp_rs(context, app)),
             ]);
             crates.push("glue/host");
         }
@@ -760,8 +754,7 @@ impl Target for WebBrowser {
             if skill::listens(&context.target.channels) {
                 let target = context.workspace_dir.join("target/bern-web-glue/control");
                 steps.push(BuildStep::Run {
-                    description: "Build the browser command CLI and MCP adapter (no native engine)"
-                        .into(),
+                    description: "Build the browser CLI (no native engine)".into(),
                     program: "cargo".into(),
                     args: cargo("glue/control/Cargo.toml", &target, None),
                     cwd: output.join("glue/control"),
@@ -770,14 +763,12 @@ impl Target for WebBrowser {
                 steps.push(BuildStep::CreateDir {
                     path: output.join("bin"),
                 });
-                for stem in [glue::program(app), format!("{}-mcp", glue::program(app))] {
-                    let name = format!("{stem}{}", std::env::consts::EXE_SUFFIX);
-                    steps.push(BuildStep::Copy {
-                        from: target.join(profile).join(&name),
-                        to: output.join("bin").join(&name),
-                    });
-                    products.push(output.join("bin").join(&name));
-                }
+                let name = format!("{}{}", glue::program(app), std::env::consts::EXE_SUFFIX);
+                steps.push(BuildStep::Copy {
+                    from: target.join(profile).join(&name),
+                    to: output.join("bin").join(&name),
+                });
+                products.push(output.join("bin").join(&name));
             } else {
                 for name in [
                     "control.js",
@@ -797,7 +788,7 @@ impl Target for WebBrowser {
             let host_target = context.workspace_dir.join("target/bern-web-glue/host");
             let built = host_target.join(profile);
             steps.push(BuildStep::Run {
-                description: "Build the engine host, CLI and MCP server".into(),
+                description: "Build the engine host and CLI".into(),
                 program: "cargo".into(),
                 args: cargo("glue/host/Cargo.toml", &host_target, None),
                 cwd: output.join("glue/host"),
@@ -808,11 +799,7 @@ impl Target for WebBrowser {
             // there: `bin/` keeps this build's programs only. They are copied
             // by replacing the files, as rebuilt programs must be, so the
             // mirror only clears the rest.
-            steps.push(BuildStep::Mirror {
-                dir: output.join("bin"),
-                files: vec![],
-                keep: programs(app).map(PathBuf::from).to_vec(),
-            });
+            steps.push(BuildStep::program_dir(output.join("bin"), programs(app)));
             for name in programs(app) {
                 steps.push(BuildStep::Copy {
                     from: built.join(&name),
@@ -821,16 +808,16 @@ impl Target for WebBrowser {
                 products.push(output.join("bin").join(&name));
             }
         }
-        // The agent skill beside `bin/`, where the engine host listens; an
-        // `app` build has no programs to describe.
+        // The agent skill beside `bin/`, for a listening host or browser bridge.
+        // An embedded page has no standalone CLI.
         let listens = skill::listens(&context.target.channels) && !page_only;
         let place = listens.then(|| {
             skill::Place::beside_bin(app, cfg!(windows)).connect(if remote { format!(
-                "The programs reach the engine host `{program}-host` beside them, which serves the page: start it (`bern run --target {target}` does) before calling them. The `ui` and `window` commands act on the page while a browser has it open.",
+                "The CLI reaches the engine host `{program}-host` beside it. Start the host with `bern run --target {target}` before calling the CLI. The `ui` and `window` commands act on the page while a browser has it open.",
                 program = glue::program(app),
                 target = context.target.name,
             ) } else { format!(
-                "These programs address the pure Web app's `.web` IPC namespace, separate from desktop instances. Start `python3 serve-bridge.py --port 18766` in the build directory (or `bern run --target {}`), and open its printed credential URL. The engine runs in that browser tab; the local server only relays requests. Several tabs require CLI `--engine ID`. Closing a tab removes its endpoint. Streaming state subscriptions are not supported.", context.target.name
+                "The CLI addresses the pure Web app's `.web` IPC namespace, separate from desktop instances. Start `python3 serve-bridge.py --port 18766` in the build directory (or `bern run --target {}`), and open its printed credential URL. The engine runs in that browser tab; the local server only relays requests. Several tabs require CLI `--engine ID`. Closing a tab removes its endpoint. Streaming state subscriptions are not supported.", context.target.name
             ) })
         });
         steps.extend(skill::steps(app, output, place.as_ref()));
@@ -857,8 +844,7 @@ impl Target for WebBrowser {
 
     /// The files a server needs, in one archive: the page and its assets
     /// for an `app` build; with a `ui` build also the engine host and its
-    /// command line and MCP server, for this machine, and the agent skill
-    /// listing their commands.
+    /// command line, for this machine, and its generated skill.
     fn package(
         &self,
         app: &Application,

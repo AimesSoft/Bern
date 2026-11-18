@@ -57,20 +57,17 @@ impl Default for CommandPolicy {
     }
 }
 
-/// Explicit, collision-checked names for entries other than the UI.
+/// An explicit, collision-checked command line path.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExternalNames {
     /// Sub-command words, for example `["player", "seek"]`.
     pub cli: Vec<String>,
-    /// MCP tool name, for example `player_seek`.
-    pub mcp: String,
 }
 
 impl ExternalNames {
     pub fn derive(namespace: &str, name: &str) -> Self {
         Self {
             cli: vec![namespace.replace('_', "-"), name.replace('_', "-")],
-            mcp: format!("{namespace}_{name}"),
         }
     }
 }
@@ -307,7 +304,7 @@ impl ProtocolDescriptor {
                 }
             }
         }
-        let mut ids = BTreeMap::new();
+        let mut symbols = BTreeMap::new();
         for command in &self.commands {
             if !valid_name(&command.name) {
                 return Err(DescriptorError(format!(
@@ -329,10 +326,17 @@ impl ProtocolDescriptor {
                     command.name, self.namespace, command.name
                 )));
             }
-            if ids.insert(command.id.clone(), ()).is_some() {
+            if let Some(other) = symbols.insert(self.command_symbol(command), &command.id) {
+                if other == &command.id {
+                    return Err(DescriptorError(format!(
+                        "command `{}` is registered twice",
+                        command.id
+                    )));
+                }
                 return Err(DescriptorError(format!(
-                    "command `{}` is registered twice",
-                    command.id
+                    "commands `{other}` and `{}` generate the same binding `{}`",
+                    command.id,
+                    self.command_symbol(command)
                 )));
             }
             let mut params = BTreeMap::new();
@@ -366,24 +370,17 @@ impl ProtocolDescriptor {
     }
 }
 
-/// Reject catalogs where two commands would share a CLI path or MCP tool.
+/// Reject catalogs where two commands would share a CLI path.
 pub fn check_external_names<'a>(
     commands: impl IntoIterator<Item = &'a CommandSpec>,
 ) -> Result<(), DescriptorError> {
     let mut cli = BTreeMap::new();
-    let mut mcp = BTreeMap::new();
     for command in commands {
         if let Some(other) = cli.insert(command.external.cli.join(" "), &command.id) {
             return Err(DescriptorError(format!(
                 "commands `{other}` and `{}` map to the same CLI command `{}`",
                 command.id,
                 command.external.cli.join(" ")
-            )));
-        }
-        if let Some(other) = mcp.insert(command.external.mcp.clone(), &command.id) {
-            return Err(DescriptorError(format!(
-                "commands `{other}` and `{}` map to the same MCP tool `{}`",
-                command.id, command.external.mcp
             )));
         }
     }
@@ -428,7 +425,10 @@ mod tests {
     fn external_names_follow_the_documented_mapping() {
         let names = ExternalNames::derive("player", "seek_to");
         assert_eq!(names.cli, vec!["player", "seek-to"]);
-        assert_eq!(names.mcp, "player_seek_to");
+        assert_eq!(
+            serde_json::to_value(&names).unwrap(),
+            serde_json::json!({"cli": ["player", "seek-to"]})
+        );
     }
 
     #[test]
@@ -439,7 +439,7 @@ mod tests {
                 .is_err()
         );
         let mut clash = command("player", "pause");
-        clash.external.mcp = "player_seek".into();
+        clash.external.cli = vec!["player".into(), "seek".into()];
         assert!(
             descriptor(vec![command("player", "seek"), clash])
                 .validate()
@@ -448,6 +448,25 @@ mod tests {
         descriptor(vec![command("player", "seek"), command("player", "pause")])
             .validate()
             .unwrap();
+    }
+
+    #[test]
+    fn binding_collisions_depend_on_the_generated_method_not_the_cli_path() {
+        let mut catalog = descriptor(vec![
+            command("player", "queue_add"),
+            command("player_queue", "add"),
+        ]);
+        catalog.modules.push("player_queue".into());
+        // Shell commands use their short name: `queue_add` and `player_queue_add`.
+        catalog.validate().unwrap();
+
+        // As two modules, their CLI paths still differ, but their bindings do not.
+        catalog.namespace = "shell".into();
+        catalog.modules.push("player".into());
+        assert_eq!(
+            catalog.validate().unwrap_err().0,
+            "commands `player.queue_add` and `player_queue.add` generate the same binding `player_queue_add`"
+        );
     }
 
     #[test]

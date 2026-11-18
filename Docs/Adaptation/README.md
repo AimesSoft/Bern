@@ -149,7 +149,7 @@ Minimum scenario set:
 - [ ] State and resource identity are preserved during folding, rotation, split screen, moving across displays or window resizing.
 - [ ] Closing, restoring and modals of native and virtual windows, stale references, and capability changes during creation.
 - [ ] Embedded video, full window, overlays, background restrictions and remote disconnection.
-- [ ] The same engine driven by UI, CLI, JSON and MCP, with consistent results and state versions.
+- [ ] The same engine driven by UI, CLI and JSON, with consistent results and state versions.
 
 The recommended implementation order is Bern's engineering choice: first use the Web to verify environment snapshots, layout continuity and virtual windows, then verify each default desktop target; after that, add mobile/foldable and TV input. Capability prototypes for the platforms can be built in parallel, but one platform passing cannot complete acceptance on behalf of the others.
 

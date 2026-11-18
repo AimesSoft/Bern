@@ -20,7 +20,7 @@
 <circle cx="64" cy="259" r="5.5" fill="#0D1117" stroke="#D29922" stroke-width="2.5"/>
 <circle cx="64" cy="343" r="6" fill="#3FB950"/>
 <text x="40" y="18" font-size="15" font-weight="700" text-anchor="end" fill="#F0F6FC">1 · 2</text>
-<text x="92.0" y="17.4" font-size="14.5" fill="#F0F6FC">编译边界验证；macOS SwiftUI，界面、CLI、JSON 与 MCP 驱动同一引擎</text>
+<text x="92.0" y="17.4" font-size="14.5" fill="#F0F6FC">编译边界验证；macOS SwiftUI，界面、CLI 与 JSON 驱动同一引擎</text>
 <text x="960.0" y="18.0" font-size="13.5" font-weight="700" fill="#3FB950" text-anchor="end">已完成</text>
 <line x1="92" y1="40.0" x2="960" y2="40.0" stroke="#21262D"/>
 <text x="40" y="72" font-size="15" font-weight="700" text-anchor="end" fill="#F0F6FC">3</text>

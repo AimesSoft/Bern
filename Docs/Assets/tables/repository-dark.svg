@@ -38,7 +38,7 @@
 <text x="520.0" y="300.1" font-size="13.5" fill="#9198A1">为没有原生主题的目标提供的 Bern 色彩算法</text>
 <line x1="0" y1="320.0" x2="960" y2="320.0" stroke="#30363D"/>
 <text x="0.0" y="347.9" font-size="13" fill="#6EA2F5" font-weight="700">入口与工具</text>
-<text x="132.0" y="348.1" font-size="13.5" fill="#F0F6FC"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#79C0FF">crates/bern-adapter-cli</tspan> · <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#79C0FF">-mcp</tspan> · <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#79C0FF">-json</tspan></text>
+<text x="132.0" y="348.1" font-size="13.5" fill="#F0F6FC"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#79C0FF">crates/bern-adapter-cli</tspan> · <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#79C0FF">-json</tspan></text>
 <text x="520.0" y="348.1" font-size="13.5" fill="#9198A1">从命令目录派生的入口</text>
 <text x="132.0" y="374.1" font-size="13.5" fill="#F0F6FC"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#79C0FF">crates/bern-cli</tspan></text>
 <text x="520.0" y="374.1" font-size="13.5" fill="#9198A1">构建工具 <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#79C0FF">bern</tspan>：创建、检查、构建、运行与环境检查</text>

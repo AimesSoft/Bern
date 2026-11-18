@@ -254,12 +254,11 @@ pub fn product_name(app: &Application) -> String {
 }
 
 /// The agent skill in the macOS bundle, `Contents/Resources/skills/<cli>`,
-/// with the programs in `Contents/Helpers`; an installed copy keeps them
+/// with the CLI in `Contents/Helpers`; an installed copy keeps it
 /// in Applications.
 fn bundled_skill(product: &str, cli: &str) -> skill::Place {
     skill::Place {
         cli: format!("../../../Helpers/{cli}"),
-        mcp: format!("../../../Helpers/{cli}-mcp"),
         installed: Some(format!(
             "/Applications/{product}.app/Contents/Helpers/{cli}"
         )),
@@ -389,7 +388,6 @@ impl Target for SwiftUiMacos {
                 glue::lib_rs(context, app, Platform::Macos),
             ),
             GeneratedFile::text("glue/src/cli.rs", glue::cli_rs(context, app)),
-            GeneratedFile::text("glue/src/mcp.rs", glue::mcp_rs(context, app)),
             GeneratedFile::text(
                 bundle.join("Contents/Info.plist"),
                 resources::info_plist(
@@ -764,35 +762,30 @@ impl Target for SwiftUiMacos {
                 env: vec![],
             });
         }
-        // The command line and MCP server live in the bundle, in
-        // `Contents/Helpers`, and the agent skill listing their commands in
+        // The command line lives in the bundle, in
+        // `Contents/Helpers`, and the agent skill listing its commands in
         // `Contents/Resources/skills`, so a copy of the app moved or
-        // installed anywhere carries them. The programs are signed before
-        // the app, whose signature seals them and the skill.
+        // installed anywhere carries them. The CLI is signed before
+        // the app, whose signature seals both files.
         let helpers = bundle.join("Contents/Helpers");
-        let programs = [cli.clone(), format!("{cli}-mcp")];
         let listens = skill::listens(&context.target.channels);
-        steps.push(BuildStep::CreateDir {
-            path: helpers.clone(),
+        steps.push(BuildStep::program_dir(helpers.clone(), [&cli]));
+        steps.push(BuildStep::Copy {
+            from: rust_output.join(&cli),
+            to: helpers.join(&cli),
         });
-        for program in &programs {
-            steps.push(BuildStep::Copy {
-                from: rust_output.join(program),
-                to: helpers.join(program),
-            });
-            steps.push(BuildStep::Run {
-                description: "Sign the command line tools for local use".into(),
-                program: "codesign".into(),
-                args: vec![
-                    "--force".into(),
-                    "--sign".into(),
-                    "-".into(),
-                    helpers.join(program).display().to_string(),
-                ],
-                cwd: output.clone(),
-                env: vec![],
-            });
-        }
+        steps.push(BuildStep::Run {
+            description: "Sign the command line for local use".into(),
+            program: "codesign".into(),
+            args: vec![
+                "--force".into(),
+                "--sign".into(),
+                "-".into(),
+                helpers.join(&cli).display().to_string(),
+            ],
+            cwd: output.clone(),
+            env: vec![],
+        });
         if listens {
             steps.push(BuildStep::Write {
                 path: bundle.join("Contents/Resources").join(skill::path(app)),
@@ -829,34 +822,25 @@ impl Target for SwiftUiMacos {
                 cwd: output.clone(),
                 env: vec![],
             },
-            BuildStep::CreateDir {
-                path: output.join("bin"),
-            },
+            BuildStep::program_dir(output.join("bin"), [&cli]),
         ]);
         // `bin/` beside the bundle, as every target lays it out, links to
-        // the programs inside it.
-        for program in &programs {
-            steps.push(BuildStep::Run {
-                description: "Link the command line tools in bin/".into(),
-                program: "ln".into(),
-                args: vec![
-                    "-sf".into(),
-                    format!("../{product}.app/Contents/Helpers/{program}"),
-                    output.join("bin").join(program).display().to_string(),
-                ],
-                cwd: output.clone(),
-                env: vec![],
-            });
-        }
+        // the CLI inside it.
+        steps.push(BuildStep::Run {
+            description: "Link the command line in bin/".into(),
+            program: "ln".into(),
+            args: vec![
+                "-sf".into(),
+                format!("../{product}.app/Contents/Helpers/{cli}"),
+                output.join("bin").join(&cli).display().to_string(),
+            ],
+            cwd: output.clone(),
+            env: vec![],
+        });
         // The agent skill beside `bin/` too, where the app listens.
         let place = listens.then(|| skill::Place::beside_bin(app, false));
         steps.extend(skill::steps(app, output, place.as_ref()));
-        let mut products = vec![
-            bundle.clone(),
-            output.join("bin").join(&cli),
-            output.join("bin").join(format!("{cli}-mcp")),
-            symbols,
-        ];
+        let mut products = vec![bundle.clone(), output.join("bin").join(&cli), symbols];
         if listens {
             products.push(output.join(skill::path(app)));
         }
@@ -869,9 +853,9 @@ impl Target for SwiftUiMacos {
     }
 
     /// A disk image with the app and a link to Applications. The app built
-    /// already carries the command line and MCP server in
+    /// already carries the command line in
     /// `Contents/Helpers` and the agent skill in `Contents/Resources/skills`;
-    /// they and the app are signed again with the identity from [`Signing`]
+    /// the CLI and the app are signed again with the identity from [`Signing`]
     /// (hardened runtime and a secure timestamp, as notarization requires)
     /// and notarized when a notary profile is given; otherwise signed for
     /// this Mac only.
@@ -947,13 +931,11 @@ impl Target for SwiftUiMacos {
                 vec![path(&output.join(format!("{product}.app"))), path(&staged)],
             ),
         ];
-        for program in [cli.clone(), format!("{cli}-mcp")] {
-            steps.push(run(
-                "Sign the command line tools",
-                "codesign",
-                sign(&helpers.join(&program)),
-            ));
-        }
+        steps.push(run(
+            "Sign the command line",
+            "codesign",
+            sign(&helpers.join(&cli)),
+        ));
         steps.push(run("Sign the app", "codesign", sign(&staged)));
         steps.push(run(
             "Link Applications",

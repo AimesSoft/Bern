@@ -233,7 +233,7 @@ fn commands_state_and_updates_reach_the_shared_engine() {
 #[test]
 fn session_commands_route_to_the_live_ui() {
     let (_server, bundle) = start("sessions");
-    let mut client = Client::connect(&bundle, None, "mcp", None).unwrap();
+    let mut client = Client::connect(&bundle, None, "cli", None).unwrap();
     let reply = client
         .request(|request_id| ClientMessage::SessionCommand {
             request_id,

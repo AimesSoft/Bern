@@ -34,7 +34,7 @@ This document records what the `compose + android` target actually delivers. The
 
 | Design requirement | Status | Notes |
 | --- | --- | --- |
-| Generated code builds | Done | `bern build --target android` generates the Kotlin, the Gradle project and the glue crate, compiles the engine library with the NDK, packages the APK with Gradle, and builds the CLI and MCP server for this computer; generation tests check the Kotlin, manifest, build scripts and string tables of the three examples |
+| Generated code builds | Done | `bern build --target android` generates the Kotlin, the Gradle project and the glue crate, compiles the engine library with the NDK, packages the APK with Gradle, and builds the CLI for this computer; generation tests check the Kotlin, manifest, build scripts and string tables of the three examples |
 | Engine inside the app process | Done | The engine, the session runtime and the JNI bridge compile to `libbern_app.so`; values are passed in the same binary layout as the C ABI |
 | Virtual windows where native multi-window is not supported | Done | One Activity: the main window fills the screen, other windows stack on top of it, and system back closes the topmost window; the window fact is reported as `Virtual` |
 | Screen rotation, keyboard, safe areas | Partial | The Activity handles configuration changes itself, so windows and drafts are not recreated on rotation; content avoids the system bars and the input method (under edge-to-edge, space is left according to the insets); rotation not measured |
@@ -54,7 +54,7 @@ This document records what the `compose + android` target actually delivers. The
 | `src/kotlin/` | Kotlin generator: value types, engine state, session drafts, one composable per component and window, the Activity |
 | `src/style.rs` | The capabilities of `style!` on Compose and the `BernStyle` declarations |
 | `src/project.rs` | Gradle scripts, manifest, theme, app name and string tables |
-| `src/glue.rs` | The engine library (cdylib) and the CLI and MCP server on this computer |
+| `src/glue.rs` | The engine library (cdylib) and the CLI on this computer |
 | `src/toolchain.rs` | Locating the SDK, NDK, Gradle and JDK |
 | `src/icons.rs` | Icon table: the Material icon for each icon name; generates the branches of `BernIcons.get`, and the check uses it to reject names that are not in the table |
 | `templates/BernRuntime.kt` | Encoding and decoding, host, windows, control registration, external session commands, window root |
@@ -100,7 +100,7 @@ The generator corresponds one-to-one to the SwiftUI generator, with components s
 
 ## Local control channel
 
-The app is its own system user, and developer tools cannot share a directory with it, so on Android the channel listens on the abstract socket `bern.<package-id>`. The peer check allows the app's own user and the shell user that `adb` runs as (root on development builds of the system), so other apps cannot connect. After the app starts, `bern run` runs `adb forward`, connecting `android.sock` in the app directory on this computer to this abstract socket, so the CLI, JSON clients and the MCP server (built for this computer) find it just as on desktop; when other engines of the app run too, `--engine android` picks it. On a later run it first removes the old forward and then recreates it; otherwise the old forward would not recreate the socket file.
+The app is its own system user, and developer tools cannot share a directory with it, so on Android the channel listens on the abstract socket `bern.<package-id>`. The peer check allows the app's own user and the shell user that `adb` runs as (root on development builds of the system), so other apps cannot connect. After the app starts, `bern run` runs `adb forward`, connecting `android.sock` in the app directory on this computer to this abstract socket, so the CLI and JSON clients (built for this computer) find it just as on desktop; when other engines of the app run too, `--engine android` picks it. On a later run it first removes the old forward and then recreates it; otherwise the old forward would not recreate the socket file.
 
 ## Media
 
@@ -139,7 +139,7 @@ bern package --target android
 ```
 
 - `bern doctor` checks the Android SDK, the NDK, Gradle and Rust's Android target. Tool locations: `ANDROID_HOME` (or Android Studio's default location), `ANDROID_NDK_HOME` (or the newest NDK in the SDK), `BERN_GRADLE` (or `gradle` on `PATH`, or a version 9.4 or later downloaded by the Gradle wrapper), `BERN_JAVA_HOME` (or the runtime bundled with Android Studio, or `JAVA_HOME`). When something is missing, `bern build` skips Android and says what to install.
-- Build steps: build the engine library for `aarch64-linux-android` with the NDK's clang; copy it into `jniLibs`; mirror the bundled resources; build the APK with Gradle; build the CLI and MCP server for this computer. On the first build Gradle downloads plugins and libraries from Google and Maven Central.
+- Build steps: build the engine library for `aarch64-linux-android` with the NDK's clang; copy it into `jniLibs`; mirror the bundled resources; build the APK with Gradle; build the CLI for this computer. On the first build Gradle downloads plugins and libraries from Google and Maven Central.
 - `bern run --target android` requires exactly one connected device (a real device or an emulator); it installs the APK, starts the Activity, forwards the control channel and shows the app's log, and returns when the app process ends.
 - **Release size.** R8 shrinks a release: what nothing reaches goes, and the classes and methods the engine calls by name are marked `@Keep` in the runtime; an engine that reaches other classes of the app by name needs the same. The engine library travels compressed in a release, about half the download, and the system unpacks it on install, which takes that much more space on the device. A debug engine stays uncompressed: it is hundreds of megabytes, too much to compress on every run.
 - **Baseline profile**: the generated project carries `app/src/main/baseline-prof.txt`, which lists every class and method of the Bern runtime (`dev/bern/runtime`) and of the generated UI code (the app's package); Gradle compiles it into the APK and AAB together with the rules that libraries such as Compose ship. On store installs the system compiles ahead of time according to it; release builds additionally copy the `.dm` that Gradle generates for Android 12 and later to `<app>.dm` next to the APK, and on devices with Android 12 or later `bern run` installs both together with `adb install-multiple`, so the app is `speed-profile` as soon as it is installed (when the device does not accept this, only the APK is installed, with a notice); debug builds are not compiled ahead of time, and the build deletes an old `.dm`. When the APK is installed directly, the ProfileInstaller that ships with Compose writes the profile after the first launch, and the system uses it only at its next background compilation; until then this code runs in the interpreter and the JIT.

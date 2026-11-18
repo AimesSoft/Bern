@@ -296,7 +296,6 @@ fn queries_lower_after_commands_as_read_only_overlapping_operations() {
     );
     assert!(search.policy.cancellable);
     assert_eq!(search.external.cli, vec!["library", "search"]);
-    assert_eq!(search.external.mcp, "library_search");
 }
 
 #[test]

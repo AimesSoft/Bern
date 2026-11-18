@@ -15,7 +15,7 @@
 
 | 设计要求 | 状态 | 说明 |
 | --- | --- | --- |
-| 生成代码可构建 | 完成 | `bern build --target ios` 生成 Swift 与胶水 crate，构建模拟器应用包、Mac 上的 CLI 与 MCP 服务器；生成测试按 iOS 模拟器 SDK 对生成的 Swift 做类型检查 |
+| 生成代码可构建 | 完成 | `bern build --target ios` 生成 Swift 与胶水 crate，构建模拟器应用包、Mac 上的 CLI；生成测试按 iOS 模拟器 SDK 对生成的 Swift 做类型检查 |
 | 窗口、导航、菜单与生命周期按平台区分 | 完成 | 运行时分为共用的 `BernRuntime.swift`、`BernMedia.swift` 与平台文件 `BernAppKit.swift`（macOS）、`BernUIKit.swift`（iOS），构建只编译自己平台的那一个 |
 | 不支持原生多窗口时用虚拟窗口 | 完成 | iPhone：一个场景，主窗口铺满，其他窗口是叠在上面的 sheet；窗口事实报告为 `Virtual` |
 | 支持多窗口的环境按已验证的原生能力选择 | 完成 | iPad：除设置外每种窗口是独立的原生窗口（`WindowGroup` 场景），报告为 `Native`；设置是主窗口上的 sheet |
@@ -72,11 +72,11 @@ iPhone 只能有一个场景，按设计文档用虚拟窗口，形式遵循 iOS
 
 ## 本地控制通道
 
-模拟器里的应用是 Mac 上的进程，可以和 Mac 共用文件系统，所以 CLI、JSON 客户端与 MCP 服务器（为 Mac 构建）能经 IPC 通道连到它。应用自己的临时目录在很深的容器路径里，套接字路径超过 Unix 套接字的长度上限；`bern run` 因此把 Mac 的临时目录经 `BERN_IPC_DIR` 交给应用（`simctl` 的 `SIMCTL_CHILD_` 变量），通道在其中建立套接字。iOS 上通道只在设置了这个变量时监听：从主屏幕点按启动或装在真机上时，没有别的进程能连到应用，通道不启动。
+模拟器里的应用是 Mac 上的进程，可以和 Mac 共用文件系统，所以 CLI 和 JSON 客户端（为 Mac 构建）能经 IPC 通道连到它。应用自己的临时目录在很深的容器路径里，套接字路径超过 Unix 套接字的长度上限；`bern run` 因此把 Mac 的临时目录经 `BERN_IPC_DIR` 交给应用（`simctl` 的 `SIMCTL_CHILD_` 变量），通道在其中建立套接字。iOS 上通道只在设置了这个变量时监听：从主屏幕点按启动或装在真机上时，没有别的进程能连到应用，通道不启动。
 
 `BERN_IPC_DIR` 在其他平台上同样有效：它代替临时目录作为各应用套接字目录的上级目录。
 
-模拟器里的应用与 macOS 版包标识相同时，两者的引擎在同一个目录里，CLI 会列出两个引擎和各自的系统，并要求用 `--engine` 指定：`--engine ios` 选模拟器里的，`--engine macos` 选 Mac 上的。MCP 服务器启动时用同样的 `--engine` 指定；不写时它的工具调用失败，报出同样的列表。
+模拟器里的应用与 macOS 版包标识相同时，两者的引擎在同一个目录里，CLI 会列出两个引擎和各自的系统，并要求用 `--engine` 指定：`--engine ios` 选模拟器里的，`--engine macos` 选 Mac 上的。
 
 iOS 会挂起完全在后台的应用，挂起时引擎不应答。客户端的握手因此有 5 秒的超时，超时报告“引擎不应答”，不再无限等待；握手之后的命令不受这个超时限制。
 
@@ -97,7 +97,7 @@ bern run --target ios
 
 `bern run --target ios` 把应用装进正在运行的 iOS 模拟器并启动，应用的输出显示在终端，直到应用退出；`BERN_*` 环境变量（例如 `BERN_APPEARANCE=dark`）一并交给应用。没有正在运行的模拟器时报错并提示启动方法。不带 `--target` 的 `bern run` 优先选择与本机系统相同的目标，Mac 上仍然启动 macOS 版。`bern doctor` 检查 iOS 模拟器 SDK 与 Rust 的模拟器目标；有没有可运行的模拟器只影响 `bern run`，不影响构建（Xcode 更新后模拟器设备要过一阵才加载完，此时构建不应失败）。
 
-构建步骤：为模拟器构建引擎静态库（`IPHONEOS_DEPLOYMENT_TARGET=17.0`）与为 Mac 构建 CLI、MCP 服务器；把随包资源镜像到包顶层；`actool` 编译图标；`xcrun --sdk iphonesimulator swiftc` 编译界面；dSYM 移到包旁；ad hoc 签名。
+构建步骤：为模拟器构建引擎静态库（`IPHONEOS_DEPLOYMENT_TARGET=17.0`）与为 Mac 构建 CLI；把随包资源镜像到包顶层；`actool` 编译图标；`xcrun --sdk iphonesimulator swiftc` 编译界面；dSYM 移到包旁；ad hoc 签名。
 
 ## 验证记录
 
@@ -111,7 +111,6 @@ bern run --target ios
 - **生命周期**：按 Home 键后主窗口为 `Hidden`、无焦点，CLI 仍能读取状态；回到前台后恢复 `Visible` 与焦点。
 - **媒体**：预览播放器播放色条片段、跳转与结束（`Ended 6000 / 6000`）；离开并回到视频页后状态不变；播放中进入后台时模拟器里继续播放直到结束；播完后进入后台报告为 `Paused 0`，再播放从头开始。视频页窄屏时片段选择是“换片”菜单。
 - **图片**：随包图片与 Grid 正常；PQ 的 PNG 做了色调映射。带增益图的 JPEG 在模拟器里按 HDR 解码得到全黑的像素（把解码结果画到 8 位上下文读回为 0），所以模拟器构建只解码 SDR 版本，显示作者给的 SDR 图。
-- **MCP**：`showcase-mcp` 完成 `initialize`，`window_list` 返回模拟器里应用的 `Virtual` 窗口。
 - **macOS 未受影响**：运行时拆分后重新构建运行 macOS 版，设置窗口、关闭协议、最小化与恢复由 CLI 实测正常。
 
 iPad，同日，iPad Pro 13 英寸（M5）模拟器（iOS 26.5，全屏模式）。展示应用只有主窗口与设置窗口，为测试多窗口临时加了一个普通的“检查器”窗口（未提交）：

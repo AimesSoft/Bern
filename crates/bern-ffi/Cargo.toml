@@ -32,7 +32,7 @@ ndk-context = "0.1"
 
 [features]
 default = ["ipc"]
-# The local control channel for CLI, JSON and MCP entries (Unix sockets).
+# The local control channel for CLI and JSON entries (Unix sockets).
 ipc = ["dep:bern-transport-ipc"]
 # Decoding HDR pictures for frontends that draw them themselves (Windows).
 picture = ["dep:bern-image"]

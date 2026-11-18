@@ -16,7 +16,7 @@
 | 设计要求 | 状态 | 说明 |
 | --- | --- | --- |
 | 平台解析 | 完成 | `platform = "tvos"` 默认 `ui = "swiftui"`，`bern doctor`、`bern build`、`bern run` 认得这个目标 |
-| 生成代码可构建 | 完成 | `bern build --target tvos` 生成 Swift 与胶水 crate，构建 Apple TV 模拟器应用包、Mac 上的 CLI 与 MCP 服务器；生成测试按 tvOS 模拟器 SDK 类型检查 |
+| 生成代码可构建 | 完成 | `bern build --target tvos` 生成 Swift 与胶水 crate，构建 Apple TV 模拟器应用包、Mac 上的 CLI；生成测试按 tvOS 模拟器 SDK 类型检查 |
 | 只构建电视显示的部分 | 完成 | `Adaptive` 有 `Layout(size: tv)` 时只保留它，`window.tv` 为真，窗口尺寸档由屏幕决定；永远不显示的分支与组件不生成、不参与能力检查（见“电视布局”） |
 | 焦点与遥控导航 | 完成 | 系统焦点引擎与系统焦点效果；`default_focus` 指定起始焦点；滑块是可聚焦的轨道 |
 | 遥控按键 | 部分 | `Shortcut` 与控件的 `shortcut:` 对应返回、播放/暂停与触控板边缘；方向键在模拟器实测，返回与播放/暂停未验证（见“验证记录”） |
@@ -103,7 +103,7 @@ Rust 1.99.0 的 rustup 为 `aarch64-apple-tvos` 与 `aarch64-apple-tvos-sim` 提
 
 ## 本地控制通道
 
-与 iOS 相同：`bern run` 把 Mac 的临时目录经 `SIMCTL_CHILD_BERN_IPC_DIR` 交给应用，Mac 上的 CLI、JSON 客户端与 MCP 服务器经 IPC 连到模拟器里的应用；从主屏幕启动时通道不监听。同一包标识的 macOS、iOS 或 Android 引擎同时在运行时，用 `--engine` 指定：`--engine tvos` 选模拟器里的。
+与 iOS 相同：`bern run` 把 Mac 的临时目录经 `SIMCTL_CHILD_BERN_IPC_DIR` 交给应用，Mac 上的 CLI 和 JSON 客户端经 IPC 连到模拟器里的应用；从主屏幕启动时通道不监听。同一包标识的 macOS、iOS 或 Android 引擎同时在运行时，用 `--engine` 指定：`--engine tvos` 选模拟器里的。
 
 ## 构建与运行
 
@@ -119,7 +119,7 @@ bern build --target tvos
 bern run --target tvos
 ```
 
-`bern run --target tvos` 只找正在运行的 tvOS 模拟器（运行时标识含 `.tvOS-`），没有时报错并提示启动方法。构建步骤：为模拟器构建引擎静态库（`TVOS_DEPLOYMENT_TARGET=18.0`）与为 Mac 构建 CLI、MCP 服务器；把随包资源镜像到包顶层；`actool` 编译图标；`xcrun --sdk appletvsimulator swiftc` 以 `arm64-apple-tvos18.0-simulator` 编译界面；dSYM 移到包旁；ad hoc 签名。
+`bern run --target tvos` 只找正在运行的 tvOS 模拟器（运行时标识含 `.tvOS-`），没有时报错并提示启动方法。构建步骤：为模拟器构建引擎静态库（`TVOS_DEPLOYMENT_TARGET=18.0`）与为 Mac 构建 CLI；把随包资源镜像到包顶层；`actool` 编译图标；`xcrun --sdk appletvsimulator swiftc` 以 `arm64-apple-tvos18.0-simulator` 编译界面；dSYM 移到包旁；ad hoc 签名。
 
 ## 验证记录
 

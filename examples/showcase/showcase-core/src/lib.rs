@@ -353,7 +353,6 @@ mod tests {
         );
         assert_eq!(set_volume.errors, vec!["out_of_range"]);
         assert_eq!(set_volume.external.cli, vec!["showcase", "set-volume"]);
-        assert_eq!(set_volume.external.mcp, "showcase_set_volume");
         let action = descriptor.types.enum_def("Action").unwrap();
         let label = action.variants[0].label.as_ref().unwrap();
         assert_eq!(label.get("en"), Some("Primary button"));

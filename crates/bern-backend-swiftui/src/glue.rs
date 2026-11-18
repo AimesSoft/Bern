@@ -1,6 +1,5 @@
 //! Generated Rust glue crate: links the engine, the session runtime and the
-//! C ABI into one static library, and builds the application CLI and MCP
-//! server from the same command catalog.
+//! C ABI into one static library, and builds the application CLI from the same command catalog.
 
 use crate::swift::Platform;
 use bern_ir::Application;
@@ -10,7 +9,7 @@ use bern_target_api::glue::{
     WindowPresentation, engine_expr, module_dependencies, path, players_expr, resources_expr,
     session_spec, session_spec_with,
 };
-pub use bern_target_api::glue::{cli_rs, mcp_rs, tools_cargo_toml};
+pub use bern_target_api::glue::{cli_rs, tools_cargo_toml};
 
 /// The iOS engine library's switch for native windows, which the app sets
 /// before it starts the engine.
@@ -45,14 +44,9 @@ path = "src/lib.rs"
 name = "{cli}"
 path = "src/cli.rs"
 
-[[bin]]
-name = "{cli}-mcp"
-path = "src/mcp.rs"
-
 [dependencies]
 bern-ffi = {{ {ffi} }}
 bern-adapter-cli = {{ {cli_adapter} }}
-bern-adapter-mcp = {{ {mcp_adapter} }}
 {protocol} = {{ path = "{protocol_path}" }}
 {engine} = {{ path = "{engine_path}" }}
 {modules}
@@ -64,7 +58,6 @@ bern-adapter-mcp = {{ {mcp_adapter} }}
         cli = app.app.id.replace('_', "-"),
         ffi = bern("bern-ffi"),
         cli_adapter = bern("bern-adapter-cli"),
-        mcp_adapter = bern("bern-adapter-mcp"),
         protocol = context.protocol_package,
         protocol_path = path(&context.protocol_path),
         engine = context.engine_package,

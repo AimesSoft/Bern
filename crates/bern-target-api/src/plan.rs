@@ -52,6 +52,18 @@ pub enum BuildStep {
     },
 }
 
+impl BuildStep {
+    /// Prepare a generated program directory, dropping helpers from older builds.
+    /// The following copy, link and signing steps own the listed paths.
+    pub fn program_dir(dir: PathBuf, names: impl IntoIterator<Item = impl Into<PathBuf>>) -> Self {
+        Self::Mirror {
+            dir,
+            files: vec![],
+            keep: names.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct BuildPlan {
     pub steps: Vec<BuildStep>,

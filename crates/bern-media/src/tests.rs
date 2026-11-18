@@ -102,7 +102,6 @@ fn catalog_and_state_schema_are_consistent() {
     }
     let play = &commands[MediaCommand::Play.index() as usize];
     assert_eq!(play.external.cli, vec!["media", "play"]);
-    assert_eq!(play.external.mcp, "media_play");
     // Every published player value matches the declared record.
     let (hub, _) = hub();
     for player in hub.snapshot().1 {

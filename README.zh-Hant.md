@@ -7,7 +7,7 @@
 <p><b>一份 Rust 宣告，編譯成每個平台自己的原生介面。</b></p>
 
 <p>從桌面到手機，為 AI 而建：SwiftUI、WinUI 3、GTK 4、Jetpack Compose 與 Web。<br>
-桌面和手機上沒有 JS 引擎，沒有內嵌瀏覽器；每個按鈕，天生就是 AI 能呼叫的 MCP 工具。</p>
+桌面和手機上沒有 JS 引擎，沒有內嵌瀏覽器；Agent 可以透過應用程式 CLI 依名稱操作按鈕。</p>
 
 <p>
 <img alt="macOS · SwiftUI" src="https://img.shields.io/badge/macOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
@@ -19,7 +19,7 @@
 </p>
 
 <p>
-<img alt="AI 原生：內建 MCP" src="https://img.shields.io/badge/AI%20%E5%8E%9F%E7%94%9F-%E5%85%A7%E5%BB%BA%20MCP-8B5CF6?style=flat-square">
+<img alt="CLI + Skill" src="https://img.shields.io/badge/AI-CLI%20%2B%20Skill-8B5CF6?style=flat-square">
 <img alt="記憶體約 40 MB" src="https://img.shields.io/badge/%E8%A8%98%E6%86%B6%E9%AB%94-%E7%B4%84%2040%20MB-0EA5E9?style=flat-square">
 <img alt="無 JS 引擎" src="https://img.shields.io/badge/JS%20%E5%BC%95%E6%93%8E-%E7%84%A1-111827?style=flat-square">
 <img alt="Rust 1.99" src="https://img.shields.io/badge/Rust-1.99-B7410E?style=flat-square&logo=rust&logoColor=white">
@@ -67,7 +67,7 @@
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/why-zh-Hant-dark.svg">
-<img alt="為什麼選擇 Bern：編譯成原生介面，一份 Rust 宣告產生各平台自己的 UI 程式碼，執行時沒有 JS 引擎；為 AI 而建，漏寫是編譯錯誤，每個按鈕都是 MCP 工具；輕到不像跨平台，macOS 記憶體 39 MB、0.4 秒出現視窗、應用程式套件 2.7 MB，Windows 35 MB、0.3 秒、4.2 MB，Web 189 KB" src="Docs/Assets/tables/why-zh-Hant-light.svg" width="100%">
+<img alt="為什麼選擇 Bern：編譯成原生介面，一份 Rust 宣告產生各平台自己的 UI 程式碼，執行時沒有 JS 引擎；為 AI 而建，漏寫是編譯錯誤，命令列可以依名稱操作按鈕；輕到不像跨平台，macOS 記憶體 39 MB、0.4 秒出現視窗、應用程式套件 2.7 MB，Windows 35 MB、0.3 秒、4.2 MB，Web 189 KB" src="Docs/Assets/tables/why-zh-Hant-light.svg" width="100%">
 </picture>
 
 ## 誰使用了 Bern
@@ -124,7 +124,7 @@ compact: missing
 
 ### AI 使用應用程式：讀語意，不讀像素
 
-在大多數框架裡，讓 AI 操作一個桌面應用程式意味著截圖、辨識、算座標、模擬點擊。Bern 的應用程式自帶一個 MCP 伺服器：介面上每個控制項都有穩定的名稱與角色，Agent 讀到的是結構，做的事情與使用者點擊走同一段程式碼，結果由應用程式如實回覆。
+在大多數框架裡，讓 AI 操作一個桌面應用程式意味著截圖、辨識、算座標、模擬點擊。啟用控制通道後，Bern 會產生應用程式 CLI 和說明其命令的 `SKILL.md`：介面上每個控制項都有穩定的名稱與角色，Agent 讀到的是結構，做的事情與使用者點擊走同一段程式碼，結果由應用程式如實回覆。
 
 ```sh
 $ showcase ui inspect                 # Agent 讀到的是語意，不是像素
@@ -140,7 +140,7 @@ $ showcase window confirm-close --window settings#1 --confirmation settings#1:c1
 { "outcome": "Rejected", "reason": "save_failed: invalid_name: a display name has 1 to 40 characters …" }
 ```
 
-同樣的操作以 MCP 工具（`ui_inspect`、`ui_activate`、`window_close`……）提供給 Agent，商業命令也各自是一個工具（例如 `showcase_set_display_name`）。按鈕被停用、被對話框擋住、目標不存在時，Agent 收到的是明確的錯誤碼，而不是一次沒有效果的點擊。
+產生的 Skill 列出的就是使用者可直接執行的命令，從 `showcase ui inspect` 到業務命令 `showcase showcase set-display-name --name Demo`。若要操作遠端應用程式，請透過 SSH 登入控制通道所在的主機，以執行應用程式的使用者身分執行同一個 CLI。按鈕被停用、被對話框擋住、目標不存在時，Agent 收到的是明確的錯誤碼，而不是一次沒有效果的點擊。
 
 ## 實測數據
 
@@ -207,7 +207,7 @@ flowchart LR
     K <--> N["原生介面"]
     K <--> L["應用程式 CLI"]
     K <--> J["JSON 通道"]
-    K <--> M["MCP 伺服器"]
+    K --> S["SKILL.md"]
 ```
 
 1. **協定**：`#[bern::protocol]` 宣告值型別、唯讀狀態，以及命令與查詢 trait。
@@ -293,7 +293,7 @@ pub fn counter_view(app: counter::Client) -> impl View {
 counter ui inspect
 counter ui activate --target counter_view.add
 counter counter add --by 5
-counter-mcp   # 同一份命令目錄，提供給 AI Agent
+counter catalog
 ```
 
 `Bern.toml` 宣告語言、主題、原始碼、隨附資源與建置目標。完整範例請見[控制項展示應用程式](examples/showcase)：側邊欄應用程式，包含文字層級、按鈕、開關、滑桿、輸入框、由引擎查詢驅動的搜尋、清單到詳細資料的導覽、影片，以及具備分頁與關閉確認的設定視窗。[計畫應用程式](examples/planner)示範模組化應用程式、樣式覆寫、動效與 `Canvas`。[圖案集](examples/gallery)示範媒體類應用程式的元件：海報牆的錯開進場、時間軸的按比例擺放、音量浮層按鈕、隨四檔尺寸變化的頁邊距與版面，以及拖入影片後由引擎讀出檔名、格式與大小。
@@ -374,12 +374,12 @@ iOS 兩個前端都保留時，寫 `packages = "separate"` 可以打成兩個 `.
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/capabilities-zh-Hant-dark.svg">
-<img alt="平台與能力：各框架對 macOS、Windows、Linux、行動端、Web 的支援，以及原生外觀、內建 MCP 與編譯期檢查；Bern 的行動端為部分支援，三項能力都具備" src="Docs/Assets/tables/capabilities-zh-Hant-light.svg" width="100%">
+<img alt="平台與能力：各框架對 macOS、Windows、Linux、行動端、Web 的支援，以及原生外觀、CLI + Skill 與編譯期檢查；Bern 的行動端為部分支援，三項能力都具備" src="Docs/Assets/tables/capabilities-zh-Hant-light.svg" width="100%">
 </picture>
 
 - **行動端**：iOS 與 Android。React Native 的桌面版本由微軟維護，uni-app 另涵蓋小程式與鴻蒙；Bern 的 Android 目標已能在實機執行並打包，iOS 目標目前建置模擬器應用程式，實機打包在規劃中。
 - **原生外觀**：控制項就是平台自己的控制項，外觀、無障礙與輸入法由系統提供。Qt Widgets 與 uni-app x 接近原生，記為部分。
-- **內建 MCP**：框架自帶、面向執行中介面的 MCP 伺服器與命令列。其他框架可以藉助無障礙介面，或 Playwright、Flutter Driver 等測試工具從外部自動化。
+- **應用程式 CLI + Skill**：框架為執行中的介面產生命令列，並產生說明這些命令的 Skill。其他框架可以藉助無障礙介面，或 Playwright、Flutter Driver 等測試工具從外部自動化。
 - **編譯期檢查**：翻譯缺漏、功能在某個版面沒有入口、入口沒有登記功能，都由編譯器直接報錯（見[為 AI 而建](#為-ai-而建)）。其他框架多藉助 lint、翻譯工具或測試發現這類問題。
 - **成熟度**：Electron 與 Qt 非常成熟；Flutter、React Native、uni-app、Tauri 與 Avalonia 成熟；Dioxus 發展中；GPUI 支撐著 Zed 編輯器，通用元件仍在早期；Bern 是早期預覽。
 
@@ -426,7 +426,7 @@ cd my_app
 bern run
 ```
 
-新的應用程式是一個帶計數的視窗，協定、引擎與介面各一個 crate，六個目標都已在 `Bern.toml` 中宣告。`bern run` 建置本機的目標並啟動它：macOS 上是 SwiftUI，Windows 上是 WinUI 3，Linux 上是 GTK；`bern run --target web_app` 在瀏覽器中開啟，`bern run --target ios` 安裝到正在執行的 iOS 模擬器，`bern run --target android` 安裝到以 USB 偵錯連接的 Android 手機（或模擬器）並啟動。每次建置也會在 `target/bern/<目標>/bin/` 中產生應用程式 CLI 與 MCP 伺服器。
+新的應用程式是一個帶計數的視窗，協定、引擎與介面各一個 crate，六個目標都已在 `Bern.toml` 中宣告。`bern run` 建置本機的目標並啟動它：macOS 上是 SwiftUI，Windows 上是 WinUI 3，Linux 上是 GTK；`bern run --target web_app` 在瀏覽器中開啟，`bern run --target ios` 安裝到正在執行的 iOS 模擬器，`bern run --target android` 安裝到以 USB 偵錯連接的 Android 手機（或模擬器）並啟動。目標宣告 `channels = ["ipc"]` 時，可在 `target/bern/<目標>/bin/` 找到應用程式 CLI，並在同層的 `skills/` 目錄找到 `SKILL.md`。
 
 `bern doctor` 列出本機建置每個目標還缺什麼、怎麼安裝：
 
@@ -462,7 +462,7 @@ bern 0.1.0 on macOS (aarch64)
 bern package
 ```
 
-以 release 建置本機能建置的目標，在 `target/bern/dist/` 中產生安裝套件：macOS 的 `.dmg`，Windows 的安裝程式（依目前使用者安裝，不需要系統管理員權限）與免安裝的 `.zip`，Linux 的 `.deb` 與 `.tar.gz`，Android 的 `.apk` 與上架用的 `.aab`，Web 的靜態網站壓縮檔。除 Android 外，每個套件都帶有應用程式 CLI 與 MCP 伺服器。簽署以環境變數設定，憑證不進儲存庫：`BERN_MACOS_SIGNING_IDENTITY` 與 `BERN_MACOS_NOTARY_PROFILE`（簽署並公證），`BERN_WINDOWS_CERTIFICATE`（憑證指紋或 `.pfx`），`BERN_ANDROID_KEYSTORE`、`BERN_ANDROID_KEYSTORE_PASSWORD` 與 `BERN_ANDROID_KEY_ALIAS`（發布金鑰）。沒有設定時照樣產生，並提示未簽署的後果。
+以 release 建置本機能建置的目標，在 `target/bern/dist/` 中產生安裝套件：macOS 的 `.dmg`，Windows 的安裝程式（依目前使用者安裝，不需要系統管理員權限）與免安裝的 `.zip`，Linux 的 `.deb` 與 `.tar.gz`，Android 的 `.apk` 與上架用的 `.aab`，Web 的靜態網站壓縮檔。桌面和 WebUI 套件含有應用程式 CLI，啟用 IPC 時也包含 Skill。靜態 Web 套件只含網站檔案；Android CLI 在開發電腦上執行，不會包進 APK。簽署以環境變數設定，憑證不進儲存庫：`BERN_MACOS_SIGNING_IDENTITY` 與 `BERN_MACOS_NOTARY_PROFILE`（簽署並公證），`BERN_WINDOWS_CERTIFICATE`（憑證指紋或 `.pfx`），`BERN_ANDROID_KEYSTORE`、`BERN_ANDROID_KEYSTORE_PASSWORD` 與 `BERN_ANDROID_KEY_ALIAS`（發布金鑰）。沒有設定時照樣產生，並提示未簽署的後果。
 
 ### 執行展示應用程式
 
@@ -482,10 +482,10 @@ showcase ui set-bool --target controls_page.sync --value true
 showcase showcase search-library --text mo                   # 引擎查詢
 showcase window open --kind settings
 showcase window list                                         # 視窗的實際狀態
-showcase-mcp                                                 # 經 stdio 的 MCP 伺服器
+ssh HOST /path/to/showcase state
 ```
 
-只有目標宣告了 `channels = ["ipc"]` 時才會啟動控制通道；未宣告則應用程式不監聽任何連接埠。Android 應用程式在手機上監聽，`bern run` 以 `adb forward` 把它接到這台電腦，命令列與 MCP 伺服器照常使用。
+只有目標宣告了 `channels = ["ipc"]` 時才會啟動控制通道；未宣告則應用程式不監聽任何連接埠。Android 應用程式在手機上監聽，`bern run` 以 `adb forward` 把它接到這台電腦，命令列可照常使用。
 
 ## 路線圖
 

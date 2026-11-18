@@ -7,7 +7,7 @@
 <p><b>一份 Rust 声明，编译成每个平台自己的原生界面。</b></p>
 
 <p>从桌面到手机，为 AI 而建：SwiftUI、WinUI 3、GTK 4、Jetpack Compose 与 Web。<br>
-桌面和手机上没有 JS 引擎，没有内嵌浏览器；每个按钮，天生就是 AI 能调用的 MCP 工具。</p>
+桌面和手机上没有 JS 引擎，没有内嵌浏览器；Agent 可以通过应用 CLI 按名称操作按钮。</p>
 
 <p>
 <img alt="macOS · SwiftUI" src="https://img.shields.io/badge/macOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
@@ -19,7 +19,7 @@
 </p>
 
 <p>
-<img alt="AI 原生：内置 MCP" src="https://img.shields.io/badge/AI%20%E5%8E%9F%E7%94%9F-%E5%86%85%E7%BD%AE%20MCP-8B5CF6?style=flat-square">
+<img alt="CLI + Skill" src="https://img.shields.io/badge/AI-CLI%20%2B%20Skill-8B5CF6?style=flat-square">
 <img alt="内存约 40 MB" src="https://img.shields.io/badge/%E5%86%85%E5%AD%98-%E7%BA%A6%2040%20MB-0EA5E9?style=flat-square">
 <img alt="无 JS 引擎" src="https://img.shields.io/badge/JS%20%E5%BC%95%E6%93%8E-%E6%97%A0-111827?style=flat-square">
 <img alt="Rust 1.99" src="https://img.shields.io/badge/Rust-1.99-B7410E?style=flat-square&logo=rust&logoColor=white">
@@ -67,7 +67,7 @@
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/why-dark.svg">
-<img alt="为什么是 Bern：编译成原生界面，一份 Rust 声明生成各平台自己的 UI 代码，运行时没有 JS 引擎；为 AI 而建，漏写是编译错误，每个按钮都是 MCP 工具；轻到不像跨平台，macOS 内存 39 MB、0.4 秒出窗口、应用包 2.7 MB，Windows 35 MB、0.3 秒、4.2 MB，Web 189 KB" src="Docs/Assets/tables/why-light.svg" width="100%">
+<img alt="为什么是 Bern：编译成原生界面，一份 Rust 声明生成各平台自己的 UI 代码，运行时没有 JS 引擎；为 AI 而建，漏写是编译错误，命令行可以按名称操作按钮；轻到不像跨平台，macOS 内存 39 MB、0.4 秒出窗口、应用包 2.7 MB，Windows 35 MB、0.3 秒、4.2 MB，Web 189 KB" src="Docs/Assets/tables/why-light.svg" width="100%">
 </picture>
 
 ## 谁使用了 Bern
@@ -124,7 +124,7 @@ compact: missing
 
 ### AI 用应用：读语义，不读像素
 
-在大多数框架里，让 AI 操作一个桌面应用意味着截图、识别、算坐标、模拟点击。Bern 的应用自带一个 MCP 服务器：界面上每个控件都有稳定的名字和角色，Agent 读到的是结构，做的事情和用户点击走同一段代码，结果由应用如实答复。
+在大多数框架里，让 AI 操作一个桌面应用意味着截图、识别、算坐标、模拟点击。开启控制通道后，Bern 会生成应用 CLI 和说明其命令的 `SKILL.md`：界面上每个控件都有稳定的名字和角色，Agent 读到的是结构，做的事情和用户点击走同一段代码，结果由应用如实答复。
 
 ```sh
 $ showcase ui inspect                 # Agent 读到的是语义，不是像素
@@ -140,7 +140,7 @@ $ showcase window confirm-close --window settings#1 --confirmation settings#1:c1
 { "outcome": "Rejected", "reason": "save_failed: invalid_name: a display name has 1 to 40 characters …" }
 ```
 
-同样的操作以 MCP 工具（`ui_inspect`、`ui_activate`、`window_close`……）提供给 Agent，业务命令也各自是一个工具（例如 `showcase_set_display_name`）。按钮被禁用、被对话框挡住、目标不存在时，Agent 收到的是明确的错误码，而不是一次没有效果的点击。
+生成的 Skill 列出的就是人可以直接执行的命令，从 `showcase ui inspect` 到业务命令 `showcase showcase set-display-name --name Demo`。要操作远端应用，用 SSH 登录控制通道所在的机器，以运行应用的用户执行同一份 CLI。按钮被禁用、被对话框挡住、目标不存在时，Agent 收到的是明确的错误码，而不是一次没有效果的点击。
 
 ## 实测数据
 
@@ -207,7 +207,7 @@ flowchart LR
     K <--> N["原生界面"]
     K <--> L["应用 CLI"]
     K <--> J["JSON 通道"]
-    K <--> M["MCP 服务器"]
+    K --> S["SKILL.md"]
 ```
 
 1. **协议**：`#[bern::protocol]` 声明值类型、只读状态，以及命令与查询 trait。
@@ -293,7 +293,7 @@ pub fn counter_view(app: counter::Client) -> impl View {
 counter ui inspect
 counter ui activate --target counter_view.add
 counter counter add --by 5
-counter-mcp   # 同一份命令目录，提供给 AI Agent
+counter catalog
 ```
 
 `Bern.toml` 声明语言、主题、源码、随包资源与构建目标。完整示例见[控件展示应用](examples/showcase)：侧边栏应用，包含文字层级、按钮、开关、滑块、输入框、由引擎查询驱动的搜索、列表到详情的导航、视频，以及带页签和关闭确认的设置窗口。[计划应用](examples/planner)演示模块化应用、样式覆盖、动效与 `Canvas`。[图案集](examples/gallery)演示媒体类应用的组件：海报墙的错开入场、时间轴的按比例摆放、音量浮层按钮、随四档尺寸变化的页边距与布局，以及拖入视频后由引擎读出文件名、格式与大小。
@@ -374,12 +374,12 @@ iOS 两个前端都留着时，写 `packages = "separate"` 可以打成两个 `.
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/capabilities-dark.svg">
-<img alt="平台与能力：各框架对 macOS、Windows、Linux、移动端、Web 的支持，以及原生外观、内置 MCP 与编译期检查；Bern 的移动端为部分支持，三项能力都具备" src="Docs/Assets/tables/capabilities-light.svg" width="100%">
+<img alt="平台与能力：各框架对 macOS、Windows、Linux、移动端、Web 的支持，以及原生外观、CLI + Skill 与编译期检查；Bern 的移动端为部分支持，三项能力都具备" src="Docs/Assets/tables/capabilities-light.svg" width="100%">
 </picture>
 
 - **移动端**：iOS 与 Android。React Native 的桌面版本由微软维护，uni-app 另覆盖小程序与鸿蒙；Bern 的 Android 目标已能在真机运行并打包，iOS 目标目前构建模拟器应用，真机打包在规划中。
 - **原生外观**：控件就是平台自己的控件，外观、无障碍与输入法由系统提供。Qt Widgets 与 uni-app x 接近原生，记为部分。
-- **内置 MCP**：框架自带、面向运行中界面的 MCP 服务器与命令行。其他框架可以借助无障碍接口或 Playwright、Flutter Driver 等测试工具从外部自动化。
+- **应用 CLI + Skill**：框架为运行中的界面生成命令行，并生成说明这些命令的 Skill。其他框架可以借助无障碍接口或 Playwright、Flutter Driver 等测试工具从外部自动化。
 - **编译期检查**：翻译缺失、功能在某个布局没有入口、入口没有登记功能，都由编译器直接报错（见[为 AI 而建](#为-ai-而建)）。其他框架多借助 lint、翻译工具或测试发现这类问题。
 - **成熟度**：Electron 与 Qt 非常成熟；Flutter、React Native、uni-app、Tauri 与 Avalonia 成熟；Dioxus 发展中；GPUI 支撑着 Zed 编辑器，通用组件仍在早期；Bern 是早期预览。
 
@@ -426,7 +426,7 @@ cd my_app
 bern run
 ```
 
-新应用是一个带计数的窗口，协议、引擎与界面各一个 crate，六个目标都已在 `Bern.toml` 中声明。`bern run` 构建本机的目标并启动它：macOS 上是 SwiftUI，Windows 上是 WinUI 3，Linux 上是 GTK；`bern run --target web_app` 在浏览器中打开，`bern run --target ios` 装进正在运行的 iOS 模拟器，`bern run --target android` 装到用 USB 调试连接的 Android 手机（或模拟器）上并启动。每次构建还会在 `target/bern/<目标>/bin/` 中生成应用 CLI 与 MCP 服务器。
+新应用是一个带计数的窗口，协议、引擎与界面各一个 crate，六个目标都已在 `Bern.toml` 中声明。`bern run` 构建本机的目标并启动它：macOS 上是 SwiftUI，Windows 上是 WinUI 3，Linux 上是 GTK；`bern run --target web_app` 在浏览器中打开，`bern run --target ios` 装进正在运行的 iOS 模拟器，`bern run --target android` 装到用 USB 调试连接的 Android 手机（或模拟器）上并启动。目标声明 `channels = ["ipc"]` 时，可在 `target/bern/<目标>/bin/` 找到应用 CLI，在同级的 `skills/` 目录找到 `SKILL.md`。
 
 `bern doctor` 列出本机构建每个目标还缺什么、怎么装：
 
@@ -462,7 +462,7 @@ bern 0.1.0 on macOS (aarch64)
 bern package
 ```
 
-按 release 构建本机能构建的目标，在 `target/bern/dist/` 中生成安装包：macOS 的 `.dmg`，Windows 的安装程序（按当前用户安装，不需要管理员权限）与免安装的 `.zip`，Linux 的 `.deb` 与 `.tar.gz`，Android 的 `.apk` 与上架用的 `.aab`，Web 的静态站点压缩包。除 Android 外，每个包都带应用 CLI 与 MCP 服务器。签名用环境变量配置，证书不进仓库：`BERN_MACOS_SIGNING_IDENTITY` 与 `BERN_MACOS_NOTARY_PROFILE`（签名并公证），`BERN_WINDOWS_CERTIFICATE`（证书指纹或 `.pfx`），`BERN_ANDROID_KEYSTORE`、`BERN_ANDROID_KEYSTORE_PASSWORD` 与 `BERN_ANDROID_KEY_ALIAS`（发布密钥）。没有配置时照样生成，并提示未签名的后果。
+按 release 构建本机能构建的目标，在 `target/bern/dist/` 中生成安装包：macOS 的 `.dmg`，Windows 的安装程序（按当前用户安装，不需要管理员权限）与免安装的 `.zip`，Linux 的 `.deb` 与 `.tar.gz`，Android 的 `.apk` 与上架用的 `.aab`，Web 的静态站点压缩包。桌面和 WebUI 安装包带有应用 CLI，开启 IPC 时还带有 Skill。静态 Web 包只含站点文件；Android CLI 在开发电脑上运行，不打进 APK。签名用环境变量配置，证书不进仓库：`BERN_MACOS_SIGNING_IDENTITY` 与 `BERN_MACOS_NOTARY_PROFILE`（签名并公证），`BERN_WINDOWS_CERTIFICATE`（证书指纹或 `.pfx`），`BERN_ANDROID_KEYSTORE`、`BERN_ANDROID_KEYSTORE_PASSWORD` 与 `BERN_ANDROID_KEY_ALIAS`（发布密钥）。没有配置时照样生成，并提示未签名的后果。
 
 ### 运行展示应用
 
@@ -482,10 +482,10 @@ showcase ui set-bool --target controls_page.sync --value true
 showcase showcase search-library --text mo                   # 引擎查询
 showcase window open --kind settings
 showcase window list                                         # 窗口的实际状态
-showcase-mcp                                                 # 经 stdio 的 MCP 服务器
+ssh HOST /path/to/showcase state
 ```
 
-只有目标声明了 `channels = ["ipc"]` 时才会启动控制通道；不声明则应用不监听任何端口。Android 应用在手机上监听，`bern run` 用 `adb forward` 把它接到这台电脑，命令行与 MCP 服务器照常使用。
+只有目标声明了 `channels = ["ipc"]` 时才会启动控制通道；不声明则应用不监听任何端口。Android 应用在手机上监听，`bern run` 用 `adb forward` 把它接到这台电脑，命令行照常使用。
 
 ## 路线图
 

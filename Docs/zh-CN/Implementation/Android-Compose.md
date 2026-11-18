@@ -34,7 +34,7 @@ let exported_uri = bern::platform::export_path(&received_file, &selected_tree.ur
 
 | 设计要求 | 状态 | 说明 |
 | --- | --- | --- |
-| 生成代码可构建 | 完成 | `bern build --target android` 生成 Kotlin、Gradle 工程与胶水 crate，用 NDK 编译引擎库、Gradle 打包 APK，并为这台电脑构建 CLI 与 MCP 服务器；生成测试检查三个示例的 Kotlin、清单、构建脚本与字符串表 |
+| 生成代码可构建 | 完成 | `bern build --target android` 生成 Kotlin、Gradle 工程与胶水 crate，用 NDK 编译引擎库、Gradle 打包 APK，并为这台电脑构建 CLI；生成测试检查三个示例的 Kotlin、清单、构建脚本与字符串表 |
 | 引擎在应用进程内 | 完成 | 引擎、会话运行时与 JNI 桥编译为 `libbern_app.so`；值按与 C ABI 相同的二进制布局传递 |
 | 不支持原生多窗口时用虚拟窗口 | 完成 | 一个 Activity：主窗口铺满屏幕，其他窗口叠在上面，系统返回关闭最上面的窗口；窗口事实报告为 `Virtual` |
 | 屏幕旋转、键盘、安全区域 | 部分 | Activity 自己处理配置变化，窗口与草稿不因旋转重建；内容避开系统栏与输入法（edge-to-edge 下按 insets 留出位置）；旋转未实测 |
@@ -54,7 +54,7 @@ let exported_uri = bern::platform::export_path(&received_file, &selected_tree.ur
 | `src/kotlin/` | Kotlin 生成器：值类型、引擎状态、会话草稿、每个组件与窗口一个 composable、Activity |
 | `src/style.rs` | `style!` 在 Compose 上的能力与 `BernStyle` 声明 |
 | `src/project.rs` | Gradle 脚本、清单、主题、应用名与字符串表 |
-| `src/glue.rs` | 引擎库（cdylib）与这台电脑上的 CLI、MCP 服务器 |
+| `src/glue.rs` | 引擎库（cdylib）与这台电脑上的 CLI |
 | `src/toolchain.rs` | 查找 SDK、NDK、Gradle 与 JDK |
 | `src/icons.rs` | 图标表：每个图标名对应的 Material 图标，生成 `BernIcons.get` 的分支，检查据此拒绝表中没有的名字 |
 | `templates/BernRuntime.kt` | 编解码、宿主、窗口、控件登记、外部会话命令、窗口根 |
@@ -100,7 +100,7 @@ Kotlin 对象 `BernNative` 声明 C ABI 的每个函数，`bern-ffi` 的 `androi
 
 ## 本地控制通道
 
-应用是自己的系统用户，开发者的工具不能与它共用目录，所以 Android 上通道监听抽象套接字 `bern.<包标识>`。对端检查允许应用自己的用户和 `adb` 所在的 shell 用户（开发版系统上为 root），其他应用连不上。`bern run` 在应用启动后执行 `adb forward`，把这台电脑上应用目录里的 `android.sock` 接到这个抽象套接字，CLI、JSON 客户端与 MCP 服务器（为这台电脑构建）因此和桌面一样找到它；这个应用的其他引擎也在运行时，用 `--engine android` 选它。再次运行时先移除旧的转发再重建，否则旧转发不会重新创建套接字文件。
+应用是自己的系统用户，开发者的工具不能与它共用目录，所以 Android 上通道监听抽象套接字 `bern.<包标识>`。对端检查允许应用自己的用户和 `adb` 所在的 shell 用户（开发版系统上为 root），其他应用连不上。`bern run` 在应用启动后执行 `adb forward`，把这台电脑上应用目录里的 `android.sock` 接到这个抽象套接字，CLI 和 JSON 客户端（为这台电脑构建）因此和桌面一样找到它；这个应用的其他引擎也在运行时，用 `--engine android` 选它。再次运行时先移除旧的转发再重建，否则旧转发不会重新创建套接字文件。
 
 ## 媒体
 
@@ -139,7 +139,7 @@ bern package --target android
 ```
 
 - `bern doctor` 检查 Android SDK、NDK、Gradle 与 Rust 的 Android 目标。工具的位置：`ANDROID_HOME`（或 Android Studio 的默认位置）、`ANDROID_NDK_HOME`（或 SDK 中最新的 NDK）、`BERN_GRADLE`（或 `PATH` 中的 `gradle`、Gradle 包装器下载的 9.4 以上版本）、`BERN_JAVA_HOME`（或 Android Studio 自带的运行时、`JAVA_HOME`）。缺少时 `bern build` 跳过 Android 并说明要装什么。
-- 构建步骤：用 NDK 的 clang 为 `aarch64-linux-android` 构建引擎库；复制到 `jniLibs`；镜像随包资源；Gradle 构建 APK；为这台电脑构建 CLI 与 MCP 服务器。第一次构建时 Gradle 从 Google 与 Maven Central 下载插件与库。
+- 构建步骤：用 NDK 的 clang 为 `aarch64-linux-android` 构建引擎库；复制到 `jniLibs`；镜像随包资源；Gradle 构建 APK；为这台电脑构建 CLI。第一次构建时 Gradle 从 Google 与 Maven Central 下载插件与库。
 - `bern run --target android` 要求恰好连着一台设备（真机或模拟器），安装 APK、启动 Activity、转发控制通道并显示应用的日志，应用进程结束时返回。
 - **发布包大小。** release 用 R8 瘦身：没有被用到的代码都会去掉，引擎按名字调用的类和方法在运行时里标了 `@Keep`；引擎按名字调用应用的其他类时也要这样标。release 的引擎库压缩后放进 APK，下载约小一半，安装时由系统解压，设备上相应多占这么多空间。debug 的引擎有几百 MB，每次运行都压缩太慢，所以不压缩。
 - **基线配置文件**：生成的工程带 `app/src/main/baseline-prof.txt`，列出 Bern 运行时（`dev/bern/runtime`）与生成的界面代码（应用的包）的全部类与方法；Gradle 把它与 Compose 等库自带的规则一起编进 APK 与 AAB。商店安装时系统按它预先编译；发布版构建另把 Gradle 为 Android 12 及以上生成的 `.dm` 复制为 APK 旁的 `<应用>.dm`，`bern run` 在 Android 12 及以上的设备上用 `adb install-multiple` 把两者一起装上，装完即为 `speed-profile`（设备不接受时只装 APK 并提示）；调试版不编译，构建时删掉旧的 `.dm`。直接装 APK 时由 Compose 带的 ProfileInstaller 在首次启动后写入配置文件，系统在下次后台编译时才用上，在那之前这些代码由解释器与 JIT 运行。
