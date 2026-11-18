@@ -1296,16 +1296,26 @@ fn query_bindings_lower_with_typed_templates() {
             Query(
                 id: hits,
                 query: app.find(draft.name),
+                presented: !draft.on,
                 loading: tr! { "en" => "Searching…", "ja" => "検索中…" },
                 empty: tr! { "en" => "No hits for {text}", "ja" => "{text} は見つかりません"; text: draft.name },
                 icon: "magnifyingglass"
             ) |hits| {
-                ForEach(items: hits, key: id) |hit| { Text(content: hit.title) }
+                QueryStatusHeader {
+                    if draft.on { Switch(id: tab, label: draft.name, value: draft.on) }
+                }
+                ScrollView {
+                    Switch(id: tab, label: draft.name, value: draft.on)
+                    ForEach(items: hits, key: id) |hit| { Text(content: hit.title) }
+                }
             }
             Query(id: best, query: app.first(draft.name), empty: tr! { "en" => "None", "ja" => "なし" }) |hit| {
                 Text(content: hit.title)
             }
-            Query(id: total, query: app.total()) |count| { Text(content: count) }
+            Query(id: total, query: app.total()) |draft| {
+                QueryStatusHeader { Text(content: draft.name) }
+                Text(content: draft)
+            }
         }"#,
         ),
     )
@@ -1331,6 +1341,10 @@ fn query_bindings_lower_with_typed_templates() {
     assert_eq!(queries.len(), 3);
     let hits = &queries[0];
     assert_eq!(hits.id.as_deref(), Some("hits"));
+    let condition = hits.query_presentation().unwrap();
+    assert_eq!(condition.ty, Type::Bool);
+    assert!(matches!(condition.kind, ir::ExprKind::Not { .. }));
+    assert!(queries[1].query_presentation().is_none());
     let binding = hits.query("query").unwrap();
     assert_eq!(binding.query, 1);
     assert_eq!(binding.args.len(), 1);
@@ -1338,6 +1352,10 @@ fn query_bindings_lower_with_typed_templates() {
     assert_eq!(binding.result, Type::list(hit.clone()));
     assert_eq!(hits.template.as_ref().unwrap().ty, Type::list(hit.clone()));
     assert!(hits.text("empty").is_some() && hits.text("loading").is_some());
+    let (header, body) = hits.query_children();
+    assert!(matches!(header, Some([ir::Node::If(_)])));
+    assert!(matches!(body, [ir::Node::Element(e)] if e.kind == "ScrollView"));
+    assert!(queries[1].query_children().0.is_none());
     // An optional result shows the value inside it.
     assert_eq!(queries[1].template.as_ref().unwrap().ty, hit);
     assert_eq!(queries[2].template.as_ref().unwrap().ty, Type::Int);
@@ -1374,6 +1392,18 @@ fn query_diagnostics() {
             r#"Query(id: q, query: windows.main.find(draft.name)) |x| { Spacer }"#,
             "not the typed engine client",
         ),
+        (
+            r#"Query(id: q, query: app.total(), presented: draft.name) |n| { Spacer }"#,
+            "this property must be bool, found text",
+        ),
+        (
+            r#"Query(id: q, query: app.total(), presented: n == 0) |n| { Spacer }"#,
+            "unknown binding `n`",
+        ),
+        (
+            "Query(id: q, query: app.total()) |n| { QueryStatusHeader { Text(content: n) } Spacer }",
+            "unknown binding `n`",
+        ),
         (r#"Query(id: q, query: app.total())"#, "needs a template"),
         (
             r#"Text(content: app.find(draft.name))"#,
@@ -1385,6 +1415,47 @@ fn query_diagnostics() {
         assert!(
             output.contains(expected),
             "`{body}` should report `{expected}`, got:\n{output}"
+        );
+    }
+}
+
+#[test]
+fn query_status_header_shape_and_control_ids() {
+    let query = |body: &str| format!("Query(id: q, query: app.total()) |n| {{ {body} }}");
+    let header = "QueryStatusHeader { Spacer }";
+    for invalid in [
+        header.to_owned(),
+        query(&format!("Spacer {header}")),
+        query(&format!("{header} {header}")),
+        query(&format!("if draft.on {{ {header} }}")),
+        query(&format!("Column {{ {header} }}")),
+    ] {
+        assert!(
+            query_errors(&invalid).contains("first direct child of `Query`"),
+            "{invalid}"
+        );
+    }
+    for invalid in [
+        "QueryStatusHeader {}",
+        "QueryStatusHeader { Spacer Spacer }",
+    ] {
+        assert!(
+            query_errors(&query(invalid)).contains("`QueryStatusHeader` takes exactly one child")
+        );
+    }
+    let control = "Switch(id: tab, label: draft.name, value: draft.on)";
+    let with_header = query(&format!("QueryStatusHeader {{ {control} }} Spacer"));
+    for invalid in [
+        format!("Column {{ {control} {with_header} }}"),
+        format!("Column {{ {with_header} {control} }}"),
+        query(&format!(
+            "QueryStatusHeader {{ Column {{ {control} {control} }} }} Spacer"
+        )),
+        query(&format!("{header} {control} {control}")),
+    ] {
+        assert!(
+            query_errors(&invalid).contains("control id `tab` is used twice"),
+            "{invalid}"
         );
     }
 }

@@ -326,22 +326,22 @@ impl Generator<'_> {
             return None;
         }
         let body = match &component.body {
-            Node::Element(element) => {
+            Node::Element(_) => {
                 self.leaving.set(true);
-                let code = self.element(element, "c");
+                let body = self.root(&component.body);
                 self.leaving.set(false);
-                code?
+                body
             }
             node => {
                 let mut out = String::new();
                 self.push_leaving(&mut out, std::slice::from_ref(node), Axis::Column);
-                format!(
-                    "b::column(c, b::Flex::default(), {{ let mut v: Vec<b::El> = Vec::new(); {out} v }})"
-                )
+                Self::root_column(&format!(
+                    "{{ let mut v: Vec<b::El> = Vec::new(); {out} v }}"
+                ))
             }
         };
         Some(format!(
-            "pub fn l_{}(c: &b::Ctx) -> b::El {{\n    {body}\n}}\n",
+            "pub fn l_{}(c: &b::Ctx) -> Option<b::El> {{\n    {body}\n}}\n",
             component.name
         ))
     }

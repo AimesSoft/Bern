@@ -13,7 +13,7 @@
 
 use crate::layout::{Layers, Rail, ReflowBox};
 use gtk::prelude::*;
-use std::cell::RefCell;
+use std::cell::{Cell, OnceCell, RefCell};
 use std::rc::{Rc, Weak};
 
 /// Plays a widget's disappearing transition, then runs the removal.
@@ -262,9 +262,28 @@ enum Item {
     Region(Rc<Region>),
 }
 
+/// Either the transition or the presentation that contains it may detach the
+/// widget first. Taking the callback also releases the widget and its sink.
+struct Removal(Cell<Option<Box<dyn FnOnce()>>>);
+
+impl Removal {
+    fn new(remove: impl FnOnce() + 'static) -> Rc<Self> {
+        Rc::new(Self(Cell::new(Some(Box::new(remove)))))
+    }
+
+    fn finish(&self) {
+        if let Some(remove) = self.0.take() {
+            remove();
+        }
+    }
+}
+
 struct Region {
     items: RefCell<Vec<Item>>,
     parent: Option<Weak<Region>>,
+    /// Only presentation boundaries track departing widgets. These widgets no
+    /// longer count as children, and even their item region may already be gone.
+    exits: OnceCell<RefCell<Vec<Weak<Removal>>>>,
 }
 
 impl Region {
@@ -272,7 +291,29 @@ impl Region {
         Rc::new(Self {
             items: RefCell::new(Vec::new()),
             parent: parent.map(Rc::downgrade),
+            exits: OnceCell::new(),
         })
+    }
+
+    fn track_exit(&self, remove: &Rc<Removal>) {
+        if let Some(exits) = self.exits.get() {
+            let mut exits = exits.borrow_mut();
+            if exits.len() == exits.capacity() {
+                exits.retain(|exit| exit.strong_count() != 0);
+            }
+            exits.push(Rc::downgrade(remove));
+        }
+        if let Some(parent) = self.parent.as_ref().and_then(Weak::upgrade) {
+            parent.track_exit(remove);
+        }
+    }
+
+    fn finish_exits(&self) {
+        if let Some(exits) = self.exits.get() {
+            for exit in exits.take().into_iter().filter_map(|exit| exit.upgrade()) {
+                exit.finish();
+            }
+        }
     }
 
     fn widgets(&self, out: &mut Vec<gtk::Widget>) {
@@ -589,12 +630,14 @@ impl Parent {
                 let sink = self.sink.clone();
                 let gone = widget.clone();
                 let filled = fills_any(widget);
-                exit(Box::new(move || {
+                let remove = Removal::new(move || {
                     sink.remove(&gone);
                     if filled && let Some(container) = sink.container() {
                         refit(&container);
                     }
-                }));
+                });
+                self.region.track_exit(&remove);
+                exit(Box::new(move || remove.finish()));
             }
             None => self.sink.remove(widget),
         }
@@ -649,6 +692,14 @@ impl Parent {
         }
     }
 
+    /// Like a normal region, but hiding it can also finish native exits that
+    /// began below it before their item regions were removed or reordered.
+    pub(crate) fn presentation_region(&self) -> Parent {
+        let region = self.region();
+        region.region.exits.get_or_init(RefCell::default);
+        region
+    }
+
     /// The widgets of this region, in order.
     pub(crate) fn widgets(&self) -> Vec<gtk::Widget> {
         let mut widgets = Vec::new();
@@ -656,15 +707,35 @@ impl Parent {
         widgets
     }
 
-    /// Remove every widget of this region.
+    /// Remove every widget of this region. A presentation boundary drops
+    /// its outgoing controls before mounting the next phase, even if both
+    /// phases are nonempty and declare the same control.
     pub fn clear(&self) {
+        if self.region.exits.get().is_some() {
+            self.clear_now();
+        } else {
+            self.clear_region(false);
+        }
+    }
+
+    pub(crate) fn clear_now(&self) {
+        self.region.finish_exits();
+        self.clear_region(true);
+    }
+
+    fn clear_region(&self, immediate: bool) {
         let mut widgets = Vec::new();
         self.region.widgets(&mut widgets);
         self.region.items.borrow_mut().clear();
         // Content that filled leaves its containers to their own size.
         let filled = widgets.iter().any(fills_any);
         for widget in &widgets {
-            self.remove_widget(widget);
+            if immediate {
+                take_exit(widget);
+                self.sink.remove(widget);
+            } else {
+                self.remove_widget(widget);
+            }
         }
         if filled && let Some(container) = self.sink.container() {
             refit(&container);
@@ -725,6 +796,50 @@ mod tests {
             None
         );
         assert_eq!(cross_alignment(Some(Start), false, false, true, true), None);
+    }
+
+    #[test]
+    #[ignore = "requires a GTK display"]
+    fn hiding_a_presentation_finishes_only_its_native_exits() {
+        use super::{Parent, on_exit};
+        use gtk::prelude::*;
+        use std::{cell::RefCell, rc::Rc};
+
+        gtk::init().expect("GTK display");
+        let panel = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        let root = Parent::of_box(&panel);
+        let page = root.presentation_region();
+        let sibling = root.presentation_region();
+        // A keyed row has left the logical region while its widget is still
+        // attached. Hold the animation completion instead of relying on a timer.
+        let start_exit = |parent: &Parent| {
+            let child = parent.region();
+            let button = gtk::Button::new();
+            child.add(&button);
+            let done = Rc::new(RefCell::new(None));
+            let pending = Rc::clone(&done);
+            on_exit(
+                button.upcast_ref(),
+                Rc::new(move |finish| *pending.borrow_mut() = Some(finish)),
+            );
+            parent.remove_region(&child);
+            (button, done.take().unwrap())
+        };
+        let (old, finish_old) = start_exit(&page);
+        let (beside, finish_beside) = start_exit(&sibling);
+        let current = gtk::Button::new();
+        page.add(&current);
+        assert!(old.parent().is_some() && beside.parent().is_some());
+        page.clear_now();
+        assert!(old.parent().is_none() && current.parent().is_none());
+        assert!(beside.parent().is_some());
+        // Even reusing the same native widget cannot let a late completion
+        // detach it from a new presentation.
+        panel.append(&old);
+        finish_old();
+        assert!(old.parent().is_some());
+        finish_beside();
+        assert!(beside.parent().is_none());
     }
 
     #[test]

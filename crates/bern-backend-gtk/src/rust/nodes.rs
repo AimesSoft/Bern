@@ -68,6 +68,11 @@ impl Generator<'_> {
 
     fn node(&self, out: &mut Out, node: &Node) {
         match node {
+            // The query owns its subscription outside both the condition and
+            // any layout/appearance wrappers of the presentation.
+            Node::Element(element) if element.query_presentation().is_some() => {
+                self.query(out, element);
+            }
             Node::Element(element) => {
                 let placement = self.placement(element);
                 if let Some(spec) = &placement {

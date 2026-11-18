@@ -1,5 +1,5 @@
 //! The result of an asynchronous query. The subscription belongs to the
-//! window instance and ends with this view; parameters are sent again
+//! window instance and ends with its declaring scope; parameters are sent again
 //! only when they change, and only the current answer is shown.
 
 use crate::controls::{self, Actions};
@@ -24,6 +24,10 @@ pub struct QueryProps {
     pub icon: Option<&'static str>,
     /// The template variable.
     pub var: &'static str,
+    /// A rail places one stable widget; its query phases change inside it.
+    pub placed: bool,
+    /// Outer-scope content above a loading/failure state with no prior answer.
+    pub status_header: Option<Build>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -86,13 +90,18 @@ fn spinner() -> gtk::Widget {
 
 #[allow(non_snake_case)]
 pub fn Query(p: &Parent, ctx: &Ctx, props: QueryProps, template: Build) {
+    own_query(ctx, props, template)(p, ctx);
+}
+
+/// Subscribe in the current scope. Mounting or dropping the returned view
+/// affects only the presentation, including its retry target.
+pub fn own_query(ctx: &Ctx, props: QueryProps, template: Build) -> Build {
     let host = host();
     let Some(spec) = host.def.descriptor.commands.get(props.query) else {
-        return;
+        return Rc::new(|_, _| {});
     };
     let result = spec.result.clone();
     let param_types: Vec<Type> = spec.params.iter().map(|param| param.ty.clone()).collect();
-    let has_empty = props.empty.is_some();
     let state = Cell::new(State {
         version: 0,
         phase: 0,
@@ -198,6 +207,40 @@ pub fn Query(p: &Parent, ctx: &Ctx, props: QueryProps, template: Build) {
         })
     };
 
+    Rc::new(move |p, ctx| {
+        let draw = |p: &Parent| {
+            present(
+                p,
+                ctx,
+                &props,
+                &result,
+                &state,
+                Rc::clone(&retry),
+                Rc::clone(&template),
+            );
+        };
+        if props.placed {
+            // Place collects the widgets made on mount. Keep that rail item,
+            // not the first loading row, attached while the phase changes.
+            let group = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            draw(&Parent::of_box(&group));
+            p.add(&group);
+        } else {
+            draw(p);
+        }
+    })
+}
+
+fn present(
+    p: &Parent,
+    ctx: &Ctx,
+    props: &QueryProps,
+    result: &Type,
+    state: &Cell<State>,
+    retry: Rc<dyn Fn()>,
+    template: Build,
+) {
+    let has_empty = props.empty.is_some();
     // Which status to show, and whether the template shows data.
     let key: Rc<dyn Fn() -> &'static str> = {
         let state = state.clone();
@@ -233,9 +276,8 @@ pub fn Query(p: &Parent, ctx: &Ctx, props: QueryProps, template: Build) {
     let failed = text_of(&props.failed, "bern.query.failed");
     let empty = props.empty.as_ref().map(|_| text_of(&props.empty, ""));
     let empty_icon = props.icon.unwrap_or("tray");
-    let in_list = p.is_list();
-    let wrap = move |widget: gtk::Widget| -> gtk::Widget {
-        if in_list {
+    let wrap = |p: &Parent, widget: gtk::Widget| -> gtk::Widget {
+        if p.is_list() {
             plain_row(&widget).upcast()
         } else {
             widget
@@ -282,7 +324,7 @@ pub fn Query(p: &Parent, ctx: &Ctx, props: QueryProps, template: Build) {
                 let label = bound_label(Rc::clone(&loading));
                 label.add_css_class("dim-label");
                 line.append(&label);
-                p.add(&wrap(line.upcast()));
+                p.add(&wrap(p, line.upcast()));
             })
         },
         {
@@ -298,7 +340,7 @@ pub fn Query(p: &Parent, ctx: &Ctx, props: QueryProps, template: Build) {
                 let failed = Rc::clone(&failed);
                 effect(move || shown.set_title(&failed()));
                 page.set_child(Some(&retry_button(Rc::clone(&retry))));
-                p.add(&wrap(page.upcast()));
+                p.add(&wrap(p, page.upcast()));
             })
         },
         {
@@ -312,7 +354,7 @@ pub fn Query(p: &Parent, ctx: &Ctx, props: QueryProps, template: Build) {
                     let shown = page.clone();
                     effect(move || shown.set_title(&empty()));
                 }
-                p.add(&wrap(page.upcast()));
+                p.add(&wrap(p, page.upcast()));
             })
         },
         {
@@ -323,7 +365,7 @@ pub fn Query(p: &Parent, ctx: &Ctx, props: QueryProps, template: Build) {
                 let label = bound_label(Rc::clone(&loading));
                 label.add_css_class("dim-label");
                 line.append(&label);
-                p.add(&wrap(line.upcast()));
+                p.add(&wrap(p, line.upcast()));
             })
         },
         {
@@ -339,11 +381,12 @@ pub fn Query(p: &Parent, ctx: &Ctx, props: QueryProps, template: Build) {
                 label.set_xalign(0.0);
                 line.append(&label);
                 line.append(&retry_button(Rc::clone(&retry)));
-                p.add(&wrap(line.upcast()));
+                p.add(&wrap(p, line.upcast()));
             })
         },
     ];
-    crate::When(p, ctx, status_branch, arms);
+    let status: Build =
+        Rc::new(move |p, ctx| crate::When(p, ctx, Rc::clone(&status_branch), arms.clone()));
 
     let data_key = Rc::clone(&key);
     let data_state = state.clone();
@@ -358,12 +401,33 @@ pub fn Query(p: &Parent, ctx: &Ctx, props: QueryProps, template: Build) {
                 .unwrap_or(Value::Unit)
         }),
     );
-    crate::When(
-        p,
-        ctx,
-        Rc::new(move |_| (data_key() == "data").then_some(0)),
-        vec![Rc::new(move |p: &Parent, _: &Ctx| template(p, &inner))],
-    );
+    let answered: Build = {
+        let status = Rc::clone(&status);
+        let branch: Branch = Rc::new(move |_| (data_key() == "data").then_some(0));
+        let data: Build = Rc::new(move |p, _| template(p, &inner));
+        Rc::new(move |p, ctx| {
+            status(p, ctx);
+            crate::When(p, ctx, Rc::clone(&branch), vec![Rc::clone(&data)]);
+        })
+    };
+    if let Some(header) = props.status_header.clone() {
+        let cold: Build = Rc::new(move |p, ctx| {
+            let group = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            let inside = Parent::of_box(&group);
+            header(&inside, ctx);
+            status(&inside, ctx);
+            p.add(&wrap(p, group.upcast()));
+        });
+        let state = state.clone();
+        let phase: Branch = Rc::new(move |_| {
+            // Only inspect the phase and the wire's presence bit, not the result.
+            let needs_header = state.with(|s| matches!(s.phase, 0 | 1 | 4) && s.data.is_none());
+            Some(if needs_header { 0 } else { 1 })
+        });
+        crate::structure::when(p, ctx, phase, vec![cold, answered], true);
+    } else {
+        answered(p, ctx);
+    }
 
     if let Some(id) = props.id {
         let read = state.clone();

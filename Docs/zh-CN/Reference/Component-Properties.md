@@ -140,7 +140,8 @@
 | `ShortcutInput` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag`<br>**`current: Shortcut`**（状态，不可为字面量）<br>`prompt: DisplayText`<br>`empty: DisplayText`<br>`enabled: Bool`<br>`feature: Feature` | 不含子节点；必须绑定动作，动作中与 `current` 相同的表达式换成选中的快捷键 |
 | `Slider` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag`<br>`value: NumberField`<br>`current: NumberValue`<br>`continuous: Flag`（仅 `current`）<br>**`min: Number`**<br>**`max: Number`**<br>`step: Number`<br>`min_icon: Icon`<br>`max_icon: Icon`<br>`feature: Feature` | 不含子节点；动作可选 |
 | `Video` | **`id: Id`**<br>`source: MediaSource`<br>`player: Player`<br>`label: DisplayText`<br>`controls: standard / none`<br>`fit: contain / cover / fill`<br>`sizing: standard / fill`<br>`corner: Length` | 不含子节点；无动作。`controls: none` 的视频只显示画面，可以作为 `Button` 的内容。`sizing: fill` 让播放表面占满有明确大小的父容器，`fit` 只控制视频内容如何放进表面；内核弹幕可以使用黑边。默认 `standard` 保持原有布局。应用登记了媒体内核时由内核画进视图给它的表面，见[设计文档](../Design.md#应用自带的媒体内核) |
-| `Query` | **`id: Id`**<br>**`query: Query`**<br>`loading: DisplayText`<br>`empty: DisplayText`<br>`failed: DisplayText`<br>`icon: Icon` | 可含子内容；无动作 |
+| `Query` | **`id: Id`**<br>**`query: Query`**<br>`presented: Bool`<br>`loading: DisplayText`<br>`empty: DisplayText`<br>`failed: DisplayText`<br>`icon: Icon` | 结果模板；开头可放一个 `QueryStatusHeader`；无动作 |
+| `QueryStatusHeader` | — | 恰好一个子节点；必须是 `Query` 的第一个直接子节点，至多一次；无动作 |
 | `Picker` | **`id: Id`**<br>**`label: DisplayText`**<br>`value: PickerField`<br>`selected: KeyValue`<br>`label_hidden: Flag`<br>`shape: capsule`<br>`height: Length`<br>`style: automatic / menu / segmented / radio / inline / chips` | 仅含 ["PickerOption"]；动作可选；`chips` 不接受 `shape` / `height` |
 
 `Grid` 给出 `cell_ratio` 时每行一样高：列宽 ÷ `cell_ratio` + `cell_extra`（如海报 2 : 3 加两行字的高度：`cell_ratio: 0.6667, cell_extra: 54`），各项从格子顶部排，内容更高时伸进下方的行间距，与按最高一项定行高的默认方式不同。
@@ -166,6 +167,43 @@
 `Form` 的 `gap` 是分组之间的距离，`row_height` 是行的最小高度，`padding_x` / `padding_y` 是所有分组行的内边距（`Section` 自己的同名属性优先）；表单以 `Section(style: plain)` 开头时从页面顶部开始，这一组的行没有底色、边距和分隔线，作为随表单滚动的标题。表单给分组的行内边距不作用于 plain 分组，它只用自己的 `padding_x` / `padding_y`。打头的 plain 分组也可以来自插槽、组件或条件：表单在布局时看第一项是不是 plain 分组，条件变了跟着变，所以 `if window.compact { Section(style: plain) { … } }` 只在窄窗口里让表单贴顶。`style!` 里 `Form { background: 角色 }` 是行的底色，表单本身透出页面背景。
 
 `Row` 的各项放得下时取各自的宽度，剩余空间由 `Spacer` 和撑满的项平分；放不下时其余项按各自宽度的比例收缩，不小于各自的最小宽度。`Spacer` 没有最小长度，放不下时先收到零，各目标相同。`Row` 里领头的文字后面紧跟 `Spacer` 时（没写宽度的 `Text`，或不写 `align`、`align: leading` 的 `Column`），由文字占去 `Spacer` 的位置：后面的控件保持自己的宽度，文字在剩下的宽度里换行，如系统列表行的标签；SwiftUI 与 Compose 这样排，其他目标按上面的一般规则。给定 `width` / `height` 而内容较小时，`Column` 从顶部开始、横向按 `align` 摆放，`Row` 从前缘开始、纵向按 `align` 摆放。`Column` 不写 `align` 时与 `leading` 相同：按钮等控件、内层的 `Column` 与 `Stack` 保持自己的宽度，输入框、分隔线、`Grid`、`List` 等横向填满的内容横跨整列，要让按钮横跨整列写 `Button(width: fill)`。直接写在窗口里、没写宽度的 `Column` 与窗口内容区同宽，从顶部开始、横向按 `align` 摆放；没写尺寸的 `Stack` 铺满内容区；比内容区小的其他正文从左上角排起。
+
+## 切换分页时保留页面的查询
+
+把 `Query` **放在宿主页面之内、切换分页的条件分支之外**，用 `presented` 决定何时显示结果和状态控件。如果分页选择器固定不滚动，把它和查询并排声明，首次答复到达前也能切换。
+
+```rust
+Column {
+    Switch(id: show_results, label: tr! { "en" => "Show results" }, value: draft.show_results)
+    Query(id: results, query: app.search(draft.text, 20), presented: draft.show_results,
+          empty: tr! { "en" => "No matches" }) |books| {
+        ForEach(items: books, key: id) |book| { Text(content: book.title) }
+    }
+    if !draft.show_results { Text(content: tr! { "en" => "Settings" }) }
+}
+```
+
+`presented` 默认为 `true`。它是外层作用域中的布尔表达式，**不是**查询参数；单独切换它不会发起请求或推进请求版本。为 `false` 时不创建结果、状态或重试控件，不占布局，不进入焦点顺序、无障碍树或外部控件列表。订阅仍处理参数变化、`#[reads]` 声明的依赖失效以及查询回复。切回来显示的是**当前**状态：已有结果或空态立即呈现；真正尚未完成的首次请求仍显示加载，失败仍可重试。框架不为每个分页或每组参数缓存一份结果。
+
+移除整个声明（例如把 `Query` 写进 `if draft.show_results`）或关闭所属窗口都会释放订阅。另一个窗口有自己的订阅。
+
+### 让标题随结果滚动
+
+如果分页选择器应随结果滚动，把它放进成功模板的 `ScrollView`。要在还没有答复时也能切换，在 `Query` 的第一个直接子节点 `QueryStatusHeader` 里调用同一个组件：
+
+```rust
+Query(id: results, query: app.search(draft.text, 20), presented: draft.show_results) |books| {
+    QueryStatusHeader { browse_header(app: app) }
+    ScrollView {
+        browse_header(app: app)
+        ForEach(items: books, key: id) |book| { Text(content: book.title) }
+    }
+}
+```
+
+`QueryStatusHeader` 只收一个子节点，使用外层作用域：可以读 `app` 和 `draft`，不能读本次查询的 `books`。如果只想在某个条件下显示，把 `if` 写在标题**里面**。等待首次答复时，标题位于原生进度控件上方；失败且没有旧答复时，它位于原生错误提示和重试按钮上方。它不替换这些控件，也不另开订阅。
+
+成功返回空列表或 `None` 也算已有答复。只要当前有答复，包括刷新中或失败时带回了旧答复，就不显示状态标题。查询仍按原有方式呈现数据、空结果和错误。`presented` 为假时，两处内容都不构造。省略 `QueryStatusHeader` 不改变查询的默认界面。
 
 ## 通用动效与轨道属性
 

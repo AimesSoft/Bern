@@ -167,7 +167,7 @@ function runtime(search = "") {
     reportError(error) { throw error; },
   };
   const context = vm.createContext(globals);
-  for (const [name, extra] of [["bern", ["chooseLanguage"]], ["features", ["transitionFrom"]]]) {
+  for (const [name, extra] of [["bern", ["chooseLanguage", "host"]], ["features", ["transitionFrom"]]]) {
     const source = readFileSync(new URL(`../templates/${name}.js`, import.meta.url), "utf8");
     const exported = [...source.matchAll(/^export (?:async )?(?:class|function|const) (\w+)/gm)].map((match) => match[1]);
     const plain = source.replace(/^import .+;$/gm, "").replace(/^export /gm, "");
@@ -176,6 +176,237 @@ function runtime(search = "") {
   const flushMicrotasks = () => { while (microtasks.length) microtasks.shift()(); };
   return { B: context.B, F: context.F, Element, document: globals.document, navigator: globals.navigator, screen: globals.screen, probes, queries, timers, frames, flushMicrotasks, resizeObservers, mutationObservers, fetches, listeners };
 }
+
+// Replace only the engine transport. The scopes, query decoder, controls,
+// conditional branches, DOM construction and teardown are the runtime's.
+function queryPages({ optional = false } = {}) {
+  const { B, Element } = runtime();
+  const live = new Map(), opened = [], closed = [], requests = [];
+  function packet(version, phase, data) {
+    const w = new B.Writer();
+    const rows = () => {
+      if (optional) w.u8(data === null ? 0 : 1);
+      if (data === null) return;
+      w.u8(data.length); for (const n of data) w.u8(n);
+    };
+    w.u64(version); w.u8(phase);
+    if (phase === 2 || phase === 3) rows();
+    if (phase === 4) {
+      w.u8(data === undefined ? 0 : 1);
+      if (data !== undefined) rows();
+      w.text("offline"); w.text("Offline");
+    }
+    return w.finish();
+  }
+  B.host.queryOpen = (win, _, receive) => {
+    const id = opened.push(win);
+    live.set(id, { receive, version: 0 });
+    return id;
+  };
+  B.host.queryRequest = (id, bytes) => {
+    requests.push([id, ...bytes]);
+    return packet(++live.get(id).version, 1);
+  };
+  B.host.queryClose = (id) => { live.delete(id); closed.push(id); };
+  function deliver(id, version, phase, data) {
+    const sub = live.get(id);
+    sub.version = Math.max(sub.version, version);
+    sub.receive(packet(version, phase, data));
+  }
+  function mount(win, initiallyShown, { header = false } = {}) {
+    const root = new Element("main"), window = new B.Scope(null);
+    const onPage = B.cell(true), selected = B.cell(initiallyShown), arg = B.cell(10);
+    const built = [];
+    const ctx = { win, comp: "page" };
+    const controls = id => B.controlEntries().filter(e => e.window === win && e.target() === `page.${id}`);
+    function navigation(parent, c) {
+      // Check at mount time, not just after both branches have finished switching.
+      assert.equal(controls("view").length, 0);
+      B.Button(parent, c, { id: "view", label: () => "Settings" }, () => selected.set(false));
+    }
+    B.within(window, () => B.When(root, ctx, () => onPage.get() ? 0 : -1, [(p) => {
+      const view = B.ownQuery(ctx, {
+        id: "results", query: 0, params: () => [arg.get()],
+        decode: r => optional && r.u8() === 0 ? null : Array.from({ length: r.u8() }, () => r.u8()),
+        shown: data => optional || data.length ? data : null, count: data => optional ? Number(data !== null) : data.length,
+        loading: () => { built.push("loading"); return "Loading"; },
+        empty: () => { built.push("empty"); return "No items"; },
+        failed: () => { built.push("failed"); return "Offline"; },
+      }, (parent, c, data) => {
+        built.push("data");
+        if (header) navigation(parent, c);
+        const row = new Element("button");
+        B.bindText(row, () => data().join(","));
+        parent.append(row);
+      }, header ? (parent, c) => { built.push("header"); navigation(parent, c); } : undefined);
+      B.presentWhen(p, ctx, () => selected.get(), view);
+    }]));
+    return { root, window, arg, onPage, selected, built, controls, control: () => controls("results")[0] };
+  }
+  return { mount, deliver, opened, closed, requests };
+}
+
+test("a page follows replies, parameter changes and invalidation while the result tab has no UI", () => {
+  const { mount, deliver, opened, closed, requests } = queryPages();
+  const p = mount("main", false);
+  deliver(1, 1, 2, [4]);
+  assert.equal(p.root.children.length, 0);
+  assert.deepEqual(p.built, []);
+  assert.equal(p.control(), undefined);
+  p.selected.set(true);
+  assert.deepEqual(p.built, ["data"]);
+  assert.equal(p.control().actions.value(), "ready v1 (1)");
+  for (let i = 0; i < 3; i++) {
+    p.selected.set(false);
+    assert.equal(p.root.children.length, 0);
+    assert.equal(p.control(), undefined);
+    p.selected.set(true);
+  }
+  assert.deepEqual(opened, ["main"]);
+  assert.deepEqual(requests, [[1, 10]]);
+  assert.ok(!p.built.includes("loading"));
+  p.selected.set(false);
+  p.built.length = 0;
+  p.arg.set(20);
+  deliver(1, 2, 2, [8]);
+  // A new version published by an engine dependency invalidation, not a tab switch.
+  deliver(1, 3, 3, [8]);
+  deliver(1, 3, 2, []);
+  deliver(1, 2, 2, [99]);
+  assert.deepEqual(p.built, []);
+  p.selected.set(true);
+  assert.deepEqual(p.built, ["empty"]);
+  assert.equal(p.control().actions.value(), "ready v3 (0)");
+  assert.deepEqual(requests, [[1, 10], [1, 20]]);
+  p.onPage.set(false);
+  assert.deepEqual(closed, [1]);
+  assert.equal(p.control(), undefined);
+  p.arg.set(30);
+  assert.equal(requests.length, 2);
+  p.window.dispose();
+  assert.deepEqual(closed, [1]);
+});
+
+test("a hidden refresh can return with its previous data and retry side by side", () => {
+  const { mount, deliver, requests } = queryPages();
+  const p = mount("main", false);
+  deliver(1, 1, 2, [6]);
+  deliver(1, 2, 3, [6]);
+  p.selected.set(true);
+  assert.equal(p.control().actions.value(), "refreshing v2 (1)");
+  assert.deepEqual(p.built, ["loading", "data"]);
+  p.selected.set(false);
+  p.built.length = 0;
+  deliver(1, 2, 4, [6]);
+  assert.deepEqual(p.built, []);
+  assert.equal(p.root.children.length, 0);
+  p.selected.set(true);
+  assert.equal(p.control().actions.value(), "failed v2 (1)");
+  assert.deepEqual(p.built, ["failed", "data"]);
+  const [status, content] = p.root.children[0].children;
+  assert.ok(status.children[0].children.some(node => node.tagName === "button"));
+  assert.equal(content.children[0].textContent, "6");
+  assert.deepEqual(requests, [[1, 10]]);
+  p.window.dispose();
+});
+
+test("cold loading and retry stay real; windows with the same target have independent owners", () => {
+  const { mount, deliver, opened, closed, requests } = queryPages();
+  const a = mount("first", true), b = mount("second", false);
+  assert.deepEqual(a.built, ["loading"]);
+  assert.equal(a.control().actions.value(), "loading v1");
+  a.selected.set(false);
+  deliver(1, 1, 4);
+  deliver(2, 1, 2, [7]);
+  assert.deepEqual(a.built, ["loading"]);
+  assert.equal(a.control(), undefined);
+  a.selected.set(true);
+  assert.deepEqual(a.built, ["loading", "failed"]);
+  assert.equal(a.control().actions.value(), "failed v1");
+  const descendants = node => node.children.flatMap(child => [child, ...descendants(child)]);
+  const retry = descendants(a.root).find(n => n.tagName === "button");
+  retry.dispatch("click");
+  assert.equal(a.control().actions.value(), "loading v2");
+  assert.deepEqual(requests, [[1, 10], [2, 10], [1, 10]]);
+  a.selected.set(false);
+  assert.equal(a.root.children.length, 0);
+  a.window.dispose();
+  assert.deepEqual(closed, [1]);
+  b.selected.set(true);
+  assert.deepEqual(b.built, ["data"]);
+  assert.equal(b.control().actions.value(), "ready v1 (1)");
+  assert.deepEqual(opened, ["first", "second"]);
+  b.window.dispose();
+  assert.deepEqual(closed, [1, 2]);
+  assert.equal(b.control(), undefined);
+});
+
+test("the unanswered header precedes progress and retry; the answered layout owns its own navigation", () => {
+  const { mount, deliver, opened, requests, closed } = queryPages();
+  const p = mount("main", true, { header: true });
+  const query = p.root.children[0], control = p.control();
+  const [header, status] = query.children;
+  assert.equal(query.children.length, 2);
+  assert.equal(header.getAttribute("data-bern-target"), "page.view");
+  assert.equal(status.children[0].getAttribute("role"), "status");
+  assert.deepEqual(p.built, ["header", "loading"]);
+
+  deliver(1, 1, 4);
+  assert.equal(query.children[0], header);
+  const error = status.children[0];
+  assert.equal(error.getAttribute("role"), "alert");
+  error.children.find(n => n.tagName === "button").dispatch("click");
+  assert.equal(control.actions.value(), "loading v2");
+  assert.deepEqual(p.built, ["header", "loading", "failed", "loading"]);
+
+  deliver(1, 2, 2, [6]);
+  const content = query.children[1];
+  const nav = content.children[0];
+  assert.equal(nav.getAttribute("data-bern-target"), "page.view");
+  assert.equal(query.contains(header), false);
+  assert.equal(content.children[1].textContent, "6");
+  assert.equal(p.controls("view").length, 1);
+  deliver(1, 3, 3, [6]);
+  deliver(1, 3, 4, [6]);
+  assert.equal(content.children[0], nav);
+  assert.equal(p.control(), control);
+  assert.deepEqual(p.built, ["header", "loading", "failed", "loading", "data", "loading", "failed"]);
+
+  p.controls("view")[0].actions.activate();
+  assert.equal(p.controls("view").length, 0);
+  assert.equal(p.control(), undefined);
+  assert.equal(p.root.children.length, 0);
+  p.built.length = 0;
+  deliver(1, 4, 2, []);
+  deliver(1, 3, 4); // late cold failure cannot replace the empty answer
+  assert.deepEqual(p.built, []);
+  p.selected.set(true);
+  assert.deepEqual(p.built, ["empty"]);
+  assert.equal(p.controls("view").length, 0);
+  assert.deepEqual(opened, ["main"]);
+  assert.deepEqual(requests, [[1, 10], [1, 10]]);
+  p.window.dispose();
+  assert.deepEqual(closed, [1]);
+});
+
+test("an absent optional value is a previous answer, not a first failure", () => {
+  const { mount, deliver } = queryPages({ optional: true });
+  const p = mount("main", false, { header: true });
+  deliver(1, 1, 2, null);
+  p.selected.set(true);
+  assert.deepEqual(p.built, ["empty"]);
+  deliver(1, 2, 3, null);
+  deliver(1, 2, 4, null); // hasPrevious = 1, but the decoded answer is null
+  assert.equal(p.controls("view").length, 0);
+  assert.ok(!p.built.includes("header") && !p.built.includes("data"));
+  deliver(1, 3, 4); // hasPrevious = 0
+  assert.equal(p.controls("view").length, 1);
+  assert.equal(p.root.children[0].children[0].getAttribute("data-bern-target"), "page.view");
+  p.controls("view")[0].actions.activate();
+  assert.equal(p.root.children.length, 0);
+  assert.equal(p.control(), undefined);
+  p.window.dispose();
+});
 
 /// An `<img>` of `url` in a scope of its own, with what a test does to it:
 /// `failAsked` is the browser failing a try and `fetch` answering why.

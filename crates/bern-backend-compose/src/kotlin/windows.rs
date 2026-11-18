@@ -37,6 +37,10 @@ impl Generator<'_> {
                 ParamKind::Client { .. } | ParamKind::Windows | ParamKind::Players => {}
             }
         }
+        let query_root = self.app.has_query_presentation_root(&component.body);
+        if query_root {
+            params.push("__bernRootModifier: Modifier = Modifier".into());
+        }
         out.line(format!(
             "/// Generated from the `{}` component.",
             component.name
@@ -48,6 +52,7 @@ impl Generator<'_> {
         // The component may be a direct child of a staggering container.
         let ctx = Ctx {
             component: component.name.clone(),
+            query_modifier: query_root.then_some("__bernRootModifier"),
             stagger: self.staggers,
             ..Ctx::default()
         };

@@ -100,6 +100,23 @@ impl Application {
             .find(|component| component.name == name)
     }
 
+    /// Whether a component (including a chain of forwarding components)
+    /// emits only a `Query` with a presentation condition. Layout applied at
+    /// the call site must then wait for the query to emit its content.
+    pub fn has_query_presentation_root<'a>(&'a self, mut node: &'a Node) -> bool {
+        for _ in 0..=self.components.len() {
+            match node {
+                Node::Element(element) => return element.query_presentation().is_some(),
+                Node::Component(reference) => match self.component(&reference.component) {
+                    Some(component) => node = &component.body,
+                    None => return false,
+                },
+                _ => return false,
+            }
+        }
+        false
+    }
+
     pub fn session(&self, name: &str) -> Option<&SessionDef> {
         self.sessions.iter().find(|session| session.name == name)
     }
@@ -1087,6 +1104,26 @@ pub struct Element {
 impl Element {
     pub fn prop(&self, name: &str) -> Option<&Prop> {
         self.props.get(name)
+    }
+
+    /// A mounted query owns its subscription independently of this optional
+    /// presentation condition. This is not part of the query call or its key.
+    pub fn query_presentation(&self) -> Option<&Expr> {
+        (self.kind == "Query")
+            .then(|| self.expr("presented"))
+            .flatten()
+    }
+
+    /// A query's optional status header and its separate success template.
+    /// Keeping the header node in `children` also keeps it visible to normal
+    /// IR walks (translations, required capabilities, component references).
+    pub fn query_children(&self) -> (Option<&[Node]>, &[Node]) {
+        match self.children.split_first() {
+            Some((Node::Element(header), body)) if header.kind == "QueryStatusHeader" => {
+                (Some(&header.children), body)
+            }
+            _ => (None, &self.children),
+        }
     }
 
     /// The items of its `ContextMenu`, dividers among them, if it has one.

@@ -821,16 +821,10 @@ impl Generator<'_> {
         self.toolbar(out, &element.children, ctx);
     }
 
-    /// A `Query`: the runtime view owns the subscription and shows the
-    /// loading, refreshing, failed and empty states; the template shows
-    /// the data. Its parameters are encoded on every render; the runtime
-    /// requests them only when they change.
-    pub(super) fn query(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
-        let (Some(binding), Some(template)) = (element.query("query"), &element.template) else {
-            return;
-        };
+    /// Open the owner before the node's accordion, window or motion wrappers.
+    pub(super) fn query_scope(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let binding = element.query("query").expect("typed query");
         let data = swift_type(&binding.result);
-        let shown = swift_type(&template.ty);
         let params = if binding.args.is_empty() {
             "[]".to_string()
         } else {
@@ -844,6 +838,27 @@ impl Generator<'_> {
                 encode.join("; ")
             )
         };
+        let count = match &binding.result {
+            Type::List { .. } => format!("{{ (data: {data}) in data.count }}"),
+            Type::Optional { .. } => format!("{{ (data: {data}) in data == nil ? 0 : 1 }}"),
+            _ => "nil".into(),
+        };
+        let presented = element
+            .query_presentation()
+            .map(|e| self.expr(e))
+            .unwrap_or_else(|| "true".into());
+        out.open(format!(
+            "BernQueryScope({data}.self, query: {}, target: {}, params: {params}, presented: {presented}, count: {count}) {{ __bernPhase, __bernRetry in",
+            binding.query, self.target(element, ctx)
+        ));
+    }
+
+    pub(super) fn query(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let (Some(binding), Some(template)) = (element.query("query"), &element.template) else {
+            return;
+        };
+        let data = swift_type(&binding.result);
+        let shown = swift_type(&template.ty);
         let framework = |key: &str| format!("BernText.string({})", string(key));
         let loading = self
             .text_prop(element, "loading")
@@ -854,37 +869,41 @@ impl Generator<'_> {
         let empty = self.text_prop(element, "empty");
         let icon = element.icon("icon").unwrap_or("tray");
         // The declared empty rule: an empty list or a missing optional.
-        let (shown_body, count) = match &binding.result {
-            Type::List { .. } if empty.is_some() => (
-                "data.isEmpty ? nil : data",
-                format!("{{ (data: {data}) in data.count }}"),
-            ),
-            Type::List { .. } => ("data", format!("{{ (data: {data}) in data.count }}")),
-            Type::Optional { .. } => (
-                "data",
-                format!("{{ (data: {data}) in data == nil ? 0 : 1 }}"),
-            ),
-            _ => ("data", "nil".to_string()),
+        let shown_body = match &binding.result {
+            Type::List { .. } if empty.is_some() => "data.isEmpty ? nil : data",
+            _ => "data",
         };
-        out.open("BernQueryView(");
-        out.line(format!(
-            "query: {}, target: {},",
-            binding.query,
-            self.target(element, ctx)
-        ));
-        out.line(format!("params: {params},"));
+        let (header, body) = element.query_children();
+        if let Some(header) = header {
+            out.open("BernQueryStatusLayout(active: __bernPhase.needsStatusHeader) {");
+            self.nodes(
+                out,
+                header,
+                &Ctx {
+                    row: false,
+                    flow: false,
+                    ..ctx.clone()
+                },
+            );
+            out.close("} content: {");
+            out.indent += 1;
+        }
+        out.open("BernQueryView(phase: __bernPhase, retry: __bernRetry,");
         out.line(format!(
             "loading: {loading}, empty: {}, emptyIcon: {}, failed: {failed},",
             empty.unwrap_or_else(|| "nil".into()),
             string(icon)
         ));
         out.line(format!(
-            "count: {count}, shown: {{ (data: {data}) -> {shown}? in {shown_body} }}"
+            "shown: {{ (data: {data}) -> {shown}? in {shown_body} }}"
         ));
         out.close(format!(") {{ {} in", member(&template.var)));
         out.indent += 1;
-        self.nodes(out, &element.children, ctx);
+        self.nodes(out, body, ctx);
         out.close("}");
+        if header.is_some() {
+            out.close("}");
+        }
     }
 
     /// One closure per layout size; `BernAdaptive` picks one by the

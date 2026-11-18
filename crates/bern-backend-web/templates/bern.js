@@ -1495,10 +1495,13 @@ class Region {
     this.end = document.createComment("");
     parent.append(this.start, this.end);
   }
-  clear() {
+  clear(immediate = false) {
     const nodes = [];
     for (let node = this.start.nextSibling; node && node !== this.end; node = node.nextSibling) nodes.push(node);
-    for (const node of nodes) leave(node);
+    for (const node of nodes) {
+      if (immediate) node.remove();
+      else leave(node);
+    }
   }
   /// A detached fragment the builder fills, then inserted at once.
   fill(build) {
@@ -3321,7 +3324,7 @@ export function Section(p, ctx, { title, footer, plain, paddingX, paddingY }, ch
 
 /// Conditional content: `branch()` picks an arm; only a change of arm
 /// rebuilds, and the arm's own bindings update in place.
-export function When(p, ctx, branch, arms) {
+export function When(p, ctx, branch, arms, immediate = false) {
   const region = new Region(p);
   let current = Symbol("none");
   let owner = null;
@@ -3335,7 +3338,7 @@ export function When(p, ctx, branch, arms) {
     first = false;
     untrack(() => {
       owner?.dispose();
-      region.clear();
+      region.clear(immediate);
       owner = new Scope(null);
       const arm = arms[next];
       if (arm) {
@@ -3344,6 +3347,11 @@ export function When(p, ctx, branch, arms) {
     });
   });
   onCleanup(() => owner?.dispose());
+}
+
+/// No hidden layout box, live region, focus target or exiting DOM.
+export function presentWhen(p, ctx, condition, view) {
+  When(p, ctx, () => condition() ? 0 : -1, [view], true);
 }
 
 /// The nodes from `start` to `end`, inclusive.
@@ -4463,23 +4471,30 @@ export function LanguagePicker(p, ctx, { id, label, labelHidden = false }) {
 /// The result of an asynchronous query. The subscription belongs to the
 /// window instance and ends with this view; parameters are sent again only
 /// when they change.
-export function Query(p, ctx, spec, template) {
-  const { id, query, params, decode, loading, failed, empty, emptyIcon, count, shown } = spec;
+export function Query(p, ctx, spec, template, statusHeader) {
+  ownQuery(ctx, spec, template, statusHeader)(p, ctx);
+}
+
+/// The current page owns the subscription; the returned builder owns only UI.
+export function ownQuery(ctx, spec, template, statusHeader) {
+  const { query, params, decode } = spec;
   const state = cell({ version: 0n, phase: 0, data: null, error: null });
-  const node = el("div", { class: "bern-query" });
   let subscription = null;
   const receive = (bytes) => {
     const reader = new Reader(bytes);
     const version = reader.u64();
+    if (version < state.peek().version) return;
     const phase = reader.u8();
     let data = null;
     let error = null;
+    let hasPrevious = false;
     if (phase === 2 || phase === 3) data = decode(reader);
     if (phase === 4) {
-      if (reader.u8() === 1) data = decode(reader);
+      hasPrevious = reader.u8() === 1;
+      if (hasPrevious) data = decode(reader); // An optional answer can itself be null.
       error = { code: reader.text(), message: reader.text() };
     }
-    state.set({ version, phase, data, error });
+    state.set({ version, phase, data, error, hasPrevious });
   };
   try {
     subscription = host.queryOpen(ctx.win, query, receive);
@@ -4511,9 +4526,46 @@ export function Query(p, ctx, spec, template) {
     sent = bytes.join(",");
     request(bytes);
   };
+  return (p, at) => presentQuery(p, at, spec, template, state, retry, statusHeader);
+}
+
+function presentQuery(p, ctx, spec, template, state, retry, statusHeader) {
+  const node = el("div", { class: "bern-query" });
+  const answered = (parent, c) => queryBody(parent, c, spec, template, state, retry);
+  if (statusHeader) {
+    // Dispose the whole outgoing layout before mounting its alternative. The
+    // query control itself stays registered until the presentation ends.
+    When(node, ctx, () => {
+      const { phase, hasPrevious } = state.get();
+      return phase === 0 || phase === 1 || (phase === 4 && !hasPrevious) ? 0 : 1;
+    }, [(parent, c) => {
+      statusHeader(parent, c);
+      queryBody(parent, c, spec, null, state, retry);
+    }, answered], true);
+  } else {
+    answered(node, ctx);
+  }
+  trackLayout(node, "column");
+  if (spec.id) {
+    control(ctx, {
+      target: () => target(ctx, spec.id), role: "query", label: () => "",
+      actions: {
+        activate: retry,
+        value: () => {
+          const { phase, version, data } = state.peek();
+          const name = ["idle", "loading", "ready", "refreshing", "failed"][phase];
+          const n = data === null ? null : spec.count(data);
+          return n === null ? `${name} v${version}` : `${name} v${version} (${n})`;
+        },
+      },
+    });
+  }
+  p.append(node);
+}
+
+function queryBody(p, ctx, { loading, failed, empty, emptyIcon, shown }, template, state, retry) {
   const status = el("div", { class: "bern-query-status" });
-  const content = el("div", { class: "bern-query-content" });
-  node.append(status, content);
+  p.append(status);
   const retryButton = () => {
     const text = el("span");
     bindText(text, () => tr("bern.query.retry"));
@@ -4563,32 +4615,17 @@ export function Query(p, ctx, spec, template) {
       f.append(el("div", { class: "bern-query-line bern-query-error", role: "alert" }, icon("exclamationmark.triangle", 14), text, retryButton()));
     },
   });
+  if (!template) return; // A cold layout never builds or observes the result template.
+  const content = el("div", { class: "bern-query-content" });
+  p.append(content);
   When(content, ctx, () => (phaseKey() === "data" ? "data" : "none"), {
     data: (f) => template(f, ctx, () => {
       const { data } = state.get();
       return data === null ? null : shown(data);
     }),
   });
-  // Queries can replace a loading placeholder with a page containing a
-  // scroll view. Carry that page's layout intent through both wrappers,
-  // including subsequent result replacements, for this query's lifetime.
+  // Carry the result's layout intent through its wrapper when data changes.
   trackLayout(content, "column");
-  trackLayout(node, "column");
-  if (id) {
-    control(ctx, {
-      target: () => target(ctx, id), role: "query", label: () => "",
-      actions: {
-        activate: retry,
-        value: () => {
-          const { phase, version, data } = state.peek();
-          const name = ["idle", "loading", "ready", "refreshing", "failed"][phase];
-          const n = data === null ? null : count(data);
-          return n === null ? `${name} v${version}` : `${name} v${version} (${n})`;
-        },
-      },
-    });
-  }
-  p.append(node);
 }
 
 // MARK: - Media

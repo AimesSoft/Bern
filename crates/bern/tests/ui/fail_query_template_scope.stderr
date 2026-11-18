@@ -1,0 +1,11 @@
+error: unknown binding `answer`; bindings start at a component parameter or template variable
+  --> tests/ui/fail_query_template_scope.rs:24:24
+   |
+24 |             presented: answer) |answer| { Spacer }
+   |                        ^^^^^^
+
+error: unknown binding `answer`; bindings start at a component parameter or template variable
+  --> tests/ui/fail_query_template_scope.rs:32:36
+   |
+32 |             QueryStatusHeader { if answer { Spacer } }
+   |                                    ^^^^^^

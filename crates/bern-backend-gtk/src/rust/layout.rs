@@ -360,10 +360,24 @@ impl Generator<'_> {
             return;
         };
         let params: Vec<_> = binding.args.iter().map(|arg| self.getter(arg)).collect();
+        let condition = element.query_presentation();
+        let placement = self.placement(element);
+        let (header, body) = element.query_children();
+        if condition.is_some() || header.is_some() {
+            out.open("{");
+        }
+        if let Some(header) = header {
+            self.children(out, "let status_header = ", header, ";");
+        }
+        let open = if condition.is_some() {
+            "let draw = b::own_query(c,"
+        } else {
+            "b::Query(p, c,"
+        };
         self.children(
             out,
             &format!(
-                "b::Query(p, c, b::QueryProps {{ id: {}, query: {}, params: vec![{}], loading: {}, failed: {}, empty: {}, icon: {}, var: {} }}, ",
+                "{open} b::QueryProps {{ id: {}, query: {}, params: vec![{}], loading: {}, failed: {}, empty: {}, icon: {}, var: {}, placed: {}, status_header: {} }}, ",
                 some(element.id.as_ref().map(|_| self.id(element))),
                 binding.query,
                 params.join(", "),
@@ -372,10 +386,26 @@ impl Generator<'_> {
                 some(self.text_prop(element, "empty")),
                 Self::icon(element, "icon"),
                 string(&template.var),
+                placement.is_some(),
+                if header.is_some() { "Some(status_header)" } else { "None" },
             ),
-            &element.children,
+            body,
             ");",
         );
+        if let Some(condition) = condition {
+            if let Some(place) = placement {
+                out.line(format!(
+                    "let draw = b::build(move |p, c| b::Place(p, c, {place}, Rc::clone(&draw)));"
+                ));
+            }
+            out.line(format!(
+                "b::present_when(p, c, {}, draw);",
+                self.getter(condition)
+            ));
+        }
+        if condition.is_some() || header.is_some() {
+            out.close("}");
+        }
     }
 
     /// One builder per layout size; the runtime picks one by the width

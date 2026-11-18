@@ -140,7 +140,8 @@ Fixed enums list the allowed keywords directly. The table does not repeat every 
 | `ShortcutInput` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag`<br>**`current: Shortcut`** (state, cannot be a literal)<br>`prompt: DisplayText`<br>`empty: DisplayText`<br>`enabled: Bool`<br>`feature: Feature` | No children; must bind an action, and in the action the expression identical to `current` is replaced with the chosen shortcut |
 | `Slider` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag`<br>`value: NumberField`<br>`current: NumberValue`<br>`continuous: Flag` (only with `current`)<br>**`min: Number`**<br>**`max: Number`**<br>`step: Number`<br>`min_icon: Icon`<br>`max_icon: Icon`<br>`feature: Feature` | No children; action optional |
 | `Video` | **`id: Id`**<br>`source: MediaSource`<br>`player: Player`<br>`label: DisplayText`<br>`controls: standard / none`<br>`fit: contain / cover / fill`<br>`sizing: standard / fill`<br>`corner: Length` | No children; no action. A video with `controls: none` shows only the picture and can be the content of a `Button`. `sizing: fill` makes the playback surface fill a parent container that has a definite size, and `fit` only controls how the video content is placed in the surface; danmaku drawn by the media core can use the letterbox bars. The default `standard` keeps the original layout. When the app registers a media core, the core draws into the surface the view gives it; see the [design document](../Design.md#app-provided-media-cores) |
-| `Query` | **`id: Id`**<br>**`query: Query`**<br>`loading: DisplayText`<br>`empty: DisplayText`<br>`failed: DisplayText`<br>`icon: Icon` | May contain children; no action |
+| `Query` | **`id: Id`**<br>**`query: Query`**<br>`presented: Bool`<br>`loading: DisplayText`<br>`empty: DisplayText`<br>`failed: DisplayText`<br>`icon: Icon` | Result template with an optional leading `QueryStatusHeader`; no action |
+| `QueryStatusHeader` | — | Exactly one child; first direct child of `Query`, at most once; no action |
 | `Picker` | **`id: Id`**<br>**`label: DisplayText`**<br>`value: PickerField`<br>`selected: KeyValue`<br>`label_hidden: Flag`<br>`shape: capsule`<br>`height: Length`<br>`style: automatic / menu / segmented / radio / inline / chips` | Contains only ["PickerOption"]; action optional; `chips` does not accept `shape` / `height` |
 
 When `Grid` is given `cell_ratio`, every row has the same height: column width ÷ `cell_ratio` + `cell_extra` (for example a 2 : 3 poster plus the height of two lines of text: `cell_ratio: 0.6667, cell_extra: 54`); items are laid out from the top of their cell, and taller content extends into the row gap below, unlike the default, which sets the row height from the tallest item.
@@ -166,6 +167,43 @@ With `markdown`, the content of `Text` is inline Markdown: `**bold**`, `*italic*
 The `gap` of `Form` is the distance between groups, `row_height` is the minimum row height, and `padding_x` / `padding_y` are the inner padding of the rows of all groups (a `Section`'s own properties of the same name take precedence); when a form begins with `Section(style: plain)`, it starts at the top of the page, and the rows of that group have no background, margins or separators, serving as a heading that scrolls with the form. The row padding the form gives groups does not apply to plain groups, which use only their own `padding_x` / `padding_y`. The leading plain group can also come from a slot, a component or a condition: during layout the form checks whether the first item is a plain group, and follows when the condition changes, so `if window.compact { Section(style: plain) { … } }` makes the form start at the top only in narrow windows. In `style!`, `Form { background: role }` is the background of the rows, and the form itself lets the page background show through.
 
 Items in a `Row` take their own widths when they fit, and the remaining space is shared equally by `Spacer`s and filling items; when they do not fit, the other items shrink in proportion to their own widths, but not below their own minimum widths. `Spacer` has no minimum length and is the first to shrink to zero when things do not fit, the same on every target. When leading text in a `Row` is immediately followed by a `Spacer` (a `Text` without a width, or a `Column` without `align` or with `align: leading`), the text takes the `Spacer`'s place: the controls after it keep their own widths, and the text wraps within the remaining width, like the label of a system list row; SwiftUI and Compose lay it out this way, and other targets follow the general rule above. When `width` / `height` is given and the content is smaller, `Column` starts from the top and is placed horizontally by `align`, and `Row` starts from the leading edge and is placed vertically by `align`. A `Column` without `align` is the same as `leading`: buttons and other controls, as well as inner `Column` and `Stack`, keep their own widths, while horizontally filling content such as input fields, dividers, `Grid` and `List` spans the whole column; to make a button span the whole column, write `Button(width: fill)`. A `Column` written directly in a window without a width is as wide as the window content area, starts from the top and is placed horizontally by `align`; a `Stack` without a size fills the content area; other body content smaller than the content area is laid out from the top-left corner.
+
+## Keep a page's query while showing another tab
+
+Declare `Query` **inside the page but outside the branch that switches tabs**. Use `presented` to choose when to show its result and status controls. If the tab selector stays fixed, make it a sibling of the query so it works even before the first answer.
+
+```rust
+Column {
+    Switch(id: show_results, label: tr! { "en" => "Show results" }, value: draft.show_results)
+    Query(id: results, query: app.search(draft.text, 20), presented: draft.show_results,
+          empty: tr! { "en" => "No matches" }) |books| {
+        ForEach(items: books, key: id) |book| { Text(content: book.title) }
+    }
+    if !draft.show_results { Text(content: tr! { "en" => "Settings" }) }
+}
+```
+
+`presented` defaults to `true`. It is a Boolean expression in the surrounding scope, **not** a query argument: toggling it neither requests data nor advances the request version. While false, there is no result, status or retry control in layout, focus, accessibility or external control lookup. The subscription still follows argument changes, invalidation from `#[reads]` and replies. Showing it again presents its **current** state: ready data or an empty result immediately, a real pending load, or a failure with retry. This does not cache results per tab or argument set.
+
+Removing the declaration (for example by putting the entire `Query` inside `if draft.show_results`) or closing its window ends the subscription. Another window owns a separate subscription.
+
+### A header that scrolls with the results
+
+If the selector should scroll with the results, put it inside the success template’s `ScrollView`. To offer the same selector before the first answer, make `QueryStatusHeader` the first direct child of `Query` and call the selector component inside it:
+
+```rust
+Query(id: results, query: app.search(draft.text, 20), presented: draft.show_results) |books| {
+    QueryStatusHeader { browse_header(app: app) }
+    ScrollView {
+        browse_header(app: app)
+        ForEach(items: books, key: id) |book| { Text(content: book.title) }
+    }
+}
+```
+
+`QueryStatusHeader` takes one child, evaluated in the surrounding scope: it can use `app` and `draft`, not this query's `books`. To make it conditional, put `if` **inside** the header. It appears above the native progress indicator until the first answer, or above the native failure and retry controls if there is no previous answer. It does not replace those controls or start a second subscription.
+
+A successful empty list or `None` counts as an answer. Once an answer is available, the status header is absent, including during a refresh or a failure that carries the previous answer. The query keeps its usual handling of data, empty results and errors. When `presented` is false neither layout is built. Omitting `QueryStatusHeader` leaves the default query UI unchanged.
 
 ## Common motion and rail properties
 

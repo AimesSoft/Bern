@@ -188,17 +188,39 @@ pub fn query(
     props: QueryProps,
     template: impl FnOnce(&Ctx, Value) -> Vec<El>,
 ) -> El {
+    match own_query(c, id, query, params) {
+        Some(owned) => owned.present(c, props, template),
+        None => div().into_any_element(),
+    }
+}
+
+/// A view of one frame's live subscription, not another cache. The sweep in
+/// `end` still releases subscriptions no longer owned by this page/window.
+pub struct OwnedQuery {
+    key: String,
+    id: &'static str,
+    query: usize,
+    params: Vec<u8>,
+}
+
+/// Mark the owner seen and follow its parameters even without a layout node.
+pub fn own_query(
+    c: &Ctx,
+    id: &'static str,
+    query: usize,
+    params: Vec<Value>,
+) -> Option<OwnedQuery> {
+    if crate::motion::drawing_exit() {
+        return None;
+    }
     let host = host();
-    let Some(spec) = host.def.descriptor.commands.get(query) else {
-        return div().into_any_element();
-    };
-    let target = c.target(id);
+    let spec = host.def.descriptor.commands.get(query)?;
     let window = c.win().id.clone();
     let key = format!("{window}/{}", c.key(id));
     let opened = SUBSCRIPTIONS.with(|subscriptions| subscriptions.borrow().contains_key(&key));
     // Looking for controls opens nothing.
     if !opened && c.listing() {
-        return div().into_any_element();
+        return None;
     }
     if !opened {
         let win = c.win();
@@ -245,7 +267,9 @@ pub fn query(
     let (fresh, live) = SUBSCRIPTIONS.with(|subscriptions| {
         let mut subscriptions = subscriptions.borrow_mut();
         let subscription = subscriptions.get_mut(&key).expect("opened above");
-        subscription.seen = true;
+        if !c.listing() {
+            subscription.seen = true;
+        }
         (
             subscription.sent.as_ref() != Some(&bytes),
             subscription.id != 0,
@@ -254,118 +278,151 @@ pub fn query(
     if fresh && live && !c.listing() {
         request(&key, bytes.clone());
     }
-    let state = SUBSCRIPTIONS
-        .with(|subscriptions| {
-            subscriptions
-                .borrow()
-                .get(&key)
-                .map(|subscription| subscription.state.clone())
-        })
-        .unwrap_or_default();
+    Some(OwnedQuery {
+        key,
+        id,
+        query,
+        params: bytes,
+    })
+}
 
-    let retry: crate::ctx::Press = {
-        let key = key.clone();
-        Rc::new(move |_| request(&key, bytes.clone()))
-    };
-    let name = ["idle", "loading", "ready", "refreshing", "failed"][state.phase.min(4) as usize];
-    c.list(Control {
-        target,
-        window,
-        role: "query",
-        label: String::new(),
-        value: Some(match state.data.as_ref().and_then(count) {
-            Some(n) => format!("{name} v{} ({n})", state.version),
-            None => format!("{name} v{}", state.version),
-        }),
-        enabled: true,
-        actions: Actions {
-            activate: Some(Rc::clone(&retry)),
-            ..Actions::default()
-        },
-    });
-
-    let has_empty = props.empty.is_some();
-    let visible = state
-        .data
-        .as_ref()
-        .and_then(|data| shown(data, &spec.result, has_empty));
-    let loading = props
-        .loading
-        .unwrap_or_else(|| text::tr("bern.query.loading"));
-    let failed = props
-        .failed
-        .unwrap_or_else(|| text::tr("bern.query.failed"));
-    let secondary = c.color("text.secondary");
-    let retry_button = |c: &Ctx| {
-        let retry = Rc::clone(&retry);
-        let hover = c.slot("button.standard", "hover", "background");
-        div()
-            .id(c.element_id("retry"))
-            .flex_none()
-            .px(px(12.0))
-            .h(px(30.0))
-            .flex()
-            .items_center()
-            .rounded(px(8.0))
-            .bg(c.slot("button.standard", "rest", "background"))
-            .text_size(px(13.0))
-            .font_weight(FontWeight::MEDIUM)
-            .hover(move |style| style.bg(hover))
-            .child(text::tr("bern.query.retry"))
-            .on_click(move |_, _, cx| {
-                cx.stop_propagation();
-                retry(cx)
-            })
-    };
-    let line = |content: Vec<El>| {
-        div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .justify_center()
-            .gap(px(8.0))
-            .py(px(18.0))
-            .text_size(px(13.0))
-            .text_color(secondary)
-            .children(content)
-            .into_any_element()
-    };
-    let status = if state.phase == 1 || (state.phase == 0 && state.data.is_none()) {
-        Some(line(vec![div().child(loading.clone()).into_any_element()]))
-    } else if state.phase == 4 && state.data.is_none() {
-        Some(line(vec![
-            icons::icon("exclamationmark.triangle", 16.0, c.color("status.warning")),
-            div().child(failed.clone()).into_any_element(),
-            retry_button(c).into_any_element(),
-        ]))
-    } else if visible.is_none() && has_empty {
-        Some(line(vec![
-            icons::icon(props.icon.unwrap_or("tray"), 16.0, secondary),
-            div()
-                .child(props.empty.clone().unwrap_or_default())
-                .into_any_element(),
-        ]))
-    } else {
-        None
-    };
-    if let Some(status) = status {
-        return c
-            .grow()
-            .apply(div().flex().flex_col().child(status))
-            .into_any_element();
+impl OwnedQuery {
+    pub fn present(
+        &self,
+        c: &Ctx,
+        props: QueryProps,
+        template: impl FnOnce(&Ctx, Value) -> Vec<El>,
+    ) -> El {
+        self.present_with_header(c, props, |_| Vec::new(), template)
     }
-    // Data, with what the query is doing again above it.
-    let note = match state.phase {
-        3 => Some(line(vec![div().child(loading).into_any_element()])),
-        4 => Some(line(vec![
-            icons::icon("exclamationmark.triangle", 16.0, c.color("status.warning")),
-            div().child(failed).into_any_element(),
-            retry_button(c).into_any_element(),
-        ])),
-        _ => None,
-    };
-    let content = template(c, visible.unwrap_or(Value::Unit));
-    c.grow()
-        .apply(div().flex().flex_col().children(note).children(content))
-        .into_any_element()
+
+    pub fn present_with_header(
+        &self,
+        c: &Ctx,
+        props: QueryProps,
+        header: impl FnOnce(&Ctx) -> Vec<El>,
+        template: impl FnOnce(&Ctx, Value) -> Vec<El>,
+    ) -> El {
+        let key = &self.key;
+        let spec = &host().def.descriptor.commands[self.query];
+        let state = SUBSCRIPTIONS
+            .with(|subscriptions| {
+                subscriptions
+                    .borrow()
+                    .get(key)
+                    .map(|subscription| subscription.state.clone())
+            })
+            .unwrap_or_default();
+
+        let retry: crate::ctx::Press = {
+            let key = self.key.clone();
+            let bytes = self.params.clone();
+            Rc::new(move |_| request(&key, bytes.clone()))
+        };
+        let name =
+            ["idle", "loading", "ready", "refreshing", "failed"][state.phase.min(4) as usize];
+        c.list(Control {
+            target: c.target(self.id),
+            window: c.win().id.clone(),
+            role: "query",
+            label: String::new(),
+            value: Some(match state.data.as_ref().and_then(count) {
+                Some(n) => format!("{name} v{} ({n})", state.version),
+                None => format!("{name} v{}", state.version),
+            }),
+            enabled: true,
+            actions: Actions {
+                activate: Some(Rc::clone(&retry)),
+                ..Actions::default()
+            },
+        });
+
+        let has_empty = props.empty.is_some();
+        let visible = state
+            .data
+            .as_ref()
+            .and_then(|data| shown(data, &spec.result, has_empty));
+        let loading = props
+            .loading
+            .unwrap_or_else(|| text::tr("bern.query.loading"));
+        let failed = props
+            .failed
+            .unwrap_or_else(|| text::tr("bern.query.failed"));
+        let secondary = c.color("text.secondary");
+        let retry_button = |c: &Ctx| {
+            let retry = Rc::clone(&retry);
+            let hover = c.slot("button.standard", "hover", "background");
+            div()
+                .id(c.element_id("retry"))
+                .flex_none()
+                .px(px(12.0))
+                .h(px(30.0))
+                .flex()
+                .items_center()
+                .rounded(px(8.0))
+                .bg(c.slot("button.standard", "rest", "background"))
+                .text_size(px(13.0))
+                .font_weight(FontWeight::MEDIUM)
+                .hover(move |style| style.bg(hover))
+                .child(text::tr("bern.query.retry"))
+                .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    retry(cx)
+                })
+        };
+        let line = |content: Vec<El>| {
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .justify_center()
+                .gap(px(8.0))
+                .py(px(18.0))
+                .text_size(px(13.0))
+                .text_color(secondary)
+                .children(content)
+                .into_any_element()
+        };
+        let status = if state.phase == 1 || (state.phase == 0 && state.data.is_none()) {
+            Some(line(vec![div().child(loading.clone()).into_any_element()]))
+        } else if state.phase == 4 && state.data.is_none() {
+            Some(line(vec![
+                icons::icon("exclamationmark.triangle", 16.0, c.color("status.warning")),
+                div().child(failed.clone()).into_any_element(),
+                retry_button(c).into_any_element(),
+            ]))
+        } else if visible.is_none() && has_empty {
+            Some(line(vec![
+                icons::icon(props.icon.unwrap_or("tray"), 16.0, secondary),
+                div()
+                    .child(props.empty.clone().unwrap_or_default())
+                    .into_any_element(),
+            ]))
+        } else {
+            None
+        };
+        if let Some(status) = status {
+            // Even an empty answer belongs to the answered layout. Do not
+            // construct the header (or list its controls) in that case.
+            let mut column = div().flex().flex_col();
+            if matches!(state.phase, 0 | 1 | 4) && state.data.is_none() {
+                column = column.children(header(c));
+            }
+            return c.grow().apply(column.child(status)).into_any_element();
+        }
+        // Data, with what the query is doing again above it.
+        let note = match state.phase {
+            3 => Some(line(vec![div().child(loading).into_any_element()])),
+            4 => Some(line(vec![
+                icons::icon("exclamationmark.triangle", 16.0, c.color("status.warning")),
+                div().child(failed).into_any_element(),
+                retry_button(c).into_any_element(),
+            ])),
+            _ => None,
+        };
+        let content = template(c, visible.unwrap_or(Value::Unit));
+        c.grow()
+            .apply(div().flex().flex_col().children(note).children(content))
+            .into_any_element()
+    }
 }
