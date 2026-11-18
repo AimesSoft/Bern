@@ -529,6 +529,8 @@ struct Catalog {
 /// font, Segoe Fluent Icons on Windows 11 and Segoe MDL2 Assets on Windows
 /// 10; empty when there is none. Generated with the catalog.
 wchar_t const* IconGlyph(std::string_view name);
+/// Fluent path markup when the system fonts do not supply the symbol.
+wchar_t const* IconPath(std::string_view name);
 
 /// Whether this is Windows 11 or later.
 bool OnWindows11();

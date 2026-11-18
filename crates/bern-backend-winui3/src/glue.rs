@@ -490,6 +490,8 @@ pub fn resource_script(app: &Application, executable: &str) -> String {
 // for the executable, and the runtime gives it to every window.
 1 ICON "app.ico"
 {status}
+1 RCDATA "fluent-icons-license.txt"
+
 1 VERSIONINFO
 FILEVERSION {major},{minor},{patch},0
 PRODUCTVERSION {major},{minor},{patch},0

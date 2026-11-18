@@ -564,8 +564,18 @@ fn gallery_generates_without_warnings() {
         "c.fileKinds.push_back({\"video\", {\"mp4\"",
         "wchar_t const* IconGlyph(",
         "if (!OnWindows11()) {",
+        "wchar_t const* IconPath(",
     ] {
         assert!(catalog.contains(expected), "missing `{expected}`");
+    }
+    for family in ["quote.bubble", "text.bubble", "captions.bubble"] {
+        for suffix in ["", ".fill"] {
+            let path = format!(r#"if (name == "{family}{suffix}") return L"F1 "#);
+            assert!(
+                catalog.contains(&path),
+                "missing Fluent path for {family}{suffix}"
+            );
+        }
     }
     compile(&output);
 }

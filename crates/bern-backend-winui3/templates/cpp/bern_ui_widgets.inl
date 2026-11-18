@@ -1613,7 +1613,7 @@ inline xaml::UIElement IconGlyph(Ctx const& ctx, IconButtonProps const& props) {
     layers.Children().Append(base);
     if (props.iconProgress) {
         auto fill = Icons::Icon(props.icon, size);
-        if (auto style = Styles::Themed(L"FontIcon", {{L"Foreground", RoleKey("accent")}})) fill.Style(style);
+        if (auto style = Styles::Themed(L"IconElement", {{L"Foreground", RoleKey("accent")}})) fill.Style(style);
         media::RectangleGeometry clip;
         fill.Clip(clip);
         auto fraction = std::make_shared<double>(0);
@@ -1640,7 +1640,7 @@ inline xaml::UIElement IconGlyph(Ctx const& ctx, IconButtonProps const& props) {
         badge.CornerRadius({size, size, size, size});
         if (auto style = Styles::Themed(L"Border", {{L"Background", RoleKey("surface.canvas")}})) badge.Style(style);
         auto glyph = Icons::Icon(props.badgeIcon, size * 0.4);
-        if (auto style = Styles::Themed(L"FontIcon", {{L"Foreground", RoleKey("accent")}})) glyph.Style(style);
+        if (auto style = Styles::Themed(L"IconElement", {{L"Foreground", RoleKey("accent")}})) glyph.Style(style);
         badge.Child(glyph);
         controls::Canvas::SetLeft(badge, -size * 0.46);
         controls::Canvas::SetTop(badge, -size * 0.46);

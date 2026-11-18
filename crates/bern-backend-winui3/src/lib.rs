@@ -336,7 +336,7 @@ impl Target for WinUi3Windows {
         diagnostics.extend(bern_target_api::icon_set::check(
             app,
             "the Windows icon set",
-            |icon| icons::glyph(icon).is_some(),
+            icons::supported,
         ));
         let mut visit = |node: &Node| {
             if let Node::Element(element) = node
@@ -442,6 +442,10 @@ impl Target for WinUi3Windows {
             ),
             GeneratedFile::text("app/app.manifest", glue::manifest(app)),
             GeneratedFile::text("app/app.rc", glue::resource_script(app, &executable)),
+            GeneratedFile::text(
+                "app/fluent-icons-license.txt",
+                include_str!("../icons/fluent/LICENSE"),
+            ),
             GeneratedFile {
                 path: "app/app.ico".into(),
                 contents: app_ico(app, context)?,
