@@ -82,6 +82,11 @@ fn hello_generates_a_gradle_project_and_the_jni_glue() {
     assert!(kotlin.contains("fun wave(bernWindow: BernWindowContext?"));
     let manifest = file(&files, "AndroidManifest.xml");
     assert!(manifest.contains("android:name=\".MainActivity\""));
+    let settings = file(&files, "settings.gradle.kts");
+    assert!(settings.contains("val central = mavenCentral()"));
+    assert!(settings.contains(
+        "exclusiveContent {\n            forRepositories(central)\n            filter { includeGroupAndSubgroups(\"org.jetbrains.kotlin\") }\n        }"
+    ));
     let build = file(&files, "app/build.gradle.kts");
     assert!(build.contains("applicationId = \"dev.bern.hello\""));
     assert!(build.contains("minSdk = 26"));
