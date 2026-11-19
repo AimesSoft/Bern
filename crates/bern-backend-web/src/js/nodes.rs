@@ -250,6 +250,7 @@ impl Generator<'_> {
             "SearchItem" => self.search_item(out, element),
             "Switch" => self.switch(out, element),
             "Slider" => self.slider(out, element),
+            "ColorPicker" => self.color_picker(out, element),
             "Picker" => self.picker(out, element),
             "Video" => self.video(out, element),
             "Query" => self.query(out, element),

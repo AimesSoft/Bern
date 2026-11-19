@@ -1722,6 +1722,95 @@ pub fn Switch(p: &Parent, ctx: &Ctx, props: SwitchProps) {
 }
 
 #[derive(Default)]
+pub struct ColorPickerProps {
+    pub id: &'static str,
+    pub label: Option<Str>,
+    pub model: Option<Model>,
+    pub label_hidden: bool,
+}
+
+#[allow(non_snake_case)]
+pub fn ColorPicker(p: &Parent, ctx: &Ctx, props: ColorPickerProps, commit: Option<Act>) {
+    let Some(model) = props.model else { return };
+    let bound = Bound::model(ctx, model);
+    let label = props.label.as_ref().map(|label| bound_text(ctx, label));
+    let dialog = gtk::ColorDialog::new();
+    dialog.set_with_alpha(false);
+    let button = gtk::ColorDialogButton::new(Some(dialog));
+    let shown_label = (!props.label_hidden).then(|| label.clone()).flatten();
+    let control = beside(shown_label, &button);
+    if props.label_hidden
+        && let Some(label) = label.clone()
+    {
+        let shown = button.clone();
+        effect(move || {
+            shown.update_property(&[gtk::accessible::Property::Label(&label())]);
+        });
+    }
+    let updating = Rc::new(Cell::new(false));
+    let guard = Rc::clone(&updating);
+    let shown = button.clone();
+    let read = bound.clone();
+    let as_rgb = |value: &Value| -> u32 {
+        match value {
+            Value::Int(n) => (*n).clamp(0, 0xff_ffff) as u32,
+            _ => (as_f64(value).round() as i64).clamp(0, 0xff_ffff) as u32,
+        }
+    };
+    effect(move || {
+        let rgb = as_rgb(&read.get());
+        let r = ((rgb >> 16) & 0xff) as f32 / 255.0;
+        let g = ((rgb >> 8) & 0xff) as f32 / 255.0;
+        let b = (rgb & 0xff) as f32 / 255.0;
+        let target = gtk::gdk::RGBA::new(r, g, b, 1.0);
+        if shown.rgba() != target {
+            guard.set(true);
+            shown.set_rgba(&target);
+            guard.set(false);
+        }
+    });
+    let commit = bound_action(ctx, &commit);
+    let changed = bound.clone();
+    let changed_commit = commit.clone();
+    let guard = Rc::clone(&updating);
+    button.connect_rgba_notify(move |b| {
+        if guard.get() {
+            return;
+        }
+        let rgba = b.rgba();
+        let byte = |f: f32| (f.clamp(0.0, 1.0) * 255.0).round() as u32;
+        let rgb = (byte(rgba.red()) << 16) | (byte(rgba.green()) << 8) | byte(rgba.blue());
+        changed.set(Value::Float(f64::from(rgb)));
+        if let Some(commit) = &changed_commit {
+            commit();
+        }
+    });
+    p.add(&control);
+    let set = bound.clone();
+    let value = bound.clone();
+    controls::register(
+        ctx,
+        props.id,
+        "color_picker",
+        label,
+        None,
+        Actions {
+            set_number: Some(Rc::new(move |number| {
+                if number.is_finite() {
+                    let clamped = (number.round() as i64).clamp(0, 0xff_ffff) as f64;
+                    set.set(Value::Float(clamped));
+                    if let Some(commit) = &commit {
+                        commit();
+                    }
+                }
+            })),
+            value: Some(Rc::new(move || Some(as_rgb(&value.peek()).to_string()))),
+            ..Actions::default()
+        },
+    );
+}
+
+#[derive(Default)]
 pub struct SliderProps {
     pub id: &'static str,
     pub label: Option<Str>,

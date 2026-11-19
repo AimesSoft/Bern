@@ -1091,6 +1091,86 @@ fun BernControlledSlider(
     )
 }
 
+@Composable
+fun BernColorPicker(
+    label: String,
+    value: Long,
+    onChange: (Long) -> Unit,
+    labelHidden: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
+    val rgb = value.coerceIn(0L, 0xFFFFFFL).toInt()
+    var open by remember { mutableStateOf(false) }
+    var r by remember(rgb) { mutableStateOf(((rgb shr 16) and 0xFF).toFloat()) }
+    var g by remember(rgb) { mutableStateOf(((rgb shr 8) and 0xFF).toFloat()) }
+    var b by remember(rgb) { mutableStateOf((rgb and 0xFF).toFloat()) }
+    val swatches = remember { intArrayOf(0xFFFFFF, 0xFFE066, 0xFF6B8B, 0x7ED6DF, 0xA3CB38, 0xD980FA, 0xFFA502, 0x70A1FF) }
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable { open = true }
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (!labelHidden) {
+            Text(label, modifier = Modifier.weight(1f))
+        } else {
+            Spacer(Modifier.weight(1f))
+        }
+        androidx.compose.material3.Surface(
+            modifier = Modifier.size(width = 40.dp, height = 24.dp),
+            shape = RoundedCornerShape(6.dp),
+            color = Color((0xFF shl 24) or rgb),
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        ) {}
+    }
+    if (open) {
+        val picked = ((r.toInt().coerceIn(0, 255) shl 16) or (g.toInt().coerceIn(0, 255) shl 8) or b.toInt().coerceIn(0, 255))
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { open = false },
+            title = { Text(label) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        for (swatch in swatches) {
+                            androidx.compose.material3.Surface(
+                                modifier = Modifier.size(26.dp).clickable {
+                                    r = ((swatch shr 16) and 0xFF).toFloat()
+                                    g = ((swatch shr 8) and 0xFF).toFloat()
+                                    b = (swatch and 0xFF).toFloat()
+                                },
+                                shape = RoundedCornerShape(13.dp),
+                                color = Color((0xFF shl 24) or swatch),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    if (swatch == picked) 2.dp else 1.dp,
+                                    if (swatch == picked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                                ),
+                            ) {}
+                        }
+                    }
+                    Text("R: ${r.toInt()}", style = MaterialTheme.typography.labelMedium)
+                    androidx.compose.material3.Slider(value = r, onValueChange = { r = it }, valueRange = 0f..255f)
+                    Text("G: ${g.toInt()}", style = MaterialTheme.typography.labelMedium)
+                    androidx.compose.material3.Slider(value = g, onValueChange = { g = it }, valueRange = 0f..255f)
+                    Text("B: ${b.toInt()}", style = MaterialTheme.typography.labelMedium)
+                    androidx.compose.material3.Slider(value = b, onValueChange = { b = it }, valueRange = 0f..255f)
+                }
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    onChange(picked.toLong())
+                    open = false
+                }) { Text(BernText.string("bern.window.done")) }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { open = false }) {
+                    Text(BernText.string("bern.close.cancel"))
+                }
+            },
+        )
+    }
+}
+
 // @bern:wear-skip-end
 
 // @bern:wear-skip-start

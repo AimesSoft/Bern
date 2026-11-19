@@ -114,11 +114,17 @@ impl Generator<'_> {
                 } else {
                     String::new()
                 };
+                let overlay = window
+                    .overlay
+                    .as_deref()
+                    .map(string)
+                    .unwrap_or_else(|| "null".into());
                 format!(
-                    "BernWindowKind({}, {}, {}{dialog})",
+                    "BernWindowKind({}, {}, {}, isUtility = {}, overlay = {overlay}{dialog})",
                     string(&window.id),
                     string(&window.title.key),
-                    window.role == WindowRole::Settings
+                    window.role == WindowRole::Settings,
+                    window.role == WindowRole::Utility
                 )
             })
             .collect();
@@ -226,17 +232,19 @@ impl Generator<'_> {
         }
         out.open("setContent {");
         out.open("BernTheme {");
-        out.line(format!(
-            "LaunchedEffect(Unit) {{ BernHost.openInitial(listOf({})) }}",
-            initial.join(", ")
-        ));
-        out.open("BernVirtualHost { kind ->");
+        out.open("val renderWindow: @Composable (String) -> Unit = { kind ->");
         out.open("when (kind) {");
         for (index, window) in app.windows.windows.iter().enumerate() {
             out.line(format!("{} -> BernWindow{index}()", string(&window.id)));
         }
         out.close("}");
         out.close("}");
+        out.line("BernHost.overlayRenderer = renderWindow");
+        out.line(format!(
+            "LaunchedEffect(Unit) {{ BernHost.openInitial(listOf({})) }}",
+            initial.join(", ")
+        ));
+        out.line("BernVirtualHost(renderWindow)");
         out.close("}");
         out.close("}");
         out.close("}");

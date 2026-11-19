@@ -17,8 +17,8 @@ use bern_command::EngineProtocol;
 use bern_command::files::{Entry, Opener, SourceFile};
 use bern_protocol::CommandError;
 use jni_sys::{
-    JNI_OK, JNIEnv, JavaVM, jboolean, jbyte, jbyteArray, jdouble, jint, jlong, jmethodID, jobject,
-    jsize, jstring, jvalue,
+    JNI_OK, JNIEnv, JavaVM, jbyte, jbyteArray, jint, jlong, jmethodID, jobject, jsize, jstring,
+    jvalue,
 };
 use std::ffi::{CStr, CString, c_void};
 
@@ -267,11 +267,11 @@ impl Opener for Documents {
     }
 }
 
-/// Copy a borrowed Java string without deleting the local reference.
+/// The text of a Java string, which is deleted; `None` for null.
 ///
 /// # Safety
 /// `env` is the calling thread's environment and `value` a string or null.
-unsafe fn string_value(env: *mut JNIEnv, value: jstring) -> Option<String> {
+unsafe fn text_in(env: *mut JNIEnv, value: jstring) -> Option<String> {
     if value.is_null() {
         return None;
     }
@@ -280,22 +280,8 @@ unsafe fn string_value(env: *mut JNIEnv, value: jstring) -> Option<String> {
         let len = ((**env).v1_6.GetStringLength)(env, value).max(0);
         let mut units = vec![0u16; len as usize];
         ((**env).v1_6.GetStringRegion)(env, value, 0, len, units.as_mut_ptr());
+        ((**env).v1_6.DeleteLocalRef)(env, value);
         Some(String::from_utf16_lossy(&units))
-    }
-}
-
-/// The text of a Java string, which is deleted; `None` for null.
-///
-/// # Safety
-/// `env` is the calling thread's environment and `value` a string or null.
-unsafe fn text_in(env: *mut JNIEnv, value: jstring) -> Option<String> {
-    // SAFETY: guaranteed by the caller.
-    unsafe {
-        let text = string_value(env, value);
-        if !value.is_null() {
-            ((**env).v1_6.DeleteLocalRef)(env, value);
-        }
-        text
     }
 }
 
@@ -842,34 +828,6 @@ pub unsafe extern "system" fn Java_dev_bern_runtime_BernNative_overlayPressed(
     if let (Ok(overlay), Ok(button)) = (std::str::from_utf8(&overlay), std::str::from_utf8(&button))
     {
         bern_command::overlay::press(overlay, button);
-    }
-}
-
-/// An overlay control changed value (`bern::overlay`).
-#[unsafe(no_mangle)]
-pub unsafe extern "system" fn Java_dev_bern_runtime_BernNative_overlayPanelChanged(
-    env: *mut JNIEnv,
-    _: jobject,
-    overlay: jstring,
-    control: jstring,
-    value: jdouble,
-    committed: jboolean,
-) {
-    let (overlay, control) = unsafe { (string_value(env, overlay), string_value(env, control)) };
-    if let (Some(overlay), Some(control)) = (overlay, control) {
-        bern_command::overlay::panel_changed(&overlay, &control, value, committed);
-    }
-}
-
-/// The host dismissed an overlay control panel (`bern::overlay`).
-#[unsafe(no_mangle)]
-pub unsafe extern "system" fn Java_dev_bern_runtime_BernNative_overlayPanelDismissed(
-    env: *mut JNIEnv,
-    _: jobject,
-    overlay: jstring,
-) {
-    if let Some(overlay) = unsafe { string_value(env, overlay) } {
-        bern_command::overlay::panel_dismissed(&overlay);
     }
 }
 

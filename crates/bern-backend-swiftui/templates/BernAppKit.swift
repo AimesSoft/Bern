@@ -194,6 +194,18 @@ extension BernWindowContext {
         guard let window, window !== platform.nsWindow else { return }
         platform.nsWindow = window
         BernStatusArea.appeared(window)
+        if let kind = BernHost.shared.kinds.first(where: { $0.id == kindID }), kind.isUtility {
+            window.level = .floating
+            window.collectionBehavior.insert([.canJoinAllSpaces, .fullScreenAuxiliary])
+            window.hidesOnDeactivate = false
+            window.isMovableByWindowBackground = true
+            window.standardWindowButton(.miniaturizeButton)?.isHidden = true
+            window.standardWindowButton(.zoomButton)?.isHidden = true
+            if let overlay = kind.overlay {
+                BernHost.shared.placeBesideOverlay(window, overlay: overlay)
+                window.orderFrontRegardless()
+            }
+        }
         closeCheckChanged()
         observe(window)
         reportFacts()
@@ -287,9 +299,62 @@ extension BernHost {
         } else if kind.isSettings {
             platform.openSettings?()
         } else {
+            if kind.isUtility, let existing = windows[kindID]?.nsWindow {
+                if let overlay = kind.overlay { placeBesideOverlay(existing, overlay: overlay) }
+                existing.orderFrontRegardless()
+                return
+            }
             platform.openWindow?(id: kindID)
         }
-        NSApplication.shared.activate()
+        if !kind.isUtility {
+            NSApplication.shared.activate()
+        }
+    }
+
+    func placeBesideOverlay(_ window: NSWindow, overlay: String) {
+        var ox = 0.0, oy = 0.0, ow = 0.0, oh = 0.0
+        let ok = overlay.utf8CString.withUnsafeBufferPointer { buf in
+            let len = max(0, buf.count - 1)
+            return buf.baseAddress.map { ptr in
+                ptr.withMemoryRebound(to: UInt8.self, capacity: len) { bytes in
+                    bern_overlay_rect(bytes, len, &ox, &oy, &ow, &oh) != 0
+                }
+            } ?? false
+        }
+        guard ok else { return }
+        let owner = NSRect(x: ox, y: oy, width: ow, height: oh)
+        let screen = NSScreen.screens.first(where: { $0.frame.intersects(owner) }) ?? NSScreen.main
+        let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let size = window.frame.size
+        let gap: CGFloat = 8
+        var x = owner.maxX + gap
+        if x + size.width > visible.maxX && owner.minX - gap - size.width >= visible.minX {
+            x = owner.minX - gap - size.width
+        }
+        x = min(max(x, visible.minX), max(visible.minX, visible.maxX - size.width))
+        var y = owner.midY - size.height / 2
+        y = min(max(y, visible.minY), max(visible.minY, visible.maxY - size.height))
+        window.setFrameOrigin(NSPoint(x: x, y: y))
+    }
+
+    func syncOverlay(_ overlayID: String) {
+        var ox = 0.0, oy = 0.0, ow = 0.0, oh = 0.0
+        let active = overlayID.utf8CString.withUnsafeBufferPointer { buf in
+            let len = max(0, buf.count - 1)
+            return buf.baseAddress.map { ptr in
+                ptr.withMemoryRebound(to: UInt8.self, capacity: len) { bytes in
+                    bern_overlay_rect(bytes, len, &ox, &oy, &ow, &oh) != 0
+                }
+            } ?? false
+        }
+        for context in Array(windows.values) {
+            guard let kind = kinds.first(where: { $0.id == context.kindID }), kind.overlay == overlayID else { continue }
+            if active, let win = context.nsWindow {
+                placeBesideOverlay(win, overlay: overlayID)
+            } else {
+                _ = try? requestClose(context)
+            }
+        }
     }
 
     /// Reopen the primary window, as clicking the Dock icon does.

@@ -1002,9 +1002,16 @@ pub(crate) fn open(kind_id: &str) -> Result<String, Failure> {
     // libadwaita's breakpoints need a minimum size; without one declared,
     // the smallest size GNOME's own applications take.
     window.set_size_request(
-        def.min_width.map(|width| width as i32).unwrap_or(360),
-        def.min_height.map(|height| height as i32).unwrap_or(294),
+        def.min_width
+            .map(|width| width as i32)
+            .unwrap_or(if def.utility { 260 } else { 360 }),
+        def.min_height
+            .map(|height| height as i32)
+            .unwrap_or(if def.utility { 200 } else { 294 }),
     );
+    if def.utility && def.min_width.is_none() && def.min_height.is_none() {
+        window.set_resizable(false);
+    }
     if def.dialog {
         // A dialog shows over the primary window and blocks it.
         if let Some(primary) = instance_of(
@@ -1852,6 +1859,19 @@ pub fn close_window(ctx: &Ctx, kind: &str) {
         && let Some(shown) = ctx.window_of()
     {
         shown.fail(&failure);
+    }
+}
+
+pub(crate) fn sync_overlay(overlay_id: &str, active: bool) {
+    if active {
+        return;
+    }
+    let matched: Vec<_> = all()
+        .into_iter()
+        .filter(|win| win.def().overlay == Some(overlay_id))
+        .collect();
+    for win in matched {
+        let _ = request_close(&win);
     }
 }
 

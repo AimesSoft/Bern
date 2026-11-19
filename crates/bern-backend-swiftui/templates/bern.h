@@ -89,5 +89,6 @@ uint8_t bern_svg_render(BernSvgPlayer *player, double now_secs, uint32_t width_p
 const uint8_t *bern_svg_pixels_ptr(const BernSvgPlayer *player);
 size_t bern_svg_pixels_len(const BernSvgPlayer *player);
 void bern_buffer_free(BernBuffer buffer);
+uint8_t bern_overlay_rect(const uint8_t *id, size_t len, double *x, double *y, double *w, double *h);
 
 #endif

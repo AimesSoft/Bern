@@ -502,6 +502,7 @@ impl<'a> Generator<'a> {
             }
             "Switch" => self.switch(out, element, ctx),
             "Slider" => self.slider(out, element, ctx),
+            "ColorPicker" => self.color_picker(out, element, ctx),
             "Video" => self.video(out, element, ctx),
             "Query" => self.query(out, element, ctx),
             "Picker" => self.picker(out, element, ctx),

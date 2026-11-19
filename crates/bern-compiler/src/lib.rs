@@ -550,8 +550,21 @@ fn window_catalog(
         let role = match keyword("role", "standard").as_str() {
             "settings" => ir::WindowRole::Settings,
             "dialog" => ir::WindowRole::Dialog,
+            "utility" => ir::WindowRole::Utility,
             _ => ir::WindowRole::Standard,
         };
+        let overlay = match window.prop("overlay") {
+            Some(ir::Prop::Id { value }) => Some(value.clone()),
+            _ => None,
+        };
+        if overlay.is_some() && role != ir::WindowRole::Utility {
+            diagnostics.push(
+                Diagnostic::error(format!(
+                    "window `{id}`: `overlay:` requires `role: utility`"
+                ))
+                .at(window.source.clone()),
+            );
+        }
         let close = match (window.expr("confirm_close"), window.text("close_message")) {
             (Some(when), Some(message)) => Some(ir::CloseCheck {
                 when: when.clone(),
@@ -628,6 +641,7 @@ fn window_catalog(
             initial,
             presentation,
             role,
+            overlay,
             width: window.number("width"),
             height: window.number("height"),
             min_width: window.number("min_width"),
@@ -658,10 +672,15 @@ fn window_catalog(
     if windows
         .iter()
         .find(|window| window.id == primary)
-        .is_some_and(|window| window.role == ir::WindowRole::Settings)
+        .is_some_and(|window| {
+            matches!(
+                window.role,
+                ir::WindowRole::Settings | ir::WindowRole::Utility
+            )
+        })
     {
         diagnostics.push(
-            Diagnostic::error("the primary window cannot be the settings window")
+            Diagnostic::error("the primary window cannot have `role: settings` or `role: utility`")
                 .at(root.source.clone()),
         );
     }

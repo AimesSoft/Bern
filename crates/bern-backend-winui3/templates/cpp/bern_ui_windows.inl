@@ -1366,6 +1366,41 @@ inline std::string OpenDialog(std::shared_ptr<Win> const& win) {
 
 /// Open a window of `kind`, or show the one already open. Returns the
 /// instance id.
+/// Position a window anchored to an overlay beside that overlay on the same
+/// monitor's work area. Returns false if the overlay is absent, locked, or
+/// taskbar-anchored.
+inline bool PlaceBesideOverlay(Win& win) {
+    auto const& def = win.Def();
+    if (def.overlay.empty()) return true;
+    double ox = 0, oy = 0, ow = 0, oh = 0;
+    if (!bern_overlay_rect(reinterpret_cast<uint8_t const*>(def.overlay.data()), def.overlay.size(), &ox, &oy, &ow, &oh)) {
+        return false;
+    }
+    RECT owner{
+        static_cast<LONG>(std::lround(ox)),
+        static_cast<LONG>(std::lround(oy)),
+        static_cast<LONG>(std::lround(ox + ow)),
+        static_cast<LONG>(std::lround(oy + oh)),
+    };
+    RECT self{};
+    if (!GetWindowRect(win.hwnd, &self)) return true;
+    int width = self.right - self.left;
+    int height = self.bottom - self.top;
+    MONITORINFO monitor{sizeof(MONITORINFO)};
+    GetMonitorInfoW(MonitorFromRect(&owner, MONITOR_DEFAULTTONEAREST), &monitor);
+    RECT work = monitor.rcWork;
+    int gap = static_cast<int>(std::lround(8.0 * win.Scale()));
+    int x = owner.right + gap;
+    if (x + width > work.right && owner.left - gap - width >= work.left) {
+        x = owner.left - gap - width;
+    }
+    x = (std::clamp)(x, work.left, (std::max)(work.left, work.right - width));
+    int y = (owner.top + owner.bottom - height) / 2;
+    y = (std::clamp)(y, work.top, (std::max)(work.top, work.bottom - height));
+    SetWindowPos(win.hwnd, HWND_TOPMOST, x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+    return true;
+}
+
 inline std::string Open(std::string const& kindId) {
     auto const& windows = app->windows;
     int kind = -1;
@@ -1374,6 +1409,7 @@ inline std::string Open(std::string const& kindId) {
     if (kind < 0) throw Fault{"target_not_found", "no window kind `" + kindId + "`"};
     for (auto const& existing : all)
         if (existing->kind == kind) {
+            PlaceBesideOverlay(*existing);
             Show(*existing);
             return existing->id;
         }
@@ -1405,7 +1441,11 @@ inline std::string Open(std::string const& kindId) {
         winrt::check_hresult(window.as<IWindowNative>()->get_WindowHandle(&hwnd));
         win->hwnd = hwnd;
     }
-    window.SystemBackdrop(media::MicaBackdrop());
+    if (def.utility) {
+        window.SystemBackdrop(media::DesktopAcrylicBackdrop());
+    } else {
+        window.SystemBackdrop(media::MicaBackdrop());
+    }
     window.ExtendsContentIntoTitleBar(true);
     controls::TitleBar titleBar;
     win->titleBar = titleBar;
@@ -1431,16 +1471,23 @@ inline std::string Open(std::string const& kindId) {
     });
     titleBar.SizeChanged([raw = win.get()](auto&&, auto&&) { PlaceHeader(*raw); });
     originals[win->hwnd] = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(win->hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(Subclass)));
-    if (def.settings) {
+    if (def.settings || def.utility) {
         auto presenter = window.AppWindow().Presenter().as<winrt::Microsoft::UI::Windowing::OverlappedPresenter>();
         presenter.IsMaximizable(false);
         presenter.IsMinimizable(false);
+        if (def.utility) {
+            presenter.IsAlwaysOnTop(true);
+            presenter.IsResizable(def.minWidth.has_value() || def.minHeight.has_value());
+            window.AppWindow().IsShownInSwitchers(false);
+            SetWindowLongPtrW(win->hwnd, GWL_EXSTYLE, GetWindowLongPtrW(win->hwnd, GWL_EXSTYLE) | WS_EX_TOOLWINDOW);
+        }
     }
 #else
     RegisterClassOnce();
-    DWORD style = WS_OVERLAPPEDWINDOW;
+    DWORD style = def.utility ? (WS_POPUP | WS_CAPTION | WS_SYSMENU) : WS_OVERLAPPEDWINDOW;
+    DWORD exStyle = def.utility ? (WS_EX_TOOLWINDOW | WS_EX_TOPMOST) : 0;
     if (def.settings) style &= ~(WS_MAXIMIZEBOX | WS_MINIMIZEBOX);
-    win->hwnd = CreateWindowExW(0, kWindowClass, L"", style, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, nullptr, nullptr,
+    win->hwnd = CreateWindowExW(exStyle, kWindowClass, L"", style, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, nullptr, nullptr,
         GetModuleHandleW(nullptr), nullptr);
     if (!win->hwnd) {
         all.pop_back();
@@ -1492,13 +1539,14 @@ inline std::string Open(std::string const& kindId) {
     SizeBeforeLayout(*win, width, height);
     Mount(win, host, page);
     SetOuterSize(*win, width, height);
+    if (!def.overlay.empty()) PlaceBesideOverlay(*win);
 
     std::weak_ptr<Win> weak = win;
     auto closeNow = [weak](auto&&, xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args) {
         args.Handled(true);
         if (auto win = weak.lock()) RequestCloseSafely(win);
     };
-    if (def.settings) {
+    if (def.settings || def.utility) {
         xaml::Input::KeyboardAccelerator escape;
         escape.Key(winrt::Windows::System::VirtualKey::Escape);
         escape.Invoked(closeNow);
@@ -2089,6 +2137,20 @@ inline void Run(uint64_t request, uint32_t index, Reader& reader) {
             throw Fault{"unsupported_file", "`" + entry.target + "` takes " + std::string(entry.actions.files ? entry.actions.files : "any") + ", not `" + url + "`"};
         }
         give(url);
+        ok(Value::Unit());
+        break;
+    }
+    case 25: {
+        auto overlayId = reader.Text();
+        std::vector<std::shared_ptr<Win>> matched;
+        for (auto const& win : WindowManager::all) {
+            if (win->Def().overlay == overlayId) matched.push_back(win);
+        }
+        for (auto const& win : matched) {
+            if (!WindowManager::PlaceBesideOverlay(*win)) {
+                WindowManager::RequestClose(win, true);
+            }
+        }
         ok(Value::Unit());
         break;
     }

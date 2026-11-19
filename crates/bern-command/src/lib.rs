@@ -29,6 +29,7 @@ pub mod storage;
 pub mod trace;
 pub mod wake;
 pub mod web_ui;
+pub mod window;
 
 pub use composite::{Composite, ModuleEngine};
 

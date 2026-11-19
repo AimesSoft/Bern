@@ -138,6 +138,8 @@ extension BernHost {
         throw unavailable(context, "maximize")
     }
 
+    func syncOverlay(_ overlayID: String) {}
+
     func move(_ context: BernWindowContext, x: Double, y: Double, request: UInt64, command: UInt32) throws {
         throw unavailable(context, "move")
     }

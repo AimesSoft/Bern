@@ -177,6 +177,10 @@ pub struct WindowDef {
     pub close: Option<fn(&Ctx) -> CloseCheck>,
     /// `role: dialog`: shown modally over the primary window.
     pub dialog: bool,
+    /// `role: utility`: compact floating tool window.
+    pub utility: bool,
+    /// `overlay: "..."`: anchored to a `bern::overlay` when open.
+    pub overlay: Option<&'static str>,
     /// `chrome: unified`: flat title bars over the content.
     pub unified: bool,
     /// Seconds without input after which `window.idle` turns true.

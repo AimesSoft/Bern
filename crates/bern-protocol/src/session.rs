@@ -38,11 +38,12 @@ pub enum SessionCommand {
     TraceStart,
     TraceStop,
     TraceReport,
+    WindowSyncOverlay,
 }
 
 impl SessionCommand {
     /// Frontends address commands by position: new commands go last.
-    pub const ALL: [SessionCommand; 25] = [
+    pub const ALL: [SessionCommand; 26] = [
         SessionCommand::Inspect,
         SessionCommand::Activate,
         SessionCommand::Edit,
@@ -68,6 +69,7 @@ impl SessionCommand {
         SessionCommand::TraceStart,
         SessionCommand::TraceStop,
         SessionCommand::TraceReport,
+        SessionCommand::WindowSyncOverlay,
     ];
 
     pub fn id(self) -> &'static str {
@@ -97,6 +99,7 @@ impl SessionCommand {
             SessionCommand::TraceStart => "trace.start",
             SessionCommand::TraceStop => "trace.stop",
             SessionCommand::TraceReport => "trace.report",
+            SessionCommand::WindowSyncOverlay => "window.sync_overlay",
         }
     }
 
@@ -867,6 +870,14 @@ pub fn session_catalog() -> (TypeTable, Vec<CommandSpec>) {
                 Retry::Idempotent,
             ),
             &["out_of_range"],
+        ),
+        spec(
+            SessionCommand::WindowSyncOverlay,
+            OperationKind::Command,
+            "Reposition or close any utility windows anchored to an overlay",
+            vec![param("overlay", Type::Text, "Overlay identifier")],
+            Type::Unit,
+            Retry::Idempotent,
         ),
     ];
     (types, commands)

@@ -25,7 +25,7 @@ impl Target for ComposeWearos {
             component_names()
                 .iter()
                 .copied()
-                .filter(|name| *name != "WebPage")
+                .filter(|name| !matches!(*name, "WebPage" | "ColorPicker"))
                 .collect()
         });
         // A watch has no mouse: the crown scrolls, and nothing hovers.

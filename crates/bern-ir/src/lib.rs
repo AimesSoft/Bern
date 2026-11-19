@@ -675,6 +675,8 @@ pub enum WindowRole {
     /// A modal window over the primary window, such as a first-run flow:
     /// a sheet where the platform has them.
     Dialog,
+    /// A compact floating utility window that stays above other windows.
+    Utility,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -684,6 +686,9 @@ pub struct WindowDef {
     pub initial: WindowInitial,
     pub presentation: Presentation,
     pub role: WindowRole,
+    /// Name of a `bern::overlay` this utility window anchors beside.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overlay: Option<String>,
     pub width: Option<f64>,
     pub height: Option<f64>,
     pub min_width: Option<f64>,

@@ -680,6 +680,7 @@ impl<'a> Generator<'a> {
             "Drop" => self.drop_zone(out, element, ctx),
             "Switch" => self.switch(out, element, ctx),
             "Slider" => self.slider(out, element, ctx),
+            "ColorPicker" => self.color_picker(out, element, ctx),
             "Picker" => self.picker(out, element, ctx),
             "Progress" => self.progress(out, element),
             "Form" => self.form(out, element, ctx),

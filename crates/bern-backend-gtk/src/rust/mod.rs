@@ -442,8 +442,13 @@ impl<'a> Generator<'a> {
                     .as_ref()
                     .map(|expr| format!("|c: &b::Ctx| {}", self.condition(expr))),
             );
+            let overlay = window
+                .overlay
+                .as_deref()
+                .map(|id| format!("Some({})", string(id)))
+                .unwrap_or_else(|| "None".into());
             out.line(format!(
-                "b::WindowDef {{ id: {}, title: {}, settings: {}, width: {}, height: {}, min_width: {}, min_height: {}, initial_open: {}, sessions: vec![{}], render: w_{}, close: {}, dialog: {}, unified: {}, idle_after: {}, immersive: {immersive}, idle_enabled: {idle_enabled} }},",
+                "b::WindowDef {{ id: {}, title: {}, settings: {}, width: {}, height: {}, min_width: {}, min_height: {}, initial_open: {}, sessions: vec![{}], render: w_{}, close: {}, dialog: {}, utility: {}, overlay: {overlay}, unified: {}, idle_after: {}, immersive: {immersive}, idle_enabled: {idle_enabled} }},",
                 string(&window.id),
                 string(&window.title.key),
                 window.role == WindowRole::Settings,
@@ -460,6 +465,7 @@ impl<'a> Generator<'a> {
                     "None".into()
                 },
                 window.role == WindowRole::Dialog,
+                window.role == WindowRole::Utility,
                 window.chrome == WindowChrome::Unified,
                 optional(window.idle_after),
             ));

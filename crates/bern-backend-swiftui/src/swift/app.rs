@@ -138,12 +138,18 @@ impl Generator<'_> {
                     ),
                     _ => "nil".into(),
                 };
+                let overlay = window
+                    .overlay
+                    .as_deref()
+                    .map(string)
+                    .unwrap_or_else(|| "nil".into());
                 format!(
-                    "BernWindowKind(id: {}, title: {}, isSettings: {}, isDialog: {}, defaultSize: {size})",
+                    "BernWindowKind(id: {}, title: {}, isSettings: {}, isDialog: {}, isUtility: {}, overlay: {overlay}, defaultSize: {size})",
                     string(&window.id),
                     string(&window.title.key),
                     window.role == WindowRole::Settings,
-                    window.role == WindowRole::Dialog
+                    window.role == WindowRole::Dialog,
+                    window.role == WindowRole::Utility
                 )
             })
             .collect();

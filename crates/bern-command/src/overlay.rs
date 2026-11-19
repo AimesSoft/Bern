@@ -25,16 +25,66 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, RwLock};
 
-#[cfg(target_os = "macos")]
-mod mac_panel;
-mod panel;
-#[cfg(target_os = "windows")]
-mod win_panel;
+/// The treatment of overlay text, including annotations and the lit region.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum TextEffect {
+    None,
+    #[default]
+    Shadow,
+    Outline,
+}
 
-pub use panel::{
-    Control, Panel, PanelEvent, TextEffect, TextStyle, panel_changed, panel_dismissed, panel_open,
-    panel_supported, set_panel_waker, show_panel, take_panel_events,
-};
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TextStyle {
+    pub effect: TextEffect,
+    /// Multiplies the text's original alpha without affecting overlay controls.
+    pub opacity: f64,
+}
+
+impl Default for TextStyle {
+    fn default() -> Self {
+        Self {
+            effect: TextEffect::Shadow,
+            opacity: 1.0,
+        }
+    }
+}
+
+static RECTS: Mutex<BTreeMap<String, (f64, f64, f64, f64)>> = Mutex::new(BTreeMap::new());
+type SyncHook = Arc<dyn Fn(&str) + Send + Sync>;
+static SYNC_HOOK: RwLock<Option<SyncHook>> = RwLock::new(None);
+
+/// Current screen rectangle `(x, y, width, height)` of an unlocked free overlay,
+/// in native platform screen coordinates (Win32 physical px on Windows, AppKit
+/// screen points on macOS). `None` when hidden, locked, or taskbar-anchored.
+pub fn screen_rect(id: &str) -> Option<(f64, f64, f64, f64)> {
+    RECTS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(id)
+        .copied()
+}
+
+/// Register a callback invoked when an overlay moves, resizes, locks, or hides.
+pub fn set_sync_hook(hook: impl Fn(&str) + Send + Sync + 'static) {
+    *SYNC_HOOK.write().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(hook));
+}
+
+pub(crate) fn update_rect(id: &str, rect: Option<(f64, f64, f64, f64)>) {
+    let changed = {
+        let mut rects = RECTS.lock().unwrap_or_else(|e| e.into_inner());
+        match rect {
+            Some(r) => {
+                let prev = rects.insert(id.to_string(), r);
+                prev != Some(r)
+            }
+            None => rects.remove(id).is_some(),
+        }
+    };
+    if changed && let Some(hook) = SYNC_HOOK.read().unwrap_or_else(|e| e.into_inner()).clone() {
+        hook(id);
+    }
+}
 
 /// One line of an overlay.
 #[derive(Clone, Debug, PartialEq)]
@@ -273,9 +323,6 @@ pub fn press(overlay: &str, button: &str) {
 
 /// A host that draws overlays itself (the GTK host on Linux).
 pub trait Host: Send + Sync {
-    fn supports_panel(&self) -> bool {
-        false
-    }
     fn show(&self, id: &str, overlay: &Overlay);
     fn show_styled(&self, id: &str, overlay: &Overlay, _style: TextStyle) {
         self.show(id, overlay);
@@ -284,7 +331,6 @@ pub trait Host: Send + Sync {
     fn lit(&self, id: &str, overlay: &Overlay) {
         self.show(id, overlay);
     }
-    fn panel(&self, _id: &str, _panel: Option<&Panel>) {}
     fn hide(&self, id: &str);
 }
 
@@ -400,7 +446,7 @@ pub fn show_styled(id: &str, overlay: &Overlay, style: TextStyle) {
         Some((was_overlay, _)) => was_overlay.change_to(overlay),
     };
     if change == Change::All && (overlay.locked || overlay.place != Place::Free) {
-        show_panel(id, None);
+        update_rect(id, None);
     }
     match (change, host()) {
         (Change::Nothing, _) => {}
@@ -413,7 +459,7 @@ pub fn show_styled(id: &str, overlay: &Overlay, style: TextStyle) {
 
 /// Take the overlay `id` down.
 pub fn hide(id: &str) {
-    show_panel(id, None);
+    update_rect(id, None);
     SHOWN.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
     match host() {
         Some(host) => host.hide(id),
@@ -559,8 +605,7 @@ fn as_json(overlay: &Overlay, style: TextStyle) -> String {
 /// the bar's buttons.
 #[cfg(target_os = "macos")]
 mod mac {
-    use super::mac_panel::Adjustment;
-    use super::{Line, Overlay, Panel, Route, TextEffect, TextStyle};
+    use super::{Line, Overlay, Route, TextEffect, TextStyle};
     use dispatch2::{DispatchQueue, DispatchTime};
     use objc2::rc::Retained;
     use objc2::runtime::{AnyClass, AnyObject, NSObject, ProtocolObject};
@@ -633,13 +678,14 @@ mod mac {
 
     /// A panel and what changes as the pointer comes and goes.
     struct Shown {
+        id: String,
         panel: Retained<NSPanel>,
-        adjustment: Option<Retained<Adjustment>>,
         plate: Option<Retained<NSBox>>,
         /// Each button's round, and the button.
         buttons: Vec<(Retained<NSBox>, Retained<NSButton>)>,
         locked: bool,
-        allows_panel: bool,
+        allows_sync: bool,
+        last_frame: Cell<NSRect>,
         /// What is lit of each line that shows, for those that light up.
         lit: Vec<Option<Lit>>,
     }
@@ -738,7 +784,6 @@ mod mac {
 
     thread_local! {
         static PANELS: RefCell<HashMap<String, Shown>> = RefCell::new(HashMap::new());
-        static PENDING: RefCell<HashMap<String, Panel>> = RefCell::new(HashMap::new());
         static POLLING: Cell<bool> = const { Cell::new(false) };
         static TARGET: RefCell<Option<Retained<Target>>> = const { RefCell::new(None) };
     }
@@ -787,76 +832,6 @@ mod mac {
         });
     }
 
-    pub fn panel(id: String, panel: Option<Panel>) {
-        DispatchQueue::main().exec_async(move || {
-            if let Some(mtm) = MainThreadMarker::new() {
-                set_panel(mtm, &id, panel);
-            }
-        });
-    }
-
-    pub(super) fn detach_panel(id: String) {
-        DispatchQueue::main().exec_async(move || {
-            let adjustment = PANELS.with(|panels| {
-                panels
-                    .borrow()
-                    .get(&id)
-                    .and_then(|shown| shown.adjustment.clone())
-            });
-            if let Some(adjustment) = adjustment {
-                adjustment.fold();
-                adjustment.detach();
-            }
-        });
-    }
-
-    fn set_panel(mtm: MainThreadMarker, id: &str, panel: Option<Panel>) {
-        let Some(panel) = panel else {
-            PENDING.with(|pending| pending.borrow_mut().remove(id));
-            let adjustment = PANELS.with(|panels| {
-                panels
-                    .borrow()
-                    .get(id)
-                    .and_then(|shown| shown.adjustment.clone())
-            });
-            if let Some(adjustment) = adjustment {
-                adjustment.fold();
-            }
-            return;
-        };
-        enum Target {
-            Ready(Retained<Adjustment>),
-            Defer,
-            Refuse,
-        }
-        let target = PANELS.with(|panels| {
-            let mut panels = panels.borrow_mut();
-            let Some(shown) = panels.get_mut(id) else {
-                return Target::Defer;
-            };
-            if !shown.allows_panel {
-                return Target::Refuse;
-            }
-            let adjustment = shown
-                .adjustment
-                .get_or_insert_with(|| Adjustment::for_parent(id, shown.panel.clone(), mtm))
-                .clone();
-            Target::Ready(adjustment)
-        });
-        match target {
-            Target::Ready(adjustment) => {
-                PENDING.with(|pending| pending.borrow_mut().remove(id));
-                adjustment.present(panel);
-            }
-            Target::Defer => {
-                PENDING.with(|pending| pending.borrow_mut().insert(id.to_owned(), panel));
-            }
-            Target::Refuse => {
-                PENDING.with(|pending| pending.borrow_mut().remove(id));
-            }
-        }
-    }
-
     /// Only how far the lines are lit changed: the panel stays as it is.
     pub fn lit(id: String, overlay: Overlay, style: TextStyle) {
         DispatchQueue::main().exec_async(move || {
@@ -886,20 +861,12 @@ mod mac {
 
     pub fn hide(id: String) {
         DispatchQueue::main().exec_async(move || {
-            PENDING.with(|pending| pending.borrow_mut().remove(&id));
-            let owner = PANELS.with(|panels| {
-                panels
-                    .borrow()
-                    .get(&id)
-                    .map(|s| (s.panel.clone(), s.adjustment.clone()))
-            });
-            if let Some((parent, adjustment)) = owner {
-                if let Some(adjustment) = adjustment {
-                    adjustment.fold();
-                }
+            let parent = PANELS.with(|panels| panels.borrow().get(&id).map(|s| s.panel.clone()));
+            if let Some(parent) = parent {
                 keep_place(&id, &parent);
                 parent.orderOut(None);
             }
+            super::update_rect(&id, None);
         });
     }
 
@@ -1115,10 +1082,10 @@ mod mac {
     }
 
     fn put(mtm: MainThreadMarker, id: &str, overlay: &Overlay, style: TextStyle) {
-        let (panel, adjustment) = PANELS.with(|panels| {
+        let panel = PANELS.with(|panels| {
             let mut panels = panels.borrow_mut();
             if let Some(shown) = panels.get_mut(id) {
-                (shown.panel.clone(), shown.adjustment.take())
+                shown.panel.clone()
             } else {
                 let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(200.0, 60.0));
                 let panel = NSPanel::initWithContentRect_styleMask_backing_defer(
@@ -1150,7 +1117,7 @@ mod mac {
                 let _: () = unsafe { msg_send![&*panel, setRestorable: false] };
                 // SAFETY: the panel stays in `PANELS` and is never closed.
                 unsafe { panel.setReleasedWhenClosed(false) };
-                (panel, None)
+                panel
             }
         });
         let was_visible = panel.isVisible();
@@ -1252,38 +1219,42 @@ mod mac {
             NSRect::new(NSPoint::new(x - width / 2.0, y), NSSize::new(width, height)),
             true,
         );
-        let allows_panel = !overlay.locked && overlay.place == super::Place::Free;
+        let empty = overlay.lines.iter().all(|line| line.text.is_empty());
+        let allows_sync = !empty && !overlay.locked && overlay.place == super::Place::Free;
+        let frame = panel.frame();
         let shown = Shown {
+            id: id.to_string(),
             panel: panel.clone(),
-            adjustment: adjustment.clone(),
             plate,
             buttons,
             locked: overlay.locked,
-            allows_panel,
+            allows_sync,
+            last_frame: Cell::new(frame),
             lit,
         };
         hover(&shown);
         PANELS.with(|panels| panels.borrow_mut().insert(id.to_string(), shown));
-        if !allows_panel {
-            set_panel(mtm, id, None);
-        }
-        if overlay.lines.iter().all(|line| line.text.is_empty()) {
-            if let Some(adjustment) = &adjustment {
-                adjustment.detach();
-            }
+        if empty {
             panel.orderOut(None);
+            super::update_rect(id, None);
         } else {
             if !was_visible {
                 panel.orderFrontRegardless();
             }
-            if let Some(adjustment) = &adjustment {
-                adjustment.refresh();
+            if allows_sync {
+                super::update_rect(
+                    id,
+                    Some((
+                        frame.origin.x,
+                        frame.origin.y,
+                        frame.size.width,
+                        frame.size.height,
+                    )),
+                );
+            } else {
+                super::update_rect(id, None);
             }
             poll();
-        }
-        let pending = PENDING.with(|pending| pending.borrow_mut().remove(id));
-        if let Some(pending) = pending {
-            set_panel(mtm, id, Some(pending));
         }
         keep_place(id, &panel);
     }
@@ -1293,6 +1264,21 @@ mod mac {
     fn hover(shown: &Shown) {
         let pointer = NSEvent::mouseLocation();
         let frame = shown.panel.frame();
+        if shown.panel.isVisible() && frame != shown.last_frame.get() {
+            shown.last_frame.set(frame);
+            keep_place(&shown.id, &shown.panel);
+            if shown.allows_sync {
+                super::update_rect(
+                    &shown.id,
+                    Some((
+                        frame.origin.x,
+                        frame.origin.y,
+                        frame.size.width,
+                        frame.size.height,
+                    )),
+                );
+            }
+        }
         let inside = |rect: NSRect| {
             pointer.x >= rect.origin.x
                 && pointer.x < rect.origin.x + rect.size.width
@@ -1499,10 +1485,9 @@ fn pick_taskbar_room(
 
 #[cfg(target_os = "windows")]
 mod win {
-    use super::win_panel::Tool;
     use super::{
-        Line, Overlay, Panel, Place, Room, Route, TASKBAR_GAP, TextEffect, TextStyle,
-        merge_intervals, pick_taskbar_room,
+        Line, Overlay, Place, Room, Route, TASKBAR_GAP, TextEffect, TextStyle, merge_intervals,
+        pick_taskbar_room,
     };
     use std::cell::RefCell;
     use std::collections::HashMap;
@@ -1547,20 +1532,18 @@ mod win {
     use windows::Win32::UI::HiDpi::{
         DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForWindow, SetThreadDpiAwarenessContext,
     };
-    use windows::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE;
     use windows::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DispatchMessageW, FindWindowExW, FindWindowW, GA_ROOT,
-        GWL_EXSTYLE, GWL_STYLE, GetAncestor, GetCursorPos, GetMessageW, GetParent,
-        GetWindowLongPtrW, GetWindowRect, HTCAPTION, HTCLIENT, HTTRANSPARENT, HWND_MESSAGE,
-        HWND_NOTOPMOST, HWND_TOP, HWND_TOPMOST, IDC_ARROW, IsDialogMessageW, IsWindow,
-        IsWindowVisible, KillTimer, LoadCursorW, MA_NOACTIVATE, MSG, PostMessageW,
-        PostThreadMessageW, RegisterClassExW, SPI_GETWORKAREA, SW_HIDE, SW_SHOWNOACTIVATE,
-        SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetParent, SetTimer,
-        SetWindowLongPtrW, SetWindowPos, ShowWindow, SystemParametersInfoW, TranslateMessage,
-        ULW_ALPHA, UPDATELAYEREDWINDOWINFO, UpdateLayeredWindow, UpdateLayeredWindowIndirect,
-        WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_EXITSIZEMOVE, WM_KEYDOWN, WM_LBUTTONDOWN,
-        WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_NCHITTEST, WM_TIMER, WNDCLASSEXW, WS_CHILD,
-        WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
+        CreateWindowExW, DefWindowProcW, DispatchMessageW, FindWindowExW, FindWindowW, GWL_EXSTYLE,
+        GWL_STYLE, GetCursorPos, GetMessageW, GetParent, GetWindowLongPtrW, GetWindowRect,
+        HTCAPTION, HTCLIENT, HTTRANSPARENT, HWND_MESSAGE, HWND_NOTOPMOST, HWND_TOP, HWND_TOPMOST,
+        IDC_ARROW, IsWindow, IsWindowVisible, KillTimer, LoadCursorW, MA_NOACTIVATE, MSG,
+        PostMessageW, PostThreadMessageW, RegisterClassExW, SPI_GETWORKAREA, SW_HIDE,
+        SW_SHOWNOACTIVATE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetParent,
+        SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow, SystemParametersInfoW,
+        TranslateMessage, ULW_ALPHA, UPDATELAYEREDWINDOWINFO, UpdateLayeredWindow,
+        UpdateLayeredWindowIndirect, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_EXITSIZEMOVE,
+        WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_NCHITTEST, WM_TIMER, WNDCLASSEXW,
+        WS_CHILD, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
     };
     use windows::core::{BOOL, PCWSTR, w};
     use windows_numerics::Vector2;
@@ -1569,7 +1552,6 @@ mod win {
         Show(String, Overlay, TextStyle),
         /// Only how far the lines are lit, or their routes, changed.
         Lit(String, Overlay, TextStyle),
-        Panel(String, Option<Panel>),
         Hide(String),
     }
 
@@ -1646,10 +1628,6 @@ mod win {
         send(Message::Lit(id, overlay, style));
     }
 
-    pub fn panel(id: String, panel: Option<Panel>) {
-        send(Message::Panel(id, panel));
-    }
-
     pub fn hide(id: String) {
         send(Message::Hide(id));
     }
@@ -1706,7 +1684,6 @@ mod win {
         /// On the taskbar, the room it had when it was last drawn.
         room: Option<Room>,
         style: TextStyle,
-        tool: Option<Box<Tool>>,
     }
 
     #[derive(Clone, PartialEq, Eq)]
@@ -2122,8 +2099,19 @@ mod win {
                     with_window(hwnd, |window, _, _| {
                         window.place = Some(place);
                         super::save_place(&window.id, place.0, place.1);
-                        if let Some(tool) = &mut window.tool {
-                            tool.owner_moved(window.visible);
+                        let allowed = window.visible
+                            && !window.overlay.locked
+                            && window.overlay.place == Place::Free;
+                        if allowed {
+                            super::update_rect(
+                                &window.id,
+                                Some((
+                                    rect.left as f64,
+                                    rect.top as f64,
+                                    (rect.right - rect.left) as f64,
+                                    (rect.bottom - rect.top) as f64,
+                                )),
+                            );
                         }
                     });
                 }
@@ -2281,7 +2269,6 @@ mod win {
             ) else {
                 return;
             };
-            super::win_panel::register(instance.into());
             let Ok(d2d) =
                 D2D1CreateFactory::<ID2D1Factory>(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)
             else {
@@ -2312,46 +2299,6 @@ mod win {
                     });
                     continue;
                 }
-                // Handle Escape and Tab/dialog navigation for any focused child
-                // control inside a visible `BernOverlayTools` utility panel.
-                if !message.hwnd.is_invalid() {
-                    let root = GetAncestor(message.hwnd, GA_ROOT);
-                    if message.message == WM_KEYDOWN && message.wParam.0 == VK_ESCAPE.0 as usize {
-                        let dismissed = WINDOWS.with(|windows| {
-                            let mut windows = windows.borrow_mut();
-                            for window in windows.values_mut() {
-                                if let Some(tool) = &mut window.tool
-                                    && tool.is_visible()
-                                    && (tool.hwnd() == message.hwnd || tool.hwnd() == root)
-                                {
-                                    tool.dismiss();
-                                    return true;
-                                }
-                            }
-                            false
-                        });
-                        if dismissed {
-                            continue;
-                        }
-                    }
-                    let tool_hwnd = WINDOWS.with(|windows| {
-                        let windows = windows.borrow();
-                        for window in windows.values() {
-                            if let Some(tool) = &window.tool
-                                && tool.is_visible()
-                                && (tool.hwnd() == message.hwnd || tool.hwnd() == root)
-                            {
-                                return Some(tool.hwnd());
-                            }
-                        }
-                        None
-                    });
-                    if let Some(tool_hwnd) = tool_hwnd
-                        && IsDialogMessageW(tool_hwnd, &message).as_bool()
-                    {
-                        continue;
-                    }
-                }
                 let _ = TranslateMessage(&message);
                 DispatchMessageW(&message);
             }
@@ -2371,9 +2318,7 @@ mod win {
                     window.visible = false;
                     window.over = false;
                     window.hot = None;
-                    if let Some(tool) = &mut window.tool {
-                        tool.present(None, false);
-                    }
+                    super::update_rect(&id, None);
                     // SAFETY: a window of this thread.
                     unsafe {
                         let _ = KillTimer(Some(window.hwnd), TASKBAR_TIMER);
@@ -2384,41 +2329,6 @@ mod win {
                 }
                 refresh_scanner(&windows);
             }),
-            Message::Panel(id, panel) => {
-                let mut rejected = false;
-                WINDOWS.with(|windows| {
-                    let mut windows = windows.borrow_mut();
-                    let Some(window) = windows.get_mut(&id) else {
-                        if panel.is_some() {
-                            rejected = true;
-                        }
-                        return;
-                    };
-                    let allowed = window.visible
-                        && !window.overlay.locked
-                        && window.overlay.place == Place::Free;
-                    if panel.is_some() && !allowed {
-                        if let Some(tool) = &mut window.tool {
-                            tool.present(None, false);
-                        }
-                        rejected = true;
-                        return;
-                    }
-                    if panel.is_some() && window.tool.is_none() {
-                        window.tool = Tool::new(&id, window.hwnd, instance);
-                        if window.tool.is_none() {
-                            rejected = true;
-                            return;
-                        }
-                    }
-                    if let Some(tool) = &mut window.tool {
-                        tool.present(panel, allowed);
-                    }
-                });
-                if rejected {
-                    super::panel_dismissed(&id);
-                }
-            }
             Message::Lit(id, overlay, style) => {
                 let moved = WINDOWS.with(|windows| {
                     let mut windows = windows.borrow_mut();
@@ -2475,7 +2385,6 @@ mod win {
                             visible: false,
                             room: None,
                             style: TextStyle::default(),
-                            tool: None,
                         }
                     });
                     window.overlay = overlay;
@@ -2486,17 +2395,6 @@ mod win {
                 if let Some(window) = windows.get_mut(&id) {
                     // SAFETY: draws a window of this thread.
                     let _ = unsafe { draw(window, d2d, dwrite) };
-                    if let Some(tool) = &mut window.tool {
-                        let allowed = window.visible
-                            && window.frame.is_some()
-                            && !window.overlay.locked
-                            && window.overlay.place == Place::Free;
-                        if !allowed {
-                            tool.present(None, false);
-                        } else {
-                            tool.owner_moved(true);
-                        }
-                    }
                 }
             }),
         }
@@ -3049,6 +2947,7 @@ mod win {
                 let _ = KillTimer(Some(hwnd), LIT_TIMER);
                 let _ = ShowWindow(hwnd, SW_HIDE);
                 window.frame = None;
+                super::update_rect(&window.id, None);
                 // Still on the taskbar, it checks again if the layout changes.
                 if !free {
                     SetTimer(Some(hwnd), TASKBAR_TIMER, 1000, None);
@@ -3432,8 +3331,21 @@ mod win {
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
             );
             match window.overlay.place {
-                Place::Taskbar => SetTimer(Some(hwnd), TASKBAR_TIMER, 1000, None),
-                Place::Free => SetTimer(Some(hwnd), HOVER_TIMER, HOVER_EVERY, None),
+                Place::Taskbar => {
+                    super::update_rect(&window.id, None);
+                    SetTimer(Some(hwnd), TASKBAR_TIMER, 1000, None);
+                }
+                Place::Free => {
+                    if !window.overlay.locked {
+                        super::update_rect(
+                            &window.id,
+                            Some((left as f64, top as f64, width as f64, height as f64)),
+                        );
+                    } else {
+                        super::update_rect(&window.id, None);
+                    }
+                    SetTimer(Some(hwnd), HOVER_TIMER, HOVER_EVERY, None);
+                }
             };
         }
         Ok(())

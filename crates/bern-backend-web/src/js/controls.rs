@@ -220,6 +220,37 @@ impl Generator<'_> {
         ));
     }
 
+    pub(super) fn color_picker(&self, out: &mut Out, element: &Element) {
+        out.line(format!(
+            "B.ColorPicker(p, ctx, {}, {});",
+            Self::props(vec![
+                ("id", Some(self.id(element))),
+                ("label", self.text_prop(element, "label")),
+                (
+                    "field",
+                    if element.expr("current").is_some() {
+                        self.control_field(element, "current")
+                    } else {
+                        self.field(element, "value")
+                    }
+                ),
+                (
+                    "controlled",
+                    Some(element.expr("current").is_some().to_string())
+                ),
+                (
+                    "labelHidden",
+                    Some((element.keyword("label_hidden") == Some("true")).to_string())
+                ),
+            ]),
+            if element.expr("current").is_some() {
+                "null".into()
+            } else {
+                self.action_fn(element)
+            }
+        ));
+    }
+
     pub(super) fn picker(&self, out: &mut Out, element: &Element) {
         let ty = element
             .expr("selected")

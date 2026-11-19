@@ -2416,6 +2416,112 @@ inline void Slider(Parent const& p, Ctx const& ctx, SliderProps props) {
             .value = [peek] { return std::optional<std::string>(R::Number(R::AsDouble(peek()))); }});
 }
 
+struct ColorPickerProps {
+    char const* id = "";
+    Str label;
+    std::optional<Field> field;
+    Get current;
+    std::function<void(Ctx const&, Value const&)> change;
+    Act commit;
+    bool labelHidden = false;
+};
+
+/// A 24-bit sRGB color (`0xRRGGBB`) swatch button whose flyout hosts the
+/// native WinUI ColorPicker.
+inline void ColorPicker(Parent const& p, Ctx const& ctx, ColorPickerProps props) {
+    if (!props.field && !props.current) return;
+    auto text = Bound(ctx, props.label);
+    auto field = props.field;
+    auto current = props.current;
+    auto change = props.change;
+    auto run = Run(ctx, props.commit);
+    auto read = [ctx, field, current] { return field ? ctx.Read(*field) : current(ctx); };
+    auto peek = [ctx, field, current] { return field ? ctx.Peek(*field) : Reactive::Untrack([&] { return current(ctx); }); };
+    auto asRgb = [](Value const& v) -> uint32_t {
+        long long n = v.kind == Value::Kind::Int ? v.i : static_cast<long long>(std::llround(R::AsDouble(v)));
+        return static_cast<uint32_t>((std::clamp)(n, 0LL, 0xffffffLL));
+    };
+    auto toColor = [](uint32_t rgb) {
+        return winrt::Windows::UI::Color{255, static_cast<uint8_t>((rgb >> 16) & 0xff),
+            static_cast<uint8_t>((rgb >> 8) & 0xff), static_cast<uint8_t>(rgb & 0xff)};
+    };
+    auto toRgb = [](winrt::Windows::UI::Color c) -> uint32_t {
+        return (static_cast<uint32_t>(c.R) << 16) | (static_cast<uint32_t>(c.G) << 8) | static_cast<uint32_t>(c.B);
+    };
+    auto give = [ctx, field, change, run](uint32_t rgb) {
+        rgb &= 0xffffffu;
+        if (field) {
+            auto const& ty = ctx.app->catalog.sessions[field->session].fields[field->field].second;
+            Value out = ty.kind == BType::Kind::Int ? Value::Int(static_cast<int64_t>(rgb)) : Value::Float(static_cast<double>(rgb));
+            SetDraft(ctx, *field, out);
+            if (run) run();
+        } else if (change) {
+            change(ctx, Value::Float(static_cast<double>(rgb)));
+        }
+    };
+
+    controls::Button button;
+    button.Width(44);
+    button.Height(26);
+    button.Padding(xaml::Thickness{2, 2, 2, 2});
+    button.CornerRadius(xaml::CornerRadius{6, 6, 6, 6});
+    controls::Border swatch;
+    swatch.CornerRadius(xaml::CornerRadius{4, 4, 4, 4});
+    swatch.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+    swatch.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+    button.Content(swatch);
+    BindName(button, text);
+
+    Reactive::Run([swatch, read, toColor] {
+        swatch.Background(media::SolidColorBrush(toColor(static_cast<uint32_t>((std::clamp)(
+            read().kind == Value::Kind::Int ? read().i : static_cast<long long>(std::llround(R::AsDouble(read()))), 0LL, 0xffffffLL)))));
+    });
+
+    controls::ColorPicker picker;
+    picker.IsAlphaEnabled(false);
+    picker.IsColorSliderVisible(true);
+    picker.IsColorChannelTextInputVisible(true);
+    picker.IsHexInputVisible(true);
+    auto updating = std::make_shared<bool>(false);
+    picker.ColorChanged([updating, give, toRgb](auto&&, controls::ColorChangedEventArgs const& args) {
+        if (*updating) return;
+        give(toRgb(args.NewColor()));
+    });
+
+    controls::Flyout flyout;
+    flyout.Content(picker);
+    flyout.Opening([picker, updating, peek, asRgb, toColor](auto&&, auto&&) {
+        *updating = true;
+        picker.Color(toColor(asRgb(peek())));
+        *updating = false;
+    });
+    button.Flyout(flyout);
+
+    if (p.isList) {
+        p.Add(props.labelHidden ? xaml::UIElement(Card(button)) : xaml::UIElement(LabeledCard(text, button)));
+    } else if (props.labelHidden) {
+        p.Add(button);
+    } else {
+        controls::Grid row;
+        row.ColumnSpacing(12);
+        row.ColumnDefinitions().Append(Column(Star()));
+        row.ColumnDefinitions().Append(Column(AutoLength()));
+        controls::TextBlock label;
+        label.VerticalAlignment(xaml::VerticalAlignment::Center);
+        Reactive::Run([label, text, ctx] { label.Text(text(ctx)); });
+        row.Children().Append(label);
+        controls::Grid::SetColumn(button, 1);
+        row.Children().Append(button);
+        p.Add(row);
+    }
+    Controls::Register(ctx, props.id, "color_picker", text, nullptr,
+        Actions{.setNumber = [give](double number) {
+            if (std::isfinite(number)) give(static_cast<uint32_t>((std::clamp)(std::llround(number), 0LL, 0xffffffLL)));
+        }, .value = [peek, asRgb] {
+            return std::optional<std::string>(std::to_string(asRgb(peek())));
+        }});
+}
+
 /// One option of a picker: variant index, variant name and label.
 struct PickOption {
     uint32_t value = 0;
