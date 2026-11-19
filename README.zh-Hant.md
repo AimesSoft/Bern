@@ -64,9 +64,17 @@
 </tr>
 </table>
 
-<p align="center"><img src="Docs/Assets/screenshots/android-en.png" width="270" alt="展示應用程式在 Android（Jetpack Compose）上"><br><sub><b>Android</b> · Jetpack Compose（跟隨系統深色）</sub></p>
+<table>
+<tr>
+<td width="40%" align="center"><img src="Docs/Assets/screenshots/android-en.png" width="220" alt="展示應用程式在 Android（Jetpack Compose）上"><br><sub><b>Android</b> · Jetpack Compose（跟隨系統深色）</sub></td>
+<td width="30%" align="center"><img src="Docs/Assets/screenshots/watchos-en.png" width="160" alt="手錶應用在 watchOS（SwiftUI）上"><br><sub><b>watchOS</b> · SwiftUI</sub></td>
+<td width="30%" align="center"><img src="Docs/Assets/screenshots/wearos-zh.png" width="160" alt="手錶應用在 Wear OS（Compose）上"><br><sub><b>Wear OS</b> · Compose Material 3</sub></td>
+</tr>
+</table>
 
-<p align="center"><sub>同一份 <code>controls_page</code> 宣告，產生五套 UI 技術。在桌面和 Android 上 Bern 不自行繪製任何像素：<br>每個開關、滑桿與側邊欄都是平台自己的標準控制項，使用平台自己的配色。</sub></p>
+<p align="center"><img src="Docs/Assets/screenshots/gpui-zh.png" width="480" alt="原生控制項範例在 macOS GPUI 上"><br><sub><b>桌面端 · GPUI</b>（<code>ui = "gpui"</code>，搭配緊鄰 <code>NativeView</code>）</sub></p>
+
+<p align="center"><sub>同一份 Rust 宣告涵蓋桌面、手機、手錶與網頁。在系統原生目標上 Bern 不自行繪製任何像素；<br>需要統一 GPU 渲染時，切換到 <code>ui = "gpui"</code> 即可直接將 Bern 作為 GPUI 的宣告式 UI 框架。</sub></p>
 
 ## 為什麼選擇 Bern
 

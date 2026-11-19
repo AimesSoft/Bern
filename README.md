@@ -64,9 +64,17 @@ No JS engine or embedded browser by default on desktop, mobile or wearables.<br>
 </tr>
 </table>
 
-<p align="center"><img src="Docs/Assets/screenshots/android-en.png" width="270" alt="The showcase on Android with Jetpack Compose"><br><sub><b>Android</b> · Jetpack Compose (dark, following the system)</sub></p>
+<table>
+<tr>
+<td width="40%" align="center"><img src="Docs/Assets/screenshots/android-en.png" width="220" alt="The showcase on Android with Jetpack Compose"><br><sub><b>Android</b> · Jetpack Compose (dark, following the system)</sub></td>
+<td width="30%" align="center"><img src="Docs/Assets/screenshots/watchos-en.png" width="160" alt="Watch demo on watchOS with SwiftUI"><br><sub><b>watchOS</b> · SwiftUI</sub></td>
+<td width="30%" align="center"><img src="Docs/Assets/screenshots/wearos-zh.png" width="160" alt="Watch demo on Wear OS with Compose"><br><sub><b>Wear OS</b> · Compose Material 3</sub></td>
+</tr>
+</table>
 
-<p align="center"><sub>One <code>controls_page</code> declaration, five UI toolkits. On the desktop and on Android Bern draws no pixels of its own:<br>every switch, slider and sidebar is the platform's standard control, in the platform's own colors.</sub></p>
+<p align="center"><img src="Docs/Assets/screenshots/gpui-zh.png" width="480" alt="Native controls demo on macOS with GPUI"><br><sub><b>Desktop · GPUI</b>（<code>ui = "gpui"</code> with co-located <code>NativeView</code>）</sub></p>
+
+<p align="center"><sub>One Rust declaration across desktop, phone, watch and Web. On system targets Bern draws no pixels of its own;<br>when you want unified GPU rendering, switch to <code>ui = "gpui"</code> without rewriting your app.</sub></p>
 
 ## Why Bern
 

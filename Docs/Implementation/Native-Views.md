@@ -83,4 +83,5 @@ Complete six-backend showcase in [examples/native-controls](../../examples/nativ
 - **Ubuntu Linux VM (GTK 4 / libadwaita)**: Built and run on GNOME Wayland (`gtk::LevelBar` + `gtk::SpinButton` + `gtk::ToggleButton` + `gtk::Calendar`); full-width layout and full CLI end-to-end verification passed.
 - **iOS 26.5 Simulator (iPhone 17 Pro)**: Built and run (`Gauge` + `ProgressView` + `Stepper` + graphical `DatePicker`); full-width layout and full CLI end-to-end verification passed.
 - **Android Emulator (Pixel 9 Pro XL)**: Built APK, installed and launched (`CircularProgressIndicator` + `AndroidView(RatingBar)` + `FilterChip` + `AndroidView(CalendarView)`); full-width rendering verified visually. Remote Android CLI over `adb forward` was not separately verified.
-- **Web & GPUI**: Passed `bern check`, unit tests and code generation; not yet run interactively in a browser or GPUI window.
+- **GPUI (macOS)**: Built and run offscreen (`meter.gpui.rs` segmented meter + `calendar.gpui.rs` calendar grid); full-width rendering and CLI operations (`ui inspect`, `set-number`, `set-bool`) verified.
+- **Web**: Passed `bern check`, unit tests and code generation; not yet run interactively in a browser.
