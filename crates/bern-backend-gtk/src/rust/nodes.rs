@@ -278,6 +278,7 @@ impl Generator<'_> {
             "Picker" => self.picker(out, element),
             "LanguagePicker" => self.language_picker(out, element),
             "Video" => self.video(out, element),
+            "NativeView" => self.native_view(out, element),
             "Query" => self.query(out, element),
             "Form" => self.form(out, element),
             "Section" if self.in_sidebar.get() => self.sidebar_section(out, element),
@@ -366,6 +367,7 @@ impl Generator<'_> {
     }
 
     pub(super) fn component(&self, out: &mut Out, component: &ComponentDef) {
+        *self.current_scope.borrow_mut() = component.name.clone();
         out.line(format!(
             "/// Generated from the `{}` component.",
             component.name
@@ -380,6 +382,7 @@ impl Generator<'_> {
     }
 
     pub(super) fn window(&self, out: &mut Out, window: &WindowDef) {
+        *self.current_scope.borrow_mut() = window.id.clone();
         out.line(format!("/// Root of the `{}` window.", window.id));
         out.open(format!("fn w_{}(p: &b::Parent, c: &b::Ctx) {{", window.id));
         self.nodes(out, std::slice::from_ref(&window.content));

@@ -10,6 +10,8 @@
 //! its place.
 
 mod motion;
+#[path = "rust_native.rs"]
+mod native;
 
 use bern_ir::style::{ColorRef, ControlSize, StyleEffect, StyleState};
 use bern_ir::{
@@ -346,6 +348,31 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
     ("WheelDown", &[]),
     ("OnCommit", &[]),
     (
+        "NativeView",
+        &[
+            "id", "label", "swiftui", "winui3", "compose", "gtk", "gpui", "web",
+        ],
+    ),
+    ("NativeValue", &["name", "value"]),
+    ("NativeText", &["name", "content"]),
+    ("NativeDraft", &["name", "value"]),
+    ("NativeAction", &["id", "label", "enabled", "feature"]),
+    (
+        "NativeNumber",
+        &[
+            "id", "label", "current", "min", "max", "step", "enabled", "feature",
+        ],
+    ),
+    (
+        "NativeBool",
+        &["id", "label", "checked", "enabled", "feature"],
+    ),
+    (
+        "NativeInput",
+        &["id", "label", "current", "enabled", "feature"],
+    ),
+    ("Fallback", &[]),
+    (
         "SplitButton",
         &[
             "id",
@@ -558,6 +585,15 @@ pub const COMPONENT_NAMES: &[&str] = &[
     "QueryStatusHeader",
     "Toolbar",
     "Video",
+    "NativeView",
+    "NativeValue",
+    "NativeText",
+    "NativeDraft",
+    "NativeAction",
+    "NativeNumber",
+    "NativeBool",
+    "NativeInput",
+    "Fallback",
     "Search",
     "SearchItem",
     "FocusRegion",
@@ -671,6 +707,8 @@ pub struct Generator<'a> {
     app: &'a Application,
     /// The platform whose `style!` rules apply.
     platform: &'a str,
+    project_dir: Option<&'a std::path::Path>,
+    current_scope: RefCell<String>,
     diagnostics: RefCell<Vec<Diagnostic>>,
     icons: RefCell<BTreeSet<String>>,
     /// The corners of its container each child lies on (bits for top-left,
@@ -707,6 +745,8 @@ impl<'a> Generator<'a> {
         Self {
             app,
             platform,
+            project_dir: None,
+            current_scope: RefCell::new(String::new()),
             diagnostics: RefCell::new(Vec::new()),
             icons: RefCell::new(RUNTIME_ICONS.iter().map(|icon| icon.to_string()).collect()),
             corners: RefCell::new(std::collections::HashMap::new()),
@@ -717,6 +757,16 @@ impl<'a> Generator<'a> {
             layers: std::cell::Cell::new(false),
             spacer: std::cell::Cell::new(false),
         }
+    }
+
+    pub fn with_project_dir(
+        app: &'a Application,
+        platform: &'a str,
+        project_dir: &'a std::path::Path,
+    ) -> Self {
+        let mut generator = Self::new(app, platform);
+        generator.project_dir = Some(project_dir);
+        generator
     }
 
     fn unsupported(&self, what: String, at: Option<&SourceLocation>) {
@@ -749,6 +799,7 @@ impl<'a> Generator<'a> {
         line("use bern_gpui::protocol::Value as V;");
         line("use bern_gpui::value as rt;");
         line("");
+        line(&self.native_view_modules());
         line("// Components.");
         for component in &app.components {
             line(&self.component(component));
@@ -781,6 +832,7 @@ impl<'a> Generator<'a> {
     // MARK: - Windows and the application
 
     fn component(&self, component: &ComponentDef) -> String {
+        *self.current_scope.borrow_mut() = component.name.clone();
         // Controls of the body are named after the component; the element
         // the body is keeps the space its caller gives it. A body that
         // plays `disappear` is also built as it leaves.
@@ -796,6 +848,7 @@ impl<'a> Generator<'a> {
     }
 
     fn window_content(&self, window: &WindowDef) -> String {
+        *self.current_scope.borrow_mut() = window.id.clone();
         let mut out = format!(
             "fn window_{}(c: &b::Ctx) -> b::El {{\n    ({}).unwrap_or_else(|| b::column(c, b::Flex::default(), Vec::new()))\n}}\n",
             window.id,
@@ -1574,6 +1627,10 @@ pub fn app() -> b::AppDef {{
             "Divider" => Greed {
                 width: parent == Axis::Column,
                 height: parent == Axis::Row,
+            },
+            "NativeView" => Greed {
+                width: parent == Axis::Column,
+                height: false,
             },
             "TextInput" | "Progress" | "Slider" | "Section" | "NavLink" | "SearchItem" => Greed {
                 width: true,
@@ -2486,6 +2543,7 @@ pub fn app() -> b::AppDef {{
                 )
             }
             "DoubleTap" | "WheelUp" | "WheelDown" | "OnCommit" => return None,
+            "NativeView" => return self.native_view_code(element),
             "Swipe" => {
                 let Some(field) = element.field("value") else {
                     self.unsupported("a `Swipe` without a draft".into(), at);

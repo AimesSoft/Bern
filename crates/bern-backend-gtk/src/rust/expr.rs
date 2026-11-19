@@ -156,7 +156,7 @@ impl Generator<'_> {
         string(element.id.as_deref().unwrap_or(&element.path))
     }
 
-    fn field_ref(&self, field: &bern_ir::FieldRef) -> String {
+    pub(super) fn field_ref(&self, field: &bern_ir::FieldRef) -> String {
         format!(
             "b::Field {{ session: {}, field: {} }}",
             self.session_index(&field.session),
@@ -199,7 +199,7 @@ impl Generator<'_> {
         }))
     }
 
-    fn action_body(&self, action: &Action) -> String {
+    pub(super) fn action_body(&self, action: &Action) -> String {
         match action {
             Action::Session { field, op } => {
                 let target = self.field_ref(field);

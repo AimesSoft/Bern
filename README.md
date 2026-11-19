@@ -6,16 +6,20 @@
 
 <p><b>One Rust declaration, compiled into each platform's own native UI.</b></p>
 
-<p>From the desktop to the phone, built for AI: SwiftUI, WinUI 3, GTK 4, Jetpack Compose and the Web.<br>
-No JS engine or embedded browser by default on desktop or mobile.<br>
+<p>From desktop, mobile, watch and TV to the Web, built for AI: SwiftUI, WinUI 3, GTK 4, Jetpack Compose, GPUI and the Web.<br>
+No JS engine or embedded browser by default on desktop, mobile or wearables.<br>
 <b>Skills + CLI:</b> With IPC enabled, agents read <code>SKILL.md</code> and use the app CLI to operate controls by name.</p>
 
 <p>
 <img alt="macOS · SwiftUI" src="https://img.shields.io/badge/macOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
 <img alt="iOS · SwiftUI" src="https://img.shields.io/badge/iOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
+<img alt="watchOS · SwiftUI" src="https://img.shields.io/badge/watchOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
+<img alt="tvOS · SwiftUI" src="https://img.shields.io/badge/tvOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
 <img alt="Windows · WinUI 3" src="https://img.shields.io/badge/Windows-WinUI%203-0078D4?style=for-the-badge&logo=windows11&logoColor=white">
 <img alt="Linux · GTK 4" src="https://img.shields.io/badge/Linux-GTK%204-4A86CF?style=for-the-badge&logo=gtk&logoColor=white">
 <img alt="Android · Jetpack Compose" src="https://img.shields.io/badge/Android-Jetpack%20Compose-3DDC84?style=for-the-badge&logo=android&logoColor=white">
+<img alt="Wear OS · Compose" src="https://img.shields.io/badge/Wear%20OS-Compose-3DDC84?style=for-the-badge&logo=wearos&logoColor=white">
+<img alt="Desktop · GPUI" src="https://img.shields.io/badge/Desktop-GPUI-084CCF?style=for-the-badge&logo=zedindustries&logoColor=white">
 <img alt="Web · WebAssembly" src="https://img.shields.io/badge/Web-WebAssembly-654FF0?style=for-the-badge&logo=webassembly&logoColor=white">
 </p>
 
@@ -185,6 +189,8 @@ You can run the same commands yourself, including app-specific ones such as `sho
 - **Media app components**: a sidebar footer, toolbar search with results, an inspector, toasts, split buttons and popover buttons holding any content, buttons with content that reveal more on hover, shortcuts, picking and dropping files, scroll snapping, pinch and drag to set a value, on all five front ends.
 - **Reading the files users hand you**: for a file the user picked, dropped or opened with the app, the engine gets its name and bytes with `MediaSource::file_name()` and `open()`, the same for a local path, an Android `content://` document or a page's `blob:` file.
 - **Modular apps**: an app is a shell and modules, each with its own protocol, engine, interface and translations, switchable at runtime; `bern new --module` adds one, so several people and AIs can work side by side (verified on macOS and Android).
+- **Desktop system integration & rich controls**: system tray icon and menu (`StatusItem`, with monochrome SVG icons and launch-at-login), macOS `MenuBar`, `Table`, `ColorPicker`, `ShortcutInput`, pure-Rust animated `Svg` (zero WebView), embedded `WebPage`, floating overlay utility windows, pointer events (`DoubleTap`, `ContextMenu`, `WheelUp`/`WheelDown`), `Slider(hover:)` and direct `players.<id>.<field>` bindings.
+- **Co-located native views (`NativeView`)**: drop platform-native files (`*.swiftui.swift`, `*.winui3.cpp`, `*.compose.kt`, `*.gtk.rs`, `*.gpui.rs`, `*.web.js`) right beside your Rust `.rs` file for platform-specific controls or custom surfaces, while keeping typed props, `tr!` localization checks, mandatory CLI control entries and `Fallback` in Rust (see [Native Views](Docs/Implementation/Native-Views.md)).
 
 </details>
 
@@ -199,16 +205,17 @@ flowchart LR
     end
     P --> C{{"bern build<br/>compiler + IR"}}
     U --> C
-    C --> S["SwiftUI<br/>macOS · iOS"]
-    C --> W["WinUI 3<br/>Windows"]
+    C --> S["SwiftUI<br/>macOS · iOS · watchOS · tvOS"]
+    C --> W["WinUI 3 / Islands<br/>Windows"]
     C --> G["GTK 4<br/>Linux"]
-    C --> A["Jetpack Compose<br/>Android"]
+    C --> A["Jetpack Compose<br/>Android · Wear OS"]
+    C --> P2["GPUI<br/>macOS · Windows · Linux"]
     C --> B["DOM + WASM<br/>Web"]
     E <--> K[["Command catalog"]]
     K <--> N["Native UI"]
     K <--> L["App CLI"]
     K <--> J["JSON channel"]
-    K --> S["SKILL.md"]
+    K --> SK["SKILL.md"]
 ```
 
 1. **Protocol** – `#[bern::protocol]` declares value types, the read-only state and the command and query traits.
@@ -297,18 +304,22 @@ counter counter add --by 5
 counter catalog
 ```
 
-`Bern.toml` declares languages, theme, sources, bundled resources and targets. See the full [showcase](examples/showcase): a sidebar app with text styles, buttons, switches, sliders, text fields, an engine-backed search, list-to-detail navigation, video, and a settings window with tabs and a close confirmation. The [planner](examples/planner) is a modular app with style overrides, motion and `Canvas`. The [gallery](examples/gallery) shows the media app components: a poster wall that enters in turn, a timeline placed by fraction, a volume popover, margins and layouts that follow the four sizes, and a dropped video whose name, format and size the engine reads from the file.
+`Bern.toml` declares languages, theme, sources, bundled resources and targets. See the full [showcase](examples/showcase): a sidebar app with text styles, buttons, switches, sliders, text fields, an engine-backed search, list-to-detail navigation, video, and a settings window with tabs and a close confirmation. The [planner](examples/planner) is a modular app with style overrides, motion and `Canvas`. The [gallery](examples/gallery) shows the media app components: a poster wall that enters in turn, a timeline placed by fraction, a volume popover, margins and layouts that follow the four sizes, and a dropped video whose name, format and size the engine reads from the file. See [native-controls](examples/native-controls) for co-located per-platform native controls via `NativeView`, [wearos](examples/wearos) for watch targets, and [svg-animation](examples/svg-animation) for pure-Rust animated SVG.
 
 ## Platforms
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/platforms-en-dark.svg">
-<img alt="Platforms: macOS, Windows, Linux, the web app, WebUI and Android are available, iOS and tvOS build simulator apps today; next are flutter + macos, iOS device packages and HarmonyOS" src="Docs/Assets/tables/platforms-en-light.svg" width="100%">
+<img alt="Platforms: macOS, Windows, Linux, the web app, WebUI, Android, Wear OS, watchOS, tvOS, iOS and desktop GPUI" src="Docs/Assets/tables/platforms-en-light.svg" width="100%">
 </picture>
 
-Implementation notes: [macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [tvOS](Docs/Implementation/tvOS-SwiftUI.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web and WebUI](Docs/Implementation/Web.md) · [Android](Docs/Implementation/Android-Compose.md); the next platforms are in the [adaptation specs](Docs/Adaptation/README.md).
+Implementation notes: [macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [watchOS](Docs/Implementation/watchOS-SwiftUI.md) · [tvOS](Docs/Implementation/tvOS-SwiftUI.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Android & Wear OS](Docs/Implementation/Android-Compose.md) · [GPUI](Docs/Implementation/GPUI.md) · [Web and WebUI](Docs/Implementation/Web.md); the next platforms are in the [adaptation specs](Docs/Adaptation/README.md).
 
 Omitting the UI technology picks the platform default; an unavailable default fails loudly instead of silently switching to another stack.
+
+### Using Bern as a GPUI UI framework
+
+GPUI gives Rust apps fast GPU rendering, but ships without a standard control library. Setting `ui = "gpui"` on macOS, Windows or Linux lets you use Bern directly as a declarative UI framework on top of GPUI: your `ui!` declarations get full desktop controls, semantic light/dark theming, spring motion, compile-time i18n and feature checks, and Skills + CLI out of the box. When a view needs bespoke GPU rendering, embed native GPUI code beside the declaration with `NativeView(gpui: "...")`—and switch back to native system controls or expand to iOS, Android, watchOS, Wear OS and the Web without rewriting your app logic.
 
 ### Windows and iOS each have two front ends
 

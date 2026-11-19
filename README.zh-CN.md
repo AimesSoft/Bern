@@ -6,16 +6,20 @@
 
 <p><b>一份 Rust 声明，编译成每个平台自己的原生界面。</b></p>
 
-<p>从桌面到手机，为 AI 而建：SwiftUI、WinUI 3、GTK 4、Jetpack Compose 与 Web。<br>
-桌面和手机默认不捆绑 JS 引擎或浏览器。<br>
+<p>覆盖桌面、手机、手表、电视与网页，为 AI 而建：SwiftUI、WinUI 3、GTK 4、Jetpack Compose、GPUI 与 Web。<br>
+桌面、手机与手表端默认不捆绑 JS 引擎或浏览器。<br>
 <b>Skills + CLI：</b>开启 IPC 后，Agent 从 <code>SKILL.md</code> 查命令，用应用 CLI 按名称操作控件。</p>
 
 <p>
 <img alt="macOS · SwiftUI" src="https://img.shields.io/badge/macOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
 <img alt="iOS · SwiftUI" src="https://img.shields.io/badge/iOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
+<img alt="watchOS · SwiftUI" src="https://img.shields.io/badge/watchOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
+<img alt="tvOS · SwiftUI" src="https://img.shields.io/badge/tvOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
 <img alt="Windows · WinUI 3" src="https://img.shields.io/badge/Windows-WinUI%203-0078D4?style=for-the-badge&logo=windows11&logoColor=white">
 <img alt="Linux · GTK 4" src="https://img.shields.io/badge/Linux-GTK%204-4A86CF?style=for-the-badge&logo=gtk&logoColor=white">
 <img alt="Android · Jetpack Compose" src="https://img.shields.io/badge/Android-Jetpack%20Compose-3DDC84?style=for-the-badge&logo=android&logoColor=white">
+<img alt="Wear OS · Compose" src="https://img.shields.io/badge/Wear%20OS-Compose-3DDC84?style=for-the-badge&logo=wearos&logoColor=white">
+<img alt="Desktop · GPUI" src="https://img.shields.io/badge/Desktop-GPUI-084CCF?style=for-the-badge&logo=zedindustries&logoColor=white">
 <img alt="Web · WebAssembly" src="https://img.shields.io/badge/Web-WebAssembly-654FF0?style=for-the-badge&logo=webassembly&logoColor=white">
 </p>
 
@@ -185,6 +189,8 @@ $ showcase window confirm-close --window settings#1 --confirmation settings#1:c1
 - **媒体类应用的组件**：侧边栏底部区域、工具栏搜索与结果、侧面板、轻提示、分体按钮与弹出任意内容的浮层按钮、带内容的按钮与悬停显示、快捷键、文件选择与拖入、滚动停靠、双指缩放与拖动调值，五个前端都已实现。
 - **读取交来的文件**：用户选中、拖入或用应用打开的文件，引擎用 `MediaSource::file_name()` 与 `open()` 读取名字与内容；本地路径、Android 的 `content://` 文档与网页的 `blob:` 文件写法相同。
 - **模块化应用**：应用由外壳和多个模块组成，每个模块有自己的协议、引擎、界面与翻译，可以在运行时开关；`bern new --module` 新建模块，适合多人和多个 AI 分头开发（已在 macOS 与 Android 上验证）。
+- **桌面集成与丰富控件**：系统托盘图标与菜单（`StatusItem`，支持单色 SVG 与登录时启动）、macOS `MenuBar`、`Table`、`ColorPicker`、`ShortcutInput`、纯 Rust 原生动画 `Svg`（零 WebView）、内嵌 `WebPage`、浮层锚定工具窗、全元素指针事件（`DoubleTap`、`ContextMenu`、`WheelUp`/`WheelDown`）、`Slider(hover:)` 与声明直读 `players.<id>.<field>`。
+- **紧邻原生视图（`NativeView`）**：直接在 Rust 声明 `.rs` 文件同目录放入各平台原生代码（`*.swiftui.swift`、`*.winui3.cpp`、`*.compose.kt`、`*.gtk.rs`、`*.gpui.rs`、`*.web.js`）来嵌入平台特有控件或专业画布，同时由 Rust 统一管住强类型输入、`tr!` 多语言检查、强制规范化 CLI 入口与 `Fallback`（见[紧邻原生视图](Docs/zh-CN/Implementation/Native-Views.md)）。
 
 </details>
 
@@ -199,16 +205,17 @@ flowchart LR
     end
     P --> C{{"bern build<br/>编译器 + IR"}}
     U --> C
-    C --> S["SwiftUI<br/>macOS · iOS"]
-    C --> W["WinUI 3<br/>Windows"]
+    C --> S["SwiftUI<br/>macOS · iOS · watchOS · tvOS"]
+    C --> W["WinUI 3 / Islands<br/>Windows"]
     C --> G["GTK 4<br/>Linux"]
-    C --> A["Jetpack Compose<br/>Android"]
+    C --> A["Jetpack Compose<br/>Android · Wear OS"]
+    C --> P2["GPUI<br/>macOS · Windows · Linux"]
     C --> B["DOM + WASM<br/>Web"]
     E <--> K[["命令目录"]]
     K <--> N["原生界面"]
     K <--> L["应用 CLI"]
     K <--> J["JSON 通道"]
-    K --> S["SKILL.md"]
+    K --> SK["SKILL.md"]
 ```
 
 1. **协议**：`#[bern::protocol]` 声明值类型、只读状态，以及命令与查询 trait。
@@ -297,18 +304,22 @@ counter counter add --by 5
 counter catalog
 ```
 
-`Bern.toml` 声明语言、主题、源码、随包资源与构建目标。完整示例见[控件展示应用](examples/showcase)：侧边栏应用，包含文字层级、按钮、开关、滑块、输入框、由引擎查询驱动的搜索、列表到详情的导航、视频，以及带页签和关闭确认的设置窗口。[计划应用](examples/planner)演示模块化应用、样式覆盖、动效与 `Canvas`。[图案集](examples/gallery)演示媒体类应用的组件：海报墙的错开入场、时间轴的按比例摆放、音量浮层按钮、随四档尺寸变化的页边距与布局，以及拖入视频后由引擎读出文件名、格式与大小。
+`Bern.toml` 声明语言、主题、源码、随包资源与构建目标。完整示例见[控件展示应用](examples/showcase)：侧边栏应用，包含文字层级、按钮、开关、滑块、输入框、由引擎查询驱动的搜索、列表到详情的导航、视频，以及带页签和关闭确认的设置窗口。[计划应用](examples/planner)演示模块化应用、样式覆盖、动效与 `Canvas`。[图案集](examples/gallery)演示媒体类应用的组件：海报墙的错开入场、时间轴的按比例摆放、音量浮层按钮、随四档尺寸变化的页边距与布局，以及拖入视频后由引擎读出文件名、格式与大小。[原生控件示例](examples/native-controls)演示通过 `NativeView` 在六个后端紧邻嵌入平台原生控件，[手表端示例](examples/wearos)演示手表目标，[动画 SVG](examples/svg-animation)演示纯 Rust 矢量动画。
 
 ## 支持的平台
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/platforms-dark.svg">
-<img alt="支持的平台：macOS、Windows、Linux、Web 应用、WebUI 与 Android 可用，iOS 与 tvOS 目前构建模拟器应用；下一步是 flutter + macos、iOS 真机打包与 HarmonyOS" src="Docs/Assets/tables/platforms-light.svg" width="100%">
+<img alt="支持的平台：macOS、Windows、Linux、Web 应用、WebUI、Android、Wear OS、watchOS、tvOS、iOS 与桌面端 GPUI" src="Docs/Assets/tables/platforms-light.svg" width="100%">
 </picture>
 
-实现记录：[macOS](Docs/zh-CN/Implementation/macOS-SwiftUI.md) · [iOS](Docs/zh-CN/Implementation/iOS-SwiftUI.md) · [tvOS](Docs/zh-CN/Implementation/tvOS-SwiftUI.md) · [Windows](Docs/zh-CN/Implementation/Windows-WinUI3.md) · [Linux](Docs/zh-CN/Implementation/Linux-GTK.md) · [Web 与 WebUI](Docs/zh-CN/Implementation/Web.md) · [Android](Docs/zh-CN/Implementation/Android-Compose.md)；下一步的平台见[适配规范](Docs/zh-CN/Adaptation/README.md)。
+实现记录：[macOS](Docs/zh-CN/Implementation/macOS-SwiftUI.md) · [iOS](Docs/zh-CN/Implementation/iOS-SwiftUI.md) · [watchOS](Docs/zh-CN/Implementation/watchOS-SwiftUI.md) · [tvOS](Docs/zh-CN/Implementation/tvOS-SwiftUI.md) · [Windows](Docs/zh-CN/Implementation/Windows-WinUI3.md) · [Linux](Docs/zh-CN/Implementation/Linux-GTK.md) · [Android 与 Wear OS](Docs/zh-CN/Implementation/Android-Compose.md) · [GPUI](Docs/zh-CN/Implementation/GPUI.md) · [Web 与 WebUI](Docs/zh-CN/Implementation/Web.md)；下一步的平台见[适配规范](Docs/zh-CN/Adaptation/README.md)。
 
 不指定 UI 技术时使用平台的默认技术；默认技术不可用时直接报错，不会悄悄换成另一套技术。
+
+### 把 Bern 当作 GPUI 的 UI 框架
+
+GPUI 提供了高性能 GPU 渲染，但本身不带标准控件库。在 macOS、Windows 或 Linux 目标里写上 `ui = "gpui"`，就可以直接把 Bern 当作 GPUI 的声明式 UI 框架使用：一份 `ui!` 开箱自带全套桌面控件、语义深浅色主题、弹簧动效、编译期多语言与功能契约检查，以及 Skills + CLI。需要自定义 GPU 绘制的地方，用 `NativeView(gpui: "...")` 紧邻嵌入原生 GPUI 代码即可；未来想切回系统原生控件，或扩展到 iOS、Android、watchOS、Wear OS 与 Web，业务与声明都无需重写。
 
 ### Windows 与 iOS 各有两个前端
 

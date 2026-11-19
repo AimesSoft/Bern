@@ -77,6 +77,7 @@ pub use filters::{blur_scope, glow};
 pub use form::{FormProps, SectionProps, form, section};
 pub use gpui;
 pub use host::{WindowOp, dispatch, window_command};
+pub use session::{NativeControlActions, register_native};
 pub use layout::{
     AccordionProps, Align, Flex, GridProps, Grow, Layers, Len, Pad, PreviewProps, Size, Style,
     accordion, adaptive, column, cover, divider, flow, grid, lazy_grid, preview_list, reveal, row,

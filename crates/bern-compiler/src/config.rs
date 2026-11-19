@@ -469,11 +469,19 @@ fn rust_files(path: &Path, written: &str, found: &mut Vec<String>) -> Result<(),
         let child = format!("{written}/{name}");
         match entry.file_type() {
             Ok(kind) if kind.is_dir() => rust_files(&entry.path(), &child, found)?,
-            Ok(kind) if kind.is_file() && name.ends_with(".rs") => found.push(child),
+            Ok(kind) if kind.is_file() && name.ends_with(".rs") && !is_native_rust_file(&name) => {
+                found.push(child)
+            }
             _ => {}
         }
     }
     Ok(())
+}
+
+/// Co-located native Rust implementations (`*.gtk.rs`, `*.gpui.rs`, `*.native.rs`)
+/// sit beside Bern UI files in the same directory and are not Bern UI sources.
+fn is_native_rust_file(name: &str) -> bool {
+    name.ends_with(".gtk.rs") || name.ends_with(".gpui.rs") || name.ends_with(".native.rs")
 }
 
 /// Resolve `pkg/src/a/b.rs` into the package directory and module path.

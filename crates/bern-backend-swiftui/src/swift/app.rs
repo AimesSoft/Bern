@@ -183,6 +183,7 @@ impl Generator<'_> {
             out.line("");
         }
         self.menu_window(&mut out);
+        self.native_view_types(&mut out);
         let menu_bar = self.menu_bar(&mut out);
         let status_item = self.status_menu(&mut out);
         let status_follows = status_item

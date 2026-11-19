@@ -1,0 +1,12 @@
+[package]
+name = "native-controls-ui"
+description = "UI declarations and co-located platform-native views"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+bern.workspace = true
+native-controls-protocol = { path = "../native-controls-protocol" }

@@ -112,6 +112,17 @@ pub enum PropKind {
     Query,
     /// A feature of the enclosing contract, such as `MediaFeature::Clip`.
     Feature,
+    /// Relative path literal to a co-located native UI implementation file
+    /// next to the declaring `.rs` file.
+    NativeFile,
+    /// Identifier naming a prop or draft slot exposed to a `NativeView`.
+    NativeName,
+    /// Read-only scalar expression passed into a `NativeView`: `bool`, `i64`,
+    /// `f64`, `String`, or an optional of `i64`, `f64`, or `String`.
+    NativeScalar,
+    /// Writable session draft field exposed to a `NativeView`: `bool`, `i64`,
+    /// `f64`, `String`, or `Option<f64>`.
+    NativeDraftField,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -210,6 +221,14 @@ impl ComponentSpec {
                 | "WheelDown"
                 | "OnCommit"
                 | "ScreenBrightness"
+                | "NativeValue"
+                | "NativeText"
+                | "NativeDraft"
+                | "NativeAction"
+                | "NativeNumber"
+                | "NativeBool"
+                | "NativeInput"
+                | "Fallback"
         )
     }
 }
@@ -228,6 +247,7 @@ pub const POINTER_EVENTS: &[&str] = &["DoubleTap", "ContextMenu", "WheelUp", "Wh
 pub const POINTER_OWNERS: &[&str] = &[
     "Button",
     "Video",
+    "NativeView",
     "Slider",
     "Image",
     "Svg",
@@ -1814,6 +1834,152 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             "Single choice among the labelled variants of an enum, with optional explicit labels; `style: chips` shows a chip per option, which in a `Flow` are items of the flow",
         )
     },
+    ComponentSpec {
+        interactive: true,
+        ..spec(
+            "NativeView",
+            &[
+                req("id", PropKind::Id),
+                req("label", PropKind::DisplayText),
+                opt("swiftui", PropKind::NativeFile),
+                opt("winui3", PropKind::NativeFile),
+                opt("compose", PropKind::NativeFile),
+                opt("gtk", PropKind::NativeFile),
+                opt("gpui", PropKind::NativeFile),
+                opt("web", PropKind::NativeFile),
+            ],
+            Children::Only(&[
+                "NativeValue",
+                "NativeText",
+                "NativeDraft",
+                "NativeAction",
+                "NativeNumber",
+                "NativeBool",
+                "NativeInput",
+                "Fallback",
+                "DoubleTap",
+                "ContextMenu",
+                "WheelUp",
+                "WheelDown",
+            ]),
+            "Platform-native UI view implemented in co-located native source files beside the declaring `.rs` file; its functional entries are declared here so Bern's CLI and feature contracts stay intact",
+        )
+    },
+    ComponentSpec {
+        placement: Placement::Within(&["NativeView"]),
+        ..spec(
+            "NativeValue",
+            &[
+                req("name", PropKind::NativeName),
+                req("value", PropKind::NativeScalar),
+            ],
+            Children::None,
+            "Read-only typed value passed into its `NativeView`'s generated props",
+        )
+    },
+    ComponentSpec {
+        placement: Placement::Within(&["NativeView"]),
+        ..spec(
+            "NativeText",
+            &[
+                req("name", PropKind::NativeName),
+                req("content", PropKind::DisplayText),
+            ],
+            Children::None,
+            "Localized display text passed into its `NativeView`'s generated props",
+        )
+    },
+    ComponentSpec {
+        placement: Placement::Within(&["NativeView"]),
+        ..spec(
+            "NativeDraft",
+            &[
+                req("name", PropKind::NativeName),
+                req("value", PropKind::NativeDraftField),
+            ],
+            Children::None,
+            "Writable session draft field read by and writable from its `NativeView`",
+        )
+    },
+    ComponentSpec {
+        action: ActionRule::Required,
+        interactive: true,
+        placement: Placement::Within(&["NativeView"]),
+        ..spec(
+            "NativeAction",
+            &[
+                req("id", PropKind::Id),
+                req("label", PropKind::DisplayText),
+                opt("enabled", PropKind::Bool),
+                FEATURE,
+            ],
+            Children::None,
+            "Command entry declared on a `NativeView`, exposed to native code and Bern's CLI (`ui activate`)",
+        )
+    },
+    ComponentSpec {
+        action: ActionRule::Required,
+        interactive: true,
+        placement: Placement::Within(&["NativeView"]),
+        ..spec(
+            "NativeNumber",
+            &[
+                req("id", PropKind::Id),
+                req("label", PropKind::DisplayText),
+                req("current", PropKind::NumberValue),
+                req("min", PropKind::Number),
+                req("max", PropKind::Number),
+                opt("step", PropKind::Number),
+                opt("enabled", PropKind::Bool),
+                FEATURE,
+            ],
+            Children::None,
+            "Numeric value entry declared on a `NativeView`, exposed to native code and Bern's CLI (`ui set-number`); the action receives the new value in place of `current`",
+        )
+    },
+    ComponentSpec {
+        action: ActionRule::Required,
+        interactive: true,
+        placement: Placement::Within(&["NativeView"]),
+        ..spec(
+            "NativeBool",
+            &[
+                req("id", PropKind::Id),
+                req("label", PropKind::DisplayText),
+                req("checked", PropKind::Bool),
+                opt("enabled", PropKind::Bool),
+                FEATURE,
+            ],
+            Children::None,
+            "Boolean toggle entry declared on a `NativeView`, exposed to native code and Bern's CLI (`ui set-bool`); the action receives the new bool in place of `checked`",
+        )
+    },
+    ComponentSpec {
+        action: ActionRule::Required,
+        interactive: true,
+        placement: Placement::Within(&["NativeView"]),
+        ..spec(
+            "NativeInput",
+            &[
+                req("id", PropKind::Id),
+                req("label", PropKind::DisplayText),
+                req("current", PropKind::TextValue),
+                opt("enabled", PropKind::Bool),
+                FEATURE,
+            ],
+            Children::None,
+            "Text entry declared on a `NativeView`, exposed to native code and Bern's CLI (`ui edit` / `ui submit`); the action receives the new text in place of `current`",
+        )
+    },
+    ComponentSpec {
+        placement: Placement::Within(&["NativeView"]),
+        ..spec(
+            "Fallback",
+            &[],
+            Children::Any,
+            "Standard Bern subtree rendered when a target has no co-located native implementation file for its `NativeView`",
+        )
+    },
 ];
 
 pub fn component(name: &str) -> Option<&'static ComponentSpec> {
@@ -2315,6 +2481,39 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
             prop: None,
             message: "a `Table` needs at least one `TableColumn`".into(),
         });
+    }
+    if spec.name == "NativeView" {
+        if !crate::native::NATIVE_BACKENDS
+            .iter()
+            .any(|backend| shape.props.contains(backend))
+        {
+            errors.push(ShapeError {
+                prop: None,
+                message: format!(
+                    "a `NativeView` needs at least one backend file ({})",
+                    crate::native::NATIVE_BACKENDS.join(", ")
+                ),
+            });
+        }
+        let entries: usize = crate::native::NATIVE_ENTRIES
+            .iter()
+            .map(|entry| count(entry))
+            .sum();
+        if entries == 0 {
+            errors.push(ShapeError {
+                prop: None,
+                message: format!(
+                    "a `NativeView` must declare at least one Bern control entry ({}) so the CLI can inspect and drive it",
+                    crate::native::NATIVE_ENTRIES.join(", ")
+                ),
+            });
+        }
+        if count("Fallback") > 1 {
+            errors.push(ShapeError {
+                prop: None,
+                message: "a `NativeView` has at most one `Fallback`".into(),
+            });
+        }
     }
     if spec.name == "Table" && count("TableMenu") > 1 {
         errors.push(ShapeError {

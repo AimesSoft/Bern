@@ -126,6 +126,7 @@ pub(crate) const FEATURES: &[&str] = &[
     feature::SEARCH_PALETTE,
     feature::SIZE_CLASSES,
     feature::TEXT_FORMATS,
+    feature::NATIVE_VIEW,
 ];
 
 pub struct SwiftUiTvos;
@@ -339,6 +340,7 @@ impl Target for SwiftUiTvos {
             "build.json",
             serde_json::to_string_pretty(&manifest).expect("manifest"),
         ));
+        files.extend(crate::native_swift_generated(app, context));
         files.extend(bern_target_api::svg::static_files(app, context)?);
         bern_target_api::script::configure(&mut files, context);
         Ok(files)
@@ -381,6 +383,7 @@ impl Target for SwiftUiTvos {
         };
         let executable = bundle.join(&product);
         let swiftc = swiftc(
+            app,
             &product,
             context,
             "appletvsimulator",
@@ -606,6 +609,7 @@ impl Target for SwiftUiTvos {
                 "Compile the SwiftUI frontend for devices",
                 "xcrun",
                 swiftc(
+                    app,
                     &product,
                     context,
                     "appletvos",
@@ -670,6 +674,7 @@ impl Target for SwiftUiTvos {
 /// The `xcrun` arguments that compile the frontend for `sdk`, linked with
 /// the engine in `rust_output`.
 fn swiftc(
+    app: &Application,
     product: &str,
     context: &BuildContext,
     sdk: &str,
@@ -722,6 +727,9 @@ fn swiftc(
     });
     for file in SOURCES {
         args.push(path(&sources.join(file)));
+    }
+    for file in crate::native_swift_paths(app, context) {
+        args.push(path(&file));
     }
     args.push("-o".into());
     args.push(path(executable));

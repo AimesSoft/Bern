@@ -146,6 +146,10 @@ impl Search<'_> {
     }
 
     fn node(&mut self, component: &str, node: &Node) -> Level {
+        self.node_in(component, None, node)
+    }
+
+    fn node_in(&mut self, component: &str, native_view: Option<&str>, node: &Node) -> Level {
         match node {
             Node::Element(element) => {
                 if element.kind == "Layout" && element.keyword("size") != Some(self.size.name()) {
@@ -155,12 +159,23 @@ impl Search<'_> {
                     Some(ir::Prop::Feature { contract, feature })
                         if contract == self.contract && feature == self.feature =>
                     {
-                        self.entries.insert(target(component, element));
+                        self.entries.insert(target(component, native_view, element));
                         Level::Unconditional
                     }
                     _ => Level::None,
                 };
-                own.max(self.nodes(component, &element.children))
+                let child_native = if element.kind == "NativeView" {
+                    element.id.as_deref()
+                } else {
+                    None
+                };
+                let children = element
+                    .children
+                    .iter()
+                    .map(|child| self.node_in(component, child_native, child))
+                    .max()
+                    .unwrap_or(Level::None);
+                own.max(children)
             }
             Node::Component(call) => {
                 let name = call.component.as_str();
@@ -207,11 +222,14 @@ impl Search<'_> {
     }
 }
 
-fn target(component: &str, element: &ir::Element) -> String {
-    format!(
-        "{component}.{}",
-        element.id.as_deref().unwrap_or(element.path.as_str())
-    )
+fn target(component: &str, native_view: Option<&str>, element: &ir::Element) -> String {
+    let leaf = element.id.as_deref().unwrap_or(element.path.as_str());
+    match native_view {
+        Some(view) if ir::native::NATIVE_ENTRIES.contains(&element.kind.as_str()) => {
+            format!("{component}.{view}.{leaf}")
+        }
+        _ => format!("{component}.{leaf}"),
+    }
 }
 
 /// The command an element's action runs, as a catalog id.
@@ -379,7 +397,7 @@ impl Walk<'_, '_> {
                 self,
                 Diagnostic::error(format!(
                     "`{}` runs `{command}` inside the scope of contract `{}` without a feature; add `feature: {}::…`, or add the feature to the contract first",
-                    target(component, element),
+                    target(component, None, element),
                     self.contract.name,
                     self.contract.name
                 ))
@@ -392,7 +410,7 @@ impl Walk<'_, '_> {
                     self,
                     Diagnostic::error(format!(
                         "`{contract}::{feature}` belongs to contract `{contract}`, but `{}` is in the scope of `{}`",
-                        target(component, element),
+                        target(component, None, element),
                         self.contract.name
                     ))
                     .code("B204")
@@ -412,7 +430,7 @@ impl Walk<'_, '_> {
                         self,
                         Diagnostic::error(format!(
                             "`{}` reaches `{}::{feature}` but runs `{command}`; the feature is implemented by {}",
-                            target(component, element),
+                            target(component, None, element),
                             self.contract.name,
                             allowed.join(", ")
                         ))
@@ -423,7 +441,7 @@ impl Walk<'_, '_> {
                         self,
                         Diagnostic::error(format!(
                             "`{}` names `{}::{feature}` but runs no business command",
-                            target(component, element),
+                            target(component, None, element),
                             self.contract.name
                         ))
                         .code("B204")

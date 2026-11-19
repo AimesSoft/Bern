@@ -24,6 +24,7 @@ mod expr;
 mod layout;
 mod menus;
 mod motion;
+pub mod native;
 mod navigation;
 mod nodes;
 
@@ -111,6 +112,7 @@ pub(crate) fn state_prop(name: &str) -> String {
 
 pub struct Generator<'a> {
     app: &'a Application,
+    current_scope: std::cell::RefCell<String>,
     /// Whether the nodes being written are a sidebar's content, where
     /// `Section` groups sidebar items.
     in_sidebar: std::cell::Cell<bool>,
@@ -120,6 +122,7 @@ impl<'a> Generator<'a> {
     pub fn new(app: &'a Application) -> Self {
         Self {
             app,
+            current_scope: std::cell::RefCell::new(String::new()),
             in_sidebar: std::cell::Cell::new(false),
         }
     }
@@ -224,6 +227,7 @@ impl<'a> Generator<'a> {
         out.line("");
         out.line(format!("import * as B from \"./bern.js?v={version}\";"));
         out.line(format!("import * as F from \"./features.js?v={version}\";"));
+        self.native_imports(&mut out, version);
         out.line("");
         self.style_tables(&mut out);
         out.line("// Values: codecs, variant names and labels.");

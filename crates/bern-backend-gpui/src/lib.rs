@@ -109,6 +109,7 @@ const FEATURES: &[&str] = &[
     feature::SCROLL_ANCHOR,
     feature::SCROLL_BROWSING,
     feature::BOUND_BLUR,
+    feature::NATIVE_VIEW,
 ];
 
 const CONTROL_STATES: &[&str] = &[
@@ -771,7 +772,7 @@ impl Target for Gpui {
         }
         let app = &prepared(app, &context.target);
         bern_target_api::svg::validate(app, context)?;
-        let generator = Generator::new(app, self.platform);
+        let generator = Generator::with_project_dir(app, self.platform, &context.project_dir);
         let ui = generator.generate(
             app.protocol.fingerprint(),
             &bern_target_api::glue::descriptor_expr(context),

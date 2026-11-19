@@ -77,6 +77,13 @@
 | `wheel` | 元素上的鼠标滚轮与触控板 `WheelUp`、`WheelDown` | 支持 | 支持 | —（忽略，警告） | 支持 | 支持 | 支持 | 支持 |
 | `slider_hover` | `Slider(hover:)` 写入指针沿轨道的悬停比例 `Option<f64>` | 支持 | 支持 | —（保持 `None`，警告） | 支持 | 支持 | 支持 | 支持 |
 | `player_state` | 在界面声明里直接读取 `players.<id>.<field>` | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `scroll_anchor` | 将锚定项停靠在滚动视口指定比例处（`ScrollView(anchor:)`） | 支持 | 支持 | — | 支持 | 支持 | 支持 | 支持 |
+| `scroll_browsing` | 报告用户是否正在手动滚动（`ScrollView(browsing:)`） | 支持 | 支持 | — | 支持 | 支持 | 支持 | 支持 |
+| `bound_blur` | 跟随数值表达式变化的动态模糊（`blur:`） | 支持 | 支持 | — | 支持 | 支持 | 支持 | 支持 |
+| `text_bold` | 随条件切换粗体的 `Text(bold:)` | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `cover_images` | 填满容器的裁切封面图（`Image(fit: cover)`） | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `web_content_mode` | 独立于 `user_agent` 的 `WebPage(content_mode: mobile / desktop)` | —（警告） | —（警告） | — | —（警告） | —（警告） | —（警告） | —（警告） |
+| `native_view` | 紧邻声明文件的原生界面视图（`NativeView`），含规范化 CLI 功能入口与 `Fallback` | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 
 ## 不由上述功能标记完整表达的能力
 

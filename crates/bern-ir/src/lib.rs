@@ -4,6 +4,7 @@
 //! WinUI types appear here. Every target module consumes the same
 //! [`Application`] and decides privately how to realize it.
 
+pub mod native;
 pub mod spec;
 pub mod style;
 
@@ -44,6 +45,10 @@ pub struct Application {
     /// Style overrides and motion tokens from `style!`.
     #[serde(default)]
     pub style: style::StyleSheet,
+    /// Co-located native UI implementation files referenced by `NativeView`
+    /// elements, sorted by path.
+    #[serde(default)]
+    pub native_files: Vec<native::NativeFileDef>,
 }
 
 impl Application {
@@ -988,6 +993,11 @@ pub enum Prop {
     /// A declared resource, by its name in `[resources]`.
     Resource {
         name: String,
+    },
+    /// A co-located native UI implementation file referenced by a `NativeView`,
+    /// normalized to a `/`-separated path relative to the project directory.
+    NativeFile {
+        path: String,
     },
     Text {
         text: Text,

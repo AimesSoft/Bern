@@ -185,6 +185,7 @@ const FEATURES: &[&str] = &[
     bern_target_api::feature::ROW_BASELINE,
     bern_target_api::feature::SIDEBAR_HEADER,
     bern_target_api::feature::UNTITLED_DETAIL,
+    bern_target_api::feature::NATIVE_VIEW,
 ];
 
 /// Motion properties the target shows.
@@ -412,7 +413,7 @@ impl Target for WinUi3Windows {
                 contents,
             });
         }
-        let generator = Generator::new(app);
+        let generator = Generator::with_project_dir(app, &context.project_dir);
         let svg = bern_target_api::svg::svg_used(app);
         let webpage = bern_target_api::svg::webpage_used(app);
         let svg_identity = format!(

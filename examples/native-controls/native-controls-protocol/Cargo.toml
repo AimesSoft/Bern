@@ -1,0 +1,11 @@
+[package]
+name = "native-controls-protocol"
+description = "Protocol for the co-located native controls example"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+bern.workspace = true

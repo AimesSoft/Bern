@@ -796,6 +796,12 @@ button:disabled {
   align-items: flex-start;
 }
 
+.bern-vstack > .bern-native-view {
+  align-self: stretch;
+  width: 100%;
+  box-sizing: border-box;
+}
+
 /* A list in a column, built as its rows come into sight. */
 .bern-column-list.bern-column-list-leading {
   justify-items: start;

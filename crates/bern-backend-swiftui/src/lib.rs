@@ -201,6 +201,7 @@ pub(crate) const FEATURES: &[&str] = &[
     bern_target_api::feature::SEARCH_PALETTE,
     bern_target_api::feature::SIZE_CLASSES,
     bern_target_api::feature::TEXT_FORMATS,
+    bern_target_api::feature::NATIVE_VIEW,
 ];
 
 const RUNTIME: &str = include_str!("../templates/BernRuntime.swift");
@@ -255,6 +256,49 @@ pub(crate) fn component_names() -> &'static [&'static str] {
 /// Bundle and executable name, e.g. `Showcase` for app id `showcase`.
 pub fn product_name(app: &Application) -> String {
     names::pascal(&app.app.id)
+}
+
+/// Co-located `.swift` files for `NativeView` elements. Real files under
+/// `context.project_dir` are compiled directly in place so diagnostics and
+/// debug info point straight back to the source tree; in-memory builds without
+/// a disk checkout fall back to generated files under `Sources/`.
+pub(crate) fn native_swift_generated(
+    app: &Application,
+    context: &BuildContext,
+) -> Vec<GeneratedFile> {
+    let mut files = Vec::new();
+    for (idx, file) in app
+        .native_files
+        .iter()
+        .filter(|f| f.backend == "swiftui")
+        .enumerate()
+    {
+        if !context.project_dir.join(&file.path).exists() {
+            files.push(GeneratedFile::text(
+                format!("Sources/BernNative_{idx}.swift"),
+                file.source.clone(),
+            ));
+        }
+    }
+    files
+}
+
+pub(crate) fn native_swift_paths(app: &Application, context: &BuildContext) -> Vec<PathBuf> {
+    app.native_files
+        .iter()
+        .filter(|f| f.backend == "swiftui")
+        .enumerate()
+        .map(|(idx, file)| {
+            let real = context.project_dir.join(&file.path);
+            if real.exists() {
+                real
+            } else {
+                context
+                    .output_dir
+                    .join(format!("Sources/BernNative_{idx}.swift"))
+            }
+        })
+        .collect()
 }
 
 /// The agent skill in the macOS bundle, `Contents/Resources/skills/<cli>`,
@@ -524,6 +568,7 @@ impl Target for SwiftUiMacos {
             "build.json",
             serde_json::to_string_pretty(&manifest).expect("manifest"),
         ));
+        files.extend(native_swift_generated(app, context));
         files.extend(bern_target_api::svg::static_files(app, context)?);
         bern_target_api::script::configure(&mut files, context);
         Ok(files)
@@ -608,6 +653,9 @@ impl Target for SwiftUiMacos {
         });
         for file in SOURCES {
             swiftc.push(sources.join(file).display().to_string());
+        }
+        for file in native_swift_paths(app, context) {
+            swiftc.push(file.display().to_string());
         }
         let executable = bundle.join("Contents/MacOS").join(&product);
         swiftc.push("-o".into());

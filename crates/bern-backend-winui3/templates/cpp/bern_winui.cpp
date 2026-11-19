@@ -5,9 +5,11 @@
 
 #include "bern_pch.h"
 
+#define BERN_WINUI 1
 namespace bern::winui {
 #include "app_ui.inl"
 }
+#undef BERN_WINUI
 
 /// `resources`: the runtime's resource index, for a runtime that does not
 /// lead WinUI to it; empty otherwise.

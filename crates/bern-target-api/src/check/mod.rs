@@ -25,7 +25,32 @@ pub fn check_common(target: &dyn Target, app: &Application) -> Vec<Diagnostic> {
     diagnostics.extend(check_window_chrome(&descriptor, app));
     diagnostics.extend(check_motion(&descriptor, app));
     diagnostics.extend(check_media(&descriptor, app));
+    diagnostics.extend(check_native_views(&descriptor, app));
     diagnostics.extend(check_presentation(&descriptor, app));
+    diagnostics
+}
+
+/// Every `NativeView` must provide either a co-located native implementation
+/// file for this target's UI backend or a `Fallback` subtree.
+fn check_native_views(descriptor: &TargetDescriptor, app: &Application) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    app.walk(&mut |node, _| {
+        let bern_ir::Node::Element(element) = node else {
+            return;
+        };
+        let Some(view) = bern_ir::native::inspect_native_view(element) else {
+            return;
+        };
+        if view.file_for(descriptor.ui).is_none() && view.fallback.is_none() {
+            diagnostics.push(
+                Diagnostic::error(format!(
+                    "`NativeView` `{}` has no `{}` native file and no `Fallback` for target `{}`",
+                    view.id, descriptor.ui, descriptor.id
+                ))
+                .at(element.source.clone()),
+            );
+        }
+    });
     diagnostics
 }
 

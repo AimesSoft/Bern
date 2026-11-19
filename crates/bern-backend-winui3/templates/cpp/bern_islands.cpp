@@ -5,9 +5,11 @@
 
 #include "bern_pch.h"
 
+#define BERN_WINUI 0
 namespace bern::islands {
 #include "app_ui.inl"
 }
+#undef BERN_WINUI
 
 int BernRunIslands() {
     static bern::islands::AppDef const definition{bern::BernCatalog(), bern::islands::Windows(), bern::islands::AccentColors(), bern::islands::StatusItem()};

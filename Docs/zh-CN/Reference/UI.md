@@ -394,6 +394,50 @@ Slider(id: seek, label: tr! { "zh-Hans" => "进度", "en" => "Position" }, label
 ) => app.seek_fraction(players.main.progress)
 Text(content: tr! { "zh-Hans" => "{at, duration, m:ss} / {length, duration, m:ss}", "en" => "{at, duration, m:ss} / {length, duration, m:ss}"; at: players.main.position, length: players.main.duration })
 ```
+
+## 内嵌原生视图
+
+当应用需要 Bern 标准组件未覆盖的平台专属原生控件（例如 AppKit 的 `NSLevelIndicator` / `NSDatePicker`、WinUI 3 的 `NumberBox` / `CalendarView`、GTK 4 的 `LevelBar` / `Calendar` 或 Android 的 `AndroidView`）时，可用 `NativeView` 直接引用放在声明 `.rs` 文件同目录下的各平台原生实现文件：
+
+```rust
+NativeView(
+    id: meter,
+    label: tr! { "zh-Hans" => "原生电平仪表", "en" => "Native Level Meter" },
+    swiftui: "meter.swiftui.swift",
+    winui3: "meter.winui3.cpp",
+    compose: "meter.compose.kt",
+    gtk: "meter.gtk.rs",
+    gpui: "meter.gpui.rs",
+    web: "meter.web.js",
+) {
+    NativeText(name: heading, content: tr! { "zh-Hans" => "原生电平与步进器", "en" => "Native Meter & Stepper" })
+    NativeDraft(name: hover, value: draft.hover_level)
+    NativeNumber(id: level, label: tr! { "zh-Hans" => "电平", "en" => "Level" }, current: app.level, min: 0, max: 10, step: 1) => app.set_level(app.level)
+    NativeBool(id: boosted, label: tr! { "zh-Hans" => "增强模式", "en" => "Boost Mode" }, checked: app.boosted) => app.set_boosted(app.boosted)
+    NativeAction(id: reset, label: tr! { "zh-Hans" => "重置", "en" => "Reset" }) => app.reset()
+    Fallback {
+        Slider(id: level_fallback, label: tr! { "zh-Hans" => "电平", "en" => "Level" }, current: app.level, min: 0, max: 10) => app.set_level(app.level)
+    }
+}
+```
+
+- **紧邻文件放置**：各后端文件属性（`swiftui`、`winui3`、`compose`、`gtk`、`gpui`、`web`）相对声明所在的 `.rs` 文件解析。配置目录扫描（`sources = "my-ui/src"`）时，编译器会自动跳过 `*.gtk.rs`、`*.gpui.rs` 与 `*.native.rs`。
+- **默认宽度**：未显式指定 `width:` 时，`NativeView` 在全部六个后端默认左右铺满容器可用宽度，避免在 `Column` 布局中缩成左侧小块；需要固定宽度时显式传入 `width:` 即可。
+- **强制规范化 CLI 入口**：每个 `NativeView` 必须至少声明一个 `NativeAction`、`NativeNumber`、`NativeBool` 或 `NativeInput`。各后端会自动以 `<component>.<view>.<entry>` 注册到控件表，`ui inspect`、`ui activate`、`ui set-number`、`ui set-bool`、`ui edit` 与 `ui submit` 无需穿透原生视图树即可直接发现和驱动。
+- **多语言与静态检查**：所有展示文本通过 `NativeText(name:, content: tr! { ... })` 或入口的 `label:` 传入。编译器还会扫描原生文件中明显的硬编码展示字面量并发出警告（需要豁免的纯技术行可用 `// bern-ignore-l10n`）。
+- **各后端入口签名**：
+
+| 后端 | 文件后缀 | 约定的入口签名 |
+| --- | --- | --- |
+| SwiftUI | `.swift` | `struct <IdPascal>NativeView: View { let props: <IdPascal>NativeProps; let actions: <IdPascal>NativeActions; let theme: BernNativeTheme }` |
+| WinUI 3 | `.cpp` / `.inl` | `inline xaml::UIElement build(Props const& props, Actions const& actions, Theme const& theme)` |
+| Compose | `.kt` | `@Composable fun NativeContent(props: Props, actions: Actions, theme: Theme)` |
+| GTK 4 | `.gtk.rs` | `pub fn build(props: Props, actions: Actions, theme: Theme) -> impl IsA<gtk::Widget>` |
+| GPUI | `.gpui.rs` | `pub fn render(props: Props, actions: Actions, theme: Theme) -> impl IntoElement` |
+| Web | `.js` | `export function mount({ host, props, actions, theme, effect, onCleanup })` |
+
+完整的六后端示例见 `examples/native-controls/`。
+
 ## 其他接口
 
 动画 SVG 是按需使用的独立组件，接口、资源声明、平台依赖与生命周期见[专项文档](../Implementation/Animated-SVG.md)。视频播放器、查询、模块、主题及命令协议的完整语义继续见[设计文档](../Design.md)与对应实现记录。

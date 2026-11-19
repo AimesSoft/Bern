@@ -394,6 +394,50 @@ Slider(id: seek, label: tr! { "zh-Hans" => "进度", "en" => "Position" }, label
 ) => app.seek_fraction(players.main.progress)
 Text(content: tr! { "zh-Hans" => "{at, duration, m:ss} / {length, duration, m:ss}", "en" => "{at, duration, m:ss} / {length, duration, m:ss}"; at: players.main.position, length: players.main.duration })
 ```
+
+## Co-located native views
+
+When an app needs a platform-specific control not covered by Bern's standard components (for example AppKit `NSLevelIndicator` / `NSDatePicker`, WinUI 3 `NumberBox` / `CalendarView`, GTK `LevelBar` / `Calendar`, or Android `AndroidView`), `NativeView` embeds co-located native implementation files placed directly beside the `.rs` UI file that declares it:
+
+```rust
+NativeView(
+    id: meter,
+    label: tr! { "zh-Hans" => "原生电平仪表", "en" => "Native Level Meter" },
+    swiftui: "meter.swiftui.swift",
+    winui3: "meter.winui3.cpp",
+    compose: "meter.compose.kt",
+    gtk: "meter.gtk.rs",
+    gpui: "meter.gpui.rs",
+    web: "meter.web.js",
+) {
+    NativeText(name: heading, content: tr! { "zh-Hans" => "原生电平与步进器", "en" => "Native Meter & Stepper" })
+    NativeDraft(name: hover, value: draft.hover_level)
+    NativeNumber(id: level, label: tr! { "zh-Hans" => "电平", "en" => "Level" }, current: app.level, min: 0, max: 10, step: 1) => app.set_level(app.level)
+    NativeBool(id: boosted, label: tr! { "zh-Hans" => "增强模式", "en" => "Boost Mode" }, checked: app.boosted) => app.set_boosted(app.boosted)
+    NativeAction(id: reset, label: tr! { "zh-Hans" => "重置", "en" => "Reset" }) => app.reset()
+    Fallback {
+        Slider(id: level_fallback, label: tr! { "zh-Hans" => "电平", "en" => "Level" }, current: app.level, min: 0, max: 10) => app.set_level(app.level)
+    }
+}
+```
+
+- **Co-located files**: Backend paths (`swiftui`, `winui3`, `compose`, `gtk`, `gpui`, `web`) resolve relative to the declaring `.rs` file. Directory scanning (`sources = "my-ui/src"`) automatically ignores `*.gtk.rs`, `*.gpui.rs` and `*.native.rs`.
+- **Default sizing**: Without an explicit `width:`, a `NativeView` fills the container's available width across all six backends so native panels and controls align cleanly inside `Column` layouts; pass `width:` when a fixed width is desired.
+- **Mandatory CLI entries**: Every `NativeView` must declare at least one `NativeAction`, `NativeNumber`, `NativeBool` or `NativeInput` entry. Each backend registers them automatically under `<component>.<view>.<entry>` so `ui inspect`, `ui activate`, `ui set-number`, `ui set-bool`, `ui edit` and `ui submit` work without piercing native widget trees.
+- **Localization**: Pass all user-visible strings through `NativeText(name:, content: tr! { ... })` or entry `label:`s. The compiler warns on obvious hardcoded display strings in native files (suppressible per line with `// bern-ignore-l10n`).
+- **Per-backend entry points**:
+
+| Backend | File suffix | Expected entry point |
+| --- | --- | --- |
+| SwiftUI | `.swift` | `struct <IdPascal>NativeView: View { let props: <IdPascal>NativeProps; let actions: <IdPascal>NativeActions; let theme: BernNativeTheme }` |
+| WinUI 3 | `.cpp` / `.inl` | `inline xaml::UIElement build(Props const& props, Actions const& actions, Theme const& theme)` |
+| Compose | `.kt` | `@Composable fun NativeContent(props: Props, actions: Actions, theme: Theme)` |
+| GTK 4 | `.gtk.rs` | `pub fn build(props: Props, actions: Actions, theme: Theme) -> impl IsA<gtk::Widget>` |
+| GPUI | `.gpui.rs` | `pub fn render(props: Props, actions: Actions, theme: Theme) -> impl IntoElement` |
+| Web | `.js` | `export function mount({ host, props, actions, theme, effect, onCleanup })` |
+
+See `examples/native-controls/` for a complete six-backend demonstration.
+
 ## Other interfaces
 
 Animated SVG is a standalone component used on demand; for its interface, resource declarations, platform dependencies and lifecycle see the [dedicated document](../Implementation/Animated-SVG.md). For the full semantics of the video player, queries, modules, themes and the command protocol, continue to see the [design document](../Design.md) and the corresponding implementation notes.

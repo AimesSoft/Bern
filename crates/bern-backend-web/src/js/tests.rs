@@ -67,6 +67,7 @@ fn app() -> Application {
         layouts: None,
         contracts: vec![],
         style: Default::default(),
+        native_files: vec![],
     }
 }
 

@@ -1783,6 +1783,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "native-controls-core"
+version = "0.1.20"
+dependencies = [
+ "bern",
+ "native-controls-protocol",
+]
+
+[[package]]
+name = "native-controls-protocol"
+version = "0.1.20"
+dependencies = [
+ "bern",
+]
+
+[[package]]
+name = "native-controls-ui"
+version = "0.1.20"
+dependencies = [
+ "bern",
+ "native-controls-protocol",
+]
+
+[[package]]
 name = "ndk-context"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

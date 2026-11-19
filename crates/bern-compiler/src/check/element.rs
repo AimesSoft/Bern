@@ -168,6 +168,9 @@ impl Checker<'_> {
         {
             self.table_parts(element, &template.var, &children);
         }
+        if parts.kind == "NativeView" {
+            self.native_view_parts(element, &children);
+        }
         if let (Some(ir::Prop::Number { value: min }), Some(ir::Prop::Number { value: max })) =
             (parts.props.get("min"), parts.props.get("max"))
             && min >= max
@@ -252,6 +255,62 @@ impl Checker<'_> {
                     "{what} belong to no row, so they cannot read `{var}`; act on the table's `selection`"
                 ),
             );
+        }
+    }
+
+    /// Check name and entry-id uniqueness inside one `NativeView` so the
+    /// generated per-backend `Props` / `Actions` structs never collide.
+    fn native_view_parts(&mut self, element: &ast::Element, children: &[ir::Node]) {
+        let mut prop_names = std::collections::BTreeSet::new();
+        let mut entry_ids = std::collections::BTreeSet::new();
+        for child in children {
+            let ir::Node::Element(part) = child else {
+                continue;
+            };
+            match part.kind.as_str() {
+                "NativeValue" | "NativeText" | "NativeDraft" => {
+                    if let Some(ir::Prop::Id { value: name }) = part.prop("name")
+                        && !prop_names.insert(name.clone())
+                    {
+                        self.error(
+                            element.span,
+                            format!("`NativeView` prop name `{name}` is used twice"),
+                        );
+                    }
+                }
+                "NativeAction" | "NativeNumber" | "NativeBool" | "NativeInput" => {
+                    if let Some(id) = &part.id {
+                        let snake = ir::native::snake_ident(id);
+                        if crate::native::is_reserved_native_ident(&snake) {
+                            self.error(
+                                element.span,
+                                format!(
+                                    "entry id `{id}` maps to reserved identifier `{snake}`; pick another id"
+                                ),
+                            );
+                        }
+                        if !entry_ids.insert(snake.clone()) {
+                            self.error(
+                                element.span,
+                                format!("`NativeView` entry id `{id}` is used twice"),
+                            );
+                        }
+                        if matches!(
+                            part.kind.as_str(),
+                            "NativeNumber" | "NativeBool" | "NativeInput"
+                        ) && !prop_names.insert(snake)
+                        {
+                            self.error(
+                                element.span,
+                                format!(
+                                    "`NativeView` entry `{id}` collides with a `NativeValue`/`NativeText`/`NativeDraft` of the same name"
+                                ),
+                            );
+                        }
+                    }
+                }
+                _ => {}
+            }
         }
     }
 
@@ -465,7 +524,12 @@ impl Checker<'_> {
             }
         }
         match kind {
-            PropKind::Id => self.id(value).map(|value| ir::Prop::Id { value }),
+            PropKind::Id => {
+                let scoped_to_native = ctx.parent.as_deref() == Some("NativeView")
+                    && ir::native::NATIVE_ENTRIES.contains(&name);
+                self.id(value, scoped_to_native)
+                    .map(|value| ir::Prop::Id { value })
+            }
             PropKind::Keyword(allowed) => self.keyword(value, allowed),
             PropKind::Flag => self.flag(value),
             PropKind::DisplayText => self
@@ -547,6 +611,10 @@ impl Checker<'_> {
             PropKind::MediaSource => self.media_source(value, scope),
             PropKind::Player => self.player(value, scope),
             PropKind::Feature => self.feature(value),
+            PropKind::NativeFile => self.native_file(&prop_name, value),
+            PropKind::NativeName => self.native_name(value),
+            PropKind::NativeScalar => self.native_scalar(&prop_name, value, scope),
+            PropKind::NativeDraftField => self.field_prop(value, scope, FieldExpect::NativeDraft),
             PropKind::SelectionField | PropKind::PathField | PropKind::Items | PropKind::Query => {
                 None
             }

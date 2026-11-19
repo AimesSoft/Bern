@@ -1,0 +1,70 @@
+# Co-located platform-native controls demo: each NativeView pairs a shared
+# Bern contract (typed values, tr! texts, CLI control entries and Fallback)
+# with platform-native implementations living right beside the `.rs` file.
+
+[app]
+id = "native_controls"
+bundle_id = "dev.bern.nativecontrols"
+version = "0.1.0"
+name = { "zh-Hans" = "原生控件示例", "en" = "Native Controls" }
+
+[languages]
+supported = ["zh-Hans", "en"]
+default = "zh-Hans"
+strict = true
+
+[theme]
+mode = "system"
+
+[protocol]
+package = "native-controls-protocol"
+source = "native-controls-protocol/src/lib.rs"
+
+[engine]
+package = "native-controls-core"
+type = "native_controls_core::NativeControlsEngine"
+
+[ui]
+package = "native-controls-ui"
+sources = "native-controls-ui/src"
+root = "app"
+
+[targets.macos]
+platform = "macos"
+channels = ["ipc"]
+
+[targets.ios]
+platform = "ios"
+channels = ["ipc"]
+
+[targets.windows]
+platform = "windows"
+channels = ["ipc"]
+
+[targets.linux]
+platform = "linux"
+channels = ["ipc"]
+
+[targets.android]
+platform = "android"
+channels = ["ipc"]
+
+[targets.web_app]
+ui = "web"
+platform = "browser"
+web_mode = "app"
+
+[targets.gpui_macos]
+ui = "gpui"
+platform = "macos"
+channels = ["ipc"]
+
+[targets.gpui_windows]
+ui = "gpui"
+platform = "windows"
+channels = ["ipc"]
+
+[targets.gpui_linux]
+ui = "gpui"
+platform = "linux"
+channels = ["ipc"]

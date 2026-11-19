@@ -47,6 +47,9 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
+import androidx.lifecycle.setViewTreeLifecycleOwner
+import androidx.lifecycle.setViewTreeViewModelStoreOwner
+import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 // @bern:wear-skip-end
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -2931,7 +2934,7 @@ internal object BernOverlay {
                             layout.x = startX + (event.rawX - downX).toInt()
                             layout.y = startY + (event.rawY - downY).toInt()
                             manager.updateViewLayout(created, layout)
-                            positionPanel(context, id)
+                            BernOverlayWindows.repositionForOverlay(context, id)
                         }
                     }
                     android.view.MotionEvent.ACTION_UP ->
@@ -3082,9 +3085,9 @@ internal object BernOverlayWindows {
         entry.registry.handleLifecycleEvent(androidx.lifecycle.Lifecycle.Event.ON_CREATE)
         entry.registry.handleLifecycleEvent(androidx.lifecycle.Lifecycle.Event.ON_START)
         entry.registry.handleLifecycleEvent(androidx.lifecycle.Lifecycle.Event.ON_RESUME)
-        androidx.lifecycle.setViewTreeLifecycleOwner(view, entry)
-        androidx.lifecycle.setViewTreeViewModelStoreOwner(view, entry)
-        androidx.savedstate.setViewTreeSavedStateRegistryOwner(view, entry)
+        view.setViewTreeLifecycleOwner(entry)
+        view.setViewTreeViewModelStoreOwner(entry)
+        view.setViewTreeSavedStateRegistryOwner(entry)
         view.setContent {
             BernTheme {
                 androidx.compose.material3.Surface(
@@ -3109,6 +3112,14 @@ internal object BernOverlayWindows {
             (context.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager)
                 .updateViewLayout(entry.view, entry.layout)
         } catch (_: Exception) {}
+    }
+
+    fun repositionForOverlay(context: Context, overlayId: String) {
+        for (entry in open.values.toList()) {
+            if (entry.kind.overlay == overlayId) {
+                reposition(context, entry.kind.id)
+            }
+        }
     }
 
     fun close(context: Context, kindID: String) {
