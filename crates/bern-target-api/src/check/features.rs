@@ -85,6 +85,7 @@ const CHECKS: &[(&str, Check)] = &[
     (feature::WHEEL, wheel),
     (feature::SLIDER_HOVER, slider_hover),
     (feature::PLAYER_STATE, player_state),
+    (feature::NATIVE_VIEW, native_view),
 ];
 
 /// Features the application uses that the target does not list.
@@ -1072,6 +1073,22 @@ fn appearance(descriptor: &TargetDescriptor, app: &Application, diagnostics: &mu
         diagnostics.push(
             Diagnostic::warning(format!(
                 "target `{}` shows `appearance` parts in the window's own appearance",
+                descriptor.id
+            ))
+            .at(element.source.clone()),
+        );
+    }
+}
+
+fn native_view(
+    descriptor: &TargetDescriptor,
+    app: &Application,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some(element) = first_element(app, |element| element.kind == "NativeView") {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` does not support `NativeView`",
                 descriptor.id
             ))
             .at(element.source.clone()),

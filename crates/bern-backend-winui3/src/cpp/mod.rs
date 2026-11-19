@@ -17,6 +17,7 @@ mod content;
 mod controls;
 mod interface;
 mod layout;
+mod native;
 mod navigation;
 mod nodes;
 mod styles;
@@ -184,6 +185,11 @@ fn motion_ref(name: &str) -> String {
 
 pub struct Generator<'a> {
     app: &'a Application,
+    /// Optional project directory for resolving co-located `NativeView` files
+    /// directly via `#include "<abs_path>"`.
+    project_dir: Option<&'a std::path::Path>,
+    /// Name of the component or window currently being emitted.
+    current_scope: std::cell::RefCell<String>,
     /// Whether the nodes being written are the items of a sidebar.
     in_sidebar: std::cell::Cell<bool>,
 }
@@ -192,6 +198,17 @@ impl<'a> Generator<'a> {
     pub fn new(app: &'a Application) -> Self {
         Self {
             app,
+            project_dir: None,
+            current_scope: std::cell::RefCell::new(String::new()),
+            in_sidebar: std::cell::Cell::new(false),
+        }
+    }
+
+    pub fn with_project_dir(app: &'a Application, project_dir: &'a std::path::Path) -> Self {
+        Self {
+            app,
+            project_dir: Some(project_dir),
+            current_scope: std::cell::RefCell::new(String::new()),
             in_sidebar: std::cell::Cell::new(false),
         }
     }

@@ -8,7 +8,7 @@ use bern_protocol::Type;
 use bern_syntax::{self as ast, Literal, UnaryOp};
 
 impl Checker<'_> {
-    pub(super) fn id(&mut self, expr: &ast::Expr) -> Option<String> {
+    pub(super) fn id(&mut self, expr: &ast::Expr, scoped_to_native: bool) -> Option<String> {
         let (value, span) = match expr {
             ast::Expr::Path(path) if path.single().is_some() => {
                 (path.single().unwrap().to_string(), path.span())
@@ -29,13 +29,103 @@ impl Checker<'_> {
         {
             self.error(span, "ids use letters, digits, `_` and `-`");
         }
-        if !self.ids.insert(value.clone()) {
+        if !scoped_to_native && !self.ids.insert(value.clone()) {
             self.error(
                 span,
                 format!("control id `{value}` is used twice in this component"),
             );
         }
         Some(value)
+    }
+
+    pub(super) fn native_file(&mut self, backend: &str, expr: &ast::Expr) -> Option<ir::Prop> {
+        let ast::Expr::Literal {
+            value: Literal::Text(path),
+            span,
+        } = expr
+        else {
+            self.error(
+                expr.span(),
+                format!("`{backend}` expects a string literal path relative to this `.rs` file"),
+            );
+            return None;
+        };
+        let exts = ir::native::backend_extensions(backend);
+        if path.is_empty()
+            || !exts
+                .iter()
+                .any(|ext| path.to_ascii_lowercase().ends_with(ext))
+        {
+            self.error(
+                *span,
+                format!(
+                    "`{backend}` expects a relative path ending in {}",
+                    exts.join(" or ")
+                ),
+            );
+            return None;
+        }
+        Some(ir::Prop::NativeFile { path: path.clone() })
+    }
+
+    pub(super) fn native_name(&mut self, expr: &ast::Expr) -> Option<ir::Prop> {
+        let (value, span) = match expr {
+            ast::Expr::Path(path) if path.single().is_some() => {
+                (path.single().unwrap().to_string(), path.span())
+            }
+            ast::Expr::Literal {
+                value: Literal::Text(text),
+                span,
+            } => (text.clone(), *span),
+            other => {
+                self.error(other.span(), "expected an identifier for `name`");
+                return None;
+            }
+        };
+        let valid = !value.is_empty()
+            && value.chars().next().is_some_and(|c| c.is_ascii_lowercase())
+            && value
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+        if !valid {
+            self.error(
+                span,
+                "`name` must be a lowercase snake_case identifier (e.g. `level` or `hover_at`)",
+            );
+            return None;
+        }
+        if crate::native::is_reserved_native_ident(&value) {
+            self.error(
+                span,
+                format!("`{value}` is reserved across target languages; pick another name"),
+            );
+            return None;
+        }
+        Some(ir::Prop::Id { value })
+    }
+
+    pub(super) fn native_scalar(
+        &mut self,
+        prop_name: &str,
+        expr: &ast::Expr,
+        scope: &Scope,
+    ) -> Option<ir::Prop> {
+        match self.expr(expr, scope) {
+            Some(lowered) if ir::native::is_native_scalar_type(&lowered.ty) => {
+                Some(ir::Prop::Expr { expr: lowered })
+            }
+            Some(lowered) => {
+                self.error(
+                    expr.span(),
+                    format!(
+                        "`{prop_name}` accepts bool, i64, f64, String, or an optional of i64/f64/String, found {}",
+                        lowered.ty.display()
+                    ),
+                );
+                None
+            }
+            None => None,
+        }
     }
 
     /// `feature: Contract::Feature`, naming a declared feature.

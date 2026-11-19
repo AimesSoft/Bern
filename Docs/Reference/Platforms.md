@@ -77,6 +77,13 @@ The optional GPUI target (`ui = "gpui"`, macOS, Windows, Linux) is a first versi
 | `wheel` | `WheelUp` and `WheelDown` mouse wheel or trackpad scrolling on elements | Supported | Supported | — (ignored, warning) | Supported | Supported | Supported | Supported |
 | `slider_hover` | `Slider(hover:)` reporting the pointer position along the track as `Option<f64>` | Supported | Supported | — (stays `None`, warning) | Supported | Supported | Supported | Supported |
 | `player_state` | Reading `players.<id>.<field>` directly in declarations | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
+| `scroll_anchor` | Keeping the anchored item at a fraction of the scroll view (`ScrollView(anchor:)`) | Supported | Supported | — | Supported | Supported | Supported | Supported |
+| `scroll_browsing` | Reporting manual scrolling in a session bool (`ScrollView(browsing:)`) | Supported | Supported | — | Supported | Supported | Supported | Supported |
+| `bound_blur` | Dynamic blur driven by a numeric expression (`blur:`) | Supported | Supported | — | Supported | Supported | Supported | Supported |
+| `text_bold` | Conditional bold weight on `Text(bold:)` | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
+| `cover_images` | Cropped cover images filling a container (`Image(fit: cover)`) | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
+| `web_content_mode` | `WebPage(content_mode: mobile / desktop)` independent of `user_agent` | — (warning) | — (warning) | — | — (warning) | — (warning) | — (warning) | — (warning) |
+| `native_view` | Co-located platform-native UI views (`NativeView`) with declared CLI control entries and `Fallback` | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
 
 ## Capabilities not fully expressed by the feature flags above
 

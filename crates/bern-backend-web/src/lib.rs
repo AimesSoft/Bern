@@ -116,6 +116,7 @@ const FEATURES: &[&str] = &[
     bern_target_api::feature::ICON_LABELS,
     bern_target_api::feature::ICON_TABS,
     bern_target_api::feature::ROW_BASELINE,
+    bern_target_api::feature::NATIVE_VIEW,
 ];
 
 fn component_names() -> &'static [&'static str] {
@@ -572,6 +573,7 @@ impl Target for WebBrowser {
             contents.extend_from_slice(&app_js.contents);
             app_js.contents = contents;
         }
+        files.extend(js::native::web_native_files(app, &context.project_dir));
         files.extend(icon_files);
         let mut crates = vec!["glue/page"];
         if !remote && skill::listens(&context.target.channels) {

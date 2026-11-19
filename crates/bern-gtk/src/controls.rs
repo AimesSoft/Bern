@@ -47,6 +47,47 @@ thread_local! {
     static NEXT: Cell<u64> = const { Cell::new(1) };
 }
 
+/// Public entry point for generated `NativeView` wrappers to register a
+/// declared Bern control entry in the CLI registry without exposing internal
+/// control structures.
+#[derive(Default, Clone)]
+pub struct NativeControlActions {
+    pub activate: Option<Rc<dyn Fn()>>,
+    pub edit: Option<Rc<dyn Fn(String)>>,
+    pub submit: Option<Rc<dyn Fn()>>,
+    pub set_bool: Option<Rc<dyn Fn(bool)>>,
+    pub set_number: Option<Rc<dyn Fn(f64)>>,
+    pub value: Option<Rc<dyn Fn() -> Option<String>>>,
+}
+
+/// Register a declared `NativeView` entry in the live UI control table until
+/// the enclosing reactive scope ends.
+pub fn register_native(
+    ctx: &Ctx,
+    id: &str,
+    role: &'static str,
+    label: Option<Rc<dyn Fn() -> String>>,
+    enabled: Option<Rc<dyn Fn() -> bool>>,
+    actions: NativeControlActions,
+) {
+    register(
+        ctx,
+        id,
+        role,
+        label,
+        enabled,
+        Actions {
+            activate: actions.activate,
+            edit: actions.edit,
+            submit: actions.submit,
+            set_bool: actions.set_bool,
+            set_number: actions.set_number,
+            value: actions.value,
+            ..Actions::default()
+        },
+    );
+}
+
 /// Register a control of the context's window until the current scope
 /// ends.
 pub(crate) fn register(

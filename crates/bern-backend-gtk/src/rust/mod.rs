@@ -19,6 +19,7 @@ mod expr;
 mod layout;
 mod menus;
 mod motion;
+mod native;
 mod navigation;
 mod nodes;
 
@@ -125,6 +126,8 @@ fn literal(value: &Value) -> String {
 
 pub struct Generator<'a> {
     app: &'a Application,
+    project_dir: Option<&'a std::path::Path>,
+    current_scope: std::cell::RefCell<String>,
     /// Whether the nodes being generated are a sidebar's items.
     in_sidebar: Cell<bool>,
 }
@@ -133,6 +136,17 @@ impl<'a> Generator<'a> {
     pub fn new(app: &'a Application) -> Self {
         Self {
             app,
+            project_dir: None,
+            current_scope: std::cell::RefCell::new(String::new()),
+            in_sidebar: Cell::new(false),
+        }
+    }
+
+    pub fn with_project_dir(app: &'a Application, project_dir: &'a std::path::Path) -> Self {
+        Self {
+            app,
+            project_dir: Some(project_dir),
+            current_scope: std::cell::RefCell::new(String::new()),
             in_sidebar: Cell::new(false),
         }
     }
@@ -354,6 +368,7 @@ impl<'a> Generator<'a> {
         out.line("use std::rc::Rc;");
         out.line("");
         self.style_tables(&mut out);
+        self.native_view_modules(&mut out);
         out.line("// Components.");
         for component in &app.components {
             self.component(&mut out, component);

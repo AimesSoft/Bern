@@ -299,6 +299,9 @@ pub mod feature {
     /// Plural branches, dates and durations in translated texts, and enum
     /// labels that show their variant's fields.
     pub const TEXT_FORMATS: &str = "text_formats";
+    /// Co-located platform-native UI views (`NativeView`) with declared Bern
+    /// control entries and optional `Fallback`.
+    pub const NATIVE_VIEW: &str = "native_view";
 }
 
 /// Whether the application writes numbers, dates or durations in its

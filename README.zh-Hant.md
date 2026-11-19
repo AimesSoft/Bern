@@ -6,16 +6,20 @@
 
 <p><b>一份 Rust 宣告，編譯成每個平台自己的原生介面。</b></p>
 
-<p>從桌面到手機，為 AI 而建：SwiftUI、WinUI 3、GTK 4、Jetpack Compose 與 Web。<br>
-桌面與手機預設不隨附 JS 引擎或瀏覽器。<br>
+<p>涵蓋桌面、手機、手錶、電視與網頁，為 AI 而建：SwiftUI、WinUI 3、GTK 4、Jetpack Compose、GPUI 與 Web。<br>
+桌面、手機與手錶端預設不隨附 JS 引擎或瀏覽器。<br>
 <b>Skills + CLI：</b>啟用 IPC 後，Agent 可在 <code>SKILL.md</code> 查詢指令，再用應用程式的 CLI 依名稱操作控制項。</p>
 
 <p>
 <img alt="macOS · SwiftUI" src="https://img.shields.io/badge/macOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
 <img alt="iOS · SwiftUI" src="https://img.shields.io/badge/iOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
+<img alt="watchOS · SwiftUI" src="https://img.shields.io/badge/watchOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
+<img alt="tvOS · SwiftUI" src="https://img.shields.io/badge/tvOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
 <img alt="Windows · WinUI 3" src="https://img.shields.io/badge/Windows-WinUI%203-0078D4?style=for-the-badge&logo=windows11&logoColor=white">
 <img alt="Linux · GTK 4" src="https://img.shields.io/badge/Linux-GTK%204-4A86CF?style=for-the-badge&logo=gtk&logoColor=white">
 <img alt="Android · Jetpack Compose" src="https://img.shields.io/badge/Android-Jetpack%20Compose-3DDC84?style=for-the-badge&logo=android&logoColor=white">
+<img alt="Wear OS · Compose" src="https://img.shields.io/badge/Wear%20OS-Compose-3DDC84?style=for-the-badge&logo=wearos&logoColor=white">
+<img alt="Desktop · GPUI" src="https://img.shields.io/badge/Desktop-GPUI-084CCF?style=for-the-badge&logo=zedindustries&logoColor=white">
 <img alt="Web · WebAssembly" src="https://img.shields.io/badge/Web-WebAssembly-654FF0?style=for-the-badge&logo=webassembly&logoColor=white">
 </p>
 

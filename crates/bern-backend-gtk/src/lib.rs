@@ -114,6 +114,7 @@ const FEATURES: &[&str] = &[
     feature::ROW_BASELINE,
     feature::SIDEBAR_HEADER,
     feature::UNTITLED_DETAIL,
+    feature::NATIVE_VIEW,
 ];
 
 /// `reflow` GTK cannot show, in components and in the content written
@@ -376,7 +377,7 @@ impl Target for GtkLinux {
             GeneratedFile::text("app/src/main.rs", glue::main_rs(context, app)),
             GeneratedFile::text(
                 "app/src/ui.rs",
-                Generator::new(app).generate(
+                Generator::with_project_dir(app, &context.project_dir).generate(
                     app.protocol.fingerprint(),
                     &bern_target_api::glue::descriptor_expr(context),
                 ),

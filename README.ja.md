@@ -6,16 +6,20 @@
 
 <p><b>一つの Rust 宣言を、各プラットフォーム自身のネイティブ UI へコンパイル。</b></p>
 
-<p>デスクトップからスマートフォンまで、AI のために作られた：SwiftUI、WinUI 3、GTK 4、Jetpack Compose、そして Web。<br>
-デスクトップでもスマートフォンでも、標準では JS エンジンやブラウザーを同梱しません。<br>
+<p>デスクトップ・スマートフォン・ウォッチ・テレビ・Web をカバーし、AI のために作られた：SwiftUI、WinUI 3、GTK 4、Jetpack Compose、GPUI、そして Web。<br>
+デスクトップ・モバイル・ウェアラブルでは標準で JS エンジンやブラウザーを同梱しません。<br>
 <b>Skills + CLI：</b>IPC を有効にすると、エージェントは <code>SKILL.md</code> でコマンドを調べ、アプリの CLI からコントロールを名前で操作できます。</p>
 
 <p>
 <img alt="macOS · SwiftUI" src="https://img.shields.io/badge/macOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
 <img alt="iOS · SwiftUI" src="https://img.shields.io/badge/iOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
+<img alt="watchOS · SwiftUI" src="https://img.shields.io/badge/watchOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
+<img alt="tvOS · SwiftUI" src="https://img.shields.io/badge/tvOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
 <img alt="Windows · WinUI 3" src="https://img.shields.io/badge/Windows-WinUI%203-0078D4?style=for-the-badge&logo=windows11&logoColor=white">
 <img alt="Linux · GTK 4" src="https://img.shields.io/badge/Linux-GTK%204-4A86CF?style=for-the-badge&logo=gtk&logoColor=white">
 <img alt="Android · Jetpack Compose" src="https://img.shields.io/badge/Android-Jetpack%20Compose-3DDC84?style=for-the-badge&logo=android&logoColor=white">
+<img alt="Wear OS · Compose" src="https://img.shields.io/badge/Wear%20OS-Compose-3DDC84?style=for-the-badge&logo=wearos&logoColor=white">
+<img alt="Desktop · GPUI" src="https://img.shields.io/badge/Desktop-GPUI-084CCF?style=for-the-badge&logo=zedindustries&logoColor=white">
 <img alt="Web · WebAssembly" src="https://img.shields.io/badge/Web-WebAssembly-654FF0?style=for-the-badge&logo=webassembly&logoColor=white">
 </p>
 

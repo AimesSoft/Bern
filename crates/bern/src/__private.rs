@@ -65,6 +65,10 @@ pub fn keys_field<T: PositionValue>(_: &SessionField<Vec<T>>) {}
 
 pub fn number_value<N: Numeric>(_: &N) {}
 
+pub fn native_scalar<V: NativeScalar>(_: &V) {}
+
+pub fn native_draft_field<V: NativeDraftValue>(_: &SessionField<V>) {}
+
 pub fn picker_field<E: LabeledEnum>(_: &SessionField<E>) {}
 
 pub fn selection_field<E: BernEnum>(_: &SessionField<E>) -> E {

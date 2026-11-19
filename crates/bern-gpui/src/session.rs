@@ -31,6 +31,49 @@ pub(crate) struct Actions {
     pub(crate) select: Option<Select>,
 }
 
+/// Public entry point for generated `NativeView` wrappers to register a
+/// declared Bern control entry in the CLI registry.
+#[derive(Clone, Default)]
+pub struct NativeControlActions {
+    pub activate: Option<Rc<dyn Fn()>>,
+    pub edit: Option<Rc<dyn Fn(String)>>,
+    pub submit: Option<Rc<dyn Fn()>>,
+    pub set_number: Option<Rc<dyn Fn(f64)>>,
+    pub set_bool: Option<Rc<dyn Fn(bool)>>,
+}
+
+/// Register a declared `NativeView` control entry synchronously during render
+/// so `ui.inspect` and external commands (`ui.activate`, `ui.set_number`, etc.)
+/// can inspect and drive it.
+pub fn register_native(
+    c: &crate::Ctx,
+    id: &str,
+    role: &'static str,
+    label: String,
+    value: Option<String>,
+    enabled: bool,
+    actions: NativeControlActions,
+) {
+    c.list(Control {
+        target: c.target(id),
+        window: c.win().id.clone(),
+        role,
+        label,
+        value,
+        enabled: enabled && c.enabled(),
+        actions: Actions {
+            activate: actions
+                .activate
+                .map(|f| Rc::new(move |_cx: &mut gpui::App| f()) as crate::ctx::Press),
+            edit: actions.edit,
+            submit: actions.submit,
+            set_number: actions.set_number,
+            set_bool: actions.set_bool,
+            select: None,
+        },
+    });
+}
+
 /// A control as external entries see it.
 pub(crate) struct Control {
     /// `component.id`, with row keys inside lists.

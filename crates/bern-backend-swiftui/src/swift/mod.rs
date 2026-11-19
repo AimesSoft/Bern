@@ -12,6 +12,7 @@ mod drawing;
 mod expr;
 mod layout;
 mod motion;
+mod native;
 mod navigation;
 mod table;
 mod toolbar;
@@ -504,6 +505,7 @@ impl<'a> Generator<'a> {
             "Slider" => self.slider(out, element, ctx),
             "ColorPicker" => self.color_picker(out, element, ctx),
             "Video" => self.video(out, element, ctx),
+            "NativeView" => self.native_view(out, element, ctx),
             "Query" => self.query(out, element, ctx),
             "Picker" => self.picker(out, element, ctx),
             "Form" => self.form(out, element, ctx),

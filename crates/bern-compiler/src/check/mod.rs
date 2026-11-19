@@ -146,6 +146,7 @@ enum FieldExpect {
     Selection,
     Path,
     Keys,
+    NativeDraft,
 }
 
 /// Locations are reported relative to the project, like rustc does.

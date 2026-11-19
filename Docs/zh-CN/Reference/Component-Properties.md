@@ -52,6 +52,10 @@
 | `Player` | 应用播放器目录中的播放器 |
 | `Query` | 类型化查询调用 |
 | `Feature` | 所属功能契约中的入口 |
+| `NativeFile` | 相对声明所在 `.rs` 文件的紧邻原生界面实现路径字面量 |
+| `NativeName` | 暴露给 `NativeView` 的只读值、文本或草稿字段的小写 `snake_case` 标识符 |
+| `NativeScalar` | 传入 `NativeView` 的只读标量表达式（`bool`、`i64`、`f64`、`String` 或 `i64`/`f64`/`String` 的可选值） |
+| `NativeDraftField` | 暴露给 `NativeView` 读写的可写会话草稿字段（`bool`、`i64`、`f64`、`String` 或 `Option<f64>`） |
 
 固定枚举直接列出允许的关键字。表内没有逐一重复所有跨属性约束：Switch / Picker / Slider / ColorPicker 必须二选一指定草稿来源或受控来源，受控来源还必须提供动作；`Window` 的 `overlay` 必须与 `role: utility` 同用（主窗口不能声明 `role: utility`）；`appear_delay` 必须配合 `appear`；具体错误由编译器检查。资源、语义颜色、本地化、功能覆盖与类型仍会进一步校验。
 
@@ -93,10 +97,10 @@
 | `SidebarItem` | **`value: SelectionValue`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`badge: NumberValue`<br>`variant: StyleVariant` | 不含子节点；无动作；直接位于 ["Sidebar", "Section"] |
 | `Section` | `title: DisplayText`<br>`footer: DisplayText`<br>`style: grouped / plain`<br>`padding_x: Length`<br>`padding_y: Length` | 可含子内容；无动作 |
 | `Slot` | **`id: SlotName`** | 不含子节点；无动作 |
-| `Pages` | **`slot: SlotName`** | 不含子节点；无动作；直接位于 ["Sidebar", "Section", "Tabs"]。在 `Tabs` 里每个页面展开成一个 `Tab`，内容是该页面的组件 |
+| `Pages` | **`slot: SlotName`**<br>`all: Flag` | 不含子节点；无动作；直接位于 ["Sidebar", "Section", "Tabs"]。在 `Tabs` 里每个页面展开成一个 `Tab`，内容是该页面的组件；`all: true` 包含全部贡献页面 |
 | `PageContent` | **`slot: SlotName`**<br>**`selected: SelectionField`** | 不含子节点；无动作 |
 | `Form` | `title: DisplayText`<br>`variant: StyleVariant`<br>`gap: Length`<br>`row_height: Length`<br>`padding_x: Length`<br>`padding_y: Length` | 可含子内容；无动作 |
-| `Navigation` | **`path: PathField`**<br>`id: Id` | 可含子内容；无动作 |
+| `Navigation` | **`path: PathField`**<br>`id: Id`<br>`reset: KeyValue` | 可含子内容；无动作；`reset` 变化时回到根页 |
 | `Destination` | 无专有属性 | 可含子内容；无动作；直接位于 ["Navigation"] |
 | `NavLink` | **`id: Id`**<br>**`route: Route`** | 可含子内容；无动作 |
 | `ControlGroup` | `label: DisplayText`<br>`height: Length` | 可含子内容；无动作 |
@@ -108,7 +112,9 @@
 | `Inspector` | **`presented: BoolField`**<br>`width: Number` | 可含子内容；无动作 |
 | `Toast` | **`content: DisplayText`**<br>`icon: Icon`<br>`key: KeyValue`<br>`duration: Number` | 不含子节点；无动作 |
 | `Pinch` | **`id: Id`**<br>**`label: DisplayText`**<br>**`value: NumberField`**<br>**`min: Number`**<br>**`max: Number`**<br>`feature: Feature` | 恰好一个子节点；动作可选 |
-| `Swipe` | **`id: Id`**<br>**`label: DisplayText`**<br>**`value: NumberField`**<br>**`min: Number`**<br>**`max: Number`**<br>`axis: vertical / horizontal`<br>`distance: Number`<br>`feature: Feature` | 恰好一个子节点；动作可选 |
+| `Swipe` | **`id: Id`**<br>**`label: DisplayText`**<br>**`value: NumberField`**<br>**`min: Number`**<br>**`max: Number`**<br>`axis: vertical / horizontal`<br>`distance: Number`<br>`continuous: Flag`<br>`active: BoolField`<br>`feature: Feature` | 恰好一个可视子节点外加可选 `OnCommit`；动作可选 |
+| `OnCommit` | 无 | 不含子节点；必须绑定动作；直接位于 ["Swipe"]，最多一个；在 `Swipe` 完成松手后运行一次，取消时不运行 |
+| `ScreenBrightness` | **`value: NumberField`**<br>**`available: BoolField`** | 不含子节点；无动作；挂载期间临时覆盖宿主亮度（0..1）；`available` 表示宿主是否支持该覆盖 |
 | `Drop` | **`id: Id`**<br>**`label: DisplayText`**<br>**`value: FileField`**<br>`files: FileKinds`<br>`over: BoolField`<br>`opens: Flag`<br>`feature: Feature` | 恰好一个子节点；必须绑定动作 |
 | `Toolbar` | 无专有属性 | 仅含 ["Button", "IconButton", "Picker", "Menu", "Search", "Switch", "SplitButton", "PopoverButton", "Divider", "Spacer", "Text"]；无动作 |
 | `Adaptive` | `id: Id` | 仅含 ["Layout"]；无动作 |
@@ -126,17 +132,18 @@
 | `WheelUp` | 无 | 不含子节点；必须绑定动作；直接位于指针事件的宿主元素内，每个元素最多一个；滚轮或触控板在元素上向上滚动（让滚动视图回到顶部的方向）每一格运行一次，这段滚动由元素接住 |
 | `WheelDown` | 无 | 不含子节点；必须绑定动作；直接位于指针事件的宿主元素内，每个元素最多一个；滚轮或触控板在元素上向下滚动每一格运行一次，这段滚动由元素接住 |
 | `PreviewList` | **`items: Items`**<br>**`key: KeyField`**<br>**`item_height: Number`**<br>`gap: Number`<br>`more_height: Number` | 按可用高度创建能完整放下的前几项；有剩余时为 `+N` 留位，默认高度 22；不滚动，也不创建隐藏项。使用 `\|item\|` 行模板 |
-| `Text` | **`content: DisplayText`**<br>`style: large_title / title / title2 / title3 / headline / subheadline / body / callout / footnote / caption / caption2 / control / code`<br>`emphasis: primary / secondary / tertiary`<br>`color: accent / status.success / status.warning / status.error`<br>`mark: ColorRole`<br>`lines: Number`<br>`font_size: Length`<br>`line_height: Length`<br>`ruby: TextValue`<br>`markdown: Flag`<br>`bold: Bool`<br>`lit: Length` | 不含子节点；无动作；`color` 与 `emphasis` 二选一 |
-| `Canvas` | `width: Length`<br>`height: Length`<br>`label: DisplayText` | 仅含 ["Shape", "Series", "Pattern"]；无动作 |
+| `Text` | **`content: DisplayText`**<br>`style: large_title / title / title2 / title3 / headline / subheadline / body / callout / footnote / caption / caption2 / control / code`<br>`emphasis: primary / secondary / tertiary`<br>`color: accent / status.success / status.warning / status.error`<br>`mark: ColorRole`<br>`lines: Number`<br>`font_size: Length`<br>`line_height: Length`<br>`ruby: TextValue`<br>`markdown: Flag`<br>`bold: Bool`<br>`lit: Length`<br>`lit_path: TextValue`<br>`lit_clock: NumberValue`<br>`lit_since: NumberValue` | 不含子节点；无动作；`color` 与 `emphasis` 二选一 |
+| `Canvas` | `width: Length`<br>`height: Length`<br>`label: DisplayText`<br>`bleed: Flag` | 仅含 ["Shape", "Series", "Pattern"]；无动作 |
 | `Shape` | **`kind: rect / rounded / capsule / ellipse`**<br>`x: Number`<br>`y: Number`<br>`width: Number`<br>`height: Number`<br>`corner: Number`<br>`fill: ColorRole`<br>`fill_from: ImageResource`<br>`fade: up / down / left / right`<br>`stroke: ColorRole`<br>`stroke_width: Number`<br>`dash: Number`<br>`dash_gap: Number`<br>`opacity: Number` | 不含子节点；无动作；直接位于 ["Canvas"] |
 | `Series` | **`values: NumberList`**<br>`kind: area / line`<br>`max: NumberValue`<br>`fill: ColorRole`<br>`stroke: ColorRole`<br>`stroke_width: Number`<br>`opacity: Number` | 不含子节点；无动作；直接位于 ["Canvas"] |
 | `Pattern` | **`name: PatternName`**<br>`opacity: Number` | 不含子节点；无动作；直接位于 ["Canvas"] |
 | `Label` | **`title: DisplayText`**<br>**`icon: Icon`**<br>`style: large_title / title / title2 / title3 / headline / subheadline / body / callout / footnote / caption / caption2 / control / code`<br>`font_size: Number`<br>`display: title_and_icon / icon` | 不含子节点；无动作 |
 | `Svg` | **`source: SvgResource`**<br>`static_source: SvgResource`<br>**`width: Length`**<br>**`height: Length`**<br>`label: DisplayText`<br>`fit: contain / cover / fill`<br>`playing: Bool`<br>`speed: NumberValue`<br>`restart: NumberValue`<br>`interactive: Flag`<br>`data: DisplayText`<br>`external_links: Flag` | 不含子节点；无动作 |
+| `WebPage` | **`url: DisplayText`**<br>`cookies_file: DisplayText`<br>`cookie_domain: DisplayText`<br>`user_agent: DisplayText`<br>`content_mode: auto / mobile / desktop`<br>`close_on: DisplayText`<br>`label: DisplayText` | 不含子节点；动作可选（点击匹配 CSS 选择器 `close_on` 的元素时触发）；tvOS、watchOS 与 Wear OS 不支持 |
 | `Image` | **`source: ImageResource`**<br>`label: DisplayText`<br>`width: Length`<br>`height: Length`<br>`fit: contain / cover / fill`<br>`corner: Length`<br>`rendering: original / template`<br>`aspect: Number` | 不含子节点；无动作 |
 | `Progress` | `value: NumberValue`<br>`total: Number`<br>`label: DisplayText`<br>`style: bar / ring`<br>`width: Length`<br>`stroke_width: Number` | 不含子节点；无动作；`style: ring` 需要 `value`；`width` 与 `stroke_width` 只用于 `style: ring` |
 | `Button` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`shape: capsule / chip`<br>`height: Length`<br>`width: fill`<br>`role: normal / destructive / cancel`<br>`prominence: standard / prominent / plain`<br>`enabled: Bool`<br>`variant: StyleVariant`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`files: FileKinds`<br>`default_focus: Flag`<br>`clears: TextField`<br>`paste: TextField` | 可含子内容；必须绑定动作；`paste` 先把剪贴板里的文字放进该草稿，有文字时才运行动作；`pick` 与 `paste` 二选一 |
-| `IconButton` | **`id: Id`**<br>**`icon: Icon`**<br>`font_size: Number`<br>`height: Length`<br>**`label: DisplayText`**<br>`prominence: standard / prominent / plain`<br>`enabled: Bool`<br>`variant: StyleVariant`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`files: FileKinds`<br>`paste: TextField`<br>`default_focus: Flag` | 不含子节点；必须绑定动作；`pick` 与 `paste` 二选一 |
+| `IconButton` | **`id: Id`**<br>**`icon: Icon`**<br>`font_size: Number`<br>`height: Length`<br>**`label: DisplayText`**<br>`prominence: standard / prominent / plain`<br>`enabled: Bool`<br>`variant: StyleVariant`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`files: FileKinds`<br>`paste: TextField`<br>`default_focus: Flag`<br>`icon_progress: NumberValue`<br>`badge_icon: Icon`<br>`badge_visible: Bool` | 不含子节点；必须绑定动作；`pick` 与 `paste` 二选一 |
 | `TextInput` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag`<br>`value: TextField`<br>`current: TextValue`<br>`prompt: DisplayText`<br>`kind: plain / secure / multiline`<br>`submit: clear`<br>`clear_key: NumberValue`<br>`feature: Feature` | 不含子节点；动作可选；`value` 与 `current` 二选一；`value` 时动作在提交时运行，`submit: clear` 在动作后清空草稿、交出焦点；`current` 时每次编辑都运行动作，动作参数里同一表达式就是输入的文字，编辑中引擎的文字不覆盖用户的输入；SwiftUI 的 `clear_key` 在数值变化时清空，供异步成功回执使用 |
 | `Search` | **`id: Id`**<br>**`value: TextField`**<br>`prompt: DisplayText`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`style: automatic / palette`<br>`display: automatic / icon`<br>`panel_prompt: DisplayText`<br>`width: Number`<br>`height: Number`<br>`font_size: Number`<br>`suggest: Flag` | 可含子内容；动作可选；`display: icon` 仅用于 `style: palette` |
 | `SearchItem` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`detail: DisplayText`<br>`hint: DisplayText`<br>`navigation: Bool`<br>`pick: FileField`<br>`files: FileKinds`<br>`feature: Feature` | 可含子内容；必须绑定动作 |
@@ -148,6 +155,15 @@
 | `Query` | **`id: Id`**<br>**`query: Query`**<br>`presented: Bool`<br>`loading: DisplayText`<br>`empty: DisplayText`<br>`failed: DisplayText`<br>`icon: Icon` | 结果模板；开头可放一个 `QueryStatusHeader`；无动作 |
 | `QueryStatusHeader` | — | 恰好一个子节点；必须是 `Query` 的第一个直接子节点，至多一次；无动作 |
 | `Picker` | **`id: Id`**<br>**`label: DisplayText`**<br>`value: PickerField`<br>`selected: KeyValue`<br>`label_hidden: Flag`<br>`shape: capsule`<br>`height: Length`<br>`style: automatic / menu / segmented / radio / inline / chips` | 仅含 ["PickerOption"]；动作可选；`chips` 不接受 `shape` / `height` |
+| `NativeView` | **`id: Id`**<br>**`label: DisplayText`**<br>`swiftui: NativeFile`<br>`winui3: NativeFile`<br>`compose: NativeFile`<br>`gtk: NativeFile`<br>`gpui: NativeFile`<br>`web: NativeFile` | 仅含 ["NativeValue", "NativeText", "NativeDraft", "NativeAction", "NativeNumber", "NativeBool", "NativeInput", "Fallback", "DoubleTap", "ContextMenu", "WheelUp", "WheelDown"]；至少声明一个后端文件且至少声明一个 CLI 功能入口（`NativeAction` / `NativeNumber` / `NativeBool` / `NativeInput`），最多一个 `Fallback`；缺少当前后端文件时渲染 `Fallback`（若无则编译报错） |
+| `NativeValue` | **`name: NativeName`**<br>**`value: NativeScalar`** | 不含子节点；无动作；直接位于 ["NativeView"]；在生成的 `Props` 中暴露强类型只读字段 |
+| `NativeText` | **`name: NativeName`**<br>**`content: DisplayText`** | 不含子节点；无动作；直接位于 ["NativeView"]；把经过 `tr!` 校验的多语言文本传入 `Props` |
+| `NativeDraft` | **`name: NativeName`**<br>**`value: NativeDraftField`** | 不含子节点；无动作；直接位于 ["NativeView"]；在 `Props` 中暴露当前草稿值并在 `Actions` 中生成 `set_<name>` 写回回调 |
+| `NativeAction` | **`id: Id`**<br>**`label: DisplayText`**<br>`enabled: Bool`<br>`feature: Feature` | 不含子节点；必须绑定动作；直接位于 ["NativeView"]；以 `<component>.<view>.<id>` 自动注册到 CLI（`ui activate`） |
+| `NativeNumber` | **`id: Id`**<br>**`label: DisplayText`**<br>**`current: NumberValue`**<br>**`min: Number`**<br>**`max: Number`**<br>`step: Number`<br>`enabled: Bool`<br>`feature: Feature` | 不含子节点；必须绑定动作；直接位于 ["NativeView"]；以 `<component>.<view>.<id>` 自动注册到 CLI（`ui set-number`） |
+| `NativeBool` | **`id: Id`**<br>**`label: DisplayText`**<br>**`checked: Bool`**<br>`enabled: Bool`<br>`feature: Feature` | 不含子节点；必须绑定动作；直接位于 ["NativeView"]；以 `<component>.<view>.<id>` 自动注册到 CLI（`ui set-bool`） |
+| `NativeInput` | **`id: Id`**<br>**`label: DisplayText`**<br>**`current: TextValue`**<br>`enabled: Bool`<br>`feature: Feature` | 不含子节点；必须绑定动作；直接位于 ["NativeView"]；以 `<component>.<view>.<id>` 自动注册到 CLI（`ui edit` / `ui submit`） |
+| `Fallback` | 无 | 可含子内容；无动作；直接位于 ["NativeView"]，最多一个；在未提供原生文件的目标平台上渲染 |
 
 `Grid` 给出 `cell_ratio` 时每行一样高：列宽 ÷ `cell_ratio` + `cell_extra`（如海报 2 : 3 加两行字的高度：`cell_ratio: 0.6667, cell_extra: 54`），各项从格子顶部排，内容更高时伸进下方的行间距，与按最高一项定行高的默认方式不同。
 

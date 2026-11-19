@@ -681,7 +681,9 @@ impl<'a> Gen<'a> {
                             } => text.clone(),
                             _ => id.to_string(),
                         };
-                        if !self.ids.insert(id.clone()) {
+                        let scoped_to_native = ctx.parent.as_deref() == Some("NativeView")
+                            && bern_ir::native::NATIVE_ENTRIES.contains(&name.as_str());
+                        if !scoped_to_native && !self.ids.insert(id.clone()) {
                             self.error(
                                 prop.value.span(),
                                 format!("control id `{id}` is used twice in this component"),
@@ -942,6 +944,44 @@ impl<'a> Gen<'a> {
                         "expected a feature of the component's contract, e.g. `MediaFeature::Clip`",
                     ),
                 },
+                PropKind::NativeFile => match &prop.value {
+                    Expr::Literal {
+                        value: Literal::Text(path),
+                        span,
+                    } => {
+                        let exts = bern_ir::native::backend_extensions(&prop_name);
+                        if path.is_empty()
+                            || !exts
+                                .iter()
+                                .any(|ext| path.to_ascii_lowercase().ends_with(ext))
+                        {
+                            self.error(
+                                *span,
+                                format!(
+                                    "`{prop_name}` expects a relative path ending in {}",
+                                    exts.join(" or ")
+                                ),
+                            );
+                        }
+                    }
+                    other => self.error(
+                        other.span(),
+                        format!(
+                            "`{prop_name}` expects a string literal path relative to this `.rs` file"
+                        ),
+                    ),
+                },
+                PropKind::NativeName => {
+                    self.ident_prop(&prop.value, &prop_name);
+                }
+                PropKind::NativeScalar => {
+                    let value = self.value(&prop.value);
+                    let span = prop.value.span();
+                    pre.push(quote_spanned!(span=> ::bern::__private::native_scalar(&#value);));
+                }
+                PropKind::NativeDraftField => pre.push(
+                    self.writable(&prop.value, quote!(::bern::__private::native_draft_field)),
+                ),
                 PropKind::SelectionField
                 | PropKind::PathField
                 | PropKind::Items

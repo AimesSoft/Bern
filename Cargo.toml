@@ -59,6 +59,9 @@ members = [
     "examples/catalog/catalog-protocol",
     "examples/catalog/catalog-core",
     "examples/catalog/catalog-ui",
+    "examples/native-controls/native-controls-protocol",
+    "examples/native-controls/native-controls-core",
+    "examples/native-controls/native-controls-ui",
 ]
 
 [workspace.package]

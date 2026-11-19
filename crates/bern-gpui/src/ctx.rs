@@ -736,6 +736,16 @@ impl Ctx {
         self.0.theme.color(role)
     }
 
+    /// Whether the hosting window currently uses a dark appearance.
+    pub fn theme_is_dark(&self) -> bool {
+        self.0.theme.dark
+    }
+
+    /// Resolve a Bern semantic color role in the hosting window's theme.
+    pub fn theme_color(&self, role: &str) -> Rgba {
+        self.0.theme.color(role)
+    }
+
     /// The color of a recipe slot, such as the `background` of
     /// `button.prominent` at `hover`; the `rest` state's when the state
     /// does not name the slot.

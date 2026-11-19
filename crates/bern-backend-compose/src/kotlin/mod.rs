@@ -8,6 +8,7 @@ mod drawing;
 mod expr;
 mod layout;
 mod motion;
+pub mod native;
 mod navigation;
 mod pointer;
 mod table;
@@ -126,6 +127,7 @@ impl Ctx {
 
 pub struct Generator<'a> {
     app: &'a Application,
+    package: std::cell::RefCell<String>,
     multicast: bool,
     watch: bool,
     /// Whether a container anywhere declares `stagger`. Only then do the
@@ -148,6 +150,7 @@ impl<'a> Generator<'a> {
         }
         Self {
             app,
+            package: std::cell::RefCell::new(String::new()),
             staggers,
             multicast: false,
             watch: false,
@@ -735,6 +738,7 @@ impl<'a> Generator<'a> {
             "PreviewList" => self.preview_list(out, element, ctx),
             "Query" => self.query(out, element, ctx),
             "Video" => self.video(out, element, ctx),
+            "NativeView" => self.native_view(out, element, ctx),
             "SplitView" => self.split_view(out, element, ctx),
             "Navigation" => self.navigation(out, element, ctx),
             "NavLink" => self.nav_link(out, element, ctx),

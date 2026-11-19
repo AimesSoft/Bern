@@ -734,6 +734,7 @@ mod tests {
             layouts: None,
             contracts: vec![],
             style: Default::default(),
+            native_files: vec![],
         }
     }
 

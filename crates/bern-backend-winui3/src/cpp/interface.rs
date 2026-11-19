@@ -7,6 +7,7 @@ use bern_ir::{Action, ComponentDef, Node, WindowChrome, WindowDef, WindowInitial
 
 impl Generator<'_> {
     fn component(&self, out: &mut Out, component: &ComponentDef) {
+        *self.current_scope.borrow_mut() = component.name.clone();
         out.line(format!(
             "/// Generated from the `{}` component.",
             component.name
@@ -21,6 +22,7 @@ impl Generator<'_> {
     }
 
     fn window(&self, out: &mut Out, window: &WindowDef) {
+        *self.current_scope.borrow_mut() = window.id.clone();
         out.line(format!("/// Root of the `{}` window.", window.id));
         out.open(format!(
             "static void w_{}(Parent const& p, Ctx const& c) {{",
@@ -65,6 +67,7 @@ impl Generator<'_> {
         out.line("");
         self.style_tables(&mut out);
         self.theme_functions(&mut out);
+        self.native_view_namespaces(&mut out);
         out.line("// Components.");
         for component in &app.components {
             out.line(format!(

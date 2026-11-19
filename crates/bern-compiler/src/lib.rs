@@ -8,6 +8,7 @@
 mod check;
 pub mod config;
 mod features;
+mod native;
 mod placement;
 pub mod style;
 
@@ -2210,12 +2211,18 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
     );
     checker.contributions = contributions;
     use_style(&mut checker, &style);
-    let (mut lowered, root_element) =
+    let (mut lowered, mut root_element) =
         lower_components(&mut checker, config, &sources.components, &libraries);
     diagnostics.append(&mut checker.diagnostics);
     let texts = std::mem::take(&mut checker.texts);
     let page_sessions = std::mem::take(&mut checker.page_sessions);
     add_page_sessions(page_sessions, &mut lowered, &mut signatures);
+    let native_files = native::resolve_and_lint(
+        config,
+        &mut lowered,
+        root_element.as_mut(),
+        &mut diagnostics,
+    );
 
     // Checks across the lowered components and the windows they fill.
     let graph = component_graph(
@@ -2310,6 +2317,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
             layouts: config.layouts,
             contracts,
             style,
+            native_files,
         },
         protocol_module,
         module_protocols,

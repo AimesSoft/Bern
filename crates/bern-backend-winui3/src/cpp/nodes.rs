@@ -323,6 +323,7 @@ impl Generator<'_> {
             "Picker" => self.picker(out, element),
             "LanguagePicker" => self.language_picker(out, element),
             "Video" => self.video(out, element),
+            "NativeView" => self.native_view(out, element),
             "Query" => self.query(out, element),
             "Form" => self.form(out, element),
             "Section" if self.in_sidebar.get() => self.sidebar_section(out, element),

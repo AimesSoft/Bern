@@ -53,8 +53,12 @@ pub use svg::{Svg, SvgProps};
 pub use svg::{WebPage, WebPageProps};
 mod windows;
 
+pub use adw;
 pub use bern_ffi;
 pub use bern_ffi::protocol;
+pub use controls::{NativeControlActions, register_native};
+pub use gio;
+pub use gtk;
 pub use canvas::{
     Band, Canvas, CanvasProps, Op, PatternDef, SeriesOp, ShapeOp, Source, numbers, url,
 };

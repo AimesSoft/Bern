@@ -168,6 +168,7 @@ const FEATURES_BUILT: &[&str] = &[
     bern_target_api::feature::ROW_BASELINE,
     bern_target_api::feature::SIDEBAR_HEADER,
     bern_target_api::feature::UNTITLED_DETAIL,
+    bern_target_api::feature::NATIVE_VIEW,
 ];
 
 /// The features template with the extensions of each file kind from the
@@ -498,6 +499,13 @@ impl Target for ComposeAndroid {
             GeneratedFile::text("glue/Cargo.toml", glue::cargo_toml(context, app)),
             GeneratedFile::text("glue/src/lib.rs", glue::lib_rs(context, app)),
         ];
+        for native_file in kotlin::native::compose_native_files(app, &package, &context.project_dir)
+        {
+            files.push(GeneratedFile::text(
+                sources.join(&native_file.rel_kotlin_path),
+                native_file.contents,
+            ));
+        }
         if watch {
             files.retain(|file| !file.path.starts_with(sources.join("dev/bern/runtime")));
             files.extend(wear_runtime::files(&app.engine_kinds(), &package));
@@ -664,6 +672,11 @@ impl Target for ComposeAndroid {
         // shares the output directory, and sources another one left behind
         // would be compiled into this one.
         let package = names::package(&app.app.bundle_id);
+        let native_keep: Vec<PathBuf> =
+            kotlin::native::compose_native_files(app, &package, &context.project_dir)
+                .into_iter()
+                .map(|file| file.rel_kotlin_path)
+                .collect();
         let kotlin = BuildStep::Mirror {
             dir: gradle_project.join("app/src/main/kotlin"),
             files: Vec::new(),
@@ -677,6 +690,7 @@ impl Target for ComposeAndroid {
                             .to_path_buf()
                     })
                     .chain([PathBuf::from(package.replace('.', "/")).join("BernGenerated.kt")])
+                    .chain(native_keep)
                     .collect()
             } else {
                 [
@@ -700,6 +714,7 @@ impl Target for ComposeAndroid {
                         .then(|| PathBuf::from("dev/bern/runtime/BernWebPage.kt")),
                 )
                 .chain([PathBuf::from(package.replace('.', "/")).join("BernGenerated.kt")])
+                .chain(native_keep)
                 .collect()
             },
         };

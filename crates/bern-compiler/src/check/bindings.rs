@@ -119,6 +119,7 @@ impl Checker<'_> {
                     FieldExpect::Path => {
                         matches!(&ty, Type::List { inner } if matches!(**inner, Type::Enum { .. }))
                     }
+                    FieldExpect::NativeDraft => ir::native::is_native_draft_type(&ty),
                 };
                 if !ok {
                     let wanted = match expect {
@@ -135,6 +136,9 @@ impl Checker<'_> {
                         FieldExpect::Path => "a `Vec` of a route enum",
                         FieldExpect::Keys => {
                             "a `Vec<String>` or `Vec<i64>` field, like the keys of the items"
+                        }
+                        FieldExpect::NativeDraft => {
+                            "a `bool`, `i64`, `f64`, `String` or `Option<f64>` field"
                         }
                     };
                     self.error(

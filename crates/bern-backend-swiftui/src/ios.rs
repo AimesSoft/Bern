@@ -378,6 +378,9 @@ impl Target for SwiftUiIos {
             "build.json",
             serde_json::to_string_pretty(&manifest).expect("manifest"),
         ));
+        if FrontEnds::of(&context.target) == FrontEnds::Current {
+            files.extend(crate::native_swift_generated(app, context));
+        }
         files.extend(bern_target_api::svg::static_files(app, context)?);
         bern_target_api::script::configure(&mut files, context);
         Ok(files)
@@ -423,6 +426,7 @@ impl Target for SwiftUiIos {
         let minimum = frontends.minimum();
         let frameworks = bundle.join("Frameworks");
         let swiftc = swiftc(
+            app,
             &product,
             context,
             "iphonesimulator",
@@ -570,6 +574,7 @@ impl Target for SwiftUiIos {
                     "Compile the front end of iOS 17 and later",
                     "xcrun",
                     self::swiftc(
+                        app,
                         &product,
                         context,
                         "iphonesimulator",
@@ -769,6 +774,7 @@ impl Target for SwiftUiIos {
                     "Compile the front end of iOS 17 and later for devices",
                     "xcrun",
                     swiftc(
+                        app,
                         &product,
                         context,
                         "iphoneos",
@@ -789,6 +795,7 @@ impl Target for SwiftUiIos {
                 "Compile the SwiftUI frontend for devices",
                 "xcrun",
                 swiftc(
+                    app,
                     &product,
                     context,
                     "iphoneos",
@@ -893,6 +900,7 @@ impl Target for SwiftUiIos {
                     "Compile the front end of iOS 16 for devices",
                     "xcrun",
                     swiftc(
+                        app,
                         &product,
                         context,
                         "iphoneos",
@@ -988,7 +996,20 @@ fn swift_sources(app: &Application, frontends: FrontEnds) -> Vec<GeneratedFile> 
         ),
     ];
     let mut files = Vec::new();
-    for (name, source) in sources {
+    let swift_native: Vec<(String, String)> = app
+        .native_files
+        .iter()
+        .filter(|f| f.backend == "swiftui")
+        .enumerate()
+        .map(|(idx, f)| (format!("BernNative_{idx}.swift"), f.source.clone()))
+        .collect();
+    for (name, source) in sources.into_iter().map(|(n, s)| (n.to_string(), s)).chain(
+        if frontends == FrontEnds::Current {
+            Vec::new()
+        } else {
+            swift_native
+        },
+    ) {
         match frontends {
             FrontEnds::Current => {
                 files.push(GeneratedFile::text(format!("Sources/{name}"), source));
@@ -1052,6 +1073,7 @@ fn swift_sources(app: &Application, frontends: FrontEnds) -> Vec<GeneratedFile> 
 /// `executable`.
 #[allow(clippy::too_many_arguments)]
 fn swiftc(
+    app: &Application,
     product: &str,
     context: &BuildContext,
     sdk: &str,
@@ -1151,6 +1173,20 @@ fn swiftc(
     });
     for file in SOURCES {
         args.push(path(&sources.join(file)));
+    }
+    if frontends == FrontEnds::Current {
+        for file in crate::native_swift_paths(app, context) {
+            args.push(path(&file));
+        }
+    } else {
+        for idx in 0..app
+            .native_files
+            .iter()
+            .filter(|f| f.backend == "swiftui")
+            .count()
+        {
+            args.push(path(&sources.join(format!("BernNative_{idx}.swift"))));
+        }
     }
     match (part, frontends) {
         (Part::Ui17, _) => args.push(path(&sources.join("BernEntry17.swift"))),

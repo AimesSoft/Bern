@@ -137,7 +137,7 @@ pub(crate) fn pair(background: &Color) -> Option<Color> {
     }
 }
 
-pub(crate) fn is_dark() -> bool {
+pub fn is_dark() -> bool {
     adw::StyleManager::default().is_dark()
 }
 
@@ -161,7 +161,7 @@ pub(crate) fn part_of(widget: &gtk::Widget) -> Option<bool> {
 }
 
 /// A color as RGBA for drawing in `widget`.
-pub(crate) fn rgba(color: &Color, widget: &gtk::Widget) -> gtk::gdk::RGBA {
+pub fn rgba(color: &Color, widget: &gtk::Widget) -> gtk::gdk::RGBA {
     let part = part_of(widget);
     match color {
         Color::Role(role) => {
@@ -220,7 +220,7 @@ thread_local! {
 
 /// Record a dependency on the colors behind the roles: the system's
 /// appearance, contrast and accent, and the application's choices.
-pub(crate) fn track() {
+pub fn track() {
     watch();
     TICK.with(crate::reactive::Version::track);
 }

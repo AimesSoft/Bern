@@ -17,8 +17,8 @@ use bern_command::EngineProtocol;
 use bern_command::files::{Entry, Opener, SourceFile};
 use bern_protocol::CommandError;
 use jni_sys::{
-    JNI_OK, JNIEnv, JavaVM, jbyte, jbyteArray, jint, jlong, jmethodID, jobject, jsize, jstring,
-    jvalue,
+    JNI_OK, JNIEnv, JavaVM, jbyte, jbyteArray, jdouble, jint, jlong, jmethodID, jobject, jsize,
+    jstring, jvalue,
 };
 use std::ffi::{CStr, CString, c_void};
 

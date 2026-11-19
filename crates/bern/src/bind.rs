@@ -130,6 +130,26 @@ pub trait Numeric {}
 impl Numeric for i64 {}
 impl Numeric for f64 {}
 
+/// Read-only scalar values that can be passed into a `NativeView` via `NativeValue`.
+pub trait NativeScalar {}
+
+impl NativeScalar for bool {}
+impl NativeScalar for i64 {}
+impl NativeScalar for f64 {}
+impl NativeScalar for String {}
+impl NativeScalar for Option<i64> {}
+impl NativeScalar for Option<f64> {}
+impl NativeScalar for Option<String> {}
+
+/// Writable session field types a `NativeView` can read and update via `NativeDraft`.
+pub trait NativeDraftValue {}
+
+impl NativeDraftValue for bool {}
+impl NativeDraftValue for i64 {}
+impl NativeDraftValue for f64 {}
+impl NativeDraftValue for String {}
+impl NativeDraftValue for Option<f64> {}
+
 /// Types usable as a stable list key.
 pub trait ListKey {}
 
