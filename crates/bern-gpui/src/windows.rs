@@ -296,6 +296,101 @@ pub(crate) fn command(cx: &mut App, op: crate::WindowOp, kind_id: &str) {
     }
 }
 
+/// Open a window kind (or bring its open instance forward), returning its
+/// instance id.
+pub(crate) fn open_kind(kind_id: &str, cx: &mut App) -> Result<String, crate::Failure> {
+    let host = host();
+    let Some(kind) = host.def.windows.iter().position(|def| def.id == kind_id) else {
+        return Err(crate::Failure::new(
+            "target_not_found",
+            format!("no window kind `{kind_id}`"),
+        ));
+    };
+    for handle in cx.windows() {
+        let existing = handle
+            .update(cx, |root, window, cx| {
+                let view = root
+                    .downcast::<gpui_base::Root>()
+                    .ok()
+                    .and_then(|root| root.read(cx).view().clone().downcast::<WindowView>().ok())?;
+                if view.read(cx).win.kind == kind {
+                    window.activate_window();
+                    Some(view.read(cx).win.id.to_string())
+                } else {
+                    None
+                }
+            })
+            .ok()
+            .flatten();
+        if let Some(id) = existing {
+            return Ok(id);
+        }
+    }
+    open(kind, &host.def.windows[kind], cx)
+}
+
+/// Close an open window instance by its instance id.
+pub(crate) fn close_instance(window_id: &str, cx: &mut App) -> Result<(), crate::Failure> {
+    let handle = cx.windows().into_iter().find(|handle| {
+        handle
+            .update(cx, |root, _, cx| {
+                root.downcast::<gpui_base::Root>()
+                    .ok()
+                    .and_then(|root| root.read(cx).view().clone().downcast::<WindowView>().ok())
+                    .is_some_and(|view| view.read(cx).win.id.as_ref() == window_id)
+            })
+            .unwrap_or(false)
+    });
+    let Some(handle) = handle else {
+        return Err(crate::Failure::new(
+            "target_not_found",
+            format!("no open window `{window_id}`"),
+        ));
+    };
+    let _ = handle.update(cx, |_, window, _| window.remove_window());
+    Ok(())
+}
+
+/// Close utility windows anchored to `overlay_id` when the overlay is hidden
+/// or locked.
+pub(crate) fn sync_overlay(overlay_id: &str, cx: &mut App) {
+    let mut ox = 0.0;
+    let mut oy = 0.0;
+    let mut ow = 0.0;
+    let mut oh = 0.0;
+    // SAFETY: valid slice pointer & length and four valid out pointers.
+    let active = unsafe {
+        bern_ffi::bern_overlay_rect(
+            overlay_id.as_ptr(),
+            overlay_id.len(),
+            &mut ox,
+            &mut oy,
+            &mut ow,
+            &mut oh,
+        ) != 0
+    };
+    if active {
+        return;
+    }
+    let to_close: Vec<_> = cx
+        .windows()
+        .into_iter()
+        .filter(|handle| {
+            handle
+                .update(cx, |root, _, cx| {
+                    root.downcast::<gpui_base::Root>()
+                        .ok()
+                        .and_then(|root| root.read(cx).view().clone().downcast::<WindowView>().ok())
+                        .is_some_and(|view| view.read(cx).def.overlay == Some(overlay_id))
+                })
+                .unwrap_or(false)
+        })
+        .collect();
+    for handle in to_close {
+        let _ = handle.update(cx, |_, window, _| window.remove_window());
+    }
+}
+
 /// Open the windows the application starts with.
 pub(crate) fn open_initial(cx: &mut App) {
     if offscreen() {
@@ -343,13 +438,15 @@ fn instance(bytes: &[u8]) -> Result<Instance, crate::Failure> {
     Ok((generation, id, drafts))
 }
 
-fn open(kind: usize, def: &'static WindowDef, cx: &mut App) -> Result<(), crate::Failure> {
+fn open(kind: usize, def: &'static WindowDef, cx: &mut App) -> Result<String, crate::Failure> {
     let host = host();
     // SAFETY: the handle is live while the application runs.
     let bytes = take(unsafe { bern_ffi::bern_window_opened(host.app(), kind as u32) });
     let (generation, id, drafts) = instance(&bytes)?;
-    let width = def.width.unwrap_or(800.0) as f32;
-    let height = def.height.unwrap_or(600.0) as f32;
+    let width = def.width.unwrap_or(if def.utility { 300.0 } else { 800.0 }) as f32;
+    let height = def
+        .height
+        .unwrap_or(if def.utility { 360.0 } else { 600.0 }) as f32;
     let mut bounds = Bounds::centered(None, size(px(width), px(height)), cx);
     let offscreen = offscreen();
     // Windows would give a window outside every display a size of its own:
@@ -380,6 +477,12 @@ fn open(kind: usize, def: &'static WindowDef, cx: &mut App) -> Result<(), crate:
                 px(min_height.unwrap_or(0.0) as f32),
             )),
         },
+        kind: if def.utility {
+            gpui::WindowKind::PopUp
+        } else {
+            gpui::WindowKind::Normal
+        },
+        is_resizable: !def.utility || def.min_width.is_some() || def.min_height.is_some(),
         app_id: Some(host.def.bundle_id.to_string()),
         window_decorations: crate::chrome::decorations(def.unified),
         // A frame drawn on Linux has a shadow around the window.
@@ -390,6 +493,7 @@ fn open(kind: usize, def: &'static WindowDef, cx: &mut App) -> Result<(), crate:
         },
         ..Default::default()
     };
+    let returned = win.id.to_string();
     let instance = win.id.clone();
     cx.open_window(options, move |window, cx| {
         if offscreen {
@@ -446,5 +550,5 @@ fn open(kind: usize, def: &'static WindowDef, cx: &mut App) -> Result<(), crate:
         cx.new(|cx| gpui_base::Root::new(view, window, cx))
     })
     .map_err(|error| crate::Failure::new("window_failed", error.to_string()))?;
-    Ok(())
+    Ok(returned)
 }

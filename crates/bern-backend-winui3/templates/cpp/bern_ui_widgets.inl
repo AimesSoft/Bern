@@ -2451,7 +2451,7 @@ inline void ColorPicker(Parent const& p, Ctx const& ctx, ColorPickerProps props)
     auto give = [ctx, field, change, run](uint32_t rgb) {
         rgb &= 0xffffffu;
         if (field) {
-            auto const& ty = ctx.app->catalog.sessions[field->session].fields[field->field].second;
+            auto const& ty = app->catalog.sessions[field->session].fields[field->field].second;
             Value out = ty.kind == BType::Kind::Int ? Value::Int(static_cast<int64_t>(rgb)) : Value::Float(static_cast<double>(rgb));
             SetDraft(ctx, *field, out);
             if (run) run();
@@ -2472,9 +2472,8 @@ inline void ColorPicker(Parent const& p, Ctx const& ctx, ColorPickerProps props)
     button.Content(swatch);
     BindName(button, text);
 
-    Reactive::Run([swatch, read, toColor] {
-        swatch.Background(media::SolidColorBrush(toColor(static_cast<uint32_t>((std::clamp)(
-            read().kind == Value::Kind::Int ? read().i : static_cast<long long>(std::llround(R::AsDouble(read()))), 0LL, 0xffffffLL)))));
+    Reactive::Run([swatch, read, asRgb, toColor] {
+        swatch.Background(media::SolidColorBrush(toColor(asRgb(read()))));
     });
 
     controls::ColorPicker picker;
@@ -2499,7 +2498,7 @@ inline void ColorPicker(Parent const& p, Ctx const& ctx, ColorPickerProps props)
 
     if (p.isList) {
         p.Add(props.labelHidden ? xaml::UIElement(Card(button)) : xaml::UIElement(LabeledCard(text, button)));
-    } else if (props.labelHidden) {
+    } else if (props.labelHidden || !text) {
         p.Add(button);
     } else {
         controls::Grid row;
@@ -2508,7 +2507,7 @@ inline void ColorPicker(Parent const& p, Ctx const& ctx, ColorPickerProps props)
         row.ColumnDefinitions().Append(Column(AutoLength()));
         controls::TextBlock label;
         label.VerticalAlignment(xaml::VerticalAlignment::Center);
-        Reactive::Run([label, text, ctx] { label.Text(text(ctx)); });
+        BindText(label, text);
         row.Children().Append(label);
         controls::Grid::SetColumn(button, 1);
         row.Children().Append(button);

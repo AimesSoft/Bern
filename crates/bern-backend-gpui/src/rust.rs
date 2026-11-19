@@ -483,6 +483,10 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "hover",
         ],
     ),
+    (
+        "ColorPicker",
+        &["id", "label", "label_hidden", "value", "current", "feature"],
+    ),
     ("Shortcut", &["key", "enabled"]),
     (
         "ShortcutInput",
@@ -580,6 +584,7 @@ pub const COMPONENT_NAMES: &[&str] = &[
     "PickerOption",
     "ControlGroup",
     "Slider",
+    "ColorPicker",
     "Shortcut",
     "ShortcutInput",
     "Toast",
@@ -848,7 +853,7 @@ impl<'a> Generator<'a> {
             if window.presentation != Presentation::Auto {
                 unsupported.push("presentation");
             }
-            if window.role != WindowRole::Standard {
+            if !matches!(window.role, WindowRole::Standard | WindowRole::Utility) {
                 unsupported.push("role");
             }
             if window.close.is_some() {
@@ -1010,11 +1015,17 @@ impl<'a> Generator<'a> {
                     .into_iter()
                     .map(|f| f.to_string())
                     .collect();
+                let overlay = window
+                    .overlay
+                    .as_deref()
+                    .map(|id| format!("Some({})", string(id)))
+                    .unwrap_or_else(|| "None".into());
                 format!(
-                    "b::WindowDef {{ id: {}, title: {}, open: {}, width: {}, height: {}, min_width: {}, min_height: {}, unified: {}, idle_after: {}, immersive: {}, idle_enabled: {}, engine_fields: &[{}], content: window_{} }},",
+                    "b::WindowDef {{ id: {}, title: {}, open: {}, utility: {}, overlay: {overlay}, width: {}, height: {}, min_width: {}, min_height: {}, unified: {}, idle_after: {}, immersive: {}, idle_enabled: {}, engine_fields: &[{}], content: window_{} }},",
                     string(&window.id),
                     string(&window.title.key),
                     window.initial == WindowInitial::Open,
+                    window.role == WindowRole::Utility,
                     size(window.width),
                     size(window.height),
                     size(window.min_width),
@@ -3096,6 +3107,15 @@ pub fn app() -> b::AppDef {{
                         ),
                         None => "None".into(),
                     },
+                )
+            }
+            "ColorPicker" => {
+                let model = self.model(element, "current")?;
+                format!(
+                    "b::color_picker(c, {}, {}, {model}, b::ColorPickerProps {{ label_hidden: {} }})",
+                    id(),
+                    text("label"),
+                    element.keyword("label_hidden") == Some("true"),
                 )
             }
             "Shortcut" => {

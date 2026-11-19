@@ -1213,7 +1213,7 @@ fn engine_window_host_dispatches_open_and_close_and_overlay_rect_reports_absent(
 
     let frontend = Frontend::default();
     let app = start(&frontend, descriptor().fingerprint()).unwrap();
-    let host = EngineWindowHost(Arc::clone(&unsafe { &*app }.bridge));
+    let host = EngineWindowHost(Arc::downgrade(&unsafe { &*app }.bridge));
     assert!(!host.is_open("main"));
 
     host.open("main");
@@ -1250,4 +1250,9 @@ fn engine_window_host_dispatches_open_and_close_and_overlay_rect_reports_absent(
     let _ = close_req;
 
     unsafe { bern_app_stop(app) };
+    // After teardown the weak bridge must no longer dispatch into freed
+    // frontend callbacks.
+    assert!(!host.is_open("main"));
+    host.open("main");
+    host.close("main");
 }

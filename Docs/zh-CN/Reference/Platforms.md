@@ -38,7 +38,7 @@
 | `text_lines` | 文本行数上限 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `image_corners` | 图片圆角 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `sidebar_width` | 固定侧栏宽度 | 支持 | 支持 | —（系统宽度，警告） | 支持 | 支持 | 支持 | 支持 |
-| `controlled_values` | Switch / Picker / Slider 引擎受控值 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `controlled_values` | Switch / Picker / Slider / ColorPicker 引擎受控值 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `controlled_text` | `TextInput(current:)` 引擎受控文字，编辑中保留用户的输入 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `table` | 表格 `Table`：列、选中行、点表头排序、行菜单与主操作 | 支持 | 支持 | 支持（一列行按钮） | 支持 | 支持（Material 数据表） | 支持 | 支持 |
 | `paste` | `Button`、`IconButton`、`MenuItem`、`CommandItem` 的 `paste:`，先把剪贴板的文字放进草稿 | 支持 | 支持 | — | 支持 | 支持 | 支持 | 支持 |

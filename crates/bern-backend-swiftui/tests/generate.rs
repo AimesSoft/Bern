@@ -2617,3 +2617,178 @@ fn slider_feedback_uses_native_ios_selection_only_during_interaction() {
     let media = include_str!("../templates/BernMedia.swift");
     assert!(media.contains("BernSliderInteraction(value: $value"));
 }
+
+/// `ColorPicker` with both `i64` draft and `i64` controlled sources, inside a
+/// `Window(role: utility, overlay:)`, type-checks cleanly under Swift 6.
+#[test]
+fn utility_overlay_window_and_int_color_picker_typecheck_in_swift() {
+    let protocol = r#"
+#[bern::protocol(namespace = "palette", version = 1)]
+pub mod palette {
+    use bern::prelude::*;
+
+    #[state]
+    pub struct State {
+        pub color: i64,
+    }
+
+    #[commands]
+    pub trait Commands {
+        fn set_color(&mut self, color: i64) -> Result<(), CommandError>;
+    }
+}
+"#;
+    let ui = r#"
+use bern::prelude::*;
+use palette_protocol::palette;
+
+#[bern::session]
+pub struct Draft {
+    pub picked: f64,
+}
+
+#[component]
+pub fn tool_view(app: palette::Client, #[session] draft: Draft) -> impl View {
+    ui! {
+        Column(gap: 8) {
+            ColorPicker(id: controlled, label: tr! { "en" => "Color" }, current: app.color) => app.set_color(app.color)
+            ColorPicker(id: draft_float, label: tr! { "en" => "Draft Float" }, value: draft.picked)
+        }
+    }
+}
+
+#[component]
+pub fn app(app: palette::Client, windows: AppWindows) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Main" }, initial: open) {
+                Text(content: tr! { "en" => "Hello" })
+            }
+            Window(id: tool, title: tr! { "en" => "Tool" }, initial: closed, role: utility, overlay: "lyrics", width: 280, height: 320) {
+                tool_view(app: app)
+            }
+        }
+    }
+}
+"#;
+    let root = workspace();
+    let dir =
+        std::env::temp_dir().join(format!("bern-swiftui-utility-color-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    for (package, source) in [
+        ("palette-protocol", protocol),
+        ("palette-ui", ui),
+        ("palette-core", ""),
+    ] {
+        std::fs::create_dir_all(dir.join(package).join("src")).unwrap();
+        std::fs::write(
+            dir.join(package).join("Cargo.toml"),
+            format!("[package]\nname = \"{package}\"\n"),
+        )
+        .unwrap();
+        std::fs::write(dir.join(package).join("src/lib.rs"), source).unwrap();
+    }
+    std::fs::write(
+        dir.join("Bern.toml"),
+        r#"
+[app]
+id = "util"
+bundle_id = "dev.bern.util"
+version = "0.1.0"
+name = { "en" = "Util" }
+
+[languages]
+supported = ["en"]
+default = "en"
+
+[protocol]
+package = "palette-protocol"
+source = "palette-protocol/src/lib.rs"
+
+[engine]
+package = "palette-core"
+type = "palette_core::Engine"
+
+[ui]
+package = "palette-ui"
+sources = ["palette-ui/src/lib.rs"]
+root = "app"
+
+[targets.macos]
+platform = "macos"
+"#,
+    )
+    .unwrap();
+    let config = bern_compiler::config::load(&dir.join("Bern.toml")).unwrap();
+    let compiled = bern_compiler::compile(&config).unwrap_or_else(|errors| {
+        panic!(
+            "{}",
+            errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    });
+    let target = config.targets[0].clone();
+    let problems = SwiftUiMacos.check(&compiled.app, &target);
+    assert!(problems.is_empty(), "{problems:?}");
+    let out = dir.join("out");
+    let ctx = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: out.clone(),
+        target,
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    let files = SwiftUiMacos.generate(&compiled.app, &ctx).unwrap();
+    for file in &files {
+        let path = out.join(&file.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, &file.contents).unwrap();
+    }
+    let sources = out.join("Sources");
+    if cfg!(target_os = "macos")
+        && Command::new("xcrun")
+            .arg("--find")
+            .arg("swiftc")
+            .output()
+            .is_ok_and(|o| o.status.success())
+    {
+        let result = Command::new("xcrun")
+            .args([
+                "swiftc",
+                "-typecheck",
+                "-swift-version",
+                "6",
+                "-parse-as-library",
+            ])
+            .arg("-target")
+            .arg(format!("arm64-apple-macos{MINIMUM_MACOS}"))
+            .arg("-module-cache-path")
+            .arg(cache::module_cache(&root))
+            .arg("-import-objc-header")
+            .arg(sources.join("bern.h"))
+            .arg(sources.join("BernRuntime.swift"))
+            .arg(sources.join("BernMedia.swift"))
+            .arg(sources.join("BernStyle.swift"))
+            .arg(sources.join("BernAppKit.swift"))
+            .arg(sources.join("BernGenerated.swift"))
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "swiftc rejected the generated code:\n{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

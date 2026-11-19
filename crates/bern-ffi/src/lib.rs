@@ -38,9 +38,9 @@ use link::{EngineLink, Guard, MediaLink};
 use std::collections::BTreeMap;
 use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::channel;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 pub use bern_command::{files, overlay, platform};
@@ -138,6 +138,7 @@ pub(crate) struct UiBridge {
     session: Arc<Mutex<UiSession>>,
     pending: Mutex<BTreeMap<u64, PendingRequest>>,
     next: AtomicU64,
+    stopped: AtomicBool,
 }
 
 pub(crate) type SessionReply = Box<dyn FnOnce(Result<Value, CommandError>) + Send>;
@@ -206,6 +207,13 @@ impl UiBridge {
         params: Vec<Value>,
         reply: SessionReply,
     ) -> Option<u64> {
+        if self.stopped.load(Ordering::Acquire) {
+            reply(Err(CommandError::new(
+                "ui_unavailable",
+                "the application is stopping",
+            )));
+            return None;
+        }
         // The trace is the runtime's own; the frontend only records.
         if command.is_trace() {
             reply(trace::run(command, &params));
@@ -537,11 +545,14 @@ pub unsafe fn start_app<E: EngineProtocol>(
 }
 
 /// Window host backed by a live UI session bridge.
-pub(crate) struct EngineWindowHost(pub(crate) Arc<UiBridge>);
+pub(crate) struct EngineWindowHost(pub(crate) Weak<UiBridge>);
 
 impl bern_command::window::Host for EngineWindowHost {
     fn open(&self, id: &str) {
-        let _ = self.0.run(
+        let Some(bridge) = self.0.upgrade() else {
+            return;
+        };
+        let _ = bridge.run(
             SessionCommand::WindowOpen,
             vec![Value::Text(id.to_string())],
             Box::new(|_| {}),
@@ -549,8 +560,10 @@ impl bern_command::window::Host for EngineWindowHost {
     }
 
     fn close(&self, id: &str) {
-        let windows: Vec<String> = self
-            .0
+        let Some(bridge) = self.0.upgrade() else {
+            return;
+        };
+        let windows: Vec<String> = bridge
             .session
             .lock()
             .map(|session| {
@@ -563,7 +576,7 @@ impl bern_command::window::Host for EngineWindowHost {
             })
             .unwrap_or_default();
         for instance in windows {
-            let _ = self.0.run(
+            let _ = bridge.run(
                 SessionCommand::WindowClose,
                 vec![Value::Text(instance)],
                 Box::new(|_| {}),
@@ -572,7 +585,10 @@ impl bern_command::window::Host for EngineWindowHost {
     }
 
     fn is_open(&self, id: &str) -> bool {
-        self.0
+        let Some(bridge) = self.0.upgrade() else {
+            return false;
+        };
+        bridge
             .session
             .lock()
             .is_ok_and(|session| session.window_infos().iter().any(|info| info.kind == id))
@@ -601,15 +617,18 @@ pub(crate) fn assemble(
         session: Arc::clone(&session),
         pending: Mutex::new(BTreeMap::new()),
         next: AtomicU64::new(1),
+        stopped: AtomicBool::new(false),
     });
-    bern_command::window::install(EngineWindowHost(Arc::clone(&bridge)));
-    let sync_bridge = Arc::clone(&bridge);
+    bern_command::window::install(EngineWindowHost(Arc::downgrade(&bridge)));
+    let sync_bridge = Arc::downgrade(&bridge);
     bern_command::overlay::set_sync_hook(move |overlay| {
-        let _ = sync_bridge.run(
-            SessionCommand::WindowSyncOverlay,
-            vec![Value::Text(overlay.to_string())],
-            Box::new(|_| {}),
-        );
+        if let Some(bridge) = sync_bridge.upgrade() {
+            let _ = bridge.run(
+                SessionCommand::WindowSyncOverlay,
+                vec![Value::Text(overlay.to_string())],
+                Box::new(|_| {}),
+            );
+        }
     });
     let queries = query::Subscriptions::default();
     let mirrored: MirroredState = Arc::new(Mutex::new(None));
@@ -714,6 +733,7 @@ pub unsafe extern "C" fn bern_app_stop(app: *mut BernApp) {
     // SAFETY: `app` came from `start_app` and is not used afterwards.
     let app = unsafe { Box::from_raw(app) };
     let _ = catch_unwind(AssertUnwindSafe(|| {
+        app.bridge.stopped.store(true, Ordering::Release);
         app.sessions.unregister(&app.bridge.session_id);
         app.media.detach_executor();
         if let Some(kernel) = app.kernel.lock().expect("kernel lock").take() {

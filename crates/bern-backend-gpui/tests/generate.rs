@@ -149,7 +149,9 @@ fn hello_generates_a_gpui_application() {
     assert!(ui.contains("你好，世界！"), "{ui}");
     assert!(ui.contains("Hello, World!"), "{ui}");
     assert!(
-        ui.contains("open: true, width: Some(480.0), height: Some(320.0)"),
+        ui.contains(
+            "open: true, utility: false, overlay: None, width: Some(480.0), height: Some(320.0)"
+        ),
         "{ui}"
     );
     let manifest = file("build.json");
@@ -1035,5 +1037,153 @@ fn the_target_lists_pointer_events_and_player_state() {
         }
         assert!(target.descriptor().components.contains(&"WheelUp"));
         assert!(target.descriptor().components.contains(&"WheelDown"));
+        assert!(target.descriptor().components.contains(&"ColorPicker"));
     }
+}
+
+#[test]
+fn utility_overlay_window_and_color_picker_generate_without_errors() {
+    let protocol = r#"
+#[bern::protocol(namespace = "palette", version = 1)]
+pub mod palette {
+    use bern::prelude::*;
+
+    #[state]
+    pub struct State {
+        pub color: i64,
+    }
+
+    #[commands]
+    pub trait Commands {
+        fn set_color(&mut self, color: i64) -> Result<(), CommandError>;
+    }
+}
+"#;
+    let ui = r#"
+use bern::prelude::*;
+use palette_protocol::palette;
+
+#[bern::session]
+pub struct Draft {
+    pub picked: f64,
+}
+
+#[component]
+pub fn tool_view(app: palette::Client, #[session] draft: Draft) -> impl View {
+    ui! {
+        Column(gap: 8) {
+            ColorPicker(id: swatch, label: tr! { "en" => "Color" }, current: app.color) => app.set_color(app.color)
+            ColorPicker(id: local, label: tr! { "en" => "Draft" }, value: draft.picked)
+        }
+    }
+}
+
+#[component]
+pub fn app(app: palette::Client, windows: AppWindows) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Main" }, initial: open) {
+                Text(content: tr! { "en" => "Hello" })
+            }
+            Window(id: tool, title: tr! { "en" => "Tool" }, initial: closed, role: utility, overlay: "lyrics", width: 280, height: 320) {
+                tool_view(app: app)
+            }
+        }
+    }
+}
+"#;
+    let root = workspace();
+    let dir = std::env::temp_dir().join(format!("bern-gpui-utility-color-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    for (package, source) in [
+        ("palette-protocol", protocol),
+        ("palette-ui", ui),
+        ("palette-core", ""),
+    ] {
+        std::fs::create_dir_all(dir.join(package).join("src")).unwrap();
+        std::fs::write(
+            dir.join(package).join("Cargo.toml"),
+            format!("[package]\nname = \"{package}\"\n"),
+        )
+        .unwrap();
+        std::fs::write(dir.join(package).join("src/lib.rs"), source).unwrap();
+    }
+    std::fs::write(
+        dir.join("Bern.toml"),
+        r#"
+[app]
+id = "util"
+bundle_id = "dev.bern.util"
+version = "0.1.0"
+name = { "en" = "Util" }
+
+[languages]
+supported = ["en"]
+default = "en"
+
+[protocol]
+package = "palette-protocol"
+source = "palette-protocol/src/lib.rs"
+
+[engine]
+package = "palette-core"
+type = "palette_core::Engine"
+
+[ui]
+package = "palette-ui"
+sources = ["palette-ui/src/lib.rs"]
+root = "app"
+
+[targets.macos]
+platform = "macos"
+ui = "gpui"
+"#,
+    )
+    .unwrap();
+    let config = bern_compiler::config::load(&dir.join("Bern.toml")).unwrap();
+    let compiled = bern_compiler::compile(&config).unwrap_or_else(|errors| {
+        panic!(
+            "{}",
+            errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    });
+    let target = config.targets[0].clone();
+    let problems = Gpui::MACOS.check(&compiled.app, &target);
+    assert!(problems.is_empty(), "{problems:?}");
+    let files = Gpui::MACOS
+        .generate(
+            &compiled.app,
+            &BuildContext {
+                project_dir: config.dir.clone(),
+                workspace_dir: root.clone(),
+                output_dir: dir.join("out"),
+                target,
+                protocol_package: config.protocol_package.name.clone(),
+                protocol_path: config.protocol_package.dir.clone(),
+                protocol_module: compiled.protocol_module.clone(),
+                engine_package: config.engine_package.name.clone(),
+                engine_path: config.engine_package.dir.clone(),
+                engine_type: config.engine_type.clone(),
+                modules: Vec::new(),
+                framework: Framework::Path(root.join("crates")),
+                release: false,
+            },
+        )
+        .unwrap();
+    let generated = files
+        .iter()
+        .find(|f| f.path.ends_with("ui.rs"))
+        .map(|f| String::from_utf8_lossy(&f.contents).into_owned())
+        .unwrap();
+    assert!(generated.contains("b::color_picker("), "{generated}");
+    assert!(generated.contains("utility: true"), "{generated}");
+    assert!(
+        generated.contains("overlay: Some(\"lyrics\")"),
+        "{generated}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }

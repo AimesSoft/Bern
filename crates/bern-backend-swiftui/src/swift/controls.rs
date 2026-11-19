@@ -866,17 +866,36 @@ impl Generator<'_> {
             return;
         }
         let field = self.field(element, "value").expect("number field");
+        let integer = matches!(
+            element.field("value").map(|field| &field.ty),
+            Some(Type::Int)
+        );
         let commit = element
             .action
             .as_ref()
             .map(|action| self.action(action))
             .unwrap_or_default();
         let binding = self.binding_of(&field);
+        let read = if integer {
+            format!("Double({binding}.wrappedValue)")
+        } else {
+            format!("{binding}.wrappedValue")
+        };
+        let assign_next = if integer {
+            format!("{binding}.wrappedValue = Int64(next.rounded())")
+        } else {
+            format!("{binding}.wrappedValue = next")
+        };
+        let assign_value = if integer {
+            format!("{field} = Int64(value.rounded())")
+        } else {
+            format!("{field} = value")
+        };
         out.line(format!(
-            "BernControlledColorPicker(value: {binding}.wrappedValue, label: {label}, labelHidden: {label_hidden}) {{ next in {binding}.wrappedValue = next; {commit} }}"
+            "BernControlledColorPicker(value: {read}, label: {label}, labelHidden: {label_hidden}) {{ next in {assign_next}; {commit} }}"
         ));
         out.line(format!(
-            ".bernControl({}, role: \"color_picker\", label: {label}, actions: BernControlActions(setNumber: {{ value in {field} = value; {commit} }}, value: {{ BernText.text({field}) }}))",
+            ".bernControl({}, role: \"color_picker\", label: {label}, actions: BernControlActions(setNumber: {{ value in {assign_value}; {commit} }}, value: {{ BernText.text({field}) }}))",
             self.target(element, ctx)
         ));
     }

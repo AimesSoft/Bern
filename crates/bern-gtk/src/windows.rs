@@ -427,6 +427,11 @@ impl Win {
         else {
             return false;
         };
+        let value = match (&value, ty) {
+            (Value::Float(number), crate::protocol::Type::Int) => Value::Int(number.round() as i64),
+            (Value::Int(number), crate::protocol::Type::Float) => Value::Float(*number as f64),
+            _ => value,
+        };
         let mut writer = Writer::new();
         encode(&value, ty, &host.def.types, &mut writer);
         let bytes = with_bytes(&writer.bytes, |ptr, len| {

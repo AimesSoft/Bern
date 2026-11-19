@@ -2287,3 +2287,112 @@ int main() {{
     );
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn utility_overlay_window_and_color_picker_compile() {
+    let protocol = r#"
+#[bern::protocol(namespace = "palette", version = 1)]
+pub mod palette {
+    use bern::prelude::*;
+
+    #[state]
+    pub struct State {
+        pub color: i64,
+    }
+
+    #[commands]
+    pub trait Commands {
+        fn set_color(&mut self, color: i64) -> Result<(), CommandError>;
+    }
+}
+"#;
+    let ui = r#"
+use bern::prelude::*;
+use util_protocol::palette;
+
+#[bern::session]
+pub struct Draft {
+    pub picked: f64,
+}
+
+#[component]
+pub fn tool_view(app: palette::Client, #[session] draft: Draft) -> impl View {
+    ui! {
+        Column(gap: 8) {
+            ColorPicker(id: controlled, label: tr! { "en" => "Color" }, current: app.color) => app.set_color(app.color)
+            ColorPicker(id: draft_float, label: tr! { "en" => "Draft Float" }, value: draft.picked)
+            ColorPicker(id: hidden, label: tr! { "en" => "Hidden" }, label_hidden: true, value: draft.picked)
+        }
+    }
+}
+
+#[component]
+pub fn app(app: palette::Client, windows: AppWindows) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Main" }, initial: open) {
+                Text(content: tr! { "en" => "Hello" })
+            }
+            Window(id: tool, title: tr! { "en" => "Tool" }, initial: closed, role: utility, overlay: "lyrics", width: 280, height: 320) {
+                tool_view(app: app)
+            }
+        }
+    }
+}
+"#;
+    let root = workspace();
+    let dir = root.join("target/bern-test/winui3-utility-color-src");
+    let output = root.join("target/bern-test/winui3-utility-color");
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&output);
+    for (package, source) in [
+        ("util-protocol", protocol),
+        ("util-ui", ui),
+        ("util-core", ""),
+    ] {
+        std::fs::create_dir_all(dir.join(package).join("src")).unwrap();
+        std::fs::write(
+            dir.join(package).join("Cargo.toml"),
+            format!("[package]\nname = \"{package}\"\n"),
+        )
+        .unwrap();
+        std::fs::write(dir.join(package).join("src/lib.rs"), source).unwrap();
+    }
+    std::fs::write(
+        dir.join("Bern.toml"),
+        "[app]\nid = \"util\"\nbundle_id = \"dev.bern.util\"\nversion = \"0.1.0\"\nname = { \"en\" = \"Util\" }\n[languages]\nsupported = [\"en\"]\ndefault = \"en\"\n[protocol]\npackage = \"util-protocol\"\nsource = \"util-protocol/src/lib.rs\"\n[engine]\npackage = \"util-core\"\ntype = \"util_core::Engine\"\n[ui]\npackage = \"util-ui\"\nsources = [\"util-ui/src/lib.rs\"]\nroot = \"app\"\n[targets.windows]\nplatform = \"windows\"\n",
+    )
+    .unwrap();
+    let config = bern_compiler::config::load(&dir.join("Bern.toml")).unwrap();
+    let compiled = bern_compiler::compile(&config).unwrap();
+    let target = windows_target(&config);
+    let problems = WinUi3Windows.check(&compiled.app, &target);
+    assert!(problems.is_empty(), "{problems:?}");
+    let context = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: output.clone(),
+        target,
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    let files = WinUi3Windows.generate(&compiled.app, &context).unwrap();
+    for file in &files {
+        let path = output.join(&file.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, &file.contents).unwrap();
+    }
+    let generated = std::fs::read_to_string(output.join("app/app_ui.inl")).unwrap();
+    assert!(generated.contains("B::ColorPicker("), "{generated}");
+    assert!(generated.contains("w.utility = true;"), "{generated}");
+    assert!(generated.contains("w.overlay = \"lyrics\";"), "{generated}");
+    compile(&output);
+    let _ = std::fs::remove_dir_all(&dir);
+}
