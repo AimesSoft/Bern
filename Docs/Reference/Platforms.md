@@ -38,7 +38,7 @@ The optional GPUI target (`ui = "gpui"`, macOS, Windows, Linux) is a first versi
 | `text_lines` | Text line limit | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
 | `image_corners` | Image corner radius | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
 | `sidebar_width` | Fixed sidebar width | Supported | Supported | — (system width, warning) | Supported | Supported | Supported | Supported |
-| `controlled_values` | Engine-controlled values for Switch / Picker / Slider | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
+| `controlled_values` | Engine-controlled values for Switch / Picker / Slider / ColorPicker | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
 | `controlled_text` | `TextInput(current:)` engine-controlled text, keeping the user's input while editing | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
 | `table` | Table `Table`: columns, selected rows, sorting by clicking a header, row menus and primary action | Supported | Supported | Supported (one column of row buttons) | Supported | Supported (Material data table) | Supported | Supported |
 | `paste` | `paste:` on `Button`, `IconButton`, `MenuItem`, `CommandItem`, which first puts the clipboard text into the draft | Supported | Supported | — | Supported | Supported | Supported | Supported |

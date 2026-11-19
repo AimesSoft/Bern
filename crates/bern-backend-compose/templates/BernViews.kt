@@ -42,6 +42,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
@@ -1105,33 +1106,44 @@ fun BernColorPicker(
     var g by remember(rgb) { mutableStateOf(((rgb shr 8) and 0xFF).toFloat()) }
     var b by remember(rgb) { mutableStateOf((rgb and 0xFF).toFloat()) }
     val swatches = remember { intArrayOf(0xFFFFFF, 0xFFE066, 0xFF6B8B, 0x7ED6DF, 0xA3CB38, 0xD980FA, 0xFFA502, 0x70A1FF) }
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .clickable { open = true }
-            .padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (!labelHidden) {
-            Text(label, modifier = Modifier.weight(1f))
-        } else {
-            Spacer(Modifier.weight(1f))
+    val picked = ((r.toInt().coerceIn(0, 255) shl 16) or (g.toInt().coerceIn(0, 255) shl 8) or b.toInt().coerceIn(0, 255))
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { open = !open }
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (!labelHidden) {
+                Text(label, modifier = Modifier.weight(1f))
+            } else {
+                Spacer(Modifier.weight(1f))
+            }
+            androidx.compose.material3.Surface(
+                modifier = Modifier.size(width = 40.dp, height = 24.dp),
+                shape = RoundedCornerShape(6.dp),
+                color = Color((0xFF shl 24) or (if (open) picked else rgb)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+            ) {}
         }
-        androidx.compose.material3.Surface(
-            modifier = Modifier.size(width = 40.dp, height = 24.dp),
-            shape = RoundedCornerShape(6.dp),
-            color = Color((0xFF shl 24) or rgb),
-            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-        ) {}
-    }
-    if (open) {
-        val picked = ((r.toInt().coerceIn(0, 255) shl 16) or (g.toInt().coerceIn(0, 255) shl 8) or b.toInt().coerceIn(0, 255))
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { open = false },
-            title = { Text(label) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Inline expandable picker so it also works inside TYPE_APPLICATION_OVERLAY
+        // utility windows where an Activity-scoped AlertDialog token is unavailable.
+        androidx.compose.animation.AnimatedVisibility(visible = open) {
+            androidx.compose.material3.Surface(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                shape = RoundedCornerShape(12.dp),
+                tonalElevation = 2.dp,
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
                         for (swatch in swatches) {
                             androidx.compose.material3.Surface(
                                 modifier = Modifier.size(26.dp).clickable {
@@ -1154,20 +1166,24 @@ fun BernColorPicker(
                     androidx.compose.material3.Slider(value = g, onValueChange = { g = it }, valueRange = 0f..255f)
                     Text("B: ${b.toInt()}", style = MaterialTheme.typography.labelMedium)
                     androidx.compose.material3.Slider(value = b, onValueChange = { b = it }, valueRange = 0f..255f)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        androidx.compose.material3.TextButton(onClick = {
+                            r = ((rgb shr 16) and 0xFF).toFloat()
+                            g = ((rgb shr 8) and 0xFF).toFloat()
+                            b = (rgb and 0xFF).toFloat()
+                            open = false
+                        }) { Text(BernText.string("bern.close.cancel")) }
+                        androidx.compose.material3.TextButton(onClick = {
+                            onChange(picked.toLong())
+                            open = false
+                        }) { Text(BernText.string("bern.window.done")) }
+                    }
                 }
-            },
-            confirmButton = {
-                androidx.compose.material3.TextButton(onClick = {
-                    onChange(picked.toLong())
-                    open = false
-                }) { Text(BernText.string("bern.window.done")) }
-            },
-            dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { open = false }) {
-                    Text(BernText.string("bern.close.cancel"))
-                }
-            },
-        )
+            }
+        }
     }
 }
 

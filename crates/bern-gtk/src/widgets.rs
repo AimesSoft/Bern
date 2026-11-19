@@ -1773,6 +1773,13 @@ pub fn ColorPicker(p: &Parent, ctx: &Ctx, props: ColorPickerProps, commit: Optio
     let changed = bound.clone();
     let changed_commit = commit.clone();
     let guard = Rc::clone(&updating);
+    fn as_value(peeked: &Value, rgb: u32) -> Value {
+        if matches!(peeked, Value::Int(_)) {
+            Value::Int(i64::from(rgb))
+        } else {
+            Value::Float(f64::from(rgb))
+        }
+    }
     button.connect_rgba_notify(move |b| {
         if guard.get() {
             return;
@@ -1780,7 +1787,7 @@ pub fn ColorPicker(p: &Parent, ctx: &Ctx, props: ColorPickerProps, commit: Optio
         let rgba = b.rgba();
         let byte = |f: f32| (f.clamp(0.0, 1.0) * 255.0).round() as u32;
         let rgb = (byte(rgba.red()) << 16) | (byte(rgba.green()) << 8) | byte(rgba.blue());
-        changed.set(Value::Float(f64::from(rgb)));
+        changed.set(as_value(&changed.peek(), rgb));
         if let Some(commit) = &changed_commit {
             commit();
         }
@@ -1797,8 +1804,8 @@ pub fn ColorPicker(p: &Parent, ctx: &Ctx, props: ColorPickerProps, commit: Optio
         Actions {
             set_number: Some(Rc::new(move |number| {
                 if number.is_finite() {
-                    let clamped = (number.round() as i64).clamp(0, 0xff_ffff) as f64;
-                    set.set(Value::Float(clamped));
+                    let clamped = (number.round() as i64).clamp(0, 0xff_ffff) as u32;
+                    set.set(as_value(&set.peek(), clamped));
                     if let Some(commit) = &commit {
                         commit();
                     }

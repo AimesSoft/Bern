@@ -2284,7 +2284,7 @@ fun BernWindowRoot(
     // `window.compact` and its siblings follow the window's width: the
     // screen's, or a dialog's declared one, until the window is laid out.
     val density = LocalDensity.current
-    val dialogWidth = BernHost.kinds.firstOrNull { it.id == context.kindID && it.isDialog }?.width
+    val dialogWidth = BernHost.kinds.firstOrNull { it.id == context.kindID && (it.isDialog || it.isUtility) }?.width
     context.estimatedWidth = dialogWidth ?: LocalConfiguration.current.screenWidthDp.toDouble()
     context.estimatedHeight = LocalConfiguration.current.screenHeightDp.toDouble()
     val editingRegions = remember(context) { BernEditingRegions() }

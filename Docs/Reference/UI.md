@@ -111,6 +111,7 @@ A back entry with an icon and text uses one `Button(icon:, label:)`, which lays 
 | Switch | `value: draft.enabled` | `checked: app.enabled` | The boolean the user just chose |
 | Picker | `value: draft.appearance` | `selected: app.appearance` | The enum value the user just chose |
 | Slider | `value: draft.volume` | `current: app.volume` | The number the user committed |
+| ColorPicker | `value: draft.color` | `current: app.color` | The 24-bit sRGB color (`0xRRGGBB`) the user chose |
 | TextInput | `value: draft.name` | `current: app.name` | The whole text the user just changed it to |
 
 Each control can choose only one column as its source; it cannot write both or neither. An engine source must provide an action; in the action's arguments, an expression identical to `checked` / `selected` / `current` is replaced with the user's new value, while its subexpressions and other arguments are not replaced. The enum variants of a Picker must have labels.

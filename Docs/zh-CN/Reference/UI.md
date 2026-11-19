@@ -111,6 +111,7 @@ ControlGroup(height: 40) {
 | Switch | `value: draft.enabled` | `checked: app.enabled` | 用户刚选择的布尔值 |
 | Picker | `value: draft.appearance` | `selected: app.appearance` | 用户刚选择的枚举值 |
 | Slider | `value: draft.volume` | `current: app.volume` | 用户提交的数值 |
+| ColorPicker | `value: draft.color` | `current: app.color` | 用户选中的 24 位 sRGB 颜色（`0xRRGGBB`） |
 | TextInput | `value: draft.name` | `current: app.name` | 用户刚改成的整段文字 |
 
 每个控件只能选择一列作为来源，不能两者都写或都不写。引擎来源必须提供动作；动作参数中与 `checked` / `selected` / `current` 完全相同的表达式被替换为用户的新值，不替换其子表达式或其他参数。Picker 的枚举变体必须具有标签。

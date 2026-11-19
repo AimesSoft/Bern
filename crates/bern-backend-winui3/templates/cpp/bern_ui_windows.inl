@@ -1384,20 +1384,20 @@ inline bool PlaceBesideOverlay(Win& win) {
     };
     RECT self{};
     if (!GetWindowRect(win.hwnd, &self)) return true;
-    int width = self.right - self.left;
-    int height = self.bottom - self.top;
+    LONG width = self.right - self.left;
+    LONG height = self.bottom - self.top;
     MONITORINFO monitor{sizeof(MONITORINFO)};
     GetMonitorInfoW(MonitorFromRect(&owner, MONITOR_DEFAULTTONEAREST), &monitor);
     RECT work = monitor.rcWork;
-    int gap = static_cast<int>(std::lround(8.0 * win.Scale()));
-    int x = owner.right + gap;
+    LONG gap = static_cast<LONG>(std::lround(8.0 * win.Scale()));
+    LONG x = owner.right + gap;
     if (x + width > work.right && owner.left - gap - width >= work.left) {
         x = owner.left - gap - width;
     }
     x = (std::clamp)(x, work.left, (std::max)(work.left, work.right - width));
-    int y = (owner.top + owner.bottom - height) / 2;
+    LONG y = (owner.top + owner.bottom - height) / 2;
     y = (std::clamp)(y, work.top, (std::max)(work.top, work.bottom - height));
-    SetWindowPos(win.hwnd, HWND_TOPMOST, x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+    SetWindowPos(win.hwnd, HWND_TOPMOST, static_cast<int>(x), static_cast<int>(y), 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
     return true;
 }
 
@@ -1480,11 +1480,14 @@ inline std::string Open(std::string const& kindId) {
             presenter.IsResizable(def.minWidth.has_value() || def.minHeight.has_value());
             window.AppWindow().IsShownInSwitchers(false);
             SetWindowLongPtrW(win->hwnd, GWL_EXSTYLE, GetWindowLongPtrW(win->hwnd, GWL_EXSTYLE) | WS_EX_TOOLWINDOW);
+            SetWindowPos(win->hwnd, nullptr, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
         }
     }
 #else
     RegisterClassOnce();
-    DWORD style = def.utility ? (WS_POPUP | WS_CAPTION | WS_SYSMENU) : WS_OVERLAPPEDWINDOW;
+    DWORD style = def.utility
+        ? (WS_POPUP | WS_CAPTION | WS_SYSMENU | ((def.minWidth.has_value() || def.minHeight.has_value()) ? WS_THICKFRAME : 0))
+        : WS_OVERLAPPEDWINDOW;
     DWORD exStyle = def.utility ? (WS_EX_TOOLWINDOW | WS_EX_TOPMOST) : 0;
     if (def.settings) style &= ~(WS_MAXIMIZEBOX | WS_MINIMIZEBOX);
     win->hwnd = CreateWindowExW(exStyle, kWindowClass, L"", style, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, nullptr, nullptr,
@@ -1534,8 +1537,8 @@ inline std::string Open(std::string const& kindId) {
         Reactive::Run([hwnd, titleKey] { SetWindowTextW(hwnd, bern::Text::Tr(titleKey).c_str()); });
 #endif
     });
-    double width = def.width.value_or(def.settings ? 640 : 960);
-    double height = def.height.value_or(def.settings ? 560 : 680);
+    double width = def.width.value_or(def.utility ? 300 : (def.settings ? 640 : 960));
+    double height = def.height.value_or(def.utility ? 360 : (def.settings ? 560 : 680));
     SizeBeforeLayout(*win, width, height);
     Mount(win, host, page);
     SetOuterSize(*win, width, height);

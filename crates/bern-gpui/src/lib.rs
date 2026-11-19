@@ -54,8 +54,8 @@ mod windows;
 pub use gestures::{SwipeProps, swipe};
 
 pub use behaviors::{
-    ShortcutInputProps, SliderProps, focus_on_appear, focus_region, pinch, screen_brightness,
-    shortcut, shortcut_input, slider, timer, toast, watch,
+    ColorPickerProps, ShortcutInputProps, SliderProps, color_picker, focus_on_appear, focus_region,
+    pinch, screen_brightness, shortcut, shortcut_input, slider, timer, toast, watch,
 };
 pub use bern_ffi;
 pub use bern_ffi::protocol;
@@ -204,6 +204,10 @@ pub struct WindowDef {
     pub title: &'static str,
     /// Opened when the application starts.
     pub open: bool,
+    /// Compact floating utility window (`role: utility`).
+    pub utility: bool,
+    /// Name of a `bern::overlay` this utility window anchors beside.
+    pub overlay: Option<&'static str>,
     pub width: Option<f64>,
     pub height: Option<f64>,
     pub min_width: Option<f64>,

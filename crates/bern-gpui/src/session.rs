@@ -227,6 +227,24 @@ fn run(index: u32, reader: &mut Reader<'_>, cx: &mut App) -> Result<Value, Failu
                 ))
             }
         }
+        Some(SessionCommand::WindowOpen) => {
+            let kind_id = reader.text().map_err(malformed)?;
+            let id = windows::open_kind(&kind_id, cx)?;
+            Ok(Value::Text(id))
+        }
+        Some(SessionCommand::WindowClose) => {
+            let window_id = reader.text().map_err(malformed)?;
+            windows::close_instance(&window_id, cx)?;
+            Ok(Value::Enum {
+                variant: 0,
+                fields: Vec::new(),
+            })
+        }
+        Some(SessionCommand::WindowSyncOverlay) => {
+            let overlay_id = reader.text().map_err(malformed)?;
+            windows::sync_overlay(&overlay_id, cx);
+            Ok(Value::Unit)
+        }
         Some(command) => Err(Failure::new(
             "ui_unavailable",
             format!("the GPUI target does not run `{}` yet", command.id()),

@@ -53,7 +53,7 @@
 | `Query` | 类型化查询调用 |
 | `Feature` | 所属功能契约中的入口 |
 
-固定枚举直接列出允许的关键字。表内没有逐一重复所有跨属性约束：Switch / Picker / Slider 必须二选一指定草稿来源或受控来源，受控来源还必须提供动作；`appear_delay` 必须配合 `appear`；具体错误由编译器检查。资源、语义颜色、本地化、功能覆盖与类型仍会进一步校验。
+固定枚举直接列出允许的关键字。表内没有逐一重复所有跨属性约束：Switch / Picker / Slider / ColorPicker 必须二选一指定草稿来源或受控来源，受控来源还必须提供动作；`Window` 的 `overlay` 必须与 `role: utility` 同用（主窗口不能声明 `role: utility`）；`appear_delay` 必须配合 `appear`；具体错误由编译器检查。资源、语义颜色、本地化、功能覆盖与类型仍会进一步校验。
 
 ## 组件
 
@@ -64,7 +64,7 @@
 | `StatusItem` | **`label: LocalizedText`**<br>`icon: Icon`<br>`image: SvgResource`<br>`login_item: Flag`<br>`shown: Bool` | 仅含 ["CommandItem", "CommandMenu", "Divider"]，可在 `if`、`match`、`ForEach` 中；无动作；直接位于 ["WindowSet"]，最多一个；菜单不读写草稿与窗口字段，菜单项不带 `pick`、`shortcut`；`icon` 与 `image` 二选一：`icon` 只在 macOS 显示，Windows 与 Linux 显示应用图标；`image` 是单色 SVG，三个桌面平台都按所在栏的明暗显示成白色或黑色；iOS、tvOS、Android 与网页不显示 |
 | `CommandMenu` | `label: LocalizedText`<br>`role: app / file / edit / view / window / help` | 仅含 ["CommandItem", "CommandMenu", "Divider"]，可在 `if`、`match`、`ForEach` 中；无动作；直接位于 ["MenuBar", "CommandMenu", "StatusItem"]；`label` 与 `role` 二选一，`role` 只用于菜单栏上的菜单 |
 | `CommandItem` | **`id: Id`**<br>**`label: DisplayText`**<br>`shortcut: Shortcut`<br>`enabled: Bool`<br>`checked: Bool`<br>`pick: FileField`<br>`files: FileKinds`<br>`paste: TextField` | 不含子节点；必须绑定动作；直接位于 ["CommandMenu", "StatusItem"]；菜单栏的项的草稿属于主窗口；`pick` 与 `paste` 二选一 |
-| `Window` | **`id: WindowId`**<br>**`title: LocalizedText`**<br>`initial: open / closed`<br>`presentation: auto / virtual / floating / native_required`<br>`role: standard / settings / dialog`<br>`width: Number`<br>`height: Number`<br>`min_width: Number`<br>`min_height: Number`<br>`confirm_close: Bool`<br>`close_message: LocalizedText`<br>`chrome: standard / unified`<br>`immersive: Bool`<br>`landscape: Bool`<br>`idle_after: Number`<br>`idle_enabled: Bool` | 恰好一个子节点；动作可选；直接位于 ["WindowSet"] |
+| `Window` | **`id: WindowId`**<br>**`title: LocalizedText`**<br>`initial: open / closed`<br>`presentation: auto / virtual / floating / native_required`<br>`role: standard / settings / dialog / utility`<br>`overlay: Id`<br>`width: Number`<br>`height: Number`<br>`min_width: Number`<br>`min_height: Number`<br>`confirm_close: Bool`<br>`close_message: LocalizedText`<br>`chrome: standard / unified`<br>`immersive: Bool`<br>`landscape: Bool`<br>`idle_after: Number`<br>`idle_enabled: Bool` | 恰好一个子节点；动作可选；直接位于 ["WindowSet"]；`role: utility` 声明紧凑的浮动工具窗口，`overlay` 将其锚定到同名 `bern::overlay` 旁（当该浮层隐藏、锁定或切入任务栏时自动关闭） |
 | `Column` | `variant: StyleVariant`<br>`gap: Length`<br>`padding: Length`<br>`padding_x: Length`<br>`padding_y: Length`<br>`width: Length`<br>`height: Length`<br>`align: leading / center / trailing` | 可含子内容；无动作 |
 | `FocusRegion` | 无 | 一个内容视图；文本编辑时首次区域外指针操作只失焦并消费整次点击，保留草稿；区域内控件和下一次点击正常 |
 | `Row` | `variant: StyleVariant`<br>`gap: Length`<br>`padding: Length`<br>`padding_x: Length`<br>`padding_y: Length`<br>`width: Length`<br>`height: Length`<br>`align: top / center / bottom / baseline` | 可含子内容；无动作 |
@@ -143,6 +143,7 @@
 | `Switch` | **`id: Id`**<br>**`label: DisplayText`**<br>`value: BoolField`<br>`checked: Bool`<br>`label_hidden: Flag`<br>`shape: capsule / chip`<br>`height: Length`<br>`style: switch / checkbox / button`<br>`icon: Icon`<br>`shortcut: Shortcut`<br>`login_item: Flag` | 不含子节点；动作可选；`login_item: true` 显示并改变系统的登录项，不写 `value`、`checked` 与动作 |
 | `ShortcutInput` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag`<br>**`current: Shortcut`**（状态，不可为字面量）<br>`prompt: DisplayText`<br>`empty: DisplayText`<br>`enabled: Bool`<br>`feature: Feature` | 不含子节点；必须绑定动作，动作中与 `current` 相同的表达式换成选中的快捷键 |
 | `Slider` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag`<br>`value: NumberField`<br>`current: NumberValue`<br>`continuous: Flag`（仅 `current`）<br>`hover: OptionalNumberField`<br>**`min: Number`**<br>**`max: Number`**<br>`step: Number`<br>`min_icon: Icon`<br>`max_icon: Icon`<br>`feature: Feature` | 除指针事件外不含子节点；动作可选；指针停在滑块上时 `hover` 是指针在轨道上的位置，`min` 处为 0，`max` 处为 1，其余时候为 `None`；它不改变滑块的值 |
+| `ColorPicker` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag`<br>`value: NumberField`<br>`current: NumberValue`<br>`feature: Feature` | 不含子节点；`value` 时动作可选，`current` 时必须绑定动作；以 24 位 sRGB 整数（`0xRRGGBB`）表示颜色；tvOS、watchOS 与 Wear OS 不支持 |
 | `Video` | **`id: Id`**<br>`source: MediaSource`<br>`player: Player`<br>`label: DisplayText`<br>`controls: standard / none`<br>`fit: contain / cover / fill`<br>`sizing: standard / fill`<br>`corner: Length` | 不含子节点；无动作。`controls: none` 的视频只显示画面，可以作为 `Button` 的内容。`sizing: fill` 让播放表面占满有明确大小的父容器，`fit` 只控制视频内容如何放进表面；内核弹幕可以使用黑边。默认 `standard` 保持原有布局。应用登记了媒体内核时由内核画进视图给它的表面，见[设计文档](../Design.md#应用自带的媒体内核) |
 | `Query` | **`id: Id`**<br>**`query: Query`**<br>`presented: Bool`<br>`loading: DisplayText`<br>`empty: DisplayText`<br>`failed: DisplayText`<br>`icon: Icon` | 结果模板；开头可放一个 `QueryStatusHeader`；无动作 |
 | `QueryStatusHeader` | — | 恰好一个子节点；必须是 `Query` 的第一个直接子节点，至多一次；无动作 |

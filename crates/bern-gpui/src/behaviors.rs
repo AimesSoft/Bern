@@ -312,6 +312,214 @@ pub fn slider(c: &Ctx, id: &'static str, label: String, model: Model, props: Sli
     c.grow().apply(element.min_w(px(0.0))).into_any_element()
 }
 
+// MARK: - ColorPicker
+
+/// How a `ColorPicker` shows.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ColorPickerProps {
+    pub label_hidden: bool,
+}
+
+/// `ColorPicker`: a 24-bit sRGB color (`0xRRGGBB`) swatch button whose
+/// popover holds preset swatches and R/G/B channel sliders.
+pub fn color_picker(
+    c: &Ctx,
+    id: &'static str,
+    label: String,
+    model: Model,
+    props: ColorPickerProps,
+) -> El {
+    let enabled = c.enabled();
+    let current = match model.value(c) {
+        Value::Int(n) => n.clamp(0, 0xff_ffff) as u32,
+        other => (crate::value::as_f64(&other).round() as i64).clamp(0, 0xff_ffff) as u32,
+    };
+    let int = match &model {
+        Model::Field(field, _) => matches!(c.read(*field), Value::Int(_)),
+        Model::Controlled(Value::Int(_), _) => true,
+        _ => false,
+    };
+    let set_rgb: Rc<dyn Fn(u32)> = {
+        let c = c.clone();
+        let model = model.clone();
+        Rc::new(move |rgb: u32| {
+            let rgb = rgb & 0xff_ffff;
+            let value = if int {
+                Value::Int(i64::from(rgb))
+            } else {
+                Value::Float(f64::from(rgb))
+            };
+            model.set(&c, value);
+        })
+    };
+    c.list(Control {
+        target: c.target(id),
+        window: c.win().id.clone(),
+        role: "color_picker",
+        label: label.clone(),
+        value: Some(current.to_string()),
+        enabled,
+        actions: Actions {
+            set_number: Some({
+                let set_rgb = Rc::clone(&set_rgb);
+                Rc::new(move |number: f64| {
+                    if number.is_finite() {
+                        set_rgb((number.round() as i64).clamp(0, 0xff_ffff) as u32);
+                    }
+                })
+            }),
+            edit: Some({
+                let set_rgb = Rc::clone(&set_rgb);
+                Rc::new(move |text: String| {
+                    let trimmed = text.trim();
+                    let parsed = if let Some(hex) = trimmed.strip_prefix('#') {
+                        u32::from_str_radix(hex, 16).ok()
+                    } else {
+                        trimmed
+                            .parse::<f64>()
+                            .ok()
+                            .filter(|v| v.is_finite())
+                            .map(|v| (v.round() as i64).clamp(0, 0xff_ffff) as u32)
+                    };
+                    if let Some(rgb) = parsed {
+                        set_rgb(rgb);
+                    }
+                })
+            }),
+            ..Actions::default()
+        },
+    });
+    let target = c.key(id);
+    let open = crate::overlay::is_open(&target);
+    let swatch = div()
+        .id(c.element_id(id))
+        .flex_none()
+        .w(px(40.0))
+        .h(px(24.0))
+        .rounded(px(6.0))
+        .border_1()
+        .border_color(c.slot("button.standard", "rest", "border"))
+        .bg(gpui::rgb(current));
+    let swatch = if enabled {
+        let toggle = target.clone();
+        swatch.on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            crate::overlay::set_open(&toggle, !crate::overlay::is_open(&toggle));
+        })
+    } else {
+        swatch.opacity(0.5)
+    };
+    let button_wrap = div()
+        .relative()
+        .flex_none()
+        .child(swatch)
+        .child(crate::overlay::opener_place(&target))
+        .when(open, |element| {
+            let swatches: [u32; 8] = [
+                0xFFFFFF, 0xFFE066, 0xFF6B8B, 0x7ED6DF, 0xA3CB38, 0xD980FA, 0xFFA502, 0x70A1FF,
+            ];
+            let r = f64::from((current >> 16) & 0xff);
+            let g = f64::from((current >> 8) & 0xff);
+            let b = f64::from(current & 0xff);
+            let colors = [
+                c.color("separator"),
+                c.color("accent"),
+                c.color("surface.raised"),
+            ];
+            let channel = |name: &'static str, value: f64, shift: u32| {
+                let set_rgb = Rc::clone(&set_rgb);
+                let update: Rc<dyn Fn(f64)> = Rc::new(move |next: f64| {
+                    let byte = (next.round() as i64).clamp(0, 255) as u32;
+                    let mask = !(0xffu32 << shift);
+                    set_rgb((current & mask) | (byte << shift));
+                });
+                let track = Track {
+                    key: ElementId::Name(format!("{target}.{name}").into()),
+                    props: SliderProps {
+                        tint: None,
+                        min: 0.0,
+                        max: 255.0,
+                        step: Some(1.0),
+                        continuous: true,
+                        label_hidden: true,
+                        min_icon: None,
+                        max_icon: None,
+                        hover: None,
+                    },
+                    value,
+                    enabled,
+                    preview: Rc::clone(&update),
+                    commit: update,
+                    hover: None,
+                    colors,
+                };
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .w(px(36.0))
+                            .text_size(px(12.0))
+                            .text_color(c.color("text.secondary"))
+                            .child(format!("{name} {}", value.round() as u32)),
+                    )
+                    .child(track)
+            };
+            let body = div()
+                .flex()
+                .flex_col()
+                .gap(px(8.0))
+                .w(px(236.0))
+                .p(px(12.0))
+                .child(div().flex().flex_row().gap(px(6.0)).children(
+                    swatches.into_iter().enumerate().map(|(index, swatch_rgb)| {
+                        let set_rgb = Rc::clone(&set_rgb);
+                        let selected = swatch_rgb == current;
+                        div()
+                            .id(ElementId::Name(format!("{target}.swatch.{index}").into()))
+                            .size(px(22.0))
+                            .rounded(px(11.0))
+                            .bg(gpui::rgb(swatch_rgb))
+                            .border_1()
+                            .border_color(if selected {
+                                c.color("accent")
+                            } else {
+                                c.slot("button.standard", "rest", "border")
+                            })
+                            .on_click(move |_, _, cx| {
+                                cx.stop_propagation();
+                                set_rgb(swatch_rgb);
+                            })
+                    }),
+                ))
+                .child(channel("R", r, 16))
+                .child(channel("G", g, 8))
+                .child(channel("B", b, 0));
+            element.child(crate::overlay::panel(c, &target, body))
+        });
+    if props.label_hidden {
+        button_wrap.into_any_element()
+    } else {
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .justify_between()
+            .gap(px(12.0))
+            .w_full()
+            .child(
+                div()
+                    .text_size(px(14.0))
+                    .text_color(c.color("text.primary"))
+                    .child(label),
+            )
+            .child(button_wrap)
+            .into_any_element()
+    }
+}
+
 // MARK: - Shortcuts
 
 /// `Shortcut`: a key combination that runs the action while mounted and
