@@ -331,6 +331,17 @@ impl Generator<'_> {
                         values.join(", ")
                     )
                 }
+                Action::Session {
+                    field,
+                    op: bern_ir::SessionOp::Set { value },
+                } if value == expr => {
+                    let rhs = if field.ty == Type::Int {
+                        "V::Int(rt::as_f64(&v).round() as i64)"
+                    } else {
+                        "v.clone()"
+                    };
+                    format!("b::session_set(c, {}, {rhs})", self.field_ref(field))
+                }
                 other => self.action_body(other),
             };
             return Some(format!(

@@ -274,8 +274,13 @@ impl Generator<'_> {
             "SearchItem" => self.search_item(out, element),
             "Switch" => self.switch(out, element),
             "Slider" => self.slider(out, element),
+            "NumberInput" => self.number_input(out, element),
             "ColorPicker" => self.color_picker(out, element),
             "Picker" => self.picker(out, element),
+            "Tooltip" => self.tooltip(out, element),
+            "Banner" => self.banner(out, element),
+            "Disclosure" => self.disclosure(out, element),
+            "Alert" => self.alert(out, element),
             "Video" => self.video(out, element),
             "NativeView" => self.native_view(out, element),
             "Query" => self.query(out, element),
@@ -326,7 +331,8 @@ impl Generator<'_> {
             "Table" => self.table(out, element),
             "LanguagePicker" => self.language_picker(out, element),
             "Detail" | "Destination" | "TabAccessory" | "Sidebar" | "SidebarHeader"
-            | "SidebarFooter" | "WindowSet" | "Window" | "Layout" | "MenuItem" | "PickerOption"
+            | "SidebarFooter" | "WindowSet" | "Window" | "Layout" | "MenuItem" | "AlertAction"
+            | "PickerOption"
             | "TableColumn" | "TableMenu" | "ContextMenu" | "DoubleTap" | "WheelUp" | "WheelDown"
             // A page has no menu bar.
             | "MenuBar" | "CommandMenu" | "CommandItem"

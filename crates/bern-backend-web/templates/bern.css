@@ -3210,3 +3210,141 @@ button.bern-table-heading:hover {
 .bern-icon-fill { color: var(--bern-accent); }
 .bern-icon-badge { position: absolute; right: -6%; bottom: -6%; width: 52%; height: 52%; padding: 6%; box-sizing: border-box; border-radius: 50%; color: var(--bern-accent); background: var(--bern-surface-canvas); }
 .bern-icon-button .bern-icon-badge > .bern-icon { display: block; width: 100%; height: 100%; }
+
+/* Inline semantic Banner */
+.bern-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--bern-accent) 28%, transparent);
+  background: color-mix(in srgb, var(--bern-accent) 11%, transparent);
+  box-sizing: border-box;
+}
+.bern-banner-success {
+  border-color: color-mix(in srgb, var(--bern-status-success) 32%, transparent);
+  background: color-mix(in srgb, var(--bern-status-success) 12%, transparent);
+}
+.bern-banner-warning {
+  border-color: color-mix(in srgb, var(--bern-status-warning) 35%, transparent);
+  background: color-mix(in srgb, var(--bern-status-warning) 13%, transparent);
+}
+.bern-banner-error {
+  border-color: color-mix(in srgb, var(--bern-status-error) 35%, transparent);
+  background: color-mix(in srgb, var(--bern-status-error) 12%, transparent);
+}
+.bern-banner-icon { flex: none; color: var(--bern-accent); }
+.bern-banner-success .bern-banner-icon { color: var(--bern-status-success); }
+.bern-banner-warning .bern-banner-icon { color: var(--bern-status-warning); }
+.bern-banner-error .bern-banner-icon { color: var(--bern-status-error); }
+.bern-banner-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.bern-banner-title { font-weight: 600; color: var(--bern-text-primary); }
+.bern-banner-content { color: var(--bern-text-secondary); font-size: 13px; }
+.bern-banner-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+.bern-banner-close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--bern-text-secondary);
+  cursor: pointer;
+}
+.bern-banner-close:hover { background: var(--bern-hover-overlay); color: var(--bern-text-primary); }
+
+/* Disclosure (<details>/<summary>) */
+.bern-disclosure { width: 100%; }
+.bern-disclosure-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 2px;
+  font-weight: 500;
+  color: var(--bern-text-primary);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+.bern-disclosure-summary::-webkit-details-marker { display: none; }
+.bern-disclosure-summary::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 6px solid var(--bern-text-secondary);
+  transition: transform 140ms ease;
+}
+.bern-disclosure[open] > .bern-disclosure-summary::before { transform: rotate(90deg); }
+.bern-disclosure-body { padding: 6px 0 6px 20px; display: flex; flex-direction: column; gap: 8px; }
+
+/* NumberInput */
+.bern-number-group { display: inline-flex; align-items: center; gap: 4px; }
+.bern-number-input { width: 88px; text-align: end; font-variant-numeric: tabular-nums; }
+.bern-number-step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--bern-control-border);
+  border-radius: 6px;
+  background: var(--bern-surface-panel);
+  color: var(--bern-text-primary);
+  cursor: pointer;
+}
+.bern-number-step:hover:not(:disabled) { background: var(--bern-hover-overlay); }
+.bern-number-step:disabled { opacity: 0.45; cursor: default; }
+
+/* Alert (<dialog>) */
+dialog.bern-alert {
+  max-width: min(400px, calc(100vw - 32px));
+  width: 100%;
+  padding: 20px 22px;
+  border-radius: 14px;
+  border: 1px solid var(--bern-control-border);
+  background: var(--bern-surface-raised);
+  color: var(--bern-text-primary);
+  box-shadow: 0 20px 44px rgba(0, 0, 0, 0.28);
+}
+dialog.bern-alert::backdrop { background: rgba(0, 0, 0, 0.35); }
+.bern-alert-title { margin: 0 0 8px; font-size: 16px; font-weight: 600; }
+.bern-alert-message { margin: 0 0 18px; font-size: 13px; color: var(--bern-text-secondary); line-height: 1.45; }
+.bern-alert-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+
+/* ComboBox */
+.bern-combobox { position: relative; min-width: 160px; }
+.bern-combobox-input { width: 100%; box-sizing: border-box; }
+.bern-combobox-list {
+  position: absolute;
+  inset-inline: 0;
+  top: calc(100% + 4px);
+  z-index: 40;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  max-height: 240px;
+  overflow: auto;
+  border-radius: 8px;
+  border: 1px solid var(--bern-control-border);
+  background: var(--bern-surface-raised);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+}
+.bern-combobox-option {
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.bern-combobox-option:hover { background: var(--bern-hover-overlay); }
+.bern-combobox-option[aria-selected="true"] {
+  background: var(--bern-selection-background);
+  font-weight: 500;
+}

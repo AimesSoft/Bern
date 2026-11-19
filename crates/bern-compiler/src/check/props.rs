@@ -1,7 +1,7 @@
 //! Props written as names, literals and resources, each checked for
 //! the kind of prop it fills.
 
-use super::{Checker, Scope};
+use super::{Checker, Scope, is_displayable, not_content};
 use bern_ir as ir;
 use bern_ir::spec::{self, PropKind};
 use bern_protocol::Type;
@@ -281,17 +281,13 @@ impl Checker<'_> {
         }
     }
 
-    pub(super) fn key(
-        &mut self,
-        expr: &ast::Expr,
-        template: Option<&ir::Template>,
-    ) -> Option<ir::Prop> {
-        let (Some(field), Some(template)) = (
+    pub(super) fn key(&mut self, expr: &ast::Expr, item_ty: Option<&Type>) -> Option<ir::Prop> {
+        let (Some(field), Some(item_ty)) = (
             match expr {
                 ast::Expr::Path(path) => path.single().cloned(),
                 _ => None,
             },
-            template,
+            item_ty,
         ) else {
             self.error(
                 expr.span(),
@@ -299,7 +295,7 @@ impl Checker<'_> {
             );
             return None;
         };
-        let Type::Record { name } = &template.ty else {
+        let Type::Record { name } = item_ty else {
             return None;
         };
         let def = self.types.record_def(name)?;
@@ -317,6 +313,54 @@ impl Checker<'_> {
         Some(ir::Prop::Key {
             field: index,
             name: field.to_string(),
+        })
+    }
+
+    pub(super) fn label_field(
+        &mut self,
+        expr: &ast::Expr,
+        item_ty: Option<&Type>,
+    ) -> Option<ir::Prop> {
+        let (Some(field), Some(item_ty)) = (
+            match expr {
+                ast::Expr::Path(path) => path.single().cloned(),
+                _ => None,
+            },
+            item_ty,
+        ) else {
+            self.error(
+                expr.span(),
+                "expected the name of an item field, e.g. `item_label: name`",
+            );
+            return None;
+        };
+        let Type::Record { name } = item_ty else {
+            return None;
+        };
+        let def = self.types.record_def(name)?;
+        let field_name = field.to_string();
+        let Some(index) = def.field_index(&field_name) else {
+            self.error(field.span(), format!("`{name}` has no field `{field}`"));
+            return None;
+        };
+        let field_def = &def.fields[index];
+        if !is_displayable(&field_def.ty, self.types) {
+            self.error(
+                field.span(),
+                format!(
+                    "`item_label` must be text, a number or a labelled enum, found {}",
+                    field_def.ty.display()
+                ),
+            );
+            return None;
+        }
+        if field_def.ty == Type::Text && !field_def.content {
+            self.error(field.span(), not_content(&format!("{name}.{field_name}")));
+            return None;
+        }
+        Some(ir::Prop::Key {
+            field: index,
+            name: field_name,
         })
     }
 
@@ -543,6 +587,21 @@ impl Checker<'_> {
                 }
                 if prop_name == "aspect" && (!value.is_finite() || value <= 0.0) {
                     self.error(expr.span(), "`aspect` must be finite and greater than zero");
+                    return None;
+                }
+            }
+            if element == "NumberInput" {
+                if prop_name == "step" && (!value.is_finite() || value <= 0.0) {
+                    self.error(expr.span(), "`step` must be finite and greater than zero");
+                    return None;
+                }
+                if prop_name == "precision"
+                    && (!value.is_finite() || value.fract() != 0.0 || !(0.0..=6.0).contains(&value))
+                {
+                    self.error(
+                        expr.span(),
+                        "`precision` must be a whole number from 0 to 6",
+                    );
                     return None;
                 }
             }

@@ -581,6 +581,15 @@ impl<'a> Gen<'a> {
         };
         let mut pushed = 0;
         let mut query = None;
+        let dynamic_picker = name == "Picker" && element.prop("items").is_some();
+        let mut picker_item: Option<Ident> = None;
+        let picker_key_field: Option<Ident> = dynamic_picker
+            .then(|| element.prop("key"))
+            .flatten()
+            .and_then(|prop| match &prop.value {
+                Expr::Path(path) => path.single().cloned(),
+                _ => None,
+            });
 
         // Bindings that children depend on come first.
         for prop in &element.props {
@@ -637,6 +646,13 @@ impl<'a> Gen<'a> {
                         pre.push(quote_spanned!(path.span()=> let #template = ::bern::__private::list_item(&#tokens);));
                         self.scope.push(template.to_string());
                         pushed += 1;
+                    } else if let Expr::Path(path) = &prop.value
+                        && dynamic_picker
+                    {
+                        let tokens = self.path(path);
+                        let var = self.fresh("picker_item");
+                        pre.push(quote_spanned!(path.span()=> let #var = ::bern::__private::list_item(&#tokens);));
+                        picker_item = Some(var);
                     } else if !matches!(prop.value, Expr::Path(_)) {
                         self.error(prop.value.span(), "expected a list binding");
                     }
@@ -843,7 +859,22 @@ impl<'a> Gen<'a> {
                     ),
                 },
                 PropKind::PickerField => {
-                    pre.push(self.writable(&prop.value, quote!(::bern::__private::picker_field)))
+                    if dynamic_picker {
+                        pre.push(
+                            self.writable(&prop.value, quote!(::bern::__private::position_field)),
+                        );
+                        if let (Expr::Path(path), Some(item), Some(key_field)) =
+                            (&prop.value, &picker_item, &picker_key_field)
+                        {
+                            let tokens = self.path(path);
+                            let span = path.span();
+                            pre.push(quote_spanned!(span=> ::bern::__private::same_type(&::bern::__private::value_of(&#tokens), &::bern::__private::value_of(&#item.#key_field));));
+                        }
+                    } else {
+                        pre.push(
+                            self.writable(&prop.value, quote!(::bern::__private::picker_field)),
+                        );
+                    }
                 }
                 PropKind::SelectionValue => {
                     let value = self.value(&prop.value);
@@ -876,16 +907,27 @@ impl<'a> Gen<'a> {
                         }
                     }
                 }
-                PropKind::KeyField => match (&prop.value, &element.template) {
-                    (Expr::Path(path), Some(template)) if path.single().is_some() => {
-                        let field = path.single().unwrap();
-                        pre.push(quote_spanned!(field.span()=> ::bern::__private::key(&#template.#field);));
+                PropKind::KeyField => {
+                    let row = element.template.as_ref().or(picker_item.as_ref());
+                    match (&prop.value, row) {
+                        (Expr::Path(path), Some(row)) if path.single().is_some() => {
+                            let field = path.single().unwrap();
+                            if prop_name == "item_label" {
+                                pre.push(quote_spanned!(field.span()=> ::bern::__private::display(&#row.#field);));
+                            } else {
+                                pre.push(quote_spanned!(field.span()=> ::bern::__private::key(&#row.#field);));
+                            }
+                        }
+                        _ => self.error(
+                            prop.value.span(),
+                            if prop_name == "item_label" {
+                                "expected the name of an item field, e.g. `item_label: name`"
+                            } else {
+                                "expected the name of a row field, e.g. `key: id`"
+                            },
+                        ),
                     }
-                    _ => self.error(
-                        prop.value.span(),
-                        "expected the name of a row field, e.g. `key: id`",
-                    ),
-                },
+                }
                 PropKind::WindowId => {
                     if let Some(id) = self.ident_prop(&prop.value, &prop_name) {
                         window_ids.push(id);
@@ -900,7 +942,14 @@ impl<'a> Gen<'a> {
                 PropKind::KeyValue | PropKind::Watched => {
                     let value = self.value(&prop.value);
                     let span = prop.value.span();
-                    pre.push(quote_spanned!(span=> let _ = &#value;));
+                    if dynamic_picker
+                        && prop_name == "selected"
+                        && let (Some(item), Some(key_field)) = (&picker_item, &picker_key_field)
+                    {
+                        pre.push(quote_spanned!(span=> ::bern::__private::same_type(&#value, &::bern::__private::value_of(&#item.#key_field));));
+                    } else {
+                        pre.push(quote_spanned!(span=> let _ = &#value;));
+                    }
                 }
                 PropKind::TypeName
                 | PropKind::SlotName

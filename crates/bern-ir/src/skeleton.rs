@@ -710,8 +710,39 @@ fn project_element(element: &Element, ctx: &mut ProjectCtx<'_>) -> Vec<Node> {
         // Non-visual, event, gesture, overlay, or side-effect elements vanish.
         "ContextMenu" | "TableMenu" | "DoubleTap" | "WheelUp" | "WheelDown" | "Pinch" | "Swipe"
         | "OnCommit" | "Drop" | "Shortcut" | "Watch" | "Timer" | "ScreenBrightness" | "Toast"
-        | "Modal" | "MenuItem" | "PickerOption" | "SearchItem" | "CommandMenu" | "CommandItem"
-        | "QueryStatusHeader" => Vec::new(),
+        | "Modal" | "Alert" | "AlertAction" | "MenuItem" | "PickerOption" | "SearchItem"
+        | "CommandMenu" | "CommandItem" | "QueryStatusHeader" => Vec::new(),
+
+        // Tooltip is a transparent wrapper: project its child directly.
+        "Tooltip" => project_nodes(&element.children, ctx),
+
+        // Inline banner and collapsible disclosure header project as soft horizontal bars.
+        "Banner" => vec![make_skeleton_node(
+            ctx,
+            &element.path,
+            &element.source,
+            None,
+            Some(Prop::Number { value: 48.0 }),
+            Some(1.0),
+            None,
+            None,
+            Some(Prop::Number { value: 10.0 }),
+            "rect",
+            "media",
+        )],
+        "Disclosure" => vec![make_skeleton_node(
+            ctx,
+            &element.path,
+            &element.source,
+            None,
+            Some(Prop::Number { value: 36.0 }),
+            Some(1.0),
+            None,
+            None,
+            Some(Prop::Number { value: 8.0 }),
+            "rect",
+            "media",
+        )],
 
         // Already a manual Skeleton: keep as-is (with safe prop substitution).
         "Skeleton" => vec![Node::Element(clone_skeleton_props(element, ctx))],
@@ -820,8 +851,8 @@ fn project_element(element: &Element, ctx: &mut ProjectCtx<'_>) -> Vec<Node> {
                 "media",
             )]
         }
-        "TextInput" | "Search" | "Picker" | "LanguagePicker" | "ColorPicker" | "ShortcutInput"
-        | "Menu" | "SplitButton" | "PopoverButton" => {
+        "TextInput" | "Search" | "NumberInput" | "Picker" | "LanguagePicker" | "ColorPicker"
+        | "ShortcutInput" | "Menu" | "SplitButton" | "PopoverButton" => {
             let height = element
                 .prop("height")
                 .and_then(|p| substitute_prop(p, ctx))

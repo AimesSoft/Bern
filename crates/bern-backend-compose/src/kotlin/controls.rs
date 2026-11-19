@@ -3,8 +3,8 @@
 
 use super::values::kotlin_type;
 use super::{Ctx, Generator, Out, Scope};
-use crate::names::{double, float, string};
-use bern_ir::{Element, Node};
+use crate::names::{double, float, member, string};
+use bern_ir::{Element, Node, Prop};
 use bern_protocol::Type;
 
 impl Generator<'_> {
@@ -527,8 +527,219 @@ impl Generator<'_> {
         self.picker_in(out, element, ctx, false);
     }
 
+    pub(super) fn tooltip(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let content = self.text_prop(element, "content").unwrap_or_default();
+        out.open(format!("BernTooltip({content}) {{"));
+        self.nodes(out, &element.children, ctx);
+        out.close("}");
+    }
+
+    pub(super) fn banner(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let severity = element.keyword("severity").unwrap_or("info");
+        let default_icon = match severity {
+            "success" => "checkmark.circle",
+            "warning" => "exclamationmark.triangle",
+            "error" => "xmark.circle.fill",
+            _ => "info.circle",
+        };
+        let icon = Self::icon(Some(element.icon("icon").unwrap_or(default_icon)));
+        let title = self
+            .text_prop(element, "title")
+            .unwrap_or_else(|| "null".into());
+        let content = self.text_prop(element, "content").unwrap_or_default();
+        let dismiss_label = self
+            .text_prop(element, "dismiss_label")
+            .unwrap_or_else(|| "null".into());
+        let (dismiss_target, on_dismiss) = match &element.action {
+            Some(action) => {
+                let target = element
+                    .id
+                    .as_ref()
+                    .map(|_| self.target(element, ctx))
+                    .unwrap_or_else(|| "null".into());
+                (target, format!("{{ {} }}", self.action(action)))
+            }
+            None => ("null".into(), "null".into()),
+        };
+        out.open(format!(
+            "BernBanner({}, {title}, {content}, {icon}, {dismiss_label}, {dismiss_target}, {on_dismiss}) {{",
+            string(severity)
+        ));
+        self.nodes(out, &element.children, &ctx.within(Scope::Row));
+        out.close("}");
+    }
+
+    pub(super) fn disclosure(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let label = self.text_prop(element, "label").unwrap_or_default();
+        let icon = Self::icon(element.icon("icon"));
+        let target = self.target(element, ctx);
+        let (external_val, on_change) = if element.expr("open").is_some() {
+            let Some((val, change)) = self.model(element, "open", &|_| "it".into()) else {
+                return;
+            };
+            (val, format!("{{ it: Boolean -> {change} }}"))
+        } else if let Some(field) = self.field(element, "expanded") {
+            let then = element
+                .action
+                .as_ref()
+                .map(|a| format!("; {}", self.action(a)))
+                .unwrap_or_default();
+            (
+                field.clone(),
+                format!("{{ it: Boolean -> {field} = it{then} }}"),
+            )
+        } else {
+            let on_toggle = element
+                .action
+                .as_ref()
+                .map(|a| format!("{{ _: Boolean -> {} }}", self.action(a)))
+                .unwrap_or_else(|| "null".into());
+            ("null".into(), on_toggle)
+        };
+        out.open(format!(
+            "BernDisclosure({target}, {label}, {icon}, {external_val}, {on_change}) {{"
+        ));
+        self.nodes(out, &element.children, &ctx.within(Scope::Column));
+        out.close("}");
+    }
+
+    pub(super) fn number_input(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let label = self.text_prop(element, "label").unwrap_or_default();
+        let target = self.target(element, ctx);
+        let label_hidden = element.keyword("label_hidden") == Some("true");
+        let min = element
+            .number("min")
+            .map(double)
+            .unwrap_or_else(|| "null".into());
+        let max = element
+            .number("max")
+            .map(double)
+            .unwrap_or_else(|| "null".into());
+        let step = double(element.number("step").unwrap_or(1.0));
+        let is_int = matches!(element.expr("current").map(|e| &e.ty), Some(Type::Int));
+        let precision =
+            infer_precision(element.number("precision"), element.number("step"), is_int);
+        let enabled = element
+            .expr("enabled")
+            .map(|e| self.expr(e))
+            .unwrap_or_else(|| "true".into());
+        let convert = |ty: &Type| match ty {
+            Type::Int => "Math.round(it)".to_string(),
+            _ => "it".to_string(),
+        };
+        let Some((value, change)) = self.model(element, "current", &convert) else {
+            return;
+        };
+        out.line(format!(
+            "BernNumberInput({target}, {label}, ({value}).toDouble(), {{ it: Double -> {change} }}, {min}, {max}, {step}, {precision}, {enabled}, {label_hidden}, Modifier.testTag({target}))"
+        ));
+    }
+
+    pub(super) fn alert(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let title = self.text_prop(element, "title").unwrap_or_default();
+        let message = self
+            .text_prop(element, "message")
+            .unwrap_or_else(|| "null".into());
+        let on_dismiss = element
+            .action
+            .as_ref()
+            .map(|a| format!("{{ {} }}", self.action(a)))
+            .unwrap_or_else(|| "null".into());
+        let mut specs = Vec::new();
+        for node in &element.children {
+            let Node::Element(act) = node else { continue };
+            if act.kind != "AlertAction" {
+                continue;
+            }
+            let target = self.target(act, ctx);
+            let label = self.text_prop(act, "label").unwrap_or_default();
+            let role = act.keyword("role").unwrap_or("default");
+            let enabled = act
+                .expr("enabled")
+                .map(|e| self.expr(e))
+                .unwrap_or_else(|| "true".into());
+            let code = act
+                .action
+                .as_ref()
+                .map(|a| self.action(a))
+                .unwrap_or_else(|| "Unit".into());
+            specs.push(format!(
+                "BernAlertActionSpec({target}, {label}, {}, {enabled}) {{ {code} }}",
+                string(role)
+            ));
+        }
+        out.line(format!(
+            "BernAlert({title}, {message}, listOf({}), {on_dismiss})",
+            specs.join(", ")
+        ));
+    }
+
     /// A picker; in a top bar (`toolbar`) the chosen option opening a menu.
     pub(super) fn picker_in(&self, out: &mut Out, element: &Element, ctx: &Ctx, toolbar: bool) {
+        let prompt_arg = self
+            .text_prop(element, "prompt")
+            .map(|p| format!(", prompt = {p}"))
+            .unwrap_or_default();
+        if let Some(items_expr) = element.expr("items") {
+            let Type::List { inner } = &items_expr.ty else {
+                return;
+            };
+            let Type::Record { name: rec_name } = inner.as_ref() else {
+                return;
+            };
+            let def = self.types().record_def(rec_name).expect("picker record");
+            let Some(Prop::Key { field: key_idx, .. }) = element.prop("key") else {
+                return;
+            };
+            let Some(Prop::Key {
+                field: label_idx, ..
+            }) = element.prop("item_label")
+            else {
+                return;
+            };
+            let key_member = member(&def.fields[*key_idx].name);
+            let label_def = &def.fields[*label_idx];
+            let label_member = member(&label_def.name);
+            let item_label_code = match &label_def.ty {
+                Type::Text => format!("it.{label_member}"),
+                Type::Int | Type::Float | Type::Enum { .. } => {
+                    format!("BernText.text(it.{label_member})")
+                }
+                _ => format!("it.{label_member}.toString()"),
+            };
+            let items_code = self.expr(items_expr);
+            let options = format!("({items_code}).map {{ it.{key_member} }}");
+            let option_label = format!(
+                "{{ key -> ({items_code}).firstOrNull {{ it.{key_member} == key }}?.let {{ {item_label_code} }} ?: \"\" }}"
+            );
+            let Some((value, change)) = self.model(element, "selected", &|_| "it".into()) else {
+                return;
+            };
+            let label = self.text_prop(element, "label").unwrap_or_default();
+            let target = self.target(element, ctx);
+            out.line(format!(
+                "BernControl({target}, \"picker\", {label}, actions = BernControlActions(select = {{ name -> ({options}).firstOrNull {{ bernOptionName(it) == name }}?.let {{ {change}; true }} ?: false }}, value = {{ bernOptionName({value}) }}))"
+            ));
+            if toolbar {
+                out.line(format!(
+                    "BernToolbarPicker({label}, {options}, {value}, {option_label}, {{ {change} }}, Modifier.testTag({target}))"
+                ));
+                return;
+            }
+            let style = element.keyword("style").unwrap_or("menu");
+            let flow = match ctx.scope {
+                Scope::Flow => ", inFlow = true",
+                Scope::Row => ", inRow = true",
+                _ => "",
+            };
+            out.line(format!(
+                "BernPicker({label}, {options}, {value}, {option_label}, {{ {change} }}, {}, Modifier.testTag({target}), labelHidden = {}{}{flow}{prompt_arg})",
+                string(style),
+                element.keyword("label_hidden") == Some("true"),
+                self.shape_arg(element)
+            ));
+            return;
+        }
         let Some(ty) = element
             .expr("selected")
             .map(|expr| expr.ty.clone())
@@ -562,7 +773,7 @@ impl Generator<'_> {
             _ => "",
         };
         out.line(format!(
-            "BernPicker({label}, {options}, {value}, {option_label}, {{ {change} }}, {}, Modifier.testTag({target}), labelHidden = {}{}{flow})",
+            "BernPicker({label}, {options}, {value}, {option_label}, {{ {change} }}, {}, Modifier.testTag({target}), labelHidden = {}{}{flow}{prompt_arg})",
             string(style),
             element.keyword("label_hidden") == Some("true"),
             self.shape_arg(element)
@@ -707,4 +918,21 @@ fn widens(nodes: &[Node]) -> bool {
         }
         _ => false,
     })
+}
+
+fn infer_precision(precision: Option<f64>, step: Option<f64>, is_int: bool) -> u32 {
+    if let Some(p) = precision {
+        return p.round().clamp(0.0, 6.0) as u32;
+    }
+    if is_int {
+        return 0;
+    }
+    if let Some(s) = step {
+        let formatted = format!("{s:.4}");
+        let trimmed = formatted.trim_end_matches('0');
+        if let Some((_, frac)) = trimmed.split_once('.') {
+            return (frac.len() as u32).min(4);
+        }
+    }
+    0
 }

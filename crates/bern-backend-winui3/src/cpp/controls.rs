@@ -2,7 +2,7 @@
 //! pickers, menus, and the areas that take drops and gestures.
 
 use super::{Generator, Out, designated, motion_ref, null, string, wide};
-use bern_ir::{Element, ExprKind, Node};
+use bern_ir::{Element, ExprKind, Node, Prop};
 use bern_protocol::{EnumDef, Type};
 
 impl Generator<'_> {
@@ -326,7 +326,158 @@ impl Generator<'_> {
         out.line(format!("B::ColorPicker(p, c, {});", designated(&fields)));
     }
 
+    pub(super) fn tooltip(&self, out: &mut Out, element: &Element) {
+        let content = null(self.text_prop(element, "content"));
+        self.call(
+            out,
+            &format!("B::Tooltip(p, c, {content}, "),
+            &element.children,
+        );
+    }
+
+    pub(super) fn banner(&self, out: &mut Out, element: &Element) {
+        let props = designated(&[
+            ("id", element.id.as_deref().map(string)),
+            ("severity", Self::keyword(element, "severity")),
+            ("title", self.text_prop(element, "title")),
+            ("content", self.text_prop(element, "content")),
+            ("icon", Self::icon(element, "icon")),
+            ("dismissLabel", self.text_prop(element, "dismiss_label")),
+            ("dismiss", self.action(element)),
+        ]);
+        if element.children.is_empty() {
+            out.line(format!("B::Banner(p, c, {props}, nullptr);"));
+        } else {
+            self.call(
+                out,
+                &format!("B::Banner(p, c, {props}, "),
+                &element.children,
+            );
+        }
+    }
+
+    pub(super) fn disclosure(&self, out: &mut Out, element: &Element) {
+        let mut fields = vec![
+            ("id", Some(self.id(element))),
+            ("label", self.text_prop(element, "label")),
+            ("icon", Self::icon(element, "icon")),
+        ];
+        if element.expr("open").is_some() {
+            fields.extend(self.model(element, "open"));
+        } else if let Some(field) = self.field(element, "expanded") {
+            fields.push(("field", Some(field)));
+            fields.push(("then", self.action(element)));
+        } else {
+            fields.push(("then", self.action(element)));
+        }
+        self.call(
+            out,
+            &format!("B::Disclosure(p, c, {}, ", designated(&fields)),
+            &element.children,
+        );
+    }
+
+    pub(super) fn number_input(&self, out: &mut Out, element: &Element) {
+        let controlled = element.expr("current").is_some();
+        let is_int = matches!(element.expr("current").map(|e| &e.ty), Some(Type::Int));
+        let precision =
+            infer_precision(element.number("precision"), element.number("step"), is_int);
+        let mut fields = vec![
+            ("id", Some(self.id(element))),
+            ("label", self.text_prop(element, "label")),
+        ];
+        if controlled {
+            fields.extend(self.model(element, "current"));
+        } else {
+            fields.push(("field", self.field(element, "value")));
+            fields.push(("then", self.action(element)));
+        }
+        fields.extend([
+            ("min", Self::number(element, "min")),
+            ("max", Self::number(element, "max")),
+            ("step", Self::number(element, "step")),
+            ("precision", Some(precision.to_string())),
+            ("enabled", self.enabled(element)),
+            (
+                "labelHidden",
+                (element.keyword("label_hidden") == Some("true")).then(|| "true".to_string()),
+            ),
+        ]);
+        out.line(format!("B::NumberInput(p, c, {});", designated(&fields)));
+    }
+
+    pub(super) fn alert(&self, out: &mut Out, element: &Element) {
+        let mut actions = Vec::new();
+        for node in &element.children {
+            let Node::Element(act) = node else { continue };
+            if act.kind != "AlertAction" {
+                continue;
+            }
+            actions.push(format!(
+                "B::AlertActionDef{}",
+                designated(&[
+                    ("id", Some(self.id(act))),
+                    ("label", self.text_prop(act, "label")),
+                    ("role", Self::keyword(act, "role")),
+                    ("enabled", self.enabled(act)),
+                    ("action", self.action(act)),
+                ])
+            ));
+        }
+        let props = designated(&[
+            ("title", self.text_prop(element, "title")),
+            ("message", self.text_prop(element, "message")),
+            ("actions", Some(format!("{{{}}}", actions.join(", ")))),
+            ("dismiss", self.action(element)),
+        ]);
+        out.line(format!("B::Alert(p, c, {props});"));
+    }
+
     pub(super) fn picker(&self, out: &mut Out, element: &Element) {
+        if let Some(items_expr) = element.expr("items") {
+            let Type::List { inner } = &items_expr.ty else {
+                return;
+            };
+            let Type::Record { name: rec_name } = inner.as_ref() else {
+                return;
+            };
+            let def = self.types().record_def(rec_name).expect("picker record");
+            let Some(Prop::Key { field: key_idx, .. }) = element.prop("key") else {
+                return;
+            };
+            let Some(Prop::Key {
+                field: label_idx, ..
+            }) = element.prop("item_label")
+            else {
+                return;
+            };
+            let key_is_int = def.fields[*key_idx].ty == Type::Int;
+            let label_enum = match &def.fields[*label_idx].ty {
+                Type::Enum { name } => Some(string(name)),
+                _ => None,
+            };
+            let mut fields = vec![
+                ("id", Some(self.id(element))),
+                ("label", self.text_prop(element, "label")),
+            ];
+            fields.extend(self.model(element, "selected"));
+            fields.extend([
+                ("items", Some(self.getter(items_expr))),
+                ("keyField", Some(key_idx.to_string())),
+                ("labelField", Some(label_idx.to_string())),
+                ("keyIsInt", key_is_int.then(|| "true".to_string())),
+                ("labelEnum", label_enum),
+                ("prompt", self.text_prop(element, "prompt")),
+                ("style", Self::keyword(element, "style")),
+                (
+                    "labelHidden",
+                    (element.keyword("label_hidden") == Some("true")).then(|| "true".to_string()),
+                ),
+                ("shape", self.shape(element)),
+            ]);
+            out.line(format!("B::DynamicPicker(p, c, {});", designated(&fields)));
+            return;
+        }
         let ty = element
             .expr("selected")
             .map(|expr| &expr.ty)
@@ -378,6 +529,7 @@ impl Generator<'_> {
         fields.extend(self.model(element, "selected"));
         fields.extend([
             ("options", Some(format!("{{{}}}", options.join(", ")))),
+            ("prompt", self.text_prop(element, "prompt")),
             ("style", Self::keyword(element, "style")),
             (
                 "labelHidden",
@@ -633,4 +785,21 @@ impl Generator<'_> {
             &element.children,
         );
     }
+}
+
+fn infer_precision(precision: Option<f64>, step: Option<f64>, is_int: bool) -> u32 {
+    if let Some(p) = precision {
+        return p.round().clamp(0.0, 6.0) as u32;
+    }
+    if is_int {
+        return 0;
+    }
+    if let Some(s) = step {
+        let formatted = format!("{s:.4}");
+        let trimmed = formatted.trim_end_matches('0');
+        if let Some((_, frac)) = trimmed.split_once('.') {
+            return (frac.len() as u32).min(4);
+        }
+    }
+    0
 }

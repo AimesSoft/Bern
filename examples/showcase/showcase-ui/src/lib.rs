@@ -56,6 +56,17 @@ pub enum Density {
     Spacious,
 }
 
+/// Confirmation alert state on the buttons page.
+#[bern::value]
+pub enum AlertState {
+    #[label(tr! { "zh-Hans" => "空闲", "en" => "Idle" })]
+    Idle,
+    #[label(tr! { "zh-Hans" => "已打开", "en" => "Open" })]
+    Open,
+    #[label(tr! { "zh-Hans" => "已确认", "en" => "Confirmed" })]
+    Confirmed,
+}
+
 /// Routes pushed inside the library page.
 #[bern::value]
 pub enum Route {
@@ -91,6 +102,16 @@ pub struct MainDraft {
     #[initial(Density::Regular)]
     pub density: Density,
     pub preview_skeleton: bool,
+    #[initial(true)]
+    pub banner_shown: bool,
+    pub alert_state: AlertState,
+    pub advanced_open: bool,
+    #[initial(8080.0)]
+    pub port: f64,
+    #[initial(1.5)]
+    pub ratio: f64,
+    #[initial(1)]
+    pub selected_item: i64,
 }
 
 /// The application: a main window and a settings window. Each window's

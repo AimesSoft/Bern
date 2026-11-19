@@ -542,6 +542,21 @@ impl<'a> Generator<'a> {
                         values.join(", ")
                     )
                 }
+                Some(Action::Session {
+                    field,
+                    op: bern_ir::SessionOp::Set { value },
+                }) if value == expr => {
+                    let rhs = match field.ty {
+                        Type::Int => "Value::Int(std::llround(R::AsDouble(v)))",
+                        Type::Float => "Value::Float(R::AsDouble(v))",
+                        _ => "v",
+                    };
+                    format!(
+                        "[](Ctx const& c, Value const& v) {{ SetDraft(c, Field{{{}, {}}}, {rhs}); }}",
+                        string(&field.session),
+                        field.field
+                    )
+                }
                 Some(other) => format!(
                     "[](Ctx const& c, Value const&) {{ {}; }}",
                     self.action_body(other)

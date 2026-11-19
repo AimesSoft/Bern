@@ -2181,17 +2181,37 @@ pub fn Picker(p: &Parent, ctx: &Ctx, props: PickerProps) {
     } else {
         let model = gtk::StringList::new(&[]);
         let updating = Rc::new(Cell::new(false));
+        let searchable = props.style == Some("combobox");
         let (selected_owner, widget): (glib::Object, gtk::Widget) =
             if p.is_list() && !ctx.in_toolbar() {
                 let row = adw::ComboRow::new();
                 row.set_model(Some(&model));
+                if searchable {
+                    row.set_enable_search(true);
+                    row.set_expression(Some(&gtk::PropertyExpression::new(
+                        gtk::StringObject::static_type(),
+                        None::<gtk::Expression>,
+                        "string",
+                    )));
+                }
                 if let Some(label) = label.clone() {
                     let shown = row.clone();
                     effect(move || shown.set_title(&label()));
                 }
                 (row.clone().upcast(), row.upcast())
             } else {
-                let dropdown = gtk::DropDown::new(Some(model.clone()), None::<gtk::Expression>);
+                let expr = searchable.then(|| {
+                    gtk::PropertyExpression::new(
+                        gtk::StringObject::static_type(),
+                        None::<gtk::Expression>,
+                        "string",
+                    )
+                    .upcast()
+                });
+                let dropdown = gtk::DropDown::new(Some(model.clone()), expr);
+                if searchable {
+                    dropdown.set_enable_search(true);
+                }
                 dropdown.set_valign(gtk::Align::Center);
                 shape(ctx, dropdown.upcast_ref(), &props.shape);
                 (dropdown.clone().upcast(), dropdown.upcast())
@@ -2286,6 +2306,570 @@ pub fn Picker(p: &Parent, ctx: &Ctx, props: PickerProps) {
             value: Some(Rc::new(move || {
                 index_of(&value.peek()).map(|index| names[index].to_string())
             })),
+            ..Actions::default()
+        },
+    );
+}
+
+pub struct DynamicPickerProps {
+    pub id: &'static str,
+    pub label: Option<Str>,
+    pub model: Option<Model>,
+    pub items: Get,
+    pub key_field: usize,
+    pub label_field: usize,
+    pub label_enum: Option<&'static str>,
+    pub prompt: Option<Str>,
+    pub style: Option<&'static str>,
+    pub label_hidden: bool,
+    pub shape: Shape,
+}
+
+#[allow(non_snake_case)]
+pub fn DynamicPicker(p: &Parent, ctx: &Ctx, props: DynamicPickerProps) {
+    let Some(model) = props.model else { return };
+    let bound = Bound::model(ctx, model);
+    let label = props.label.as_ref().map(|label| bound_text(ctx, label));
+    let items_get = props.items;
+    let key_field = props.key_field;
+    let label_field = props.label_field;
+    let label_enum = props.label_enum;
+    let at_items = ctx.clone();
+    let read_items: Rc<dyn Fn() -> Vec<(Value, String, String)>> = Rc::new(move || {
+        crate::value::as_list(items_get(&at_items))
+            .into_iter()
+            .map(|row| {
+                let k = crate::value::at(row.clone(), &[key_field]);
+                let lv = crate::value::at(row, &[label_field]);
+                let kt = crate::value::key_text(&k);
+                let lt = display(&lv, label_enum);
+                (k, kt, lt)
+            })
+            .collect()
+    });
+    let snapshot: Rc<std::cell::RefCell<Vec<(Value, String, String)>>> =
+        Rc::new(std::cell::RefCell::new(Vec::new()));
+    let choose_val: Rc<dyn Fn(Value)> = {
+        let bound = bound.clone();
+        Rc::new(move |val| {
+            if bound.peek() != val {
+                bound.set(val);
+            }
+        })
+    };
+    let segmented = matches!(
+        props.style,
+        Some("segmented") | Some("radio") | Some("inline")
+    );
+    let searchable = props.style == Some("combobox");
+    let control: gtk::Widget = if props.style == Some("chips") || segmented {
+        let holder = if props.style == Some("chips") {
+            let flow = crate::scene::flow_of(8.0);
+            flow.upcast::<gtk::Widget>()
+        } else {
+            let group = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+            group.add_css_class("linked");
+            group.set_valign(gtk::Align::Center);
+            group.upcast::<gtk::Widget>()
+        };
+        let holder_ref = holder.clone();
+        let read_items = Rc::clone(&read_items);
+        let snapshot = Rc::clone(&snapshot);
+        let read_val = bound.clone();
+        let choose = Rc::clone(&choose_val);
+        let is_chips = props.style == Some("chips");
+        effect(move || {
+            let cur_items = read_items();
+            let cur_val = read_val.get();
+            *snapshot.borrow_mut() = cur_items.clone();
+            while let Some(child) = holder_ref.first_child() {
+                child.unparent();
+            }
+            let mut first_btn: Option<gtk::ToggleButton> = None;
+            for (key, _, lbl) in &cur_items {
+                let btn = gtk::ToggleButton::with_label(lbl);
+                btn.set_valign(gtk::Align::Center);
+                if let Some(first) = &first_btn {
+                    btn.set_group(Some(first));
+                } else {
+                    first_btn = Some(btn.clone());
+                }
+                if *key == cur_val {
+                    btn.set_active(true);
+                }
+                let k = key.clone();
+                let choose = Rc::clone(&choose);
+                btn.connect_toggled(move |b| {
+                    if b.is_active() {
+                        choose(k.clone());
+                    }
+                });
+                if is_chips {
+                    btn.set_parent(&holder_ref);
+                } else if let Ok(bx) = holder_ref.clone().downcast::<gtk::Box>() {
+                    bx.append(&btn);
+                }
+            }
+        });
+        holder
+    } else {
+        let list_model = gtk::StringList::new(&[]);
+        let updating = Rc::new(Cell::new(false));
+        let (selected_owner, widget): (glib::Object, gtk::Widget) =
+            if p.is_list() && !ctx.in_toolbar() {
+                let row = adw::ComboRow::new();
+                row.set_model(Some(&list_model));
+                if searchable {
+                    row.set_enable_search(true);
+                    row.set_expression(Some(&gtk::PropertyExpression::new(
+                        gtk::StringObject::static_type(),
+                        None::<gtk::Expression>,
+                        "string",
+                    )));
+                }
+                if let Some(label) = label.clone() {
+                    let shown = row.clone();
+                    effect(move || shown.set_title(&label()));
+                }
+                (row.clone().upcast(), row.upcast())
+            } else {
+                let expr = searchable.then(|| {
+                    gtk::PropertyExpression::new(
+                        gtk::StringObject::static_type(),
+                        None::<gtk::Expression>,
+                        "string",
+                    )
+                    .upcast()
+                });
+                let dropdown = gtk::DropDown::new(Some(list_model.clone()), expr);
+                if searchable {
+                    dropdown.set_enable_search(true);
+                }
+                dropdown.set_valign(gtk::Align::Center);
+                shape(ctx, dropdown.upcast_ref(), &props.shape);
+                (dropdown.clone().upcast(), dropdown.upcast())
+            };
+        let owner_sync = selected_owner.clone();
+        let snap_sync = Rc::clone(&snapshot);
+        let read_items_sync = Rc::clone(&read_items);
+        let read_val = bound.clone();
+        let guard = Rc::clone(&updating);
+        effect(move || {
+            let cur_items = read_items_sync();
+            let cur_val = read_val.get();
+            let labels: Vec<&str> = cur_items.iter().map(|(_, _, l)| l.as_str()).collect();
+            *snap_sync.borrow_mut() = cur_items.clone();
+            guard.set(true);
+            list_model.splice(0, list_model.n_items(), &labels);
+            if let Some(idx) = cur_items.iter().position(|(k, _, _)| *k == cur_val) {
+                owner_sync.set_property("selected", idx as u32);
+            } else {
+                owner_sync.set_property("selected", gtk::INVALID_LIST_POSITION);
+            }
+            guard.set(false);
+        });
+        let snap_sel = Rc::clone(&snapshot);
+        let choose_sel = Rc::clone(&choose_val);
+        let guard_sel = Rc::clone(&updating);
+        selected_owner.connect_notify_local(Some("selected"), move |owner, _| {
+            if !guard_sel.get() {
+                let idx = owner.property::<u32>("selected") as usize;
+                if let Some((key, _, _)) = snap_sel.borrow().get(idx) {
+                    choose_sel(key.clone());
+                }
+            }
+        });
+        widget
+    };
+    if props.label_hidden
+        && let Some(label) = label.clone()
+    {
+        let named = control.clone();
+        effect(move || named.update_property(&[gtk::accessible::Property::Label(&label())]));
+    }
+    if ctx.in_toolbar() || props.label_hidden {
+        if p.is_list() {
+            p.add(&plain_row(&control));
+        } else {
+            keeps_width(&control);
+            p.add(&control);
+        }
+    } else if (segmented || props.style == Some("chips")) && p.is_list() {
+        let row = adw::ActionRow::new();
+        if let Some(label) = label.clone() {
+            let shown = row.clone();
+            effect(move || shown.set_title(&glib::markup_escape_text(&label())));
+        }
+        row.add_suffix(&control);
+        p.add(&row);
+    } else if p.is_list() {
+        p.add(&control);
+    } else {
+        p.add(&beside(label.clone(), &control));
+    }
+    let select = {
+        let read_items = Rc::clone(&read_items);
+        let choose = Rc::clone(&choose_val);
+        Rc::new(move |name: &str| {
+            let cur = untrack(|| read_items());
+            if let Some((key, _, _)) = cur.into_iter().find(|(_, kt, _)| kt == name) {
+                choose(key);
+                true
+            } else {
+                false
+            }
+        })
+    };
+    let value = bound.clone();
+    controls::register(
+        ctx,
+        props.id,
+        "picker",
+        label,
+        None,
+        Actions {
+            select: Some(select),
+            value: Some(Rc::new(move || Some(crate::value::key_text(&value.peek())))),
+            ..Actions::default()
+        },
+    );
+}
+
+#[allow(non_snake_case)]
+pub fn Tooltip(p: &Parent, ctx: &Ctx, content: Option<Str>, build: Build) {
+    let region = p.region();
+    build(&region, ctx);
+    let Some(content) = content else { return };
+    let text = bound_text(ctx, &content);
+    for widget in region.widgets() {
+        let w = widget.clone();
+        let t = Rc::clone(&text);
+        effect(move || w.set_tooltip_text(Some(&t())));
+    }
+}
+
+#[derive(Default)]
+pub struct BannerProps {
+    pub id: Option<&'static str>,
+    pub severity: Option<&'static str>,
+    pub title: Option<Str>,
+    pub content: Option<Str>,
+    pub icon: Option<&'static str>,
+    pub dismiss_label: Option<Str>,
+}
+
+#[allow(non_snake_case)]
+pub fn Banner(
+    p: &Parent,
+    ctx: &Ctx,
+    props: BannerProps,
+    dismiss: Option<Act>,
+    actions: Option<Build>,
+) {
+    let severity = props.severity.unwrap_or("info");
+    let default_icon = match severity {
+        "success" => "checkmark.circle",
+        "warning" => "exclamationmark.triangle",
+        "error" => "xmark.circle.fill",
+        _ => "info.circle",
+    };
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    row.add_css_class("bern-banner");
+    row.add_css_class(&format!("bern-banner-{severity}"));
+    row.set_hexpand(true);
+    row.set_valign(gtk::Align::Center);
+    let icon = icons::image(props.icon.unwrap_or(default_icon));
+    icon.set_valign(gtk::Align::Center);
+    row.append(&icon);
+    let text_col = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    text_col.set_hexpand(true);
+    if let Some(title) = props.title.as_ref().map(|t| bound_text(ctx, t)) {
+        let lbl = gtk::Label::new(None);
+        lbl.add_css_class("heading");
+        lbl.set_xalign(0.0);
+        lbl.set_wrap(true);
+        let l = lbl.clone();
+        effect(move || l.set_text(&title()));
+        text_col.append(&lbl);
+    }
+    let content_text = props.content.as_ref().map(|t| bound_text(ctx, t));
+    if let Some(content) = &content_text {
+        let lbl = gtk::Label::new(None);
+        lbl.set_xalign(0.0);
+        lbl.set_wrap(true);
+        let l = lbl.clone();
+        let c = Rc::clone(content);
+        effect(move || l.set_text(&c()));
+        text_col.append(&lbl);
+    }
+    row.append(&text_col);
+    if let Some(build_actions) = actions {
+        let act_box = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        act_box.set_valign(gtk::Align::Center);
+        build_actions(&Parent::of_box(&act_box), ctx);
+        row.append(&act_box);
+    }
+    if let Some(on_dismiss) = bound_action(ctx, &dismiss) {
+        let close = gtk::Button::from_icon_name("window-close-symbolic");
+        close.add_css_class("flat");
+        close.add_css_class("circular");
+        close.set_valign(gtk::Align::Center);
+        let close_label = props
+            .dismiss_label
+            .as_ref()
+            .map(|l| bound_text(ctx, l))
+            .or_else(|| content_text.clone());
+        if let Some(lbl) = &close_label {
+            let btn = close.clone();
+            let l = Rc::clone(lbl);
+            effect(move || btn.set_tooltip_text(Some(&l())));
+        }
+        let run = Rc::clone(&on_dismiss);
+        close.connect_clicked(move |_| run());
+        row.append(&close);
+        if let Some(id) = props.id {
+            controls::register(
+                ctx,
+                id,
+                "button",
+                close_label,
+                None,
+                Actions {
+                    activate: Some(on_dismiss),
+                    ..Actions::default()
+                },
+            );
+        }
+    }
+    p.add(&row);
+}
+
+pub struct DisclosureProps {
+    pub id: &'static str,
+    pub label: Option<Str>,
+    pub icon: Option<&'static str>,
+    pub model: Option<Model>,
+    pub then: Option<Act>,
+}
+
+#[allow(non_snake_case)]
+pub fn Disclosure(p: &Parent, ctx: &Ctx, props: DisclosureProps, children: Build) {
+    let label = props.label.as_ref().map(|l| bound_text(ctx, l));
+    let bound = props.model.map(|m| Bound::model(ctx, m));
+    let local = Rc::new(crate::reactive::Cell::new(false));
+    let then = bound_action(ctx, &props.then);
+    let read_open: Rc<dyn Fn() -> bool> = {
+        let bound = bound.clone();
+        let local = Rc::clone(&local);
+        Rc::new(move || match &bound {
+            Some(b) => crate::value::truthy(&b.get()),
+            None => local.get(),
+        })
+    };
+    let peek_open: Rc<dyn Fn() -> bool> = {
+        let bound = bound.clone();
+        let local = Rc::clone(&local);
+        Rc::new(move || match &bound {
+            Some(b) => crate::value::truthy(&b.peek()),
+            None => local.peek(),
+        })
+    };
+    let write_open: Rc<dyn Fn(bool)> = {
+        let bound = bound.clone();
+        let local = Rc::clone(&local);
+        let then = then.clone();
+        Rc::new(move |next| match &bound {
+            Some(b) => {
+                if crate::value::truthy(&b.peek()) != next {
+                    b.set(Value::Bool(next));
+                }
+            }
+            None => {
+                if local.peek() != next {
+                    local.set(next);
+                    if let Some(run) = &then {
+                        run();
+                    }
+                }
+            }
+        })
+    };
+    let expander = gtk::Expander::new(None);
+    expander.set_hexpand(true);
+    let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    if let Some(icon) = props.icon {
+        header.append(&icons::image(icon));
+    }
+    if let Some(lbl) = label.clone() {
+        let text = gtk::Label::new(None);
+        let shown = text.clone();
+        effect(move || shown.set_text(&lbl()));
+        header.append(&text);
+    }
+    expander.set_label_widget(Some(&header));
+    let body = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    body.set_margin_top(6);
+    body.set_margin_start(16);
+    children(&Parent::of_box(&body), ctx);
+    expander.set_child(Some(&body));
+    let updating = Rc::new(Cell::new(false));
+    {
+        let exp = expander.clone();
+        let read_open = Rc::clone(&read_open);
+        let guard = Rc::clone(&updating);
+        effect(move || {
+            let open = read_open();
+            if exp.is_expanded() != open {
+                guard.set(true);
+                exp.set_expanded(open);
+                guard.set(false);
+            }
+        });
+    }
+    {
+        let write_open = Rc::clone(&write_open);
+        let guard = Rc::clone(&updating);
+        expander.connect_expanded_notify(move |exp| {
+            if !guard.get() {
+                write_open(exp.is_expanded());
+            }
+        });
+    }
+    p.add(&expander);
+    let peek_toggle = Rc::clone(&peek_open);
+    let write_toggle = Rc::clone(&write_open);
+    let write_bool = Rc::clone(&write_open);
+    let peek_val = Rc::clone(&peek_open);
+    controls::register(
+        ctx,
+        props.id,
+        "disclosure",
+        label,
+        None,
+        Actions {
+            activate: Some(Rc::new(move || write_toggle(!peek_toggle()))),
+            set_bool: Some(Rc::new(move |on| write_bool(on))),
+            value: Some(Rc::new(move || {
+                Some(if peek_val() { "true" } else { "false" }.to_string())
+            })),
+            ..Actions::default()
+        },
+    );
+}
+
+#[derive(Default)]
+pub struct NumberInputProps {
+    pub id: &'static str,
+    pub label: Option<Str>,
+    pub model: Option<Model>,
+    pub min: Option<f64>,
+    pub max: Option<f64>,
+    pub step: Option<f64>,
+    pub precision: u32,
+    pub enabled: Option<Get>,
+    pub label_hidden: bool,
+}
+
+#[allow(non_snake_case)]
+pub fn NumberInput(p: &Parent, ctx: &Ctx, props: NumberInputProps) {
+    let Some(model) = props.model else { return };
+    let bound = Bound::model(ctx, model);
+    let label = props.label.as_ref().map(|l| bound_text(ctx, l));
+    let enabled = bound_enabled(ctx, &props.enabled);
+    let min = props.min.unwrap_or(-1e9);
+    let max = props.max.unwrap_or(1e9);
+    let step = props.step.unwrap_or(1.0);
+    let precision = props.precision.min(6);
+    let clamp_round = move |raw: f64| -> f64 {
+        let clamped = raw.clamp(min, max);
+        let factor = 10_f64.powi(precision as i32);
+        (clamped * factor).round() / factor
+    };
+    let initial = clamp_round(as_f64(&bound.peek()));
+    let adj = gtk::Adjustment::new(initial, min, max, step, step * 10.0, 0.0);
+    let spin = gtk::SpinButton::new(Some(&adj), step, precision);
+    spin.set_numeric(true);
+    spin.set_valign(gtk::Align::Center);
+    let updating = Rc::new(Cell::new(false));
+    {
+        let spin_r = spin.clone();
+        let read = bound.clone();
+        let guard = Rc::clone(&updating);
+        effect(move || {
+            let v = as_f64(&read.get());
+            if (spin_r.value() - v).abs() > 1e-12 {
+                guard.set(true);
+                spin_r.set_value(v);
+                guard.set(false);
+            }
+        });
+    }
+    if let Some(en) = enabled.clone() {
+        let s = spin.clone();
+        effect(move || s.set_sensitive(en()));
+    }
+    let commit: Rc<dyn Fn(f64)> = {
+        let bound = bound.clone();
+        Rc::new(move |raw| {
+            if !raw.is_finite() {
+                return;
+            }
+            let next = clamp_round(raw);
+            if (as_f64(&bound.peek()) - next).abs() > 1e-12 {
+                bound.set(Value::Float(next));
+            }
+        })
+    };
+    {
+        let commit = Rc::clone(&commit);
+        let guard = Rc::clone(&updating);
+        spin.connect_value_changed(move |s| {
+            if !guard.get() {
+                commit(s.value());
+            }
+        });
+    }
+    if props.label_hidden
+        && let Some(lbl) = label.clone()
+    {
+        let named = spin.clone();
+        effect(move || named.update_property(&[gtk::accessible::Property::Label(&lbl())]));
+    }
+    if ctx.in_toolbar() || props.label_hidden {
+        if p.is_list() {
+            p.add(&plain_row(&spin));
+        } else {
+            keeps_width(&spin);
+            p.add(&spin);
+        }
+    } else if p.is_list() {
+        let row = adw::ActionRow::new();
+        if let Some(lbl) = label.clone() {
+            let shown = row.clone();
+            effect(move || shown.set_title(&glib::markup_escape_text(&lbl())));
+        }
+        row.add_suffix(&spin);
+        p.add(&row);
+    } else {
+        p.add(&beside(label.clone(), &spin));
+    }
+    let commit_edit = Rc::clone(&commit);
+    let commit_num = Rc::clone(&commit);
+    let value = bound.clone();
+    controls::register(
+        ctx,
+        props.id,
+        "number_input",
+        label,
+        enabled,
+        Actions {
+            edit: Some(Rc::new(move |s| {
+                if let Ok(v) = s.trim().parse::<f64>() {
+                    commit_edit(v);
+                }
+            })),
+            set_number: Some(Rc::new(move |v| commit_num(v))),
+            value: Some(Rc::new(move || Some(number(as_f64(&value.peek()))))),
             ..Actions::default()
         },
     );

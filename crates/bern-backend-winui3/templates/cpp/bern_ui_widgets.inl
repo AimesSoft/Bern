@@ -2622,15 +2622,26 @@ struct PickerProps {
     Get current;
     std::function<void(Ctx const&, Value const&)> change;
     std::vector<PickOption> options;
+    Str prompt;
     char const* style = nullptr;
     bool labelHidden = false;
     std::optional<ControlShape> shape;
 };
 
+/// Case-insensitive UTF-16 substring search for combobox filtering.
+inline bool ContainsCaseInsensitive(winrt::hstring const& haystack, winrt::hstring const& needle) {
+    if (needle.empty()) return true;
+    std::wstring h(haystack.c_str()), n(needle.c_str());
+    for (auto& ch : h) ch = static_cast<wchar_t>(towlower(ch));
+    for (auto& ch : n) ch = static_cast<wchar_t>(towlower(ch));
+    return h.find(n) != std::wstring::npos;
+}
+
 inline void Picker(Parent const& p, Ctx const& ctx, PickerProps props) {
     auto model = ModelOf(ctx, props.field, props.then, props.current, props.change);
     if (!model.read || props.options.empty()) return;
     auto text = Bound(ctx, props.label);
+    auto prompt = Bound(ctx, props.prompt);
     auto options = std::make_shared<std::vector<PickOption>>(std::move(props.options));
     auto indexOf = [options](Value const& value) -> std::optional<int> {
         if (value.kind != Value::Kind::Enum) return std::nullopt;
@@ -2644,7 +2655,54 @@ inline void Picker(Parent const& p, Ctx const& ctx, PickerProps props) {
     };
     std::string_view style = props.style ? props.style : "";
     xaml::FrameworkElement control{nullptr};
-    if (style == "chips") {
+    if (style == "combobox") {
+        controls::AutoSuggestBox box;
+        box.MinWidth(180);
+        box.QueryIcon(controls::SymbolIcon(controls::Symbol::Find));
+        if (prompt) Reactive::Run([box, prompt] { box.PlaceholderText(prompt()); });
+        else if (text) Reactive::Run([box, text] { box.PlaceholderText(text()); });
+        auto updating = std::make_shared<bool>(false);
+        auto filter = [box, options, ctx](winrt::hstring const& query) {
+            auto items = winrt::single_threaded_vector<winrt::Windows::Foundation::IInspectable>();
+            for (auto const& opt : *options) {
+                auto lbl = opt.label(ctx);
+                if (ContainsCaseInsensitive(lbl, query)) items.Append(winrt::box_value(lbl));
+            }
+            box.ItemsSource(items);
+        };
+        Reactive::Run([box, options, model, indexOf, ctx, updating, filter] {
+            auto idx = indexOf(model.read());
+            winrt::hstring chosen = idx ? (*options)[*idx].label(ctx) : winrt::hstring();
+            *updating = true;
+            box.Text(chosen);
+            filter(winrt::hstring());
+            *updating = false;
+        });
+        box.GotFocus([filter](auto&&, auto&&) { filter(winrt::hstring()); });
+        box.TextChanged([updating, filter](controls::AutoSuggestBox const& sender, controls::AutoSuggestBoxTextChangedEventArgs const& args) {
+            if (*updating) return;
+            if (args.Reason() == controls::AutoSuggestionBoxTextChangeReason::UserInput) {
+                filter(sender.Text());
+                sender.IsSuggestionListOpen(true);
+            }
+        });
+        auto pickByLabel = [options, ctx, choose](winrt::hstring const& lbl) {
+            for (size_t i = 0; i < options->size(); ++i) {
+                if ((*options)[i].label(ctx) == lbl) {
+                    choose(static_cast<int>(i));
+                    return;
+                }
+            }
+        };
+        box.SuggestionChosen([pickByLabel](auto&&, controls::AutoSuggestBoxSuggestionChosenEventArgs const& args) {
+            if (auto chosen = args.SelectedItem().try_as<winrt::hstring>()) pickByLabel(*chosen);
+        });
+        box.QuerySubmitted([pickByLabel](auto&&, controls::AutoSuggestBoxQuerySubmittedEventArgs const& args) {
+            if (auto chosen = args.ChosenSuggestion().try_as<winrt::hstring>()) pickByLabel(*chosen);
+            else if (!args.QueryText().empty()) pickByLabel(args.QueryText());
+        });
+        control = box;
+    } else if (style == "chips") {
         // A toggle button per option, the chosen one checked. In a flow the
         // buttons are items of the flow; elsewhere they wrap in a flow of
         // their own.
@@ -2752,6 +2810,604 @@ inline void Picker(Parent const& p, Ctx const& ctx, PickerProps props) {
                 if (auto index = indexOf(model.peek())) return std::string((*options)[*index].name);
                 return std::nullopt;
             }});
+}
+
+struct DynamicPickerProps {
+    char const* id = "";
+    Str label;
+    std::optional<Field> field;
+    Act then;
+    Get current;
+    std::function<void(Ctx const&, Value const&)> change;
+    Get items;
+    int keyField = 0;
+    int labelField = 0;
+    bool keyIsInt = false;
+    char const* labelEnum = nullptr;
+    Str prompt;
+    char const* style = nullptr;
+    bool labelHidden = false;
+    std::optional<ControlShape> shape;
+};
+
+struct DynPickItem {
+    Value key;
+    std::string keyText;
+    winrt::hstring label;
+};
+
+inline void DynamicPicker(Parent const& p, Ctx const& ctx, DynamicPickerProps props) {
+    auto model = ModelOf(ctx, props.field, props.then, props.current, props.change);
+    if (!model.read || !props.items) return;
+    auto text = Bound(ctx, props.label);
+    auto prompt = Bound(ctx, props.prompt);
+    int keyField = props.keyField;
+    int labelField = props.labelField;
+    bool keyIsInt = props.keyIsInt;
+    std::string labelEnum = props.labelEnum ? props.labelEnum : "";
+    auto itemsGetter = props.items;
+    auto readItems = [ctx, itemsGetter, keyField, labelField, labelEnum]() -> std::vector<DynPickItem> {
+        std::vector<DynPickItem> out;
+        auto const& list = R::AsList(itemsGetter(ctx));
+        out.reserve(list.size());
+        for (auto const& row : list) {
+            Value k = R::At(row, {keyField});
+            Value lv = R::At(row, {labelField});
+            winrt::hstring lbl = !labelEnum.empty() && lv.kind == Value::Kind::Enum
+                ? bern::Text::Label(labelEnum.c_str(), lv.variant)
+                : R::Plain(lv);
+            out.push_back(DynPickItem{k, R::KeyText(k), lbl});
+        }
+        return out;
+    };
+    auto snapshot = std::make_shared<std::vector<DynPickItem>>();
+    auto indexOf = [](std::vector<DynPickItem> const& items, Value const& value) -> std::optional<int> {
+        for (size_t i = 0; i < items.size(); ++i)
+            if (items[i].key == value) return static_cast<int>(i);
+        return std::nullopt;
+    };
+    auto chooseValue = [model](Value const& value) {
+        if (!(model.peek() == value)) model.write(value);
+    };
+    std::string_view style = props.style ? props.style : "";
+    xaml::FrameworkElement control{nullptr};
+    if (style == "combobox") {
+        controls::AutoSuggestBox box;
+        box.MinWidth(180);
+        box.QueryIcon(controls::SymbolIcon(controls::Symbol::Find));
+        if (prompt) Reactive::Run([box, prompt] { box.PlaceholderText(prompt()); });
+        else if (text) Reactive::Run([box, text] { box.PlaceholderText(text()); });
+        auto updating = std::make_shared<bool>(false);
+        auto shownKeys = std::make_shared<std::vector<Value>>();
+        auto filter = [box, snapshot, shownKeys](winrt::hstring const& query) {
+            auto items = winrt::single_threaded_vector<winrt::Windows::Foundation::IInspectable>();
+            shownKeys->clear();
+            for (auto const& opt : *snapshot) {
+                if (ContainsCaseInsensitive(opt.label, query)) {
+                    items.Append(winrt::box_value(opt.label));
+                    shownKeys->push_back(opt.key);
+                }
+            }
+            box.ItemsSource(items);
+        };
+        Reactive::Run([box, readItems, snapshot, model, indexOf, updating, filter] {
+            *snapshot = readItems();
+            auto cur = model.read();
+            auto idx = indexOf(*snapshot, cur);
+            winrt::hstring chosen = idx ? (*snapshot)[*idx].label : winrt::hstring();
+            *updating = true;
+            box.Text(chosen);
+            filter(winrt::hstring());
+            *updating = false;
+        });
+        box.GotFocus([filter](auto&&, auto&&) { filter(winrt::hstring()); });
+        box.TextChanged([updating, filter](controls::AutoSuggestBox const& sender, controls::AutoSuggestBoxTextChangedEventArgs const& args) {
+            if (*updating) return;
+            if (args.Reason() == controls::AutoSuggestionBoxTextChangeReason::UserInput) {
+                filter(sender.Text());
+                sender.IsSuggestionListOpen(true);
+            }
+        });
+        auto pickByLabel = [snapshot, chooseValue](winrt::hstring const& lbl) {
+            for (auto const& opt : *snapshot) {
+                if (opt.label == lbl) {
+                    chooseValue(opt.key);
+                    return;
+                }
+            }
+        };
+        box.SuggestionChosen([pickByLabel](auto&&, controls::AutoSuggestBoxSuggestionChosenEventArgs const& args) {
+            if (auto chosen = args.SelectedItem().try_as<winrt::hstring>()) pickByLabel(*chosen);
+        });
+        box.QuerySubmitted([pickByLabel](auto&&, controls::AutoSuggestBoxQuerySubmittedEventArgs const& args) {
+            if (auto chosen = args.ChosenSuggestion().try_as<winrt::hstring>()) pickByLabel(*chosen);
+            else if (!args.QueryText().empty()) pickByLabel(args.QueryText());
+        });
+        control = box;
+    } else if (style == "chips" || style == "segmented" || style == "radio" || style == "inline") {
+        auto panel = MakeFlowPanel(8);
+        Reactive::Run([panel, readItems, snapshot, model, chooseValue] {
+            *snapshot = readItems();
+            auto cur = model.read();
+            panel.Children().Clear();
+            for (auto const& opt : *snapshot) {
+                controls::Primitives::ToggleButton btn;
+                btn.Content(winrt::box_value(opt.label));
+                btn.IsChecked(opt.key == cur);
+                Value k = opt.key;
+                btn.Click([chooseValue, k](auto&&, auto&&) { chooseValue(k); });
+                panel.Children().Append(btn);
+            }
+        });
+        control = panel;
+    } else if (props.shape) {
+        controls::DropDownButton button;
+        button.HorizontalAlignment(xaml::HorizontalAlignment::Left);
+        controls::TextBlock chosen;
+        button.Content(chosen);
+        controls::MenuFlyout flyout;
+        if (auto st = PresenterTheme(L"MenuFlyoutPresenter", ctx.appearance)) flyout.MenuFlyoutPresenterStyle(st);
+        button.Flyout(flyout);
+        Reactive::Run([chosen, flyout, readItems, snapshot, model, indexOf, chooseValue, prompt, text] {
+            *snapshot = readItems();
+            auto cur = model.read();
+            auto idx = indexOf(*snapshot, cur);
+            if (idx) chosen.Text((*snapshot)[*idx].label);
+            else if (prompt) chosen.Text(prompt());
+            else if (text) chosen.Text(text());
+            else chosen.Text(L"");
+            flyout.Items().Clear();
+            for (auto const& opt : *snapshot) {
+                controls::ToggleMenuFlyoutItem item;
+                item.Text(opt.label);
+                item.IsChecked(opt.key == cur);
+                Value k = opt.key;
+                item.Click([chooseValue, k](auto&&, auto&&) { chooseValue(k); });
+                flyout.Items().Append(item);
+            }
+        });
+        ShapeControl(ctx, button, props.shape);
+        control = button;
+    } else {
+        controls::ComboBox combo;
+        combo.MinWidth(160);
+        if (prompt) Reactive::Run([combo, prompt] { combo.PlaceholderText(prompt()); });
+        auto updating = std::make_shared<bool>(false);
+        Reactive::Run([combo, readItems, snapshot, model, indexOf, updating] {
+            *snapshot = readItems();
+            auto cur = model.read();
+            *updating = true;
+            combo.Items().Clear();
+            for (auto const& opt : *snapshot) combo.Items().Append(winrt::box_value(opt.label));
+            auto idx = indexOf(*snapshot, cur);
+            combo.SelectedIndex(idx.value_or(-1));
+            *updating = false;
+        });
+        combo.SelectionChanged([weak = winrt::make_weak(combo), snapshot, chooseValue, updating](auto&&, auto&&) {
+            if (auto combo = weak.get(); combo && !*updating) {
+                int idx = combo.SelectedIndex();
+                if (idx >= 0 && static_cast<size_t>(idx) < snapshot->size()) chooseValue((*snapshot)[idx].key);
+            }
+        });
+        control = combo;
+    }
+    if (control) {
+        BindName(control, text);
+        if (ctx.toolbar || props.labelHidden) p.isList && !ctx.toolbar ? p.Add(Card(control)) : p.Add(control);
+        else if (p.isList) p.Add(LabeledCard(text, control));
+        else p.Add(Stacked(text, control));
+    }
+    Controls::Register(ctx, props.id, "picker", text, nullptr,
+        Actions{.select = [readItems, chooseValue, keyIsInt](std::string const& name) {
+                    auto cur = Reactive::Untrack([&] { return readItems(); });
+                    for (auto const& opt : cur) {
+                        if (opt.keyText == name) {
+                            chooseValue(opt.key);
+                            return true;
+                        }
+                    }
+                    (void)keyIsInt;
+                    return false;
+                },
+            .value = [model]() -> std::optional<std::string> {
+                return R::KeyText(model.peek());
+            }});
+}
+
+/// `Tooltip`: attaches native ToolTipService text to its single child without extra wrapper panels.
+inline void Tooltip(Parent const& p, Ctx const& ctx, Str content, Build const& children) {
+    if (!p.region) return children(p, ctx);
+    auto before = p.region->items.size();
+    children(p, ctx);
+    auto text = Bound(ctx, content);
+    if (!text) return;
+    for (auto i = before; i < p.region->items.size(); ++i) {
+        if (auto const& element = p.region->items[i].element) {
+            Reactive::Run([element, text] {
+                controls::ToolTipService::SetToolTip(element, winrt::box_value(text()));
+            });
+        }
+    }
+}
+
+struct BannerProps {
+    char const* id = nullptr;
+    char const* severity = nullptr;
+    Str title;
+    Str content;
+    char const* icon = nullptr;
+    Str dismissLabel;
+    Act dismiss;
+};
+
+inline void Banner(Parent const& p, Ctx const& ctx, BannerProps props, Build const& actions) {
+    std::string sev = props.severity ? props.severity : "info";
+    auto title = Bound(ctx, props.title);
+    auto content = Bound(ctx, props.content);
+    auto dismissLabel = Bound(ctx, props.dismissLabel);
+    auto dismiss = Run(ctx, props.dismiss);
+    char const* defaultIcon = sev == "success" ? "checkmark.circle"
+        : sev == "warning" ? "exclamationmark.triangle"
+        : sev == "error" ? "xmark.circle.fill"
+        : "info.circle";
+    char const* iconName = props.icon ? props.icon : defaultIcon;
+#if BERN_WINUI
+    controls::InfoBar bar;
+    bar.IsOpen(true);
+    bar.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+    if (sev == "success") bar.Severity(controls::InfoBarSeverity::Success);
+    else if (sev == "warning") bar.Severity(controls::InfoBarSeverity::Warning);
+    else if (sev == "error") bar.Severity(controls::InfoBarSeverity::Error);
+    else bar.Severity(controls::InfoBarSeverity::Informational);
+    if (props.icon) {
+        controls::FontIconSource iconSrc;
+        iconSrc.Glyph(Icons::Glyph(iconName));
+        iconSrc.FontFamily(media::FontFamily(L"Segoe Fluent Icons"));
+        bar.IconSource(iconSrc);
+    }
+    if (title) Reactive::Run([bar, title] { bar.Title(title()); });
+    if (content) Reactive::Run([bar, content] { bar.Message(content()); });
+    bar.IsClosable(static_cast<bool>(dismiss));
+    if (actions) {
+        controls::StackPanel row;
+        row.Orientation(controls::Orientation::Horizontal);
+        row.Spacing(8);
+        row.Margin(xaml::Thickness{0, 0, 0, 12});
+        actions(Parent::Of(row), ctx);
+        bar.Content(row);
+    }
+    if (dismiss) {
+        bar.Closing([dismiss](controls::InfoBar const&, controls::InfoBarClosingEventArgs const& args) {
+            args.Cancel(true);
+            dismiss();
+        });
+    }
+    SetRole(bar, L"bern-fill-width");
+    p.Add(bar);
+#else
+    controls::Border border;
+    border.CornerRadius(xaml::CornerRadius{8, 8, 8, 8});
+    border.BorderThickness(xaml::Thickness{1, 1, 1, 1});
+    border.Padding(xaml::Thickness{14, 10, 14, 10});
+    border.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+    std::string role = sev == "success" ? "status.success"
+        : sev == "warning" ? "status.warning"
+        : sev == "error" ? "status.error"
+        : "accent";
+    auto paintBorder = [border, win = ctx.win, role] {
+        bool dark = IsDark(border);
+        border.Background(media::SolidColorBrush(ColorOf(win, dark, Paint(role.c_str()), 0.12)));
+        border.BorderBrush(media::SolidColorBrush(ColorOf(win, dark, Paint(role.c_str()), 0.30)));
+    };
+    paintBorder();
+    border.ActualThemeChanged([paintBorder](auto&&, auto&&) { paintBorder(); });
+    controls::Grid grid;
+    controls::ColumnDefinition c0, c1, c2, c3;
+    c0.Width(xaml::GridLength{0, xaml::GridUnitType::Auto});
+    c1.Width(xaml::GridLength{1, xaml::GridUnitType::Star});
+    c2.Width(xaml::GridLength{0, xaml::GridUnitType::Auto});
+    c3.Width(xaml::GridLength{0, xaml::GridUnitType::Auto});
+    grid.ColumnDefinitions().Append(c0);
+    grid.ColumnDefinitions().Append(c1);
+    grid.ColumnDefinitions().Append(c2);
+    grid.ColumnDefinitions().Append(c3);
+    auto glyph = Icons::Icon(iconName);
+    glyph.Margin(xaml::Thickness{0, 2, 12, 0});
+    glyph.VerticalAlignment(xaml::VerticalAlignment::Top);
+    controls::Grid::SetColumn(glyph, 0);
+    grid.Children().Append(glyph);
+    controls::StackPanel textCol;
+    textCol.Spacing(2);
+    if (title) {
+        controls::TextBlock tb;
+        tb.FontWeight(WeightNamed("semibold"));
+        tb.TextWrapping(xaml::TextWrapping::Wrap);
+        Reactive::Run([tb, title] { tb.Text(title()); });
+        textCol.Children().Append(tb);
+    }
+    if (content) {
+        controls::TextBlock cb;
+        cb.TextWrapping(xaml::TextWrapping::Wrap);
+        Reactive::Run([cb, content] { cb.Text(content()); });
+        textCol.Children().Append(cb);
+    }
+    controls::Grid::SetColumn(textCol, 1);
+    grid.Children().Append(textCol);
+    if (actions) {
+        controls::StackPanel row;
+        row.Orientation(controls::Orientation::Horizontal);
+        row.Spacing(8);
+        row.Margin(xaml::Thickness{12, 0, 0, 0});
+        row.VerticalAlignment(xaml::VerticalAlignment::Center);
+        actions(Parent::Of(row), ctx);
+        controls::Grid::SetColumn(row, 2);
+        grid.Children().Append(row);
+    }
+    if (dismiss) {
+        controls::Button close;
+        close.Content(Icons::Icon("xmark"));
+        close.Margin(xaml::Thickness{8, 0, 0, 0});
+        Styles::MakeSubtle(close);
+        close.Click([dismiss](auto&&, auto&&) { dismiss(); });
+        controls::Grid::SetColumn(close, 3);
+        grid.Children().Append(close);
+    }
+    border.Child(grid);
+    SetRole(border, L"bern-fill-width");
+    p.Add(border);
+#endif
+    if (props.id && *props.id && dismiss) {
+        auto label = dismissLabel ? dismissLabel : content;
+        Controls::Register(ctx, props.id, "button", label, nullptr, Actions{.activate = dismiss});
+    }
+}
+
+struct DisclosureProps {
+    char const* id = "";
+    Str label;
+    char const* icon = nullptr;
+    std::optional<Field> field;
+    Act then;
+    Get current;
+    std::function<void(Ctx const&, Value const&)> change;
+};
+
+inline void Disclosure(Parent const& p, Ctx const& ctx, DisclosureProps props, Build const& children) {
+    auto text = Bound(ctx, props.label);
+    auto local = std::make_shared<Cell<bool>>(false);
+    auto model = ModelOf(ctx, props.field, props.then, props.current, props.change);
+    auto then = Run(ctx, props.then);
+    auto readExpanded = [model, local]() -> bool {
+        if (model.read) return R::Truthy(model.read());
+        return local->Get();
+    };
+    auto peekExpanded = [model, local]() -> bool {
+        if (model.peek) return R::Truthy(model.peek());
+        return local->Peek();
+    };
+    auto writeExpanded = [model, local, then](bool next) {
+        if (model.write) {
+            if (R::Truthy(model.peek()) != next) model.write(Value::Bool(next));
+        } else {
+            if (local->Peek() != next) {
+                local->Set(next);
+                if (then) then();
+            }
+        }
+    };
+    auto body = MakeFlex(false, 8, xaml::Thickness{0, 0, 0, 0}, false);
+    children(Parent::Of(body), ctx);
+    auto updating = std::make_shared<bool>(false);
+#if BERN_WINUI
+    controls::Expander expander;
+    expander.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+    expander.HorizontalContentAlignment(xaml::HorizontalAlignment::Stretch);
+    controls::StackPanel header;
+    header.Orientation(controls::Orientation::Horizontal);
+    header.Spacing(8);
+    if (props.icon) header.Children().Append(Icons::Icon(props.icon));
+    if (text) header.Children().Append(TextOf(text));
+    expander.Header(header);
+    expander.Content(body);
+    Reactive::Run([expander, readExpanded, updating] {
+        bool open = readExpanded();
+        if (expander.IsExpanded() != open) {
+            *updating = true;
+            expander.IsExpanded(open);
+            *updating = false;
+        }
+    });
+    expander.Expanding([updating, writeExpanded](auto&&, auto&&) {
+        if (!*updating) writeExpanded(true);
+    });
+    expander.Collapsed([updating, writeExpanded](auto&&, auto&&) {
+        if (!*updating) writeExpanded(false);
+    });
+    BindName(expander, text);
+    SetRole(expander, L"bern-fill-width");
+    p.Add(expander);
+#else
+    controls::StackPanel container;
+    container.Spacing(6);
+    container.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+    controls::Primitives::ToggleButton toggle;
+    toggle.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+    toggle.HorizontalContentAlignment(xaml::HorizontalAlignment::Left);
+    controls::StackPanel header;
+    header.Orientation(controls::Orientation::Horizontal);
+    header.Spacing(8);
+    controls::ContentControl chevronHost;
+    chevronHost.IsTabStop(false);
+    chevronHost.Content(Icons::Icon("chevron.right"));
+    header.Children().Append(chevronHost);
+    if (props.icon) header.Children().Append(Icons::Icon(props.icon));
+    if (text) header.Children().Append(TextOf(text));
+    toggle.Content(header);
+    body.Margin(xaml::Thickness{16, 0, 0, 0});
+    Reactive::Run([toggle, chevronHost, body, readExpanded, updating] {
+        bool open = readExpanded();
+        *updating = true;
+        toggle.IsChecked(open);
+        chevronHost.Content(Icons::Icon(open ? "chevron.down" : "chevron.right"));
+        body.Visibility(open ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
+        *updating = false;
+    });
+    toggle.Click([updating, writeExpanded, weak = winrt::make_weak(toggle)](auto&&, auto&&) {
+        if (*updating) return;
+        if (auto btn = weak.get()) writeExpanded(btn.IsChecked().GetBoolean());
+    });
+    container.Children().Append(toggle);
+    container.Children().Append(body);
+    BindName(toggle, text);
+    SetRole(container, L"bern-fill-width");
+    p.Add(container);
+#endif
+    Controls::Register(ctx, props.id, "disclosure", text, nullptr,
+        Actions{
+            .activate = [peekExpanded, writeExpanded] { writeExpanded(!peekExpanded()); },
+            .setBool = [writeExpanded](bool on) { writeExpanded(on); },
+            .value = [peekExpanded]() -> std::optional<std::string> { return std::string(peekExpanded() ? "true" : "false"); },
+        });
+}
+
+struct NumberInputProps {
+    char const* id = "";
+    Str label;
+    std::optional<Field> field;
+    Act then;
+    Get current;
+    std::function<void(Ctx const&, Value const&)> change;
+    std::optional<double> min;
+    std::optional<double> max;
+    std::optional<double> step;
+    int precision = 0;
+    Get enabled;
+    bool labelHidden = false;
+};
+
+inline void NumberInput(Parent const& p, Ctx const& ctx, NumberInputProps props) {
+    auto model = ModelOf(ctx, props.field, props.then, props.current, props.change);
+    if (!model.read) return;
+    auto text = Bound(ctx, props.label);
+    auto minVal = props.min;
+    auto maxVal = props.max;
+    double stepVal = props.step.value_or(1.0);
+    int precision = (std::clamp)(props.precision, 0, 6);
+    auto enabledGetter = props.enabled;
+    auto clampAndRound = [minVal, maxVal, precision](double raw) {
+        double v = raw;
+        if (minVal) v = (std::max)(v, *minVal);
+        if (maxVal) v = (std::min)(v, *maxVal);
+        double factor = std::pow(10.0, static_cast<double>(precision));
+        return std::round(v * factor) / factor;
+    };
+    auto commitVal = [model, clampAndRound](double raw) {
+        if (!std::isfinite(raw)) return;
+        double next = clampAndRound(raw);
+        double cur = R::AsDouble(model.peek());
+        if (std::abs(cur - next) > 1e-12) model.write(Value::Float(next));
+    };
+    auto updating = std::make_shared<bool>(false);
+    xaml::FrameworkElement control{nullptr};
+#if BERN_WINUI
+    controls::NumberBox box;
+    box.MinWidth(140);
+    box.SmallChange(stepVal);
+    box.LargeChange(stepVal * 10.0);
+    box.SpinButtonPlacementMode(controls::NumberBoxSpinButtonPlacementMode::Inline);
+    if (minVal) box.Minimum(*minVal);
+    if (maxVal) box.Maximum(*maxVal);
+    {
+        winrt::Windows::Globalization::NumberFormatting::DecimalFormatter fmt;
+        fmt.IntegerDigits(1);
+        fmt.FractionDigits(precision);
+        winrt::Windows::Globalization::NumberFormatting::IncrementNumberRounder rounder;
+        rounder.Increment(std::pow(10.0, -precision));
+        fmt.NumberRounder(rounder);
+        box.NumberFormatter(fmt);
+    }
+    Reactive::Run([box, model, updating] {
+        double val = R::AsDouble(model.read());
+        if (std::isnan(box.Value()) || std::abs(box.Value() - val) > 1e-12) {
+            *updating = true;
+            box.Value(val);
+            *updating = false;
+        }
+    });
+    if (enabledGetter) {
+        Reactive::Run([box, ctx, enabledGetter] { box.IsEnabled(R::Truthy(enabledGetter(ctx))); });
+    }
+    box.ValueChanged([updating, commitVal](controls::NumberBox const&, controls::NumberBoxValueChangedEventArgs const& args) {
+        if (*updating) return;
+        double next = args.NewValue();
+        if (std::isfinite(next)) commitVal(next);
+    });
+    control = box;
+#else
+    controls::StackPanel row;
+    row.Orientation(controls::Orientation::Horizontal);
+    row.Spacing(4);
+    controls::TextBox edit;
+    edit.MinWidth(96);
+    controls::Button dec;
+    dec.Content(Icons::Icon("minus"));
+    controls::Button inc;
+    inc.Content(Icons::Icon("plus"));
+    auto formatNum = [precision](double v) {
+        wchar_t buf[64];
+        swprintf(buf, 64, L"%.*f", precision, v);
+        return winrt::hstring(buf);
+    };
+    Reactive::Run([edit, model, updating, formatNum] {
+        double val = R::AsDouble(model.read());
+        *updating = true;
+        edit.Text(formatNum(val));
+        *updating = false;
+    });
+    if (enabledGetter) {
+        Reactive::Run([edit, dec, inc, ctx, enabledGetter] {
+            bool on = R::Truthy(enabledGetter(ctx));
+            edit.IsEnabled(on);
+            dec.IsEnabled(on);
+            inc.IsEnabled(on);
+        });
+    }
+    auto applyEdit = [weak = winrt::make_weak(edit), commitVal, model, formatNum] {
+        if (auto e = weak.get()) {
+            try {
+                double parsed = std::stod(Utf8(e.Text()));
+                commitVal(parsed);
+            } catch (...) {
+                e.Text(formatNum(R::AsDouble(model.peek())));
+            }
+        }
+    };
+    edit.LostFocus([applyEdit](auto&&, auto&&) { applyEdit(); });
+    edit.KeyDown([applyEdit](auto&&, xaml::Input::KeyRoutedEventArgs const& args) {
+        if (args.Key() == winrt::Windows::System::VirtualKey::Enter) applyEdit();
+    });
+    dec.Click([model, stepVal, commitVal](auto&&, auto&&) { commitVal(R::AsDouble(model.peek()) - stepVal); });
+    inc.Click([model, stepVal, commitVal](auto&&, auto&&) { commitVal(R::AsDouble(model.peek()) + stepVal); });
+    row.Children().Append(edit);
+    row.Children().Append(dec);
+    row.Children().Append(inc);
+    control = row;
+#endif
+    BindName(control, text);
+    if (ctx.toolbar || props.labelHidden) p.isList && !ctx.toolbar ? p.Add(Card(control)) : p.Add(control);
+    else if (p.isList) p.Add(LabeledCard(text, control));
+    else p.Add(Stacked(text, control));
+    Controls::Register(ctx, props.id, "number_input", text,
+        enabledGetter ? std::function<bool()>([ctx, enabledGetter] { return R::Truthy(enabledGetter(ctx)); }) : nullptr,
+        Actions{
+            .edit = [commitVal](std::string const& s) {
+                try {
+                    commitVal(std::stod(s));
+                } catch (...) {}
+            },
+            .setNumber = [commitVal](double v) { commitVal(v); },
+            .value = [model]() -> std::optional<std::string> { return R::Number(R::AsDouble(model.peek())); },
+        });
 }
 
 struct StackProps {

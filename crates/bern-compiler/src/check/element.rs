@@ -15,6 +15,8 @@ struct Parts {
     props: BTreeMap<String, ir::Prop>,
     id: Option<String>,
     template: Option<ir::Template>,
+    /// Record type of `items:` (present for template lists and dynamic `Picker`).
+    item_ty: Option<Type>,
     /// The context the children see.
     child_ctx: Ctx,
     /// Template variables pushed onto the scope for the children.
@@ -59,6 +61,7 @@ impl Checker<'_> {
             props: BTreeMap::new(),
             id: None,
             template: None,
+            item_ty: None,
             pushed: 0,
         };
         self.context_props(element, component, ctx, scope, &mut parts);
@@ -76,14 +79,52 @@ impl Checker<'_> {
             parts.props.insert(prop_name, lowered);
         }
 
-        if parts.kind == "Picker"
-            && let Some(ir::Prop::Expr { expr }) = parts.props.get("selected")
-            && !is_labeled_enum(&expr.ty, self.types)
-        {
-            self.error(
-                element.span,
-                "`selected` must be an enum whose variants all have labels",
-            );
+        if parts.kind == "Picker" {
+            if let Some(Type::Record { name: rec_name }) = &parts.item_ty {
+                if let Some(ir::Prop::Key { field: key_idx, .. }) = parts.props.get("key")
+                    && let Some(def) = self.types.record_def(rec_name)
+                    && let Some(key_field) = def.fields.get(*key_idx)
+                {
+                    let key_ty = &key_field.ty;
+                    if let Some(ir::Prop::Field { field }) = parts.props.get("value")
+                        && &field.ty != key_ty
+                    {
+                        let span = element
+                            .prop("value")
+                            .map_or(element.span, |p| p.value.span());
+                        self.error(
+                            span,
+                            format!(
+                                "`value` must match the `key` field's type ({}), found {}",
+                                key_ty.display(),
+                                field.ty.display()
+                            ),
+                        );
+                    }
+                    if let Some(ir::Prop::Expr { expr }) = parts.props.get("selected")
+                        && &expr.ty != key_ty
+                    {
+                        let span = element
+                            .prop("selected")
+                            .map_or(element.span, |p| p.value.span());
+                        self.error(
+                            span,
+                            format!(
+                                "`selected` must match the `key` field's type ({}), found {}",
+                                key_ty.display(),
+                                expr.ty.display()
+                            ),
+                        );
+                    }
+                }
+            } else if let Some(ir::Prop::Expr { expr }) = parts.props.get("selected")
+                && !is_labeled_enum(&expr.ty, self.types)
+            {
+                self.error(
+                    element.span,
+                    "`selected` must be an enum whose variants all have labels",
+                );
+            }
         }
         if parts.kind == "Picker"
             && matches!(parts.props.get("style"), Some(ir::Prop::Keyword { value }) if value == "chips")
@@ -170,6 +211,25 @@ impl Checker<'_> {
         }
         if parts.kind == "NativeView" {
             self.native_view_parts(element, &children);
+        }
+        if parts.kind == "Alert" {
+            let cancels = children
+                .iter()
+                .filter(|child| {
+                    matches!(
+                        child,
+                        ir::Node::Element(action)
+                            if action.kind == "AlertAction"
+                                && action.keyword("role") == Some("cancel")
+                    )
+                })
+                .count();
+            if cancels > 1 {
+                self.error(
+                    element.span,
+                    "an `Alert` has at most one `AlertAction` with `role: cancel`",
+                );
+            }
         }
         if let (Some(ir::Prop::Number { value: min }), Some(ir::Prop::Number { value: max })) =
             (parts.props.get("min"), parts.props.get("max"))
@@ -476,6 +536,7 @@ impl Checker<'_> {
                 return;
             }
         };
+        parts.item_ty = Some(item_ty.clone());
         if let Some(var) = &element.template {
             parts.bind(var.to_string(), item_ty, scope);
         }
@@ -583,7 +644,14 @@ impl Checker<'_> {
             PropKind::PositionField => self.field_prop(value, scope, FieldExpect::Position),
             PropKind::KeysField => self.field_prop(value, scope, FieldExpect::Keys),
             PropKind::FileKinds => self.file_kinds(value),
-            PropKind::PickerField => self.field_prop(value, scope, FieldExpect::Picker),
+            PropKind::PickerField => {
+                let expect = if name == "Picker" && parts.item_ty.is_some() {
+                    FieldExpect::Position
+                } else {
+                    FieldExpect::Picker
+                };
+                self.field_prop(value, scope, expect)
+            }
             // A container's `fallback` is one of its own values.
             PropKind::SelectionValue => {
                 let selection = if prop_name == "fallback" {
@@ -594,7 +662,17 @@ impl Checker<'_> {
                 self.selection_value(value, selection, scope)
             }
             PropKind::Route => self.route(value, ctx.route.clone(), scope),
-            PropKind::KeyField => self.key(value, parts.template.as_ref()),
+            PropKind::KeyField => {
+                let item_ty = parts
+                    .item_ty
+                    .as_ref()
+                    .or_else(|| parts.template.as_ref().map(|t| &t.ty));
+                if prop_name == "item_label" {
+                    self.label_field(value, item_ty)
+                } else {
+                    self.key(value, item_ty)
+                }
+            }
             PropKind::WindowId => self.window_id(value, name, &prop_name),
             // Slots are expanded before elements are lowered.
             PropKind::SlotName => None,

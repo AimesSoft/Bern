@@ -212,6 +212,18 @@ impl Generator<'_> {
                         values.join(", ")
                     )
                 }
+                Some(Action::Session {
+                    field,
+                    op: bern_ir::SessionOp::Set { value },
+                }) if value == expr => {
+                    let session = self.app.session(&field.session).expect("session");
+                    let target = format!(
+                        "{}.{}",
+                        session_var(&field.session),
+                        member(&session.fields[field.field].name)
+                    );
+                    format!("{target} = {}", convert(&field.ty))
+                }
                 Some(other) => self.action(other),
                 None => "Unit".into(),
             };

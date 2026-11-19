@@ -1,6 +1,6 @@
 //! Detail pages of the main window.
 
-use crate::{AppWindows, MainDraft, Players, Route};
+use crate::{AlertState, AppWindows, MainDraft, Players, Route};
 use bern::prelude::*;
 use showcase_protocol::showcase::{self, Action, ItemKind};
 
@@ -41,7 +41,11 @@ pub fn text_page(app: showcase::Client) -> impl View {
 
 /// Every button style, each bound to a registered command.
 #[component]
-pub fn buttons_page(app: showcase::Client, windows: AppWindows) -> impl View {
+pub fn buttons_page(
+    app: showcase::Client,
+    windows: AppWindows,
+    #[session] draft: MainDraft,
+) -> impl View {
     ui! {
         Form {
             Section(
@@ -55,11 +59,47 @@ pub fn buttons_page(app: showcase::Client, windows: AppWindows) -> impl View {
                     Button(id: delete, label: tr! { "zh-Hans" => "删除", "en" => "Delete" }, role: destructive) => app.record(Action::Delete)
                 }
             }
-            Section(title: tr! { "zh-Hans" => "图标按钮", "en" => "Icon Buttons" }) {
+            Section(title: tr! { "zh-Hans" => "图标按钮与提示", "en" => "Icon Buttons & Tooltips" }) {
                 Row(gap: 16) {
-                    IconButton(id: favorite, icon: "star", label: tr! { "zh-Hans" => "收藏", "en" => "Favorite" }) => app.record(Action::Icon)
-                    IconButton(id: share, icon: "square.and.arrow.up", label: tr! { "zh-Hans" => "分享", "en" => "Share" }) => app.record(Action::Icon)
+                    Tooltip(content: tr! { "zh-Hans" => "添加到收藏夹", "en" => "Add to favorites" }) {
+                        IconButton(id: favorite, icon: "star", label: tr! { "zh-Hans" => "收藏", "en" => "Favorite" }) => app.record(Action::Icon)
+                    }
+                    Tooltip(content: tr! { "zh-Hans" => "分享当前内容", "en" => "Share current item" }) {
+                        IconButton(id: share, icon: "square.and.arrow.up", label: tr! { "zh-Hans" => "分享", "en" => "Share" }) => app.record(Action::Icon)
+                    }
                     IconButton(id: trash, icon: "trash", label: tr! { "zh-Hans" => "移到废纸篓", "en" => "Move to Trash" }) => app.record(Action::Icon)
+                }
+            }
+            Section(title: tr! { "zh-Hans" => "横幅与确认框", "en" => "Banners & Alerts" }) {
+                if draft.banner_shown {
+                    Banner(
+                        id: sample_banner,
+                        severity: warning,
+                        title: tr! { "zh-Hans" => "本地变更尚未保存", "en" => "Unsaved Local Changes" },
+                        content: tr! { "zh-Hans" => "可先记录一次操作，或暂时关闭此提示。", "en" => "Record an action or dismiss this notice for now." }
+                    ) {
+                        Button(id: banner_save, label: tr! { "zh-Hans" => "记录操作", "en" => "Record" }, prominence: prominent) => app.record(Action::Primary)
+                    } => draft.banner_shown.set(false)
+                } else {
+                    Button(id: restore_banner, label: tr! { "zh-Hans" => "重新显示横幅", "en" => "Show Banner Again" }) => draft.banner_shown.set(true)
+                }
+                if draft.alert_state == AlertState::Confirmed {
+                    Banner(
+                        severity: success,
+                        content: tr! { "zh-Hans" => "已在确认对话框中完成操作。", "en" => "Action confirmed in the alert dialog." }
+                    )
+                }
+                Row(gap: 12) {
+                    Button(id: open_alert, label: tr! { "zh-Hans" => "打开确认对话框…", "en" => "Show Confirmation Alert…" }, role: destructive) => draft.alert_state.set(AlertState::Open)
+                }
+                if draft.alert_state == AlertState::Open {
+                    Alert(
+                        title: tr! { "zh-Hans" => "确认删除此项？", "en" => "Delete This Item?" },
+                        message: tr! { "zh-Hans" => "确认后会关闭对话框并显示完成横幅。", "en" => "Confirming closes the dialog and displays a completion banner." }
+                    ) {
+                        AlertAction(id: alert_cancel, label: tr! { "zh-Hans" => "取消", "en" => "Cancel" }, role: cancel) => draft.alert_state.set(AlertState::Idle)
+                        AlertAction(id: alert_confirm, label: tr! { "zh-Hans" => "删除", "en" => "Delete" }, role: destructive) => draft.alert_state.set(AlertState::Confirmed)
+                    } => draft.alert_state.set(AlertState::Idle)
                 }
             }
             Section(title: tr! { "zh-Hans" => "状态与窗口", "en" => "States and Windows" }) {
@@ -101,6 +141,27 @@ pub fn controls_page(app: showcase::Client, #[session] draft: MainDraft) -> impl
                 Picker(id: filter, label: tr! { "zh-Hans" => "显示", "en" => "Show" }, value: draft.filter, style: segmented)
                 Picker(id: density, label: tr! { "zh-Hans" => "密度", "en" => "Density" }, value: draft.density, style: menu)
                 Picker(id: density_chips, label: tr! { "zh-Hans" => "密度", "en" => "Density" }, value: draft.density, style: chips)
+                Picker(
+                    id: item_combo,
+                    label: tr! { "zh-Hans" => "动态检索", "en" => "Dynamic Search" },
+                    value: draft.selected_item,
+                    items: app.items,
+                    key: id,
+                    item_label: kind,
+                    style: combobox,
+                    prompt: tr! { "zh-Hans" => "输入关键词筛选…", "en" => "Filter items…" }
+                )
+            }
+            Section(title: tr! { "zh-Hans" => "折叠面板", "en" => "Disclosure" }) {
+                Disclosure(
+                    id: advanced_options,
+                    label: tr! { "zh-Hans" => "高级选项", "en" => "Advanced Options" },
+                    icon: "gearshape",
+                    expanded: draft.advanced_open
+                ) {
+                    Switch(id: adv_sync, label: tr! { "zh-Hans" => "后台同步", "en" => "Background Sync" }, value: draft.sync)
+                    Text(content: tr! { "zh-Hans" => "次要设置收纳在折叠区域内，按需展开。", "en" => "Secondary settings stay tucked away until expanded." }, style: footnote, emphasis: secondary)
+                }
             }
             Section(
                 title: tr! { "zh-Hans" => "工具条", "en" => "Tool Strip" },
@@ -128,6 +189,11 @@ pub fn inputs_page(app: showcase::Client, #[session] draft: MainDraft) -> impl V
                 TextInput(id: name, label: tr! { "zh-Hans" => "名字", "en" => "Name" }, value: draft.name, prompt: tr! { "zh-Hans" => "你的名字", "en" => "Your name" }) => app.record(Action::Submit)
                 TextInput(id: password, label: tr! { "zh-Hans" => "密码", "en" => "Password" }, value: draft.password, kind: secure, prompt: tr! { "zh-Hans" => "必填", "en" => "Required" })
                 TextInput(id: notes, label: tr! { "zh-Hans" => "备注", "en" => "Notes" }, value: draft.notes, kind: multiline, prompt: tr! { "zh-Hans" => "写点什么", "en" => "Write something" })
+            }
+            Section(title: tr! { "zh-Hans" => "数字输入", "en" => "Number Input" }) {
+                NumberInput(id: port, label: tr! { "zh-Hans" => "端口号", "en" => "Port" }, value: draft.port, min: 1, max: 65535, step: 1, precision: 0)
+                NumberInput(id: ratio, label: tr! { "zh-Hans" => "缩放倍率", "en" => "Scale Factor" }, value: draft.ratio, min: 0.25, max: 4.0, step: 0.25, precision: 2)
+                Text(content: tr! { "zh-Hans" => "当前端口：{port}，倍率：{ratio}", "en" => "Port: {port}, scale: {ratio}"; port: draft.port, ratio: draft.ratio }, style: footnote, emphasis: secondary)
             }
             Section(title: tr! { "zh-Hans" => "预览", "en" => "Preview" }) {
                 if draft.name == "" {

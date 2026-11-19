@@ -485,3 +485,12 @@ Grid(min_width: 160, gap: 16, skeleton: app.loading, skeleton_count: 6) {
 
 - **显式 `Skeleton` 原语**：针对没有对应真实内容结构的纯加载占位（如缓冲行），可直接使用 `Skeleton(width:, height:, fraction:, max_width:, aspect:, corner:, shape:, tone:, opacity:, pulse:)`。
 - **防闪烁、动效与无障碍**：骨架图在加载超过 120 ms 后才显示，避免瞬时闪屏；列表占位自带错峰轻浮入场（`stagger: 0.04`、`appear: slide`），以低透明度 `text.primary`（`0.06`–`0.09`）轻柔呼吸脉冲，系统开启减少动态效果时自动冻结脉冲；真实数据就绪后在 150 ms 内淡入；占位元素不拦截点击或焦点，并向读屏软件统一播报一次加载状态。异步网络 `Image` 在加载完成前也会自动显示轻柔脉冲的媒体占位。
+
+## 反馈提示、折叠面板、数字输入与动态选择器
+
+- **`Tooltip(content:)`**：为单个子控件附加悬停/聚焦提示，不改变布局。
+- **`Banner(severity:, title:, content:, icon:, dismiss_label:) { … } => dismiss`**：行内状态横幅（`info`、`success`、`warning`、`error`），使用各平台原生容器（WinUI 3 的 `InfoBar`，SwiftUI/GTK/Compose/Web/GPUI 的语义横幅），支持尾部操作按钮，绑定动作后自动显示关闭按钮。
+- **`Disclosure(id:, label:, icon:, expanded:, open:) { … }`**：可折叠展开区域，使用原生 `DisclosureGroup`（SwiftUI）、`Expander`（WinUI 3 / GTK）、Material 折叠区（Compose）与 `<details>`（Web）。支持草稿绑定（`expanded:`）、受控绑定（`open:` + `=> action`）以及省略绑定时的本地展开状态。
+- **`NumberInput(id:, label:, value:/current:, min:, max:, step:, precision:, enabled:)`**：带步进器与范围约束的数字输入控件（WinUI 3 `NumberBox`、GTK `SpinButton`、SwiftUI `TextField` + `Stepper`、Web `<input type="number">`）。
+- **`Alert(title:, message:) { AlertAction(id:, label:, role:) => … }`**：挂载即弹出原生确认对话框（SwiftUI `.alert`、WinUI 3 `ContentDialog`、GTK `AdwAlertDialog`、Compose Material 3 `AlertDialog`、Web `<dialog>`），通常放在 `if` 条件分支中控制显示。
+- **动态 `Picker` 与 `style: combobox`**：`Picker(items: app.items, key: id, item_label: name, value: draft.selected, style: combobox, prompt: …)` 支持直接绑定动态记录列表（`i64`、`String` 或带标签枚举键），并在 `combobox` 样式下提供可实时过滤的下拉选择。

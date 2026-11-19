@@ -528,7 +528,12 @@ impl<'a> Generator<'a> {
             }
             "Switch" => self.switch(out, element, ctx),
             "Slider" => self.slider(out, element, ctx),
+            "NumberInput" => self.number_input(out, element, ctx),
             "ColorPicker" => self.color_picker(out, element, ctx),
+            "Tooltip" => self.tooltip(out, element, ctx),
+            "Banner" => self.banner(out, element, ctx),
+            "Disclosure" => self.disclosure(out, element, ctx),
+            "Alert" => self.alert(out, element, ctx),
             "Video" => self.video(out, element, ctx),
             "NativeView" => self.native_view(out, element, ctx),
             "Query" => self.query(out, element, ctx),
@@ -598,9 +603,9 @@ impl<'a> Generator<'a> {
             "Table" => self.table(out, element, ctx),
             "LanguagePicker" => self.language_picker(out, element, ctx),
             "Detail" | "Destination" | "Tab" | "Sidebar" | "SidebarItem" | "Toolbar"
-            | "WindowSet" | "Window" | "Layout" | "MenuItem" | "MenuBar" | "StatusItem"
-            | "TableColumn" | "TableMenu" | "ContextMenu" | "DoubleTap" | "WheelUp"
-            | "WheelDown" | "OnCommit" => {
+            | "WindowSet" | "Window" | "Layout" | "MenuItem" | "AlertAction" | "MenuBar"
+            | "StatusItem" | "TableColumn" | "TableMenu" | "ContextMenu" | "DoubleTap"
+            | "WheelUp" | "WheelDown" | "OnCommit" => {
                 // Realized by their parents.
             }
             other => out.line(format!("SwiftUI.EmptyView() // unsupported {other}")),

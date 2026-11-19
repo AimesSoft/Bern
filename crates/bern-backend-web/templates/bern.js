@@ -2806,15 +2806,97 @@ function dropdown(options, field, select) {
   return node;
 }
 
-export function Picker(p, ctx, { id, label, field, options, style, labelHidden, shape, height }) {
+export function Picker(p, ctx, { id, label, field, options, prompt, style, labelHidden, shape, height }) {
+  const getOptions = typeof options === "function" ? options : () => options;
   let node;
   const select = (name) => {
-    const option = options.find((candidate) => candidate.name === name);
+    const cur = untrack(getOptions);
+    const option = cur.find((candidate) => candidate.name === name);
     if (!option) return false;
     field.set(option.value);
     return true;
   };
-  if (style === "segmented" || style === "radio" || style === "inline" || style === "chips") {
+  if (style === "combobox") {
+    node = el("div", { class: "bern-combobox" });
+    const input = el("input", {
+      class: "bern-input bern-combobox-input",
+      type: "search",
+      role: "combobox",
+      "aria-autocomplete": "list",
+      "aria-expanded": "false",
+    });
+    const list = el("ul", { class: "bern-combobox-list", role: "listbox", hidden: "" });
+    node.append(input, list);
+    node.control = input;
+    controlShape(input, shape, height);
+    if (prompt) bindAttr(input, "placeholder", prompt);
+    else if (label) bindAttr(input, "placeholder", label);
+    let open = false;
+    let query = "";
+    const renderList = () => {
+      const cur = untrack(getOptions);
+      const selected = field.peek();
+      const q = query.trim().toLowerCase();
+      list.replaceChildren();
+      const filtered = q ? cur.filter((opt) => readValue(opt.label).toLowerCase().includes(q)) : cur;
+      for (const opt of filtered) {
+        const isSel = eq(opt.value, selected);
+        const li = el("li", { class: "bern-combobox-option", role: "option", "aria-selected": isSel ? "true" : "false" });
+        li.textContent = readValue(opt.label);
+        li.addEventListener("mousedown", (event) => {
+          event.preventDefault();
+          field.set(opt.value);
+          query = "";
+          open = false;
+          list.hidden = true;
+          input.setAttribute("aria-expanded", "false");
+          input.value = readValue(opt.label);
+        });
+        list.append(li);
+      }
+      list.hidden = !open || filtered.length === 0;
+      input.setAttribute("aria-expanded", list.hidden ? "false" : "true");
+    };
+    effect(() => {
+      const cur = getOptions();
+      const val = field.get();
+      const hit = cur.find((opt) => eq(opt.value, val));
+      if (!open) input.value = hit ? readValue(hit.label) : "";
+      else renderList();
+    });
+    input.addEventListener("focus", () => {
+      open = true;
+      query = "";
+      renderList();
+    });
+    input.addEventListener("input", () => {
+      open = true;
+      query = input.value;
+      renderList();
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        open = false;
+        list.hidden = true;
+        input.setAttribute("aria-expanded", "false");
+        const hit = untrack(getOptions).find((opt) => eq(opt.value, field.peek()));
+        input.value = hit ? readValue(hit.label) : "";
+      } else if (event.key === "Enter" && open) {
+        const first = list.querySelector(".bern-combobox-option");
+        if (first) {
+          event.preventDefault();
+          first.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+        }
+      }
+    });
+    input.addEventListener("blur", () => {
+      open = false;
+      list.hidden = true;
+      input.setAttribute("aria-expanded", "false");
+      const hit = untrack(getOptions).find((opt) => eq(opt.value, field.peek()));
+      input.value = hit ? readValue(hit.label) : "";
+    });
+  } else if (style === "segmented" || style === "radio" || style === "inline" || style === "chips") {
     // Chips placed straight in a flow are items of the flow (bern.css).
     const [group, item] = {
       segmented: ["bern-segmented", "bern-segment"],
@@ -2822,37 +2904,88 @@ export function Picker(p, ctx, { id, label, field, options, style, labelHidden, 
     }[style] ?? ["bern-radio-group", "bern-radio"];
     node = el("div", { class: group, role: "radiogroup" });
     bindAttr(node, "aria-label", label);
-    const buttons = options.map((option) => {
-      const text = el("span");
-      bindText(text, option.label);
-      const button = el(
-        "button",
-        { class: item, type: "button", role: "radio" },
-        item === "bern-radio" ? el("span", { class: "bern-radio-mark" }) : null,
-        text,
-      );
-      button.addEventListener("click", () => field.set(option.value));
-      button.addEventListener("keydown", (event) => {
-        const index = options.indexOf(option);
-        const next = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
-        if (next) {
-          event.preventDefault();
-          const target = options[(index + next + options.length) % options.length];
-          field.set(target.value);
-          buttons[options.indexOf(target)].focus();
-        }
+    let currentOptions = [];
+    let buttons = [];
+    const buildButtons = (cur) => {
+      currentOptions = cur;
+      node.replaceChildren();
+      buttons = cur.map((option, index) => {
+        const text = el("span");
+        bindText(text, option.label);
+        const button = el(
+          "button",
+          { class: item, type: "button", role: "radio" },
+          item === "bern-radio" ? el("span", { class: "bern-radio-mark" }) : null,
+          text,
+        );
+        button.addEventListener("click", () => field.set(option.value));
+        button.addEventListener("keydown", (event) => {
+          const next = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
+          if (next && currentOptions.length) {
+            event.preventDefault();
+            const nextIndex = (index + next + currentOptions.length) % currentOptions.length;
+            field.set(currentOptions[nextIndex].value);
+            buttons[nextIndex]?.focus();
+          }
+        });
+        node.append(button);
+        return button;
       });
-      node.append(button);
-      return button;
-    });
-    effect(() => {
+    };
+    const syncSelection = () => {
       const value = field.get();
-      options.forEach((option, index) => {
-        const selected = eq(option.value, value);
-        buttons[index].setAttribute("aria-checked", selected ? "true" : "false");
-        buttons[index].tabIndex = selected ? 0 : -1;
+      buttons.forEach((button, index) => {
+        const selected = eq(currentOptions[index].value, value);
+        button.setAttribute("aria-checked", selected ? "true" : "false");
+        button.tabIndex = selected ? 0 : -1;
       });
+    };
+    if (typeof options === "function") {
+      let childScope = null;
+      onCleanup(() => childScope?.dispose());
+      effect(() => {
+        const cur = getOptions();
+        childScope?.dispose();
+        childScope = new Scope();
+        within(childScope, () => {
+          buildButtons(cur);
+          effect(syncSelection);
+        });
+      });
+    } else {
+      buildButtons(options);
+      effect(syncSelection);
+    }
+  } else if (typeof options === "function") {
+    // Dynamic native <select> / styled dropdown rebuilding when items change.
+    const selectEl = el("select", { class: "bern-select" });
+    effect(() => {
+      const cur = getOptions();
+      const val = field.get();
+      selectEl.replaceChildren();
+      let matched = false;
+      cur.forEach((opt, idx) => {
+        const optionEl = el("option", { value: String(idx) });
+        optionEl.textContent = readValue(opt.label);
+        if (eq(opt.value, val)) {
+          optionEl.selected = true;
+          matched = true;
+        }
+        selectEl.append(optionEl);
+      });
+      if (!matched && prompt) {
+        const ph = el("option", { value: "", disabled: "", selected: "" });
+        ph.textContent = readValue(prompt);
+        selectEl.prepend(ph);
+      }
     });
+    selectEl.addEventListener("change", () => {
+      const idx = Number(selectEl.value);
+      const cur = untrack(getOptions);
+      if (Number.isInteger(idx) && cur[idx]) field.set(cur[idx].value);
+    });
+    controlShape(selectEl, shape, height);
+    node = selectEl;
   } else {
     node = dropdown(options, field, select);
     controlShape(node.control, shape, height);
@@ -2860,7 +2993,10 @@ export function Picker(p, ctx, { id, label, field, options, style, labelHidden, 
   mark(node.control ?? node, ctx, id);
   control(ctx, {
     target: () => target(ctx, id), role: "picker", label,
-    actions: { select, value: () => options.find((option) => eq(option.value, field.peek()))?.name ?? null },
+    actions: {
+      select,
+      value: () => untrack(getOptions).find((option) => eq(option.value, field.peek()))?.name ?? null,
+    },
   });
   if (ctx.inToolbar || labelHidden) {
     bindAttr(node.control ?? node, "aria-label", label);
@@ -6413,5 +6549,257 @@ export function Marquee(p, ctx, { duration, phase = 0, paused, opacity }, childr
     line.style.animationPlayState = readValue(paused) ? "paused" : "running";
     line.classList.toggle("bern-marquee-reduced", hooks.reduced?.() ?? false);
     line.style.opacity = opacity === undefined ? 1 : Math.min(1, Math.max(0, Number(readValue(opacity))));
+  });
+}
+
+export function Tooltip(p, ctx, { content }, children) {
+  const before = p.childNodes.length;
+  children(p, ctx);
+  if (!content) return;
+  const targets = [];
+  for (let i = before; i < p.childNodes.length; i++) {
+    const child = p.childNodes[i];
+    if (child && child.nodeType === 1) targets.push(child);
+  }
+  if (!targets.length) return;
+  effect(() => {
+    const text = readValue(content) ?? "";
+    for (const node of targets) {
+      node.title = text;
+      node.dataset.bernTooltip = text;
+    }
+  });
+}
+
+export function Banner(p, ctx, { id, severity = "info", title, content, icon: iconName, dismissLabel }, dismiss, actions) {
+  const defaultIcon = severity === "success" ? "checkmark.circle"
+    : severity === "warning" ? "exclamationmark.triangle"
+    : severity === "error" ? "xmark.circle.fill"
+    : "info.circle";
+  const node = el("div", {
+    class: `bern-banner bern-banner-${severity} bern-fill-width`,
+    role: severity === "error" || severity === "warning" ? "alert" : "status",
+  });
+  const glyph = icon(iconName ?? defaultIcon, 18);
+  glyph.classList.add("bern-banner-icon");
+  const body = el("div", { class: "bern-banner-body" });
+  if (title) {
+    const titleEl = el("div", { class: "bern-banner-title" });
+    bindText(titleEl, title);
+    body.append(titleEl);
+  }
+  if (content) {
+    const textEl = el("div", { class: "bern-banner-content" });
+    bindText(textEl, content);
+    body.append(textEl);
+  }
+  node.append(glyph, body);
+  if (actions) {
+    const actRow = el("div", { class: "bern-banner-actions" });
+    actions(actRow, ctx);
+    node.append(actRow);
+  }
+  if (dismiss) {
+    const close = el("button", { class: "bern-banner-close", type: "button" }, icon("xmark", 14));
+    const closeLabel = dismissLabel ?? content;
+    bindAttr(close, "aria-label", closeLabel ?? (() => "Dismiss"));
+    bindAttr(close, "title", closeLabel ?? (() => "Dismiss"));
+    close.addEventListener("click", () => dismiss());
+    node.append(close);
+    if (id) {
+      mark(close, ctx, id);
+      control(ctx, {
+        target: () => target(ctx, id),
+        role: "button",
+        label: closeLabel ?? (() => "Dismiss"),
+        actions: { activate: () => dismiss() },
+      });
+    }
+  }
+  p.append(node);
+}
+
+export function Disclosure(p, ctx, { id, label, icon: iconName, field, onToggle }, children) {
+  const local = cell(false);
+  const read = () => (field ? !!field.get() : !!local.get());
+  const peek = () => (field ? !!field.peek() : !!local.peek());
+  const write = (next) => {
+    const boolNext = !!next;
+    if (field) {
+      if (!!field.peek() !== boolNext) field.set(boolNext);
+    } else if (!!local.peek() !== boolNext) {
+      local.set(boolNext);
+      if (onToggle) onToggle();
+    }
+  };
+  const details = el("details", { class: "bern-disclosure bern-fill-width" });
+  const summary = el("summary", { class: "bern-disclosure-summary" });
+  if (iconName) summary.append(icon(iconName, 16));
+  const titleEl = el("span", { class: "bern-disclosure-label" });
+  bindText(titleEl, label);
+  summary.append(titleEl);
+  const body = el("div", { class: "bern-disclosure-body" });
+  children(body, ctx);
+  details.append(summary, body);
+  let syncing = false;
+  effect(() => {
+    const open = read();
+    if (details.open !== open) {
+      syncing = true;
+      details.open = open;
+      syncing = false;
+    }
+  });
+  details.addEventListener("toggle", () => {
+    if (!syncing) write(details.open);
+  });
+  mark(summary, ctx, id);
+  control(ctx, {
+    target: () => target(ctx, id),
+    role: "disclosure",
+    label,
+    actions: {
+      activate: () => write(!peek()),
+      setBool: (on) => write(on),
+      value: () => (peek() ? "true" : "false"),
+    },
+  });
+  p.append(details);
+}
+
+export function NumberInput(p, ctx, { id, label, field, min, max, step = 1, precision = 0, enabled, labelHidden }, commit) {
+  if (!field) return;
+  const prec = Math.max(0, Math.min(6, Number(precision) || 0));
+  const factor = Math.pow(10, prec);
+  const clampRound = (raw) => {
+    let v = Number(raw);
+    if (!Number.isFinite(v)) return Number(field.peek()) || 0;
+    if (min !== undefined) v = Math.max(v, min);
+    if (max !== undefined) v = Math.min(v, max);
+    return Math.round(v * factor) / factor;
+  };
+  const fmt = (v) => (prec === 0 ? String(Math.round(v)) : v.toFixed(prec));
+  const apply = (raw) => {
+    const next = clampRound(raw);
+    field.set(next);
+    if (commit) commit();
+  };
+  const group = el("div", { class: "bern-number-group" });
+  const dec = el("button", { class: "bern-number-step", type: "button", "aria-label": "Decrease" }, icon("minus", 14));
+  const input = el("input", {
+    class: "bern-input bern-number-input",
+    type: "number",
+    step: String(step),
+  });
+  if (min !== undefined) input.min = String(min);
+  if (max !== undefined) input.max = String(max);
+  const inc = el("button", { class: "bern-number-step", type: "button", "aria-label": "Increase" }, icon("plus", 14));
+  group.append(dec, input, inc);
+  effect(() => {
+    const val = Number(field.get()) || 0;
+    if (document.activeElement !== input) input.value = fmt(val);
+    const isEn = enabled ? !!enabled() : true;
+    input.disabled = !isEn;
+    dec.disabled = !isEn || (min !== undefined && val <= min);
+    inc.disabled = !isEn || (max !== undefined && val >= max);
+  });
+  const commitInput = () => {
+    const parsed = Number(input.value.trim());
+    if (Number.isFinite(parsed)) {
+      apply(parsed);
+      input.value = fmt(clampRound(parsed));
+    } else {
+      input.value = fmt(Number(field.peek()) || 0);
+    }
+  };
+  input.addEventListener("change", commitInput);
+  input.addEventListener("blur", commitInput);
+  dec.addEventListener("click", () => apply((Number(field.peek()) || 0) - step));
+  inc.addEventListener("click", () => apply((Number(field.peek()) || 0) + step));
+  mark(input, ctx, id);
+  control(ctx, {
+    target: () => target(ctx, id),
+    role: "number_input",
+    label,
+    enabled: enabled ? () => !!enabled() : undefined,
+    actions: {
+      edit: (text) => {
+        const parsed = Number(String(text).trim());
+        if (Number.isFinite(parsed)) apply(parsed);
+      },
+      setNumber: (v) => { if (Number.isFinite(v)) apply(v); },
+      value: () => String(Number(field.peek()) || 0),
+    },
+  });
+  if (ctx.inToolbar || labelHidden) {
+    bindAttr(input, "aria-label", label);
+    p.append(group);
+  } else {
+    p.append(labelled(group, label, false, input));
+  }
+}
+
+export function Alert(p, ctx, { title, message, actions = [], onDismiss }) {
+  const dialog = el("dialog", { class: "bern-alert", role: "alertdialog", tabindex: "-1" });
+  const heading = el("h2", { class: "bern-alert-title" });
+  bindText(heading, title);
+  dialog.append(heading);
+  if (message) {
+    const msg = el("p", { class: "bern-alert-message" });
+    bindText(msg, message);
+    dialog.append(msg);
+  }
+  const footer = el("div", { class: "bern-alert-actions" });
+  let didAct = false;
+  const cancelAct = actions.find((a) => a.role === "cancel");
+  for (const act of actions) {
+    const cls = act.role === "destructive"
+      ? "bern-button bern-button-destructive"
+      : act.role === "cancel"
+        ? "bern-button"
+        : "bern-button bern-button-prominent";
+    const btn = el("button", { class: cls, type: "button" });
+    bindText(btn, act.label);
+    if (act.enabled) effect(() => { btn.disabled = !act.enabled(); });
+    const trigger = () => {
+      didAct = true;
+      if (typeof dialog.close === "function") dialog.close();
+      if (act.action) act.action();
+    };
+    btn.addEventListener("click", trigger);
+    mark(btn, ctx, act.id);
+    control(ctx, {
+      target: () => target(ctx, act.id),
+      role: "button",
+      label: act.label,
+      enabled: act.enabled ? () => !!act.enabled() : undefined,
+      actions: { activate: trigger },
+    });
+    footer.append(btn);
+  }
+  dialog.append(footer);
+  const handleDismiss = () => {
+    if (didAct) return;
+    didAct = true;
+    if (onDismiss) onDismiss();
+    else if (cancelAct && (!cancelAct.enabled || cancelAct.enabled()) && cancelAct.action) cancelAct.action();
+  };
+  dialog.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    handleDismiss();
+  });
+  p.append(dialog);
+  let disposed = false;
+  const returnFocus = document.activeElement;
+  const frame = requestAnimationFrame(() => {
+    if (disposed || !dialog.isConnected) return;
+    if (typeof dialog.showModal === "function") dialog.showModal();
+    (focusables(dialog)[0] ?? dialog).focus();
+  });
+  onCleanup(() => {
+    disposed = true;
+    cancelAnimationFrame(frame);
+    if (typeof dialog.close === "function") dialog.close();
+    if (returnFocus?.isConnected) returnFocus.focus();
   });
 }

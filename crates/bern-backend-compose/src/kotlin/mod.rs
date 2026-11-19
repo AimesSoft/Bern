@@ -729,8 +729,13 @@ impl<'a> Generator<'a> {
             "Drop" => self.drop_zone(out, element, ctx),
             "Switch" => self.switch(out, element, ctx),
             "Slider" => self.slider(out, element, ctx),
+            "NumberInput" => self.number_input(out, element, ctx),
             "ColorPicker" => self.color_picker(out, element, ctx),
             "Picker" => self.picker(out, element, ctx),
+            "Tooltip" => self.tooltip(out, element, ctx),
+            "Banner" => self.banner(out, element, ctx),
+            "Disclosure" => self.disclosure(out, element, ctx),
+            "Alert" => self.alert(out, element, ctx),
             "Progress" => self.progress(out, element),
             "Form" => self.form(out, element, ctx),
             "Section" => self.section(out, element, ctx),
@@ -796,8 +801,9 @@ impl<'a> Generator<'a> {
             "Adaptive" => self.adaptive(out, element, ctx),
             "LanguagePicker" => self.language_picker(out, element, ctx),
             "Detail" | "Destination" | "Tab" | "Sidebar" | "SidebarItem" | "SidebarHeader"
-            | "WindowSet" | "Window" | "Layout" | "MenuItem" | "TabAccessory" | "PickerOption"
-            | "TableColumn" | "TableMenu" | "ContextMenu" | "DoubleTap" | "WheelUp" | "WheelDown"
+            | "WindowSet" | "Window" | "Layout" | "MenuItem" | "AlertAction" | "TabAccessory"
+            | "PickerOption" | "TableColumn" | "TableMenu" | "ContextMenu" | "DoubleTap"
+            | "WheelUp" | "WheelDown"
             // Android has no menu bar for applications.
             | "MenuBar" | "CommandMenu" | "CommandItem"
             // Nor a status area.

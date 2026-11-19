@@ -197,6 +197,10 @@ impl Generator<'_> {
         if let Some(expr) = element.expr(controlled) {
             let value = self.expr(expr);
             let action = element.action.as_ref().expect("controlled action");
+            let float_to_int = matches!(
+                element.kind.as_str(),
+                "Slider" | "ColorPicker" | "NumberInput"
+            );
             // Only replace complete argument expressions, never text within
             // string literals or a neighbouring field's name.
             let commit = match action {
@@ -207,8 +211,8 @@ impl Generator<'_> {
                         .map(|arg| {
                             if arg != expr {
                                 self.expr(arg)
-                            } else if arg.ty == Type::Int {
-                                // A whole number takes the slider's value
+                            } else if arg.ty == Type::Int && float_to_int {
+                                // A whole number takes the slider's or number input's value
                                 // rounded.
                                 "Int64(newValue.rounded())".into()
                             } else {
@@ -222,6 +226,23 @@ impl Generator<'_> {
                         member(&self.app.protocol.command_symbol(spec)),
                         values.join(", ")
                     )
+                }
+                Action::Session {
+                    field,
+                    op: bern_ir::SessionOp::Set { value },
+                } if value == expr => {
+                    let session = self.app.session(&field.session).expect("session");
+                    let target = format!(
+                        "{}.{}",
+                        session_var(&field.session),
+                        member(&session.fields[field.field].name)
+                    );
+                    let rhs = if field.ty == Type::Int && float_to_int {
+                        "Int64(newValue.rounded())"
+                    } else {
+                        "newValue"
+                    };
+                    format!("{target} = {rhs}")
                 }
                 _ => self.action(action),
             };

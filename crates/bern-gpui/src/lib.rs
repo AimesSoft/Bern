@@ -20,6 +20,7 @@ mod chrome;
 mod content;
 mod controls;
 mod ctx;
+mod extra;
 mod filters;
 mod form;
 mod gestures;
@@ -73,6 +74,10 @@ pub use controls::{
 };
 pub use ctx::{
     Act, Ctx, Field, Model, act, session_pop, session_push_str, session_set, session_toggle,
+};
+pub use extra::{
+    AlertActionSpec, BannerProps, NumberInputProps, alert, banner, disclosure, number_input,
+    tooltip,
 };
 pub use filters::{blur_scope, glow};
 pub use form::{FormProps, SectionProps, form, section};

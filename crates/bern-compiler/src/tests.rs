@@ -5827,3 +5827,81 @@ fn utility_overlay_windows_and_color_picker_compile_and_validate() {
     ));
     assert!(message.contains("needs an action"), "{message}");
 }
+
+#[test]
+fn m2_controls_and_dynamic_picker_validation() {
+    let valid = compile_ui(&wrap(
+        r#"
+        Column {
+            Tooltip(content: tr! { "en" => "Tip", "ja" => "Tip" }) {
+                Button(id: btn, label: tr! { "en" => "Go", "ja" => "Go" }) => app.add(1)
+            }
+            Banner(
+                id: notice,
+                severity: warning,
+                title: tr! { "en" => "Notice", "ja" => "Notice" },
+                content: tr! { "en" => "Body", "ja" => "Body" }
+            ) {
+                Button(id: act, label: tr! { "en" => "Fix", "ja" => "Fix" }) => app.add(1)
+            } => draft.on.set(false)
+            Disclosure(id: disc_draft, label: tr! { "en" => "More", "ja" => "More" }, expanded: draft.on) {
+                Text(content: app.title)
+            }
+            Disclosure(id: disc_local, label: tr! { "en" => "Local", "ja" => "Local" }) {
+                Text(content: app.title)
+            }
+            Disclosure(id: disc_ctrl, label: tr! { "en" => "Ctrl", "ja" => "Ctrl" }, open: app.count > 0) {
+                Text(content: app.title)
+            } => app.add(1)
+            NumberInput(id: num_draft, label: tr! { "en" => "Size", "ja" => "Size" }, value: draft.size, min: 0, max: 100, step: 0.5, precision: 1)
+            NumberInput(id: num_ctrl, label: tr! { "en" => "Count", "ja" => "Count" }, current: app.count, min: 0, max: 10, step: 1) => app.add(app.count)
+            Picker(
+                id: combo,
+                label: tr! { "en" => "Mode", "ja" => "Mode" },
+                value: draft.mode,
+                style: combobox,
+                prompt: tr! { "en" => "Filter", "ja" => "Filter" }
+            )
+            Alert(
+                title: tr! { "en" => "Delete?", "ja" => "Delete?" },
+                message: tr! { "en" => "Cannot undo", "ja" => "Cannot undo" }
+            ) {
+                AlertAction(id: cancel, label: tr! { "en" => "Cancel", "ja" => "Cancel" }, role: cancel) => draft.on.set(false)
+                AlertAction(id: confirm, label: tr! { "en" => "Delete", "ja" => "Delete" }, role: destructive) => app.add(1)
+            } => draft.on.set(false)
+        }
+        "#,
+    ));
+    assert!(valid.is_ok(), "{:?}", valid.err());
+
+    let errors = |body: &str| match compile_ui(&wrap(body)) {
+        Ok(_) => panic!("expected compile error for:\n{body}"),
+        Err(errs) => errs
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    };
+
+    let msg = errors(r#"Tooltip(content: tr! { "en" => "Tip", "ja" => "Tip" }) { }"#);
+    assert!(msg.contains("one child"), "{msg}");
+
+    let msg = errors(
+        r#"Disclosure(id: d, label: tr! { "en" => "D", "ja" => "D" }, open: app.count > 0) { Text(content: app.title) }"#,
+    );
+    assert!(msg.contains("needs an action"), "{msg}");
+
+    let msg = errors(
+        r#"Disclosure(id: d, label: tr! { "en" => "D", "ja" => "D" }, expanded: draft.on, open: app.count > 0) { Text(content: app.title) } => app.add(1)"#,
+    );
+    assert!(msg.contains("not both"), "{msg}");
+
+    let msg = errors(
+        r#"NumberInput(id: n, label: tr! { "en" => "N", "ja" => "N" }, current: app.count)"#,
+    );
+    assert!(msg.contains("needs an action"), "{msg}");
+
+    let msg =
+        errors(r#"Alert(title: tr! { "en" => "A", "ja" => "A" }) { Text(content: app.title) }"#);
+    assert!(msg.contains("AlertAction"), "{msg}");
+}

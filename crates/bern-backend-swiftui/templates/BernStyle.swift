@@ -8261,3 +8261,501 @@ final class BernBrightnessOverrides {
         if controlled { entry.write(entry.owners.last?.value ?? entry.original) }
     }
 }
+
+// MARK: - Tooltip, Banner, Disclosure, NumberInput, Alert, ComboBox
+
+extension View {
+    @ViewBuilder
+    func bernTooltip(_ text: String) -> some View {
+        #if os(macOS) || os(iOS)
+        self.help(text)
+        #else
+        self
+        #endif
+    }
+}
+
+struct BernBanner<Actions: View>: View {
+    let severity: String
+    let title: String?
+    let content: String
+    let systemImage: String
+    let dismissLabel: String?
+    let dismissTarget: String?
+    let onDismiss: (@MainActor @Sendable () -> Void)?
+    @ViewBuilder var actions: () -> Actions
+
+    private var tint: Color {
+        switch severity {
+        case "success": return BernColor.role("status.success").color
+        case "warning": return BernColor.role("status.warning").color
+        case "error": return BernColor.role("status.error").color
+        default: return BernColor.role("accent").color
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(tint)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                if let title, !title.isEmpty {
+                    Text(verbatim: title)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                }
+                Text(verbatim: content)
+                    .font(.subheadline)
+                    .foregroundStyle(title == nil ? .primary : .secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 8) {
+                actions()
+            }
+            if let onDismiss {
+                let closeName = dismissLabel ?? "Dismiss"
+                let closeButton = Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text(verbatim: closeName))
+                .bernTooltip(closeName)
+                if let dismissTarget {
+                    closeButton.bernControl(
+                        dismissTarget,
+                        role: "button",
+                        label: closeName,
+                        actions: BernControlActions(activate: onDismiss)
+                    )
+                } else {
+                    closeButton
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(tint.opacity(0.11))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(tint.opacity(0.26), lineWidth: 1)
+        )
+    }
+}
+
+struct BernDisclosure<Content: View>: View {
+    let label: String
+    let systemImage: String?
+    let externalExpanded: Binding<Bool>?
+    let onToggle: (@MainActor @Sendable (Bool) -> Void)?
+    let target: String
+    @ViewBuilder var content: () -> Content
+    @State private var localExpanded = false
+
+    private var binding: Binding<Bool> {
+        if let externalExpanded {
+            return externalExpanded
+        }
+        return Binding(
+            get: { localExpanded },
+            set: { next in
+                localExpanded = next
+                onToggle?(next)
+            }
+        )
+    }
+
+    var body: some View {
+        let isExpanded = binding
+        #if os(tvOS) || os(watchOS)
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                isExpanded.wrappedValue.toggle()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: isExpanded.wrappedValue ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    if let systemImage {
+                        Image(systemName: systemImage)
+                    }
+                    Text(verbatim: label)
+                    Spacer(minLength: 0)
+                }
+            }
+            if isExpanded.wrappedValue {
+                content()
+                    .padding(.leading, 16)
+            }
+        }
+        .bernControl(
+            target,
+            role: "disclosure",
+            label: label,
+            actions: BernControlActions(
+                activate: { isExpanded.wrappedValue.toggle() },
+                setBool: { isExpanded.wrappedValue = $0 },
+                value: { isExpanded.wrappedValue ? "true" : "false" }
+            )
+        )
+        #else
+        DisclosureGroup(isExpanded: isExpanded) {
+            VStack(alignment: .leading, spacing: 8) {
+                content()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 6)
+        } label: {
+            if let systemImage {
+                Label(label, systemImage: systemImage)
+            } else {
+                Text(verbatim: label)
+            }
+        }
+        .bernControl(
+            target,
+            role: "disclosure",
+            label: label,
+            actions: BernControlActions(
+                activate: { isExpanded.wrappedValue.toggle() },
+                setBool: { isExpanded.wrappedValue = $0 },
+                value: { isExpanded.wrappedValue ? "true" : "false" }
+            )
+        )
+        #endif
+    }
+}
+
+struct BernNumberInput: View {
+    let value: Double
+    let minimum: Double?
+    let maximum: Double?
+    let step: Double
+    let precision: Int
+    let label: String
+    let labelHidden: Bool
+    let enabled: Bool
+    let commit: @MainActor @Sendable (Double) -> Void
+
+    @State private var text: String = ""
+    @FocusState private var focused: Bool
+
+    private func clampAndRound(_ raw: Double) -> Double {
+        guard raw.isFinite else { return value }
+        var v = raw
+        if let minimum { v = max(v, minimum) }
+        if let maximum { v = min(v, maximum) }
+        let factor = pow(10.0, Double(max(0, min(6, precision))))
+        return (v * factor).rounded() / factor
+    }
+
+    private func formatted(_ raw: Double) -> String {
+        let p = max(0, min(6, precision))
+        if p == 0 {
+            return String(Int64(raw.rounded()))
+        }
+        return String(format: "%.\(p)f", raw)
+    }
+
+    private func applyText() {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let parsed = Double(trimmed), parsed.isFinite {
+            let next = clampAndRound(parsed)
+            text = formatted(next)
+            commit(next)
+        } else {
+            text = formatted(value)
+        }
+    }
+
+    private func bump(_ delta: Double) {
+        let next = clampAndRound(value + delta)
+        text = formatted(next)
+        commit(next)
+    }
+
+    @ViewBuilder
+    private var editor: some View {
+        HStack(spacing: 6) {
+            TextField("", text: $text)
+                .focused($focused)
+                .multilineTextAlignment(.trailing)
+                #if os(macOS) || os(iOS)
+                .textFieldStyle(.roundedBorder)
+                #endif
+                #if os(iOS)
+                .keyboardType(precision > 0 ? .decimalPad : .numbersAndPunctuation)
+                #endif
+                .frame(minWidth: 68, idealWidth: 88, maxWidth: 120)
+                .onSubmit { applyText() }
+                .onChange(of: focused) { if !focused { applyText() } }
+                .onChange(of: value, initial: true) {
+                    if !focused { text = formatted(value) }
+                }
+            #if os(tvOS)
+            Button { bump(-step) } label: { Image(systemName: "minus") }
+                .disabled(minimum.map { value <= $0 } ?? false)
+            Button { bump(step) } label: { Image(systemName: "plus") }
+                .disabled(maximum.map { value >= $0 } ?? false)
+            #else
+            Stepper("", onIncrement: { bump(step) }, onDecrement: { bump(-step) })
+                .labelsHidden()
+            #endif
+        }
+    }
+
+    var body: some View {
+        Group {
+            if labelHidden {
+                editor
+                    .accessibilityLabel(Text(verbatim: label))
+            } else {
+                LabeledContent {
+                    editor
+                } label: {
+                    Text(verbatim: label)
+                }
+            }
+        }
+        .disabled(!enabled)
+    }
+}
+
+struct BernAlertActionSpec: Identifiable, Sendable {
+    let id: String
+    let target: String
+    let label: String
+    let role: String
+    let enabled: Bool
+    let action: @MainActor @Sendable () -> Void
+}
+
+struct BernAlertView: View {
+    let title: String
+    let message: String?
+    let actions: [BernAlertActionSpec]
+    let onDismiss: (@MainActor @Sendable () -> Void)?
+
+    @State private var presented = false
+    @State private var didAct = false
+
+    private func swiftRole(_ role: String) -> ButtonRole? {
+        switch role {
+        case "cancel": return .cancel
+        case "destructive": return .destructive
+        default: return nil
+        }
+    }
+
+    private func handleDismiss() {
+        guard !didAct else { return }
+        if let onDismiss {
+            onDismiss()
+        } else if let cancel = actions.first(where: { $0.role == "cancel" && $0.enabled }) {
+            cancel.action()
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            Color.clear
+                .frame(width: 0, height: 0)
+                .accessibilityHidden(true)
+            ForEach(actions) { item in
+                Color.clear
+                    .frame(width: 0, height: 0)
+                    .accessibilityHidden(true)
+                    .bernControl(
+                        item.target,
+                        role: "button",
+                        label: item.label,
+                        enabled: item.enabled,
+                        actions: BernControlActions(activate: {
+                            didAct = true
+                            presented = false
+                            item.action()
+                        })
+                    )
+            }
+        }
+        .onAppear {
+            didAct = false
+            Task { @MainActor in
+                presented = true
+            }
+        }
+        .alert(
+            title,
+            isPresented: Binding(
+                get: { presented },
+                set: { next in
+                    presented = next
+                    if !next { handleDismiss() }
+                }
+            )
+        ) {
+            ForEach(actions) { item in
+                Button(role: swiftRole(item.role)) {
+                    didAct = true
+                    item.action()
+                } label: {
+                    Text(verbatim: item.label)
+                }
+                .disabled(!item.enabled)
+            }
+        } message: {
+            if let message, !message.isEmpty {
+                Text(verbatim: message)
+            }
+        }
+    }
+}
+
+struct BernComboBox<Value: Hashable>: View {
+    @Binding var selection: Value
+    let label: String
+    let labelHidden: Bool
+    let prompt: String
+    let options: [(String, Value)]
+    let capsule: Bool
+    let height: CGFloat?
+
+    @State private var open = false
+    @State private var query = ""
+
+    private var currentLabel: String {
+        if let hit = options.first(where: { $0.1 == selection }) {
+            return hit.0
+        }
+        return prompt.isEmpty ? label : prompt
+    }
+
+    private var filtered: [(String, Value)] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return options }
+        return options.filter { $0.0.localizedCaseInsensitiveContains(trimmed) }
+    }
+
+    private var trigger: some View {
+        Button {
+            query = ""
+            open.toggle()
+        } label: {
+            HStack(spacing: 6) {
+                Text(verbatim: currentLabel)
+                    .lineLimit(1)
+                    .foregroundStyle(
+                        options.contains(where: { $0.1 == selection }) ? .primary : .secondary
+                    )
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(minWidth: 120)
+        }
+        .accessibilityLabel(Text(verbatim: label))
+        .modifier(BernComboTriggerStyle(capsule: capsule, height: height))
+        #if os(macOS) || os(iOS)
+        .popover(isPresented: $open, arrowEdge: .bottom) {
+            dropdownContent
+                .frame(minWidth: 240, maxWidth: 320, minHeight: 160, maxHeight: 300)
+        }
+        #else
+        .sheet(isPresented: $open) {
+            dropdownContent
+        }
+        #endif
+    }
+
+    private var dropdownContent: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField(prompt.isEmpty ? label : prompt, text: $query)
+                    #if os(macOS) || os(iOS)
+                    .textFieldStyle(.plain)
+                    #endif
+                if !query.isEmpty {
+                    Button { query = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            Divider()
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    ForEach(Array(filtered.enumerated()), id: \.offset) { _, option in
+                        let selected = option.1 == selection
+                        Button {
+                            selection = option.1
+                            query = ""
+                            open = false
+                        } label: {
+                            HStack(spacing: 8) {
+                                Text(verbatim: option.0)
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(1)
+                                Spacer(minLength: 8)
+                                if selected {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(BernColor.role("accent").color)
+                                }
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                selected ? Color.primary.opacity(0.08) : Color.clear,
+                                in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            )
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .padding(10)
+    }
+
+    var body: some View {
+        if labelHidden {
+            trigger
+        } else {
+            LabeledContent {
+                trigger
+            } label: {
+                Text(verbatim: label)
+            }
+        }
+    }
+}
+
+private struct BernComboTriggerStyle: ViewModifier {
+    let capsule: Bool
+    let height: CGFloat?
+
+    func body(content: Content) -> some View {
+        if capsule {
+            content.bernCapsuleControl(height: height ?? 32.0, prominent: false)
+        } else {
+            content.bernButtonLook(.secondary)
+        }
+    }
+}
