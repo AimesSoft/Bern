@@ -7,7 +7,7 @@
 - 日期：2026-11-14
 - 依据：[Bern 架构设计](../Design.md)
 - 工具链：Rust 1.99.0（`aarch64-apple-watchos-sim`、`aarch64-apple-watchos`）；Xcode 27.2，watchOS 27.2 模拟器与真机 SDK
-- 验证环境：Apple Watch Series 12 (46mm) 模拟器，watchOS 27.2
+- 验证环境：Apple Watch 真机与 Apple Watch Series 12 (46mm) 模拟器，watchOS 27.2
 
 本文记录 `swiftui + watchos` 目标（`Platform::Watchos`）已实现和已验证的内容。它与 macOS、iOS、tvOS 共用 SwiftUI 生成器与运行时，平台层由 `BernWatchKit.swift` 以 WatchKit 与 watchOS 原生 SwiftUI 控件实现，并与 `compose-wearos` 共用 `Layout(size: watch)` 和 `window.watch`。
 
@@ -22,7 +22,7 @@
 | 引擎平台能力 | 完成 | `bern-command` 在 watchOS 上支持 `Application Support` / `Caches` 存储、钥匙串 `secrets`、`MPNowPlayingInfoCenter` `now_playing`，以及 `javascript = true` 时的 Boa 引擎 |
 | 应用图标 | 完成 | `[app.icon].watchos` 支持方形 PNG、`.appiconset` 目录与 Icon Composer `.icon` 目录 |
 | `bern run --target watchos` | 完成 | 安装到已启动的 watchOS 模拟器，传入 `SIMCTL_CHILD_BERN_IPC_DIR`，由 `--engine watchos` 通过 IPC 控制 |
-| Watch-Only `.ipa` 打包 | 部分 | `bern package --target watchos` 编译 `aarch64-apple-watchos` 并生成 `<App>-<version>-watchos.ipa`（`ITSWatchOnlyContainer` 壳包裹 `Watch/<App>.app`，ad hoc 签名）；真机重签与安装未验证 |
+| Watch-Only `.ipa` 打包 | 完成 | `bern package --target watchos` 编译 `aarch64-apple-watchos` 并生成 `<App>-<version>-watchos.ipa`（`ITSWatchOnlyContainer` 壳包裹 `Watch/<App>.app`），经签名安装后已在 Apple Watch 真机实测通过 |
 
 ## 工程结构
 

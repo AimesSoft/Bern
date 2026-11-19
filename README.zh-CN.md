@@ -62,19 +62,28 @@
 <td width="50%" align="center"><img src="Docs/Assets/screenshots/linux-en.png" alt="展示应用在 Linux（GTK 4 与 libadwaita）上"><br><sub><b>Linux</b> · GTK 4 + libadwaita</sub></td>
 <td width="50%" align="center"><img src="Docs/Assets/screenshots/web-zh.png" alt="展示应用在浏览器中"><br><sub><b>Web</b> · DOM + WebAssembly</sub></td>
 </tr>
+<tr>
+<td width="50%" align="center"><img src="Docs/Assets/screenshots/ipad-zh.png" alt="展示应用在 iPad（iPadOS SwiftUI）上"><br><sub><b>iPad</b> · iPadOS SwiftUI</sub></td>
+<td width="50%" align="center"><img src="Docs/Assets/screenshots/android-tablet-zh.png" alt="展示应用在 Android 平板（Jetpack Compose）上"><br><sub><b>Android 平板</b> · Jetpack Compose</sub></td>
+</tr>
+<tr>
+<td width="50%" align="center"><img src="Docs/Assets/screenshots/tvos-zh.png" alt="展示应用在 Apple TV（tvOS SwiftUI）上"><br><sub><b>Apple TV</b> · tvOS SwiftUI</sub></td>
+<td width="50%" align="center"><img src="Docs/Assets/screenshots/android-tv-zh.png" alt="展示应用在 Android 电视（Jetpack Compose）上"><br><sub><b>Android 电视</b> · Jetpack Compose</sub></td>
+</tr>
 </table>
 
 <table>
 <tr>
-<td width="40%" align="center"><img src="Docs/Assets/screenshots/android-zh.png" width="220" alt="展示应用在 Android（Jetpack Compose）上"><br><sub><b>Android</b> · Jetpack Compose（跟随系统深色）</sub></td>
-<td width="30%" align="center"><img src="Docs/Assets/screenshots/watchos-en.png" width="160" alt="手表应用在 watchOS（SwiftUI）上"><br><sub><b>watchOS</b> · SwiftUI</sub></td>
-<td width="30%" align="center"><img src="Docs/Assets/screenshots/wearos-zh.png" width="160" alt="手表应用在 Wear OS（Compose）上"><br><sub><b>Wear OS</b> · Compose Material 3</sub></td>
+<td width="28%" align="center"><img src="Docs/Assets/screenshots/ios-zh.png" width="190" alt="展示应用在 iPhone（iOS SwiftUI）上"><br><sub><b>iOS</b> · SwiftUI</sub></td>
+<td width="28%" align="center"><img src="Docs/Assets/screenshots/android-zh.png" width="190" alt="展示应用在 Android（Jetpack Compose）上"><br><sub><b>Android</b> · Jetpack Compose</sub></td>
+<td width="22%" align="center"><img src="Docs/Assets/screenshots/watchos-en.png" width="145" alt="手表应用在 watchOS（SwiftUI）上"><br><sub><b>watchOS</b> · SwiftUI</sub></td>
+<td width="22%" align="center"><img src="Docs/Assets/screenshots/wearos-zh.png" width="145" alt="手表应用在 Wear OS（Compose）上"><br><sub><b>Wear OS</b> · Compose Material 3</sub></td>
 </tr>
 </table>
 
 <p align="center"><img src="Docs/Assets/screenshots/gpui-zh.png" width="480" alt="原生控件示例在 macOS GPUI 上"><br><sub><b>桌面端 · GPUI</b>（<code>ui = "gpui"</code>，搭配紧邻 <code>NativeView</code>）</sub></p>
 
-<p align="center"><sub>同一份 Rust 声明覆盖桌面、手机、手表与网页。在系统原生目标上 Bern 不自己画任何一个像素；<br>需要统一 GPU 渲染时，切换到 <code>ui = "gpui"</code> 即可直接把 Bern 当作 GPUI 的声明式 UI 框架。</sub></p>
+<p align="center"><sub>同一份 Rust 声明覆盖桌面、平板、电视、手机、手表与网页。在系统原生目标上 Bern 不自己画任何一个像素；<br>需要统一 GPU 渲染时，切换到 <code>ui = "gpui"</code> 即可直接把 Bern 当作 GPUI 的声明式 UI 框架。</sub></p>
 
 ## 为什么是 Bern
 
@@ -394,10 +403,10 @@ iOS 两个前端都留着时，写 `packages = "separate"` 可以打成两个 `.
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/capabilities-dark.svg">
-<img alt="平台与能力：各框架对 macOS、Windows、Linux、移动端、Web 的支持，以及原生外观、Skills + CLI 与编译期检查；Bern 的移动端为部分支持，三项能力都具备" src="Docs/Assets/tables/capabilities-light.svg" width="100%">
+<img alt="平台与能力：各框架对 macOS、Windows、Linux、移动端、Web 的支持，以及原生外观、Skills + CLI 与编译期检查；Bern 全平台支持且三项能力都具备" src="Docs/Assets/tables/capabilities-light.svg" width="100%">
 </picture>
 
-- **移动端**：iOS 与 Android。React Native 的桌面版本由微软维护，uni-app 另覆盖小程序与鸿蒙；Bern 的 Android 目标已能在真机运行并打包，iOS 目标目前构建模拟器应用，真机打包在规划中。
+- **移动端**：iOS / iPadOS 与 Android（并覆盖 watchOS、Wear OS、tvOS 与 Android 电视）。React Native 的桌面版本由微软维护，uni-app 另覆盖小程序与鸿蒙；Bern 覆盖的桌面、手机、平板、手表与电视目标均已在真机实际测试通过，并支持打包 `.ipa` 与 `.apk`。
 - **原生外观**：控件就是平台自己的控件，外观、无障碍与输入法由系统提供。Qt Widgets 与 uni-app x 接近原生，记为部分。
 - **Skills + CLI**：Bern 从同一份命令目录生成应用 CLI 和 `SKILL.md`，人和 Agent 使用相同的命令。其他框架可以借助无障碍接口或 Playwright、Flutter Driver 等测试工具从外部自动化。
 - **编译期检查**：翻译缺失、功能在某个布局没有入口、入口没有登记功能，都由编译器直接报错（见[为 AI 而建](#为-ai-而建)）。其他框架多借助 lint、翻译工具或测试发现这类问题。
@@ -468,7 +477,7 @@ bern 0.1.0 on macOS (aarch64)
 <br>
 
 - **macOS**：Xcode 26 或更新版本。从 App Store 安装后运行 `sudo xcode-select --switch /Applications/Xcode.app`。
-- **iOS**：Xcode 的 iOS 平台与一个 iOS 模拟器，以及 `rustup target add aarch64-apple-ios-sim`。目前构建模拟器应用，真机的签名与打包还没有做。
+- **iOS / iPadOS / tvOS / watchOS**：Xcode 对应的 Apple 平台 SDK 与 Rust 目标（`aarch64-apple-ios` / `aarch64-apple-ios-sim`、`aarch64-apple-tvos` / `aarch64-apple-tvos-sim`、`aarch64-apple-watchos` / `aarch64-apple-watchos-sim`）。`bern run` 可在模拟器调试，`bern package` 生成可供真机安装运行的 `.ipa`。
 - **Windows**：Visual Studio 2022 或更新版本的“使用 C++ 的桌面开发”（只装生成工具也可以），含 Windows 11 SDK；Rust 使用 MSVC 工具链。首次构建时用 Windows SDK 的 `cppwinrt` 生成 C++/WinRT 头文件，并把它们与运行时预编译（每个配置约 2.4 GB，放在 `target` 中）；之后的构建只编译应用自己的代码，新项目约 5 秒，展示应用约 9 秒。应用目录只有可执行文件、400 KB 的引导 DLL 和资源，不需要 .NET，也不随附 Windows App SDK。
 - **Linux**：GTK 4.14 与 libadwaita 1.5 的开发包，例如 `sudo apt install libgtk-4-dev libadwaita-1-dev libsoup-3.0-dev gstreamer1.0-libav`。
 - **Android**：Android Studio（带 SDK 与 NDK，在 SDK Manager 的 SDK Tools 里勾选 NDK）、Gradle 9.4 或更新版本，以及 `rustup target add aarch64-linux-android`。第一次构建时 Gradle 下载 Android 插件与 Compose 库。

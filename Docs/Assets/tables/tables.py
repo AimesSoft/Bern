@@ -173,6 +173,7 @@ PLATFORMS = {
     "windows": dict(color=("#0078D4", "#3A96DD")),
     "linux": dict(icon="linux"),
     "android": dict(icon="android", color=("#2DA866", "#3DDC84")),
+    "gpui": dict(glyph="bolt", color=("#084CCF", "#4A8BEF")),
     "wasm": dict(icon="webassembly", color=("#654FF0", "#8F7FF7")),
     "globe": dict(glyph="globe", color=("#654FF0", "#8F7FF7")),
     "next": dict(glyph="arrow"),
@@ -400,7 +401,7 @@ def technology(theme, lang):
 # 7. Platforms and capabilities.
 
 MATRIX = [
-    ("bern", "FFFPFFFF"), ("gpui", "FFFNNNNN"), ("dioxus", "FFFFFNNN"), ("flutter", "FFFFFNNN"),
+    ("bern", "FFFFFFFF"), ("gpui", "FFFNNNNN"), ("dioxus", "FFFFFNNN"), ("flutter", "FFFFFNNN"),
     ("rn", "PPNFPFNN"), ("uniapp", "NNNFFPNN"), ("electron", "FFFNNNNN"), ("tauri", "FFFFNNNN"),
     ("avalonia", "FFFFFNNN"), ("qt", "FFFFFPNN"),
 ]
