@@ -1160,10 +1160,18 @@ class BernBridge(context: Context) {
             }
             "open_path" -> onMain { openPath(first); "" }
             "can_open_https" -> {
-                val watch = application.packageManager.hasSystemFeature(PackageManager.FEATURE_WATCH)
-                if (!watch && httpsIntent(first).resolveActivity(application.packageManager) != null) "yes" else "no"
+                val pm = application.packageManager
+                val excluded = pm.hasSystemFeature(PackageManager.FEATURE_WATCH) ||
+                    pm.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+                if (!excluded && httpsIntent(first).resolveActivity(pm) != null) "yes" else "no"
             }
-            "open_https" -> onMain { application.startActivity(httpsIntent(first)); "" }
+            "open_https" -> {
+                val pm = application.packageManager
+                val excluded = pm.hasSystemFeature(PackageManager.FEATURE_WATCH) ||
+                    pm.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+                if (excluded) error("HTTPS links are not supported on watch or TV devices")
+                onMain { application.startActivity(httpsIntent(first)); "" }
+            }
             "save_image" -> { saveImage(File(first)); "" }
             "now_playing" -> onMain { BernNowPlaying.update(application, first); "" }
             "ui_language" -> BernLanguage.current
@@ -2777,7 +2785,40 @@ internal object BernOverlay {
     private val layouts = mutableMapOf<String, android.view.WindowManager.LayoutParams>()
     private val panels = mutableMapOf<String, android.view.View>()
     private val panelLayouts = mutableMapOf<String, android.view.WindowManager.LayoutParams>()
+    private val panelHolders = mutableMapOf<String, PanelHolder>()
     private val panelSpecs = mutableMapOf<String, String>()
+
+    private class PanelHolder(
+        val title: android.widget.TextView,
+        val shape: List<Pair<String, String>>,
+        val rows: List<PanelRow>,
+    ) {
+        var dragging: String? = null
+    }
+
+    private sealed class PanelRow(val id: String, val label: android.widget.TextView) {
+        class Range(
+            id: String,
+            label: android.widget.TextView,
+            val seek: android.widget.SeekBar,
+            var min: Double,
+            var max: Double,
+            var step: Double,
+        ) : PanelRow(id, label)
+
+        class Color(
+            id: String,
+            label: android.widget.TextView,
+            val dots: List<Pair<Int, android.graphics.drawable.GradientDrawable>>,
+        ) : PanelRow(id, label)
+
+        class Choice(
+            id: String,
+            label: android.widget.TextView,
+            val group: android.widget.RadioGroup,
+            var options: List<String>,
+        ) : PanelRow(id, label)
+    }
     /// What each overlay last showed, and those whose bar shows.
     private val shown = mutableMapOf<String, String>()
     private val barred = mutableSetOf<String>()
@@ -2949,6 +2990,7 @@ internal object BernOverlay {
     private fun closePanel(context: Context, id: String, notify: Boolean) {
         panelSpecs.remove(id)
         panelLayouts.remove(id)
+        panelHolders.remove(id)
         val panelView = panels.remove(id) ?: return
         try {
             (context.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager).removeView(panelView)
@@ -3002,15 +3044,84 @@ internal object BernOverlay {
             closePanel(context, id, notify = false)
             return
         }
+        val anchor = views[id] ?: run {
+            closePanel(context, id, notify = false)
+            BernNative.overlayPanelDismissed(id)
+            return
+        }
         if (panelSpecs[id] == json && panels.containsKey(id)) {
             positionPanel(context, id)
             return
         }
-        closePanel(context, id, notify = false)
-        val anchor = views[id] ?: return
         val spec = org.json.JSONObject(json)
-        val themed = android.view.ContextThemeWrapper(context, android.R.style.Theme_DeviceDefault_Dialog)
+        val controls = spec.optJSONArray("controls") ?: org.json.JSONArray()
+        val shape = (0 until controls.length()).map { i ->
+            val ctrl = controls.getJSONObject(i)
+            ctrl.optString("id") to ctrl.optString("type")
+        }
         val density = context.resources.displayMetrics.density
+        val existing = panelHolders[id]
+        if (existing != null && panels.containsKey(id) && existing.shape == shape) {
+            // Update controls in place so active SeekBar drags are never interrupted.
+            existing.title.text = spec.optString("title")
+            for (i in 0 until controls.length()) {
+                val ctrl = controls.getJSONObject(i)
+                val row = existing.rows[i]
+                row.label.text = ctrl.optString("label")
+                when (row) {
+                    is PanelRow.Range -> {
+                        val min = ctrl.optDouble("min", 0.0)
+                        val max = ctrl.optDouble("max", 100.0)
+                        val step = ctrl.optDouble("step", 1.0).let { if (it > 0) it else 1.0 }
+                        val value = ctrl.optDouble("value", min)
+                        val total = kotlin.math.round((max - min) / step).toInt().coerceAtLeast(1)
+                        row.min = min
+                        row.max = max
+                        row.step = step
+                        if (existing.dragging != row.id) {
+                            row.seek.max = total
+                            row.seek.progress = kotlin.math.round((value - min) / step).toInt().coerceIn(0, total)
+                        }
+                    }
+                    is PanelRow.Color -> {
+                        val currentRgb = ctrl.optInt("rgb", 0xFFFFFF) and 0xFFFFFF
+                        for ((rgb, drawable) in row.dots) {
+                            drawable.setStroke(
+                                if (rgb == currentRgb) (2.5f * density).toInt() else (1 * density).toInt(),
+                                if (rgb == currentRgb) 0xFFFFFFFF.toInt() else 0x55FFFFFF,
+                            )
+                        }
+                    }
+                    is PanelRow.Choice -> {
+                        val opts = ctrl.optJSONArray("options") ?: org.json.JSONArray()
+                        val list = (0 until opts.length()).map { j -> opts.optString(j) }
+                        val selected = ctrl.optInt("selected", 0)
+                        if (row.options != list) {
+                            row.options = list
+                            row.group.removeAllViews()
+                            val themed = android.view.ContextThemeWrapper(context, android.R.style.Theme_DeviceDefault_Dialog)
+                            list.forEachIndexed { j, text ->
+                                row.group.addView(android.widget.RadioButton(themed).apply {
+                                    this.id = android.view.View.generateViewId()
+                                    this.text = text
+                                    setTextColor(0xFFFFFFFF.toInt())
+                                    isChecked = j == selected
+                                    setOnClickListener { BernNative.overlayPanelChanged(id, row.id, j.toDouble(), true) }
+                                })
+                            }
+                        } else {
+                            for (j in 0 until row.group.childCount) {
+                                (row.group.getChildAt(j) as? android.widget.RadioButton)?.isChecked = j == selected
+                            }
+                        }
+                    }
+                }
+            }
+            panelSpecs[id] = json
+            return
+        }
+        closePanel(context, id, notify = false)
+        val themed = android.view.ContextThemeWrapper(context, android.R.style.Theme_DeviceDefault_Dialog)
         val pad = (14 * density).toInt()
         val card = android.widget.LinearLayout(themed).apply {
             orientation = android.widget.LinearLayout.VERTICAL
@@ -3024,20 +3135,22 @@ internal object BernOverlay {
             orientation = android.widget.LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
         }
-        header.addView(android.widget.TextView(themed).apply {
+        val titleText = android.widget.TextView(themed).apply {
             text = spec.optString("title")
             setTextColor(0xFFFFFFFF.toInt())
             textSize = 15f
             setTypeface(typeface, android.graphics.Typeface.BOLD)
-        }, android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }
+        header.addView(titleText, android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         header.addView(android.widget.Button(themed, null, 0, android.R.style.Widget_Material_Button_Borderless).apply {
             text = "✕"
             setTextColor(0xFFFFFFFF.toInt())
             setOnClickListener { closePanel(context, id, notify = true) }
         })
         card.addView(header)
-        val controls = spec.optJSONArray("controls") ?: org.json.JSONArray()
         val swatches = intArrayOf(0xFFFFFF, 0xFFE066, 0xFF6B8B, 0x7ED6DF, 0xA3CB38, 0xD980FA, 0xFFA502, 0x70A1FF)
+        val rows = mutableListOf<PanelRow>()
+        val holder = PanelHolder(titleText, shape, rows)
         for (i in 0 until controls.length()) {
             val ctrl = controls.getJSONObject(i)
             val cid = ctrl.optString("id")
@@ -3056,55 +3169,69 @@ internal object BernOverlay {
                     val step = ctrl.optDouble("step", 1.0).let { if (it > 0) it else 1.0 }
                     val value = ctrl.optDouble("value", min)
                     val total = kotlin.math.round((max - min) / step).toInt().coerceAtLeast(1)
-                    val seek = android.widget.SeekBar(themed).apply {
-                        this.max = total
-                        progress = kotlin.math.round((value - min) / step).toInt().coerceIn(0, total)
-                        setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
-                            override fun onProgressChanged(sb: android.widget.SeekBar?, p: Int, fromUser: Boolean) {
-                                if (fromUser) BernNative.overlayPanelChanged(id, cid, min + p * step, false)
+                    val seek = android.widget.SeekBar(themed)
+                    val row = PanelRow.Range(cid, titleView, seek, min, max, step)
+                    seek.max = total
+                    seek.progress = kotlin.math.round((value - min) / step).toInt().coerceIn(0, total)
+                    seek.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                        override fun onProgressChanged(sb: android.widget.SeekBar?, p: Int, fromUser: Boolean) {
+                            if (fromUser) {
+                                val next = (row.min + p * row.step).coerceIn(row.min, row.max)
+                                BernNative.overlayPanelChanged(id, cid, next, false)
                             }
-                            override fun onStartTrackingTouch(sb: android.widget.SeekBar?) {}
-                            override fun onStopTrackingTouch(sb: android.widget.SeekBar?) {
-                                BernNative.overlayPanelChanged(id, cid, min + (sb?.progress ?: 0) * step, true)
-                            }
-                        })
-                    }
+                        }
+                        override fun onStartTrackingTouch(sb: android.widget.SeekBar?) {
+                            holder.dragging = cid
+                        }
+                        override fun onStopTrackingTouch(sb: android.widget.SeekBar?) {
+                            holder.dragging = null
+                            val next = (row.min + (sb?.progress ?: 0) * row.step).coerceIn(row.min, row.max)
+                            BernNative.overlayPanelChanged(id, cid, next, true)
+                        }
+                    })
                     card.addView(seek)
+                    rows.add(row)
                 }
                 "color" -> {
-                    val row = android.widget.LinearLayout(themed).apply { orientation = android.widget.LinearLayout.HORIZONTAL }
+                    val rowView = android.widget.LinearLayout(themed).apply { orientation = android.widget.LinearLayout.HORIZONTAL }
                     val dot = (24 * density).toInt()
                     val gap = (6 * density).toInt()
                     val currentRgb = ctrl.optInt("rgb", 0xFFFFFF) and 0xFFFFFF
+                    val dots = mutableListOf<Pair<Int, android.graphics.drawable.GradientDrawable>>()
                     for (rgb in swatches) {
-                        row.addView(android.view.View(themed).apply {
-                            background = android.graphics.drawable.GradientDrawable().apply {
-                                shape = android.graphics.drawable.GradientDrawable.OVAL
-                                setColor((0xFF shl 24) or rgb)
-                                setStroke(if (rgb == currentRgb) (2.5f * density).toInt() else (1 * density).toInt(),
-                                    if (rgb == currentRgb) 0xFFFFFFFF.toInt() else 0x55FFFFFF)
-                            }
+                        val drawable = android.graphics.drawable.GradientDrawable().apply {
+                            shape = android.graphics.drawable.GradientDrawable.OVAL
+                            setColor((0xFF shl 24) or rgb)
+                            setStroke(if (rgb == currentRgb) (2.5f * density).toInt() else (1 * density).toInt(),
+                                if (rgb == currentRgb) 0xFFFFFFFF.toInt() else 0x55FFFFFF)
+                        }
+                        dots.add(rgb to drawable)
+                        rowView.addView(android.view.View(themed).apply {
+                            background = drawable
                             setOnClickListener {
                                 BernNative.overlayPanelChanged(id, cid, rgb.toDouble(), true)
                             }
                         }, android.widget.LinearLayout.LayoutParams(dot, dot).apply { marginEnd = gap })
                     }
-                    card.addView(row)
+                    card.addView(rowView)
+                    rows.add(PanelRow.Color(cid, titleView, dots))
                 }
                 "choice" -> {
                     val options = ctrl.optJSONArray("options") ?: org.json.JSONArray()
+                    val list = (0 until options.length()).map { j -> options.optString(j) }
                     val selected = ctrl.optInt("selected", 0)
                     val group = android.widget.RadioGroup(themed).apply { orientation = android.widget.LinearLayout.HORIZONTAL }
-                    for (j in 0 until options.length()) {
+                    list.forEachIndexed { j, text ->
                         group.addView(android.widget.RadioButton(themed).apply {
                             this.id = android.view.View.generateViewId()
-                            text = options.optString(j)
+                            this.text = text
                             setTextColor(0xFFFFFFFF.toInt())
                             isChecked = j == selected
                             setOnClickListener { BernNative.overlayPanelChanged(id, cid, j.toDouble(), true) }
                         })
                     }
                     card.addView(group)
+                    rows.add(PanelRow.Choice(cid, titleView, group, list))
                 }
             }
         }
@@ -3121,6 +3248,7 @@ internal object BernOverlay {
         manager.addView(scroll, lp)
         panels[id] = scroll
         panelLayouts[id] = lp
+        panelHolders[id] = holder
         panelSpecs[id] = json
         anchor.post { positionPanel(context, id) }
     }
@@ -3411,21 +3539,29 @@ private class BernLitLine(
                 end - 0.5f, 0f, end + 0.5f, 0f, color, faded, android.graphics.Shader.TileMode.CLAMP,
             )
         }
-        if (effect == "outline") {
+        if (effect == "outline" && lines != null) {
+            // Draw the outline directly onto the canvas without calling
+            // `setTextColor`, which would call `invalidate()` on every frame.
             val savedStyle = paint.style
             val savedStroke = paint.strokeWidth
+            val savedJoin = paint.strokeJoin
             val savedShader = paint.shader
-            val savedColor = currentTextColor
+            val savedColor = paint.color
             val outlineAlpha = (0xE6 * inkOpacity).toInt().coerceIn(0, 255)
             paint.shader = null
             paint.style = android.graphics.Paint.Style.STROKE
+            paint.strokeJoin = android.graphics.Paint.Join.ROUND
             paint.strokeWidth = 3f * resources.displayMetrics.density
-            setTextColor(outlineAlpha shl 24)
-            super.onDraw(canvas)
+            paint.color = outlineAlpha shl 24
+            val saved = canvas.save()
+            canvas.translate(compoundPaddingLeft.toFloat(), extendedPaddingTop.toFloat())
+            lines.draw(canvas)
+            canvas.restoreToCount(saved)
             paint.style = savedStyle
             paint.strokeWidth = savedStroke
+            paint.strokeJoin = savedJoin
             paint.shader = savedShader
-            setTextColor(savedColor)
+            paint.color = savedColor
         }
         super.onDraw(canvas)
     }

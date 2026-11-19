@@ -764,10 +764,8 @@ impl Target for WebBrowser {
                     cwd: output.join("glue/control"),
                     env: vec![],
                 });
-                steps.push(BuildStep::CreateDir {
-                    path: output.join("bin"),
-                });
                 let name = format!("{}{}", glue::program(app), std::env::consts::EXE_SUFFIX);
+                steps.push(BuildStep::program_dir(output.join("bin"), [&name]));
                 steps.push(BuildStep::Copy {
                     from: target.join(profile).join(&name),
                     to: output.join("bin").join(&name),

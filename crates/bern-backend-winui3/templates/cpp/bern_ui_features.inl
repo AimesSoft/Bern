@@ -1459,8 +1459,25 @@ inline void Toast(Parent const& p, Ctx const& ctx, ToastProps props) {
             controls::InfoBar notice;
             notice.Severity(controls::InfoBarSeverity::Informational);
             notice.IsClosable(false);
-            notice.Message(text);
-            if (!icon.empty()) notice.IconSource(Icons::Source(icon));
+            if (!icon.empty() && bern::IconPath(icon)) {
+                notice.IsIconVisible(false);
+                controls::StackPanel row;
+                row.Orientation(controls::Orientation::Horizontal);
+                row.Spacing(12);
+                row.Margin(xaml::Thickness{0, 12, 16, 12});
+                auto glyph = Icons::Icon(icon, 16);
+                glyph.VerticalAlignment(xaml::VerticalAlignment::Center);
+                row.Children().Append(glyph);
+                controls::TextBlock label;
+                label.Text(text);
+                label.TextWrapping(xaml::TextWrapping::Wrap);
+                label.VerticalAlignment(xaml::VerticalAlignment::Center);
+                row.Children().Append(label);
+                notice.Content(row);
+            } else {
+                notice.Message(text);
+                if (!icon.empty()) notice.IconSource(Icons::Source(icon));
+            }
             notice.IsOpen(true);
 #else
             // The system XAML has no InfoBar: a bar of its shape.

@@ -57,13 +57,51 @@ pub fn Pointer(p: &Parent, ctx: &Ctx, props: PointerProps, build: Build) {
     }
 }
 
-/// Run `run` on the second press of a double click or tap. The presses
-/// still reach the content, such as a video's controls or a slider's
-/// knob; only the press that completes the double stops here.
+/// Whether a press at `(x, y)` in surface coordinates hits an interactive
+/// control nested inside `owner` (such as a button or slider), so the
+/// owner's `DoubleTap` does not hijack rapid clicks on child controls.
+fn tap_in_control(owner: &gtk::Widget, x: f64, y: f64) -> bool {
+    let Some(root) = owner.root() else {
+        return false;
+    };
+    let root: gtk::Widget = root.upcast();
+    let Some(point) = root.compute_point(owner, &gtk::graphene::Point::new(x as f32, y as f32))
+    else {
+        return false;
+    };
+    let Some(mut node) = owner.pick(
+        f64::from(point.x()),
+        f64::from(point.y()),
+        gtk::PickFlags::DEFAULT,
+    ) else {
+        return false;
+    };
+    while node != *owner {
+        if node.is::<gtk::Button>()
+            || node.is::<gtk::ToggleButton>()
+            || node.is::<gtk::Switch>()
+            || node.is::<gtk::Scale>()
+            || node.is::<gtk::DropDown>()
+            || node.is::<gtk::Editable>()
+            || node.is::<gtk::TextView>()
+        {
+            return true;
+        }
+        let Some(parent) = node.parent() else {
+            break;
+        };
+        node = parent;
+    }
+    false
+}
+
+/// Run `run` on the second press of a double click or tap. Runs in the
+/// bubble phase so nested `DoubleTap` owners and interactive child controls
+/// take presses first; presses inside child controls are skipped.
 fn double_taps(widget: &gtk::Widget, run: Run) {
     let presses = Rc::new(RefCell::new(Presses::default()));
     let events = gtk::EventControllerLegacy::new();
-    events.set_propagation_phase(gtk::PropagationPhase::Capture);
+    events.set_propagation_phase(gtk::PropagationPhase::Bubble);
     {
         let presses = Rc::clone(&presses);
         let weak = widget.downgrade();
@@ -83,6 +121,10 @@ fn double_taps(widget: &gtk::Widget, run: Run) {
                                 .downcast_ref::<gtk::gdk::ButtonEvent>()
                                 .is_some_and(|e| e.button() == gtk::gdk::BUTTON_PRIMARY));
                     if !primary {
+                        return glib::Propagation::Proceed;
+                    }
+                    if tap_in_control(&widget, x, y) {
+                        presses.borrow_mut().cancel();
                         return glib::Propagation::Proceed;
                     }
                     let double = presses.borrow_mut().press(

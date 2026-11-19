@@ -361,6 +361,7 @@ impl Generator<'_> {
         };
         let params: Vec<_> = binding.args.iter().map(|arg| self.getter(arg)).collect();
         let condition = element.query_presentation();
+        let decoration = self.decoration(element);
         let placement = self.placement(element);
         let (header, body) = element.query_children();
         if condition.is_some() || header.is_some() {
@@ -386,13 +387,18 @@ impl Generator<'_> {
                 some(self.text_prop(element, "empty")),
                 Self::icon(element, "icon"),
                 string(&template.var),
-                placement.is_some(),
+                placement.is_some() || decoration.is_some(),
                 if header.is_some() { "Some(status_header)" } else { "None" },
             ),
             body,
             ");",
         );
         if let Some(condition) = condition {
+            if let Some(decor) = decoration {
+                out.line(format!(
+                    "let draw = b::build(move |p, c| b::Decorate(p, c, {decor}, Rc::clone(&draw)));"
+                ));
+            }
             if let Some(place) = placement {
                 out.line(format!(
                     "let draw = b::build(move |p, c| b::Place(p, c, {place}, Rc::clone(&draw)));"
