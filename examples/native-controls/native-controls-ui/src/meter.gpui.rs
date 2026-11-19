@@ -1,7 +1,10 @@
 // Co-located GPUI native segmented level meter with pointer hover & click.
 
 use super::{Actions, Props, Theme};
-use bern_gpui::gpui::{self, InteractiveElement, IntoElement, ParentElement, Styled, div, px, rgb};
+use bern_gpui::gpui::{
+    self, InteractiveElement, IntoElement, ParentElement, StatefulInteractiveElement, Styled, div,
+    px, rgb,
+};
 
 pub fn render(props: Props, actions: Actions, theme: Theme) -> impl IntoElement {
     let steps = 10usize;

@@ -64,9 +64,17 @@
 </tr>
 </table>
 
-<p align="center"><img src="Docs/Assets/screenshots/android-en.png" width="270" alt="Android（Jetpack Compose）上のショーケース"><br><sub><b>Android</b> · Jetpack Compose（システムに合わせたダーク）</sub></p>
+<table>
+<tr>
+<td width="40%" align="center"><img src="Docs/Assets/screenshots/android-en.png" width="220" alt="Android（Jetpack Compose）上のショーケース"><br><sub><b>Android</b> · Jetpack Compose（システムに合わせたダーク）</sub></td>
+<td width="30%" align="center"><img src="Docs/Assets/screenshots/watchos-en.png" width="160" alt="watchOS（SwiftUI）上のウォッチデモ"><br><sub><b>watchOS</b> · SwiftUI</sub></td>
+<td width="30%" align="center"><img src="Docs/Assets/screenshots/wearos-zh.png" width="160" alt="Wear OS（Compose）上のウォッチデモ"><br><sub><b>Wear OS</b> · Compose Material 3</sub></td>
+</tr>
+</table>
 
-<p align="center"><sub>ひとつの <code>controls_page</code> 宣言から、5 つの UI ツールキットへ。デスクトップと Android では Bern は自前のピクセルを一切描きません。<br>スイッチもスライダーもサイドバーも、プラットフォーム標準のコントロールとプラットフォームの配色です。</sub></p>
+<p align="center"><img src="Docs/Assets/screenshots/gpui-zh.png" width="480" alt="macOS GPUI 上のネイティブコントロールデモ"><br><sub><b>デスクトップ · GPUI</b>（<code>ui = "gpui"</code> + 隣接 <code>NativeView</code>）</sub></p>
+
+<p align="center"><sub>ひとつの Rust 宣言でデスクトップ・スマートフォン・ウォッチ・Web へ。システム目標では自前のピクセルを一切描かず、<br>統一された GPU 描画が必要なときは <code>ui = "gpui"</code> で GPUI の宣言的 UI フレームワークとしてそのまま使えます。</sub></p>
 
 ## Bern を選ぶ理由
 

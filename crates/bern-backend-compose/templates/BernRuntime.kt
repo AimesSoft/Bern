@@ -2934,7 +2934,9 @@ internal object BernOverlay {
                             layout.x = startX + (event.rawX - downX).toInt()
                             layout.y = startY + (event.rawY - downY).toInt()
                             manager.updateViewLayout(created, layout)
+                            // @bern:wear-skip-start
                             BernOverlayWindows.repositionForOverlay(context, id)
+                            // @bern:wear-skip-end
                         }
                     }
                     android.view.MotionEvent.ACTION_UP ->

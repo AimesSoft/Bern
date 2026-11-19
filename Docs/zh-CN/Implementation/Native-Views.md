@@ -83,4 +83,5 @@ NativeView(
 - **Ubuntu Linux 虚拟机（GTK 4 / libadwaita）**：GNOME Wayland 实机构建并运行（`gtk::LevelBar` + `gtk::SpinButton` + `gtk::ToggleButton` + `gtk::Calendar`），默认左右铺满与全套 CLI 端到端验证通过。
 - **iOS 26.5 模拟器（iPhone 17 Pro）**：构建并运行（`Gauge` + `ProgressView` + `Stepper` + 图形化 `DatePicker`），默认左右铺满与全套 CLI 端到端验证通过。
 - **Android 模拟器（Pixel 9 Pro XL）**：构建 APK 并安装启动（`CircularProgressIndicator` + `AndroidView(RatingBar)` + `FilterChip` + `AndroidView(CalendarView)`），默认左右铺满视觉验证通过；经 `adb forward` 的 Android 远端 CLI 未单独验证。
-- **Web 与 GPUI**：通过 `bern check`、单元测试与代码生成检查；尚未在浏览器或 GPUI 窗口中实跑交互。
+- **GPUI（macOS）**：离屏构建并运行（`meter.gpui.rs` 分段电平条 + `calendar.gpui.rs` 月历网格），默认左右铺满与 CLI 驱动（`ui inspect`、`set-number`、`set-bool`）验证通过。
+- **Web**：通过 `bern check`、单元测试与代码生成检查；尚未在浏览器中实跑交互。
