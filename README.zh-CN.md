@@ -74,14 +74,19 @@
 
 <table>
 <tr>
-<td width="28%" align="center"><img src="Docs/Assets/screenshots/ios-zh.png" width="190" alt="展示应用在 iPhone（iOS SwiftUI）上"><br><sub><b>iOS</b> · SwiftUI</sub></td>
-<td width="28%" align="center"><img src="Docs/Assets/screenshots/android-zh.png" width="190" alt="展示应用在 Android（Jetpack Compose）上"><br><sub><b>Android</b> · Jetpack Compose</sub></td>
-<td width="22%" align="center"><img src="Docs/Assets/screenshots/watchos-en.png" width="145" alt="手表应用在 watchOS（SwiftUI）上"><br><sub><b>watchOS</b> · SwiftUI</sub></td>
-<td width="22%" align="center"><img src="Docs/Assets/screenshots/wearos-zh.png" width="145" alt="手表应用在 Wear OS（Compose）上"><br><sub><b>Wear OS</b> · Compose Material 3</sub></td>
+<td width="32%" align="center"><img src="Docs/Assets/screenshots/ios-zh.png" width="190" alt="展示应用在 iPhone（iOS SwiftUI）上"><br><sub><b>iOS</b> · SwiftUI</sub></td>
+<td width="36%" align="center"><img src="Docs/Assets/screenshots/iphone-duo-zh.png" width="235" alt="展示应用在 iPhone Duo（iOS SwiftUI）上"><br><sub><b>iPhone Duo</b> · SwiftUI</sub></td>
+<td width="32%" align="center"><img src="Docs/Assets/screenshots/android-zh.png" width="190" alt="展示应用在 Android（Jetpack Compose）上"><br><sub><b>Android</b> · Jetpack Compose</sub></td>
 </tr>
 </table>
 
-<p align="center"><img src="Docs/Assets/screenshots/gpui-zh.png" width="480" alt="原生控件示例在 macOS GPUI 上"><br><sub><b>桌面端 · GPUI</b>（<code>ui = "gpui"</code>，搭配紧邻 <code>NativeView</code>）</sub></p>
+<table>
+<tr>
+<td width="25%" align="center"><img src="Docs/Assets/screenshots/watchos-en.png" width="145" alt="手表应用在 watchOS（SwiftUI）上"><br><sub><b>watchOS</b> · SwiftUI</sub></td>
+<td width="25%" align="center"><img src="Docs/Assets/screenshots/wearos-zh.png" width="145" alt="手表应用在 Wear OS（Compose）上"><br><sub><b>Wear OS</b> · Compose Material 3</sub></td>
+<td width="50%" align="center"><img src="Docs/Assets/screenshots/gpui-zh.png" width="360" alt="原生控件示例在 macOS GPUI 上"><br><sub><b>桌面端 · GPUI</b>（<code>ui = "gpui"</code>，搭配紧邻 <code>NativeView</code>）</sub></td>
+</tr>
+</table>
 
 <p align="center"><sub>同一份 Rust 声明覆盖桌面、平板、电视、手机、手表与网页。在系统原生目标上 Bern 不自己画任何一个像素；<br>需要统一 GPU 渲染时，切换到 <code>ui = "gpui"</code> 即可直接把 Bern 当作 GPUI 的声明式 UI 框架。</sub></p>
 

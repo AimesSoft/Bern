@@ -74,14 +74,19 @@ No JS engine or embedded browser by default on desktop, mobile or wearables.<br>
 
 <table>
 <tr>
-<td width="28%" align="center"><img src="Docs/Assets/screenshots/ios-en.png" width="190" alt="The showcase on iPhone with SwiftUI"><br><sub><b>iOS</b> · SwiftUI</sub></td>
-<td width="28%" align="center"><img src="Docs/Assets/screenshots/android-en.png" width="190" alt="The showcase on Android with Jetpack Compose"><br><sub><b>Android</b> · Jetpack Compose</sub></td>
-<td width="22%" align="center"><img src="Docs/Assets/screenshots/watchos-en.png" width="145" alt="Watch demo on watchOS with SwiftUI"><br><sub><b>watchOS</b> · SwiftUI</sub></td>
-<td width="22%" align="center"><img src="Docs/Assets/screenshots/wearos-zh.png" width="145" alt="Watch demo on Wear OS with Compose"><br><sub><b>Wear OS</b> · Compose Material 3</sub></td>
+<td width="32%" align="center"><img src="Docs/Assets/screenshots/ios-en.png" width="190" alt="The showcase on iPhone with SwiftUI"><br><sub><b>iOS</b> · SwiftUI</sub></td>
+<td width="36%" align="center"><img src="Docs/Assets/screenshots/iphone-duo-en.png" width="235" alt="The showcase on iPhone Duo with SwiftUI"><br><sub><b>iPhone Duo</b> · SwiftUI</sub></td>
+<td width="32%" align="center"><img src="Docs/Assets/screenshots/android-en.png" width="190" alt="The showcase on Android with Jetpack Compose"><br><sub><b>Android</b> · Jetpack Compose</sub></td>
 </tr>
 </table>
 
-<p align="center"><img src="Docs/Assets/screenshots/gpui-zh.png" width="480" alt="Native controls demo on macOS with GPUI"><br><sub><b>Desktop · GPUI</b> (<code>ui = "gpui"</code> with co-located <code>NativeView</code>)</sub></p>
+<table>
+<tr>
+<td width="25%" align="center"><img src="Docs/Assets/screenshots/watchos-en.png" width="145" alt="Watch demo on watchOS with SwiftUI"><br><sub><b>watchOS</b> · SwiftUI</sub></td>
+<td width="25%" align="center"><img src="Docs/Assets/screenshots/wearos-zh.png" width="145" alt="Watch demo on Wear OS with Compose"><br><sub><b>Wear OS</b> · Compose Material 3</sub></td>
+<td width="50%" align="center"><img src="Docs/Assets/screenshots/gpui-zh.png" width="360" alt="Native controls demo on macOS with GPUI"><br><sub><b>Desktop · GPUI</b> (<code>ui = "gpui"</code> with co-located <code>NativeView</code>)</sub></td>
+</tr>
+</table>
 
 <p align="center"><sub>One Rust declaration across desktop, tablet, TV, phone, watch and Web. On system targets Bern draws no pixels of its own;<br>when you want unified GPU rendering, switch to <code>ui = "gpui"</code> without rewriting your app.</sub></p>
 
