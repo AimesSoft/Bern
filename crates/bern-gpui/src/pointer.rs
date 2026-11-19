@@ -9,9 +9,9 @@ use crate::ctx::{Act, Ctx, Press};
 use crate::menus::MenuEntry;
 use crate::units::px;
 use gpui::{
-    App, Div, ElementId, InteractiveElement, IntoElement, MouseButton, MouseDownEvent,
-    ParentElement, RenderOnce, ScrollDelta, ScrollEvent, ScrollSource, Styled, TouchPhase, Window,
-    div,
+    App, ClickEvent, Div, ElementId, InteractiveElement, IntoElement, MouseButton, ParentElement,
+    RenderOnce, ScrollDelta, ScrollEvent, ScrollSource, Stateful, StatefulInteractiveElement,
+    Styled, TouchPhase, Window, div,
 };
 use std::cell::Cell;
 use std::rc::Rc;
@@ -41,6 +41,7 @@ pub fn pointer_events(
     // may be: text in it still wraps.
     let wrapper = c.grow().apply(
         div()
+            .id(ElementId::Name(format!("{}#pointer", c.key(id)).into()))
             .flex()
             .flex_col()
             .min_w(px(0.0))
@@ -53,8 +54,14 @@ pub fn pointer_events(
     let wrapper = match events.double_tap {
         Some(action) => {
             let press = crate::controls::press(c, None, Some(action));
-            wrapper.on_mouse_down(MouseButton::Left, move |event: &MouseDownEvent, _, cx| {
-                if event.click_count == 2 {
+            // Use `on_click` so child buttons (which stop propagation on
+            // `on_click`) keep their clicks instead of firing an enclosing
+            // container's `DoubleTap`.
+            wrapper.on_click(move |event: &ClickEvent, _, cx| {
+                if let ClickEvent::Mouse(mouse) = event
+                    && mouse.down.button == MouseButton::Left
+                    && mouse.down.click_count == 2
+                {
                     cx.stop_propagation();
                     press(cx);
                 }
@@ -97,7 +104,7 @@ pub fn pointer_events(
 #[derive(IntoElement)]
 struct Wheel {
     key: ElementId,
-    element: Div,
+    element: Stateful<Div>,
     up: Option<Press>,
     down: Option<Press>,
 }

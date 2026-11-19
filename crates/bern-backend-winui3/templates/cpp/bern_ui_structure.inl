@@ -1392,8 +1392,9 @@ inline Build OwnQuery(Ctx const& ctx, QueryProps props, Build const& templ) {
         }
         // Place and Decorate attach to what a builder adds on mount. The
         // status and data regions keep updating inside that same element.
-        controls::StackPanel group;
-        SetRole(group, L"bern-column");
+        // Use FlexPanel (not StackPanel) so ScrollView and Spacer children
+        // receive bounded vertical space instead of infinite measure height.
+        auto group = MakeFlex(false, 0);
         auto inside = p.isList ? Parent::OfList(group) : Parent::Of(group);
         PresentQuery(inside, c, props, templ, result, state, retry);
         p.Add(group);
@@ -1535,8 +1536,7 @@ inline void PresentQuery(Parent const& p, Ctx const& ctx, QueryProps const& prop
     };
     if (auto header = props.statusHeader) {
         Build cold = [header, drawStatus, add](Parent const& target, Ctx const& c) {
-            controls::StackPanel group;
-            SetRole(group, L"bern-column");
+            auto group = MakeFlex(false, 0);
             auto inside = Parent::Of(group);
             header(inside, c);
             drawStatus(inside, c);

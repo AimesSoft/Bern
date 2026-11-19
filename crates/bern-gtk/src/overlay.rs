@@ -42,11 +42,16 @@ impl Host for Overlays {
     fn panel(&self, id: &str, panel: Option<&Panel>) {
         let (id, panel) = (id.to_string(), panel.cloned());
         glib::MainContext::default().invoke(move || {
-            if let Some(parts) = WINDOWS.with(|windows| windows.borrow().get(&id).cloned()) {
-                match panel {
-                    Some(panel) if parts.window.is_visible() => parts.panel.show(&panel),
-                    _ => parts.panel.close(),
+            let shown = WINDOWS.with(|windows| windows.borrow().get(&id).cloned());
+            match (shown, panel) {
+                (Some(parts), Some(panel)) if parts.window.is_visible() => parts.panel.show(&panel),
+                (Some(parts), Some(_)) => {
+                    parts.panel.close();
+                    panel_dismissed(&id);
                 }
+                (None, Some(_)) => panel_dismissed(&id),
+                (Some(parts), None) => parts.panel.close(),
+                (None, None) => {}
             }
         });
     }
@@ -654,8 +659,19 @@ struct PanelRow {
     kind: PanelKind,
 }
 
+fn format_number(v: f64, step: f64) -> String {
+    if step >= 1.0 || (v - v.round()).abs() < 1e-6 {
+        format!("{}", v.round() as i64)
+    } else {
+        format!("{v:.2}")
+            .trim_end_matches('0')
+            .trim_end_matches('.')
+            .to_string()
+    }
+}
+
 enum PanelKind {
-    Range(gtk::Scale, gtk::Label),
+    Range(gtk::Scale, gtk::Label, Rc<Cell<f64>>, Rc<Cell<bool>>),
     Color(gtk::ColorDialogButton),
     Choice(gtk::DropDown, Vec<String>),
 }
@@ -700,21 +716,51 @@ impl PanelRow {
                 } else {
                     1.0
                 };
+                let step_cell = Rc::new(Cell::new(step));
+                let dragging = Rc::new(Cell::new(false));
                 let scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, *min, *max, step);
                 scale.set_draw_value(false);
+                let click = gtk::GestureClick::new();
+                click.set_propagation_phase(gtk::PropagationPhase::Capture);
+                {
+                    let dragging = Rc::clone(&dragging);
+                    click.connect_pressed(move |_, _, _, _| dragging.set(true));
+                }
+                {
+                    let dragging = Rc::clone(&dragging);
+                    let oid = overlay_id.to_owned();
+                    let cid = id.clone();
+                    let sync = Rc::clone(syncing);
+                    let scale_weak = scale.downgrade();
+                    click.connect_released(move |_, _, _, _| {
+                        if dragging.replace(false)
+                            && !sync.get()
+                            && let Some(scale) = scale_weak.upgrade()
+                        {
+                            panel_changed(&oid, &cid, scale.value(), true);
+                        }
+                    });
+                }
+                {
+                    let dragging = Rc::clone(&dragging);
+                    click.connect_cancel(move |_, _| dragging.set(false));
+                }
+                scale.add_controller(click);
                 let oid = overlay_id.to_owned();
                 let cid = id.clone();
                 let sync = Rc::clone(syncing);
                 let read = readout.clone();
+                let step_read = Rc::clone(&step_cell);
+                let drag_read = Rc::clone(&dragging);
                 scale.connect_value_changed(move |s| {
                     let v = s.value();
-                    read.set_label(&format!("{}", v.round() as i64));
+                    read.set_label(&format_number(v, step_read.get()));
                     if !sync.get() {
-                        panel_changed(&oid, &cid, v, true);
+                        panel_changed(&oid, &cid, v, !drag_read.get());
                     }
                 });
                 body.append(&scale);
-                PanelKind::Range(scale, readout)
+                PanelKind::Range(scale, readout, step_cell, dragging)
             }
             Control::Color { .. } => {
                 let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
@@ -772,7 +818,7 @@ impl PanelRow {
     fn sync(&mut self, control: &Control) {
         match (&mut self.kind, control) {
             (
-                PanelKind::Range(scale, readout),
+                PanelKind::Range(scale, readout, step_cell, dragging),
                 Control::Range {
                     label,
                     min,
@@ -783,12 +829,18 @@ impl PanelRow {
                 },
             ) => {
                 self.label.set_label(label);
-                scale.set_range(*min, *max);
-                if *step > 0.0 && step.is_finite() {
-                    scale.set_increments(*step, *step * 5.0);
+                let next_step = if *step > 0.0 && step.is_finite() {
+                    *step
+                } else {
+                    1.0
+                };
+                step_cell.set(next_step);
+                if !dragging.get() {
+                    scale.set_range(*min, *max);
+                    scale.set_increments(next_step, next_step * 5.0);
+                    scale.set_value(value.clamp(*min, *max));
+                    readout.set_label(&format_number(*value, next_step));
                 }
-                scale.set_value(value.clamp(*min, *max));
-                readout.set_label(&format!("{}", value.round() as i64));
             }
             (PanelKind::Color(btn), Control::Color { label, rgb, .. }) => {
                 self.label.set_label(label);

@@ -2079,7 +2079,7 @@ fn pointer_runtime_takes_no_room_and_lets_taps_through() {
     let layout = body(features, "fun BernPointerBox(");
     assert!(layout.contains("it.measure(constraints)"), "{layout}");
     let taps = body(features, "fun Modifier.bernDoubleTapThrough(");
-    assert!(taps.contains("PointerEventPass.Initial"), "{taps}");
+    assert!(taps.contains("PointerEventPass.Main"), "{taps}");
     assert!(!taps.contains("detectTapGestures"), "{taps}");
     assert_eq!(taps.matches(".consume()").count(), 1, "{taps}");
     let wheel = body(features, "fun Modifier.bernWheel(");

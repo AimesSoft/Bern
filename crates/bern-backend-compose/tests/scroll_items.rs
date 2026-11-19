@@ -49,7 +49,11 @@ fn removed_and_resized_items_do_not_take_part_in_snapping() {
         format!("{STUBS}\n{state}\n{fling}\n{TESTS}"),
     )
     .unwrap();
-    fs::write(root.join("settings.gradle.kts"), "pluginManagement { repositories { gradlePluginPortal(); mavenCentral() } }\nrootProject.name = \"scroll-items\"\n").unwrap();
+    fs::write(
+        root.join("settings.gradle.kts"),
+        "pluginManagement {\n    repositories {\n        val central = mavenCentral()\n        gradlePluginPortal()\n        exclusiveContent {\n            forRepositories(central)\n            filter { includeGroupAndSubgroups(\"org.jetbrains.kotlin\") }\n        }\n    }\n}\nrootProject.name = \"scroll-items\"\n",
+    )
+    .unwrap();
     fs::write(
         root.join("build.gradle.kts"),
         format!(

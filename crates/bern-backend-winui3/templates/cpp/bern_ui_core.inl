@@ -1455,17 +1455,26 @@ inline controls::FontIcon Font(std::string_view name, double size = 16) {
     return icon;
 }
 
-inline media::Geometry PathData(wchar_t const* path) {
+inline media::Geometry PathData(wchar_t const* path, double size = 20) {
     // PathIcon.Data checks for an existing owner. Share only the catalog
     // string: a rebuilt button (or a second icon) needs its own geometry.
-    return xaml::Markup::XamlBindingHelper::ConvertValue(
+    // PathIcon does not stretch its Geometry to Width/Height, so scale the
+    // 20-unit Fluent artwork to the requested size on the geometry itself.
+    auto geometry = xaml::Markup::XamlBindingHelper::ConvertValue(
         winrt::xaml_typename<media::Geometry>(), winrt::box_value(winrt::hstring{path})).as<media::Geometry>();
+    if (size > 0 && std::abs(size - 20.0) > 0.01) {
+        media::ScaleTransform scale;
+        scale.ScaleX(size / 20.0);
+        scale.ScaleY(size / 20.0);
+        geometry.Transform(scale);
+    }
+    return geometry;
 }
 
 inline controls::IconElement Icon(std::string_view name, double size = 16) {
     if (auto path = bern::IconPath(name)) {
         controls::PathIcon icon;
-        icon.Data(PathData(path));
+        icon.Data(PathData(path, size));
         icon.Width(size);
         icon.Height(size);
         return icon;
@@ -1475,11 +1484,10 @@ inline controls::IconElement Icon(std::string_view name, double size = 16) {
 
 #if BERN_WINUI
 inline controls::IconSource Source(std::string_view name) {
-    if (auto path = bern::IconPath(name)) {
-        controls::PathIconSource icon;
-        icon.Data(PathData(path));
-        return icon;
-    }
+    // PathIconSource shares its Geometry with IconSourceElement's PathIcon in
+    // WinUI 3 and throws E_INVALIDARG (0x80070057) inside InfoBar; callers use
+    // `Icon(name, 16)` when `bern::IconPath(name)` is present.
+    if (bern::IconPath(name)) return nullptr;
     controls::FontIconSource icon;
     icon.Glyph(Glyph(name));
     return icon;

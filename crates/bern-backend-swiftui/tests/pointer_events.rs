@@ -295,7 +295,7 @@ fn pointer_events_compile_for_both_ios_frontends() {
     let build_root = std::env::var_os("CARGO_TARGET_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| root.join("target"));
-    let (config, compiled) = project(&build_root.join("bern-test/pointer-events-project"));
+    let (config, compiled) = project(&build_root.join("bern-test/pointer-events-project-ios"));
     let context = build_context(
         &config,
         &compiled,
@@ -338,7 +338,7 @@ fn pointer_events_type_check_for_macos() {
     let build_root = std::env::var_os("CARGO_TARGET_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| root.join("target"));
-    let (config, compiled) = project(&build_root.join("bern-test/pointer-events-project"));
+    let (config, compiled) = project(&build_root.join("bern-test/pointer-events-project-macos"));
     let context = build_context(
         &config,
         &compiled,
@@ -384,7 +384,7 @@ fn pointer_events_type_check_for_tvos() {
     let build_root = std::env::var_os("CARGO_TARGET_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| root.join("target"));
-    let (config, compiled) = project(&build_root.join("bern-test/pointer-events-project"));
+    let (config, compiled) = project(&build_root.join("bern-test/pointer-events-project-tvos"));
     let context = build_context(
         &config,
         &compiled,
@@ -429,7 +429,7 @@ fn pointer_events_type_check_for_watchos() {
     let build_root = std::env::var_os("CARGO_TARGET_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| root.join("target"));
-    let (config, compiled) = project(&build_root.join("bern-test/pointer-events-project"));
+    let (config, compiled) = project(&build_root.join("bern-test/pointer-events-project-watchos"));
     let context = build_context(
         &config,
         &compiled,

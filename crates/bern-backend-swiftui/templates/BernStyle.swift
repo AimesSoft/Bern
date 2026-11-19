@@ -5279,6 +5279,7 @@ private struct BernSliderHover: ViewModifier {
                 case .ended: report(nil)
                 }
             }
+            .onDisappear { report(nil) }
         #else
         content
         #endif
