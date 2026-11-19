@@ -1160,10 +1160,18 @@ class BernBridge(context: Context) {
             }
             "open_path" -> onMain { openPath(first); "" }
             "can_open_https" -> {
-                val watch = application.packageManager.hasSystemFeature(PackageManager.FEATURE_WATCH)
-                if (!watch && httpsIntent(first).resolveActivity(application.packageManager) != null) "yes" else "no"
+                val pm = application.packageManager
+                val excluded = pm.hasSystemFeature(PackageManager.FEATURE_WATCH) ||
+                    pm.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+                if (!excluded && httpsIntent(first).resolveActivity(pm) != null) "yes" else "no"
             }
-            "open_https" -> onMain { application.startActivity(httpsIntent(first)); "" }
+            "open_https" -> {
+                val pm = application.packageManager
+                val excluded = pm.hasSystemFeature(PackageManager.FEATURE_WATCH) ||
+                    pm.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+                if (excluded) error("HTTPS links are not supported on watch or TV devices")
+                onMain { application.startActivity(httpsIntent(first)); "" }
+            }
             "save_image" -> { saveImage(File(first)); "" }
             "now_playing" -> onMain { BernNowPlaying.update(application, first); "" }
             "ui_language" -> BernLanguage.current
@@ -3400,21 +3408,29 @@ private class BernLitLine(
                 end - 0.5f, 0f, end + 0.5f, 0f, color, faded, android.graphics.Shader.TileMode.CLAMP,
             )
         }
-        if (effect == "outline") {
+        if (effect == "outline" && lines != null) {
+            // Draw the outline directly onto the canvas without calling
+            // `setTextColor`, which would call `invalidate()` on every frame.
             val savedStyle = paint.style
             val savedStroke = paint.strokeWidth
+            val savedJoin = paint.strokeJoin
             val savedShader = paint.shader
-            val savedColor = currentTextColor
+            val savedColor = paint.color
             val outlineAlpha = (0xE6 * inkOpacity).toInt().coerceIn(0, 255)
             paint.shader = null
             paint.style = android.graphics.Paint.Style.STROKE
+            paint.strokeJoin = android.graphics.Paint.Join.ROUND
             paint.strokeWidth = 3f * resources.displayMetrics.density
-            setTextColor(outlineAlpha shl 24)
-            super.onDraw(canvas)
+            paint.color = outlineAlpha shl 24
+            val saved = canvas.save()
+            canvas.translate(compoundPaddingLeft.toFloat(), extendedPaddingTop.toFloat())
+            lines.draw(canvas)
+            canvas.restoreToCount(saved)
             paint.style = savedStyle
             paint.strokeWidth = savedStroke
+            paint.strokeJoin = savedJoin
             paint.shader = savedShader
-            setTextColor(savedColor)
+            paint.color = savedColor
         }
         super.onDraw(canvas)
     }

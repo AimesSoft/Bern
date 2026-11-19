@@ -1152,13 +1152,17 @@ static int32_t OnPlatformRequest(void*, uint8_t const* operation, size_t operati
         AssocQueryStringW(ASSOCF_IS_PROTOCOL, ASSOCSTR_PROGID, L"https", nullptr, nullptr, &length);
         if (length <= 1) return 1;
         if (name == "can_open_https") return 0;
-        auto url = Wide(text);
-        SHELLEXECUTEINFOW open{sizeof(open)};
-        open.fMask = SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC;
-        open.lpVerb = L"open";
-        open.lpFile = url.c_str();
-        open.nShow = SW_SHOWNORMAL;
-        return ShellExecuteExW(&open) ? 0 : 1;
+        // Run ShellExecuteExW on the UI STA thread so it never executes on an
+        // uninitialized engine thread or stalls engine commands.
+        Post([url = std::wstring(Wide(text))] {
+            SHELLEXECUTEINFOW open{sizeof(open)};
+            open.fMask = SEE_MASK_FLAG_NO_UI;
+            open.lpVerb = L"open";
+            open.lpFile = url.c_str();
+            open.nShow = SW_SHOWNORMAL;
+            ShellExecuteExW(&open);
+        });
+        return 0;
     }
     if (name == "make_default_opener") {
         Post([] {

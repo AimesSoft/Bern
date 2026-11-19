@@ -1239,10 +1239,11 @@ mod tests {
             built = Some((compiled, context));
         }
         let (compiled, context) = built.unwrap();
-        let programs: Vec<String> = ["planner", "planner-host"]
+        let mut programs: Vec<String> = ["planner", "planner-host"]
             .iter()
             .map(|name| format!("{name}{}", std::env::consts::EXE_SUFFIX))
             .collect();
+        programs.sort();
         assert_eq!(files_below(&context.output_dir.join("bin")), programs);
         for path in [
             "bindgen/bern_bindgen_bg.js",

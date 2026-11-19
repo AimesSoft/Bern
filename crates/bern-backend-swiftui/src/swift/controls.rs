@@ -342,8 +342,14 @@ impl Generator<'_> {
     /// click or tap, its context menu and wheel turns, as modifiers that
     /// keep its layout as it is.
     pub(super) fn pointer_events(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
-        if let Some(events) = self.pointer_modifier(element, true) {
+        let has_modifier = if let Some(events) = self.pointer_modifier(element, true) {
             out.line(format!(".modifier({events})"));
+            true
+        } else {
+            false
+        };
+        if !has_modifier && element.context_menu().is_some() && element.kind != "Button" {
+            out.line(".contentShape(Rectangle())");
         }
         self.context_menu(out, element, ctx);
     }

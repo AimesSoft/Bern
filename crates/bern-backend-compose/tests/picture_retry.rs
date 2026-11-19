@@ -24,8 +24,12 @@ application { mainClass.set("dev.bern.runtime.PictureRetryKt") }
 const SETTINGS: &str = r#"
 pluginManagement {
     repositories {
+        val central = mavenCentral()
         gradlePluginPortal()
-        mavenCentral()
+        exclusiveContent {
+            forRepositories(central)
+            filter { includeGroupAndSubgroups("org.jetbrains.kotlin") }
+        }
     }
 }
 rootProject.name = "picture-retry"

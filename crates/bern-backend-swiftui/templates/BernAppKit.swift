@@ -1922,10 +1922,11 @@ struct BernWheelSource: NSViewRepresentable {
         /// The scrolling of a trackpad or a smooth wheel that adds up to
         /// one notch, in points; the web front end counts the same.
         private static let notch: CGFloat = 100
+        private static var active: [ObjectIdentifier: Observer] = [:]
+        private static var sharedMonitor: Any?
         var up: (() -> Void)?
         var down: (() -> Void)?
         var enabled = true
-        private var monitor: Any?
         /// Trackpad scrolling not yet a notch, in points.
         private var turned: CGFloat = 0
 
@@ -1935,19 +1936,46 @@ struct BernWheelSource: NSViewRepresentable {
             super.viewDidMoveToWindow()
             stop()
             guard window != nil else { return }
-            monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
-                let taken = MainActor.assumeIsolated { self?.take(event) ?? false }
+            Self.active[ObjectIdentifier(self)] = self
+            Self.ensureMonitor()
+        }
+
+        private static func ensureMonitor() {
+            guard sharedMonitor == nil else { return }
+            sharedMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
+                let taken = MainActor.assumeIsolated { dispatch(event) }
                 return taken ? nil : event
             }
         }
 
-        /// Whether the event is the view's: over the view, vertical, and
-        /// in a direction the view answers.
-        func take(_ event: NSEvent) -> Bool {
-            guard enabled, let window, event.window === window,
-                  bounds.contains(convert(event.locationInWindow, from: nil)) else { return false }
+        /// Pick the innermost visible observer under the pointer that answers
+        /// the scroll direction so nested targets beat enclosing ones and
+        /// hidden, clipped or sheet-covered views do not steal scrolling.
+        private static func dispatch(_ event: NSEvent) -> Bool {
+            let mods = event.modifierFlags
+            if mods.contains(.control) || mods.contains(.command) { return false }
+            guard let eventWindow = event.window, eventWindow.attachedSheet == nil else { return false }
             let delta = event.scrollingDeltaY
             guard delta != 0, abs(delta) >= abs(event.scrollingDeltaX) else { return false }
+            var best: Observer?
+            var bestArea = CGFloat.greatestFiniteMagnitude
+            for observer in active.values {
+                guard observer.enabled,
+                      observer.window === eventWindow,
+                      !observer.isHiddenOrHasHiddenAncestor,
+                      (delta > 0 ? observer.up : observer.down) != nil else { continue }
+                let local = observer.convert(event.locationInWindow, from: nil)
+                guard observer.visibleRect.contains(local) else { continue }
+                let area = observer.bounds.width * observer.bounds.height
+                if best == nil || area < bestArea {
+                    best = observer
+                    bestArea = area
+                }
+            }
+            return best?.take(event, delta: delta) ?? false
+        }
+
+        private func take(_ event: NSEvent, delta: CGFloat) -> Bool {
             // The deltas follow the user's scroll direction setting, so a
             // positive one moves content down: toward the scroll view's top.
             guard let action = (delta > 0 ? up : down) else { return false }
@@ -1965,8 +1993,11 @@ struct BernWheelSource: NSViewRepresentable {
         }
 
         func stop() {
-            if let monitor { NSEvent.removeMonitor(monitor) }
-            monitor = nil
+            Self.active.removeValue(forKey: ObjectIdentifier(self))
+            if Self.active.isEmpty, let monitor = Self.sharedMonitor {
+                NSEvent.removeMonitor(monitor)
+                Self.sharedMonitor = nil
+            }
             turned = 0
         }
     }

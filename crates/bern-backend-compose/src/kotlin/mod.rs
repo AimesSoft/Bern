@@ -496,17 +496,7 @@ impl<'a> Generator<'a> {
                         _ => None,
                     })
                     .collect();
-                // A baseline box is a real row child (including its gap).
-                // Apply it only if the called query root actually emits a view.
-                let query_baseline =
-                    ctx.baseline && self.app.has_query_presentation_root(&component.body);
-                if let Some(modifier) = ctx
-                    .query_modifier
-                    .or(query_baseline.then_some("Modifier.alignByBaseline()"))
-                {
-                    args.push(format!("__bernRootModifier = {modifier}"));
-                }
-                let call = format!("{}({})", names::component(&component.name), args.join(", "));
+                let query_root = self.app.has_query_presentation_root(&component.body);
                 let fills = ctx.scope == Scope::Row
                     && self.fills_width(
                         std::slice::from_ref(&component.body),
@@ -531,6 +521,37 @@ impl<'a> Generator<'a> {
                         std::slice::from_ref(&component.body),
                         &mut std::collections::HashSet::from([component.name.clone()]),
                     );
+                let yield_mod = if ellipsizes {
+                    "bernRowYields(ellipsizes = true)"
+                } else {
+                    "bernRowYields()"
+                };
+                // Forward every row modifier to the query presentation so a
+                // hidden query emits no empty placeholder Box in the row.
+                if query_root {
+                    let mut root_mod = ctx
+                        .query_modifier
+                        .map(str::to_string)
+                        .unwrap_or_else(|| "Modifier".into());
+                    let mut changed = ctx.query_modifier.is_some();
+                    if ctx.scope == Scope::Row && fills && !flex_root {
+                        root_mod.push_str(".weight(1f)");
+                        changed = true;
+                    }
+                    if ctx.baseline && !fills {
+                        root_mod.push_str(".alignByBaseline()");
+                        changed = true;
+                    }
+                    if yields {
+                        root_mod.push('.');
+                        root_mod.push_str(yield_mod);
+                        changed = true;
+                    }
+                    if changed {
+                        args.push(format!("__bernRootModifier = {root_mod}"));
+                    }
+                }
+                let call = format!("{}({})", names::component(&component.name), args.join(", "));
                 // In a column or row the component's layout can take the
                 // free room there, as it would written in place.
                 let call = match ctx.scope {
@@ -544,7 +565,7 @@ impl<'a> Generator<'a> {
                             "CompositionLocalProvider(LocalBernFlex provides this) {{ {call} }}"
                         )
                     }
-                    Scope::Row if fills => {
+                    Scope::Row if fills && !query_root => {
                         format!("Box(Modifier.weight(1f)) {{ {call} }}")
                     }
                     Scope::Row | Scope::Other | Scope::Flow => call,
@@ -555,12 +576,7 @@ impl<'a> Generator<'a> {
                     .window
                     .then(|| self.window_body(&component.body))
                     .flatten();
-                let yield_mod = if ellipsizes {
-                    "bernRowYields(ellipsizes = true)"
-                } else {
-                    "bernRowYields()"
-                };
-                match (ctx.baseline && !fills && !query_baseline, yields) {
+                match (ctx.baseline && !fills && !query_root, yields && !query_root) {
                     (true, true) => out.line(format!(
                         "Box(Modifier.alignByBaseline().{yield_mod}) {{ {call} }}"
                     )),

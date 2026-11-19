@@ -1420,15 +1420,131 @@ fn slider_hover(
     }
 }
 
+fn expr_reads_player(expr: &bern_ir::Expr) -> bool {
+    use bern_ir::{Binding, ExprKind};
+    match &expr.kind {
+        ExprKind::Binding {
+            binding: Binding::Player { .. },
+        } => true,
+        ExprKind::Literal { .. } | ExprKind::Binding { .. } | ExprKind::Corner { .. } => false,
+        ExprKind::Not { expr } | ExprKind::Neg { expr } => expr_reads_player(expr),
+        ExprKind::Binary { lhs, rhs, .. } => expr_reads_player(lhs) || expr_reads_player(rhs),
+        ExprKind::If {
+            cond,
+            then,
+            otherwise,
+        } => expr_reads_player(cond) || expr_reads_player(then) || expr_reads_player(otherwise),
+        ExprKind::Variant { fields, .. } => fields.iter().any(expr_reads_player),
+    }
+}
+
+fn text_reads_player(text: &bern_ir::Text) -> bool {
+    match text {
+        bern_ir::Text::Localized { args, .. } => {
+            args.iter().any(|(_, expr)| expr_reads_player(expr))
+        }
+        bern_ir::Text::Dynamic { expr } => expr_reads_player(expr),
+    }
+}
+
+fn action_reads_player(action: &bern_ir::Action) -> bool {
+    match action {
+        bern_ir::Action::Engine { args, .. } | bern_ir::Action::Media { args, .. } => {
+            args.iter().any(expr_reads_player)
+        }
+        bern_ir::Action::Session { op, .. } => match op {
+            bern_ir::SessionOp::Set { value } | bern_ir::SessionOp::PushStr { value } => {
+                expr_reads_player(value)
+            }
+            bern_ir::SessionOp::Toggle | bern_ir::SessionOp::Pop => false,
+        },
+        bern_ir::Action::Window { .. } => false,
+    }
+}
+
+fn element_reads_player(element: &bern_ir::Element) -> bool {
+    if element.action.as_ref().is_some_and(action_reads_player) {
+        return true;
+    }
+    element.props.values().any(|prop| match prop {
+        bern_ir::Prop::Expr { expr } => expr_reads_player(expr),
+        bern_ir::Prop::Text { text } => text_reads_player(text),
+        bern_ir::Prop::Query { query } => query.args.iter().any(expr_reads_player),
+        _ => false,
+    })
+}
+
+fn node_reads_player(node: &bern_ir::Node) -> bool {
+    let mut found = false;
+    node.walk(&mut |node| {
+        if found {
+            return;
+        }
+        match node {
+            bern_ir::Node::Element(element) => {
+                if element_reads_player(element) {
+                    found = true;
+                }
+            }
+            bern_ir::Node::Component(reference) => {
+                if reference.args.iter().any(|(_, arg)| match arg {
+                    bern_ir::ComponentArg::Value { expr } => expr_reads_player(expr),
+                    _ => false,
+                }) {
+                    found = true;
+                }
+            }
+            bern_ir::Node::If(node) => {
+                if node
+                    .branches
+                    .iter()
+                    .any(|(cond, _)| expr_reads_player(cond))
+                {
+                    found = true;
+                }
+            }
+            bern_ir::Node::IfLet(node) => {
+                if expr_reads_player(&node.value) {
+                    found = true;
+                }
+            }
+            bern_ir::Node::Match(node) => {
+                if expr_reads_player(&node.value) {
+                    found = true;
+                }
+            }
+        }
+    });
+    found
+}
+
 fn player_state(
     descriptor: &TargetDescriptor,
     app: &Application,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    // Player bindings can stand in any expression: props, texts,
-    // conditions, actions and component arguments. The serialized
-    // application names each by its tag.
-    let reads = serde_json::to_string(app).is_ok_and(|json| json.contains(r#""scope":"player""#));
+    let windows = &app.windows;
+    let reads =
+        windows
+            .windows
+            .iter()
+            .any(|w| node_reads_player(&w.content))
+            || [
+                &windows.accent,
+                &windows.palette,
+                &windows.appearance,
+                &windows.icon,
+            ]
+            .into_iter()
+            .flatten()
+            .any(expr_reads_player)
+            || windows.menu_bar.as_ref().is_some_and(|e| {
+                element_reads_player(e) || e.children.iter().any(node_reads_player)
+            })
+            || windows.status_item.as_ref().is_some_and(|e| {
+                element_reads_player(e) || e.children.iter().any(node_reads_player)
+            })
+            || app.components.iter().any(|c| node_reads_player(&c.body));
     if reads {
         diagnostics.push(Diagnostic::error(format!(
             "target `{}` cannot read a player's state in declarations, such as `players.preview.position`",

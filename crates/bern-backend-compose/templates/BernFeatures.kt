@@ -2496,7 +2496,9 @@ fun Modifier.bernDoubleTapThrough(onDoubleTap: (() -> Unit)?): Modifier {
         var firstPosition = Offset.Zero
         var armed = false
         awaitEachGesture {
-            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            // Observe on the Main pass (bottom-up) so child buttons, sliders and
+            // nested DoubleTap owners consume their own taps first.
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Main)
             val config = viewConfiguration
             val second = armed &&
                 down.uptimeMillis - firstUp in config.doubleTapMinTimeMillis..config.doubleTapTimeoutMillis &&
@@ -2505,7 +2507,7 @@ fun Modifier.bernDoubleTapThrough(onDoubleTap: (() -> Unit)?): Modifier {
             if (currentEvent.buttons.isSecondaryPressed) return@awaitEachGesture
             var tap = !down.isConsumed
             while (true) {
-                val event = awaitPointerEvent(PointerEventPass.Initial)
+                val event = awaitPointerEvent(PointerEventPass.Main)
                 val pointer = event.changes.firstOrNull { it.id == down.id } ?: break
                 if (pointer.isConsumed || event.changes.count { it.pressed } > 1 ||
                     (pointer.position - down.position).getDistance() > config.touchSlop) tap = false

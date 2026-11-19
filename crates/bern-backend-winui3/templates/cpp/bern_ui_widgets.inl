@@ -1317,6 +1317,12 @@ inline void PointerEvents(Parent const& p, Ctx const& ctx, PointerEventsProps pr
     auto up = Run(ctx, props.wheelUp), down = Run(ctx, props.wheelDown);
     bool own = props.own;
     for (auto const& element : made) {
+        // A XAML Panel with a null Background is transparent to hit-testing:
+        // give it a transparent brush so empty areas of Stack/Column/Row/Grid
+        // still receive DoubleTap, ContextMenu and Wheel events.
+        if (auto panel = element.try_as<controls::Panel>(); panel && !panel.Background()) {
+            panel.Background(media::SolidColorBrush(winrt::Windows::UI::Colors::Transparent()));
+        }
         // An owner inside takes the event first and marks it handled; only
         // a native control's own handling is looked past.
         if (twice)
@@ -2356,10 +2362,16 @@ inline void Slider(Parent const& p, Ctx const& ctx, SliderProps props) {
     BindName(slider, text);
     if (props.hover) {
         auto hover = *props.hover;
-        auto set = [ctx, hover](std::optional<double> at) { SetDraft(ctx, hover, at ? Value::Some(Value::Float(*at)) : Value::None()); };
-        // Entering and leaving bubble from the slider's parts, and a drag's
-        // capture ends over it too: only a pointer outside the slider has
-        // left it. A touch does not hover.
+        auto last = std::make_shared<std::optional<double>>();
+        auto set = [ctx, hover, last](std::optional<double> at) {
+            if (*last == at) return;
+            *last = at;
+            SetDraft(ctx, hover, at ? Value::Some(Value::Float(*at)) : Value::None());
+        };
+        // PointerExited is raised directly on the slider when the pointer
+        // leaves it (including when a popup or flyout covers it at the same
+        // coordinates), so always clear hover there. Capture loss may happen
+        // while the pointer is still over the slider, so check bounds for it.
         auto follow = [set](IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args) {
             if (args.Pointer().PointerDeviceType() == PointerKind::Touch) return;
             auto slider = sender.as<controls::Slider>();
@@ -2367,11 +2379,13 @@ inline void Slider(Parent const& p, Ctx const& ctx, SliderProps props) {
             bool over = at.X >= 0 && at.Y >= 0 && at.X < slider.ActualWidth() && at.Y < slider.ActualHeight();
             set(over ? std::optional<double>(SliderFraction(slider, args)) : std::nullopt);
         };
+        auto clear = [set](auto&&, auto&&) { set(std::nullopt); };
         using Handler = xaml::Input::PointerEventHandler;
-        for (auto const& routed : {xaml::UIElement::PointerEnteredEvent(), xaml::UIElement::PointerMovedEvent(), xaml::UIElement::PointerExitedEvent(),
+        for (auto const& routed : {xaml::UIElement::PointerEnteredEvent(), xaml::UIElement::PointerMovedEvent(),
                  xaml::UIElement::PointerCaptureLostEvent()})
             slider.AddHandler(routed, winrt::box_value(Handler(follow)), true);
-        slider.AddHandler(xaml::UIElement::PointerCanceledEvent(), winrt::box_value(Handler([set](auto&&, auto&&) { set(std::nullopt); })), true);
+        slider.AddHandler(xaml::UIElement::PointerExitedEvent(), winrt::box_value(Handler(clear)), true);
+        slider.AddHandler(xaml::UIElement::PointerCanceledEvent(), winrt::box_value(Handler(clear)), true);
         Reactive::OnCleanup([set] { set(std::nullopt); });
     }
     controls::Grid track;

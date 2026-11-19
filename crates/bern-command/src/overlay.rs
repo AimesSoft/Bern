@@ -452,7 +452,7 @@ pub fn show_styled(id: &str, overlay: &Overlay, style: TextStyle) {
         (Change::Nothing, _) => {}
         (Change::Lit, Some(host)) => host.lit(id, overlay),
         (Change::All, Some(host)) => host.show_styled(id, overlay, style),
-        (Change::Lit, None) => lit_here(id, overlay),
+        (Change::Lit, None) => lit_here(id, overlay, style),
         (Change::All, None) => show_here(id, overlay, style),
     }
 }
@@ -468,15 +468,15 @@ pub fn hide(id: &str) {
 }
 
 /// Change how far an overlay of this system's own windows is lit.
-fn lit_here(id: &str, overlay: &Overlay) {
+fn lit_here(id: &str, overlay: &Overlay, style: TextStyle) {
     #[cfg(target_os = "macos")]
-    mac::lit(id.to_string(), overlay.clone());
+    mac::lit(id.to_string(), overlay.clone(), style);
     #[cfg(target_os = "windows")]
-    win::lit(id.to_string(), overlay.clone());
+    win::lit(id.to_string(), overlay.clone(), style);
     #[cfg(target_os = "android")]
-    let _ = crate::platform::request("overlay_lit", id, &as_json(overlay, TextStyle::default()));
+    let _ = crate::platform::request("overlay_lit", id, &as_json(overlay, style));
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "android")))]
-    let _ = (id, overlay);
+    let _ = (id, overlay, style);
 }
 
 /// Show an overlay with this system's own windows.
@@ -833,7 +833,7 @@ mod mac {
     }
 
     /// Only how far the lines are lit changed: the panel stays as it is.
-    pub fn lit(id: String, overlay: Overlay) {
+    pub fn lit(id: String, overlay: Overlay, style: TextStyle) {
         DispatchQueue::main().exec_async(move || {
             let Some(mtm) = MainThreadMarker::new() else {
                 return;
@@ -841,7 +841,7 @@ mod mac {
             let fallback = PANELS.with(|panels| {
                 let mut panels = panels.borrow_mut();
                 let Some(shown) = panels.get_mut(&id) else {
-                    return Some(TextStyle::default());
+                    return Some(style);
                 };
                 let lines = overlay.lines.iter().filter(|line| !line.text.is_empty());
                 for (lit, line) in shown.lit.iter_mut().zip(lines) {
@@ -1535,15 +1535,15 @@ mod win {
     use windows::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DispatchMessageW, FindWindowExW, FindWindowW, GWL_EXSTYLE,
         GWL_STYLE, GetCursorPos, GetMessageW, GetParent, GetWindowLongPtrW, GetWindowRect,
-        HTCAPTION, HTCLIENT, HTTRANSPARENT, HWND_NOTOPMOST, HWND_TOP, HWND_TOPMOST, IDC_ARROW,
-        IsWindow, IsWindowVisible, KillTimer, LoadCursorW, MA_NOACTIVATE, MSG, PostThreadMessageW,
-        RegisterClassExW, SPI_GETWORKAREA, SW_HIDE, SW_SHOWNOACTIVATE, SWP_FRAMECHANGED,
-        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetParent, SetTimer, SetWindowLongPtrW,
-        SetWindowPos, ShowWindow, SystemParametersInfoW, TranslateMessage, ULW_ALPHA,
-        UPDATELAYEREDWINDOWINFO, UpdateLayeredWindow, UpdateLayeredWindowIndirect, WM_APP,
-        WM_EXITSIZEMOVE, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_NCHITTEST, WM_TIMER,
-        WNDCLASSEXW, WS_CHILD, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-        WS_EX_TRANSPARENT, WS_POPUP,
+        HTCAPTION, HTCLIENT, HTTRANSPARENT, HWND_MESSAGE, HWND_NOTOPMOST, HWND_TOP, HWND_TOPMOST,
+        IDC_ARROW, IsWindow, IsWindowVisible, KillTimer, LoadCursorW, MA_NOACTIVATE, MSG,
+        PostMessageW, PostThreadMessageW, RegisterClassExW, SPI_GETWORKAREA, SW_HIDE,
+        SW_SHOWNOACTIVATE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetParent,
+        SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow, SystemParametersInfoW,
+        TranslateMessage, ULW_ALPHA, UPDATELAYEREDWINDOWINFO, UpdateLayeredWindow,
+        UpdateLayeredWindowIndirect, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_EXITSIZEMOVE,
+        WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_NCHITTEST, WM_TIMER, WNDCLASSEXW,
+        WS_CHILD, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
     };
     use windows::core::{BOOL, PCWSTR, w};
     use windows_numerics::Vector2;
@@ -1551,11 +1551,14 @@ mod win {
     enum Message {
         Show(String, Overlay, TextStyle),
         /// Only how far the lines are lit, or their routes, changed.
-        Lit(String, Overlay),
+        Lit(String, Overlay, TextStyle),
         Hide(String),
     }
 
-    static CHANNEL: Mutex<Option<(mpsc::Sender<Message>, u32)>> = Mutex::new(None);
+    /// `(sender, wake_hwnd)` where `wake_hwnd` is a message-only window so
+    /// `WM_APP` is dispatched even while modal Win32 dialogs (`ChooseColorW`)
+    /// run their own message loops.
+    static CHANNEL: Mutex<Option<(mpsc::Sender<Message>, isize)>> = Mutex::new(None);
 
     /// Posted to the overlay thread when the background taskbar scan updates.
     const WM_TASKBAR_ROOM: u32 = WM_APP + 1;
@@ -1621,8 +1624,8 @@ mod win {
         send(Message::Show(id, overlay, style));
     }
 
-    pub fn lit(id: String, overlay: Overlay) {
-        send(Message::Lit(id, overlay));
+    pub fn lit(id: String, overlay: Overlay, style: TextStyle) {
+        send(Message::Lit(id, overlay, style));
     }
 
     pub fn hide(id: String) {
@@ -1638,14 +1641,23 @@ mod win {
                 .name("bern-overlay".into())
                 .spawn(move || run(receive, ready));
             let Ok(_) = spawned else { return };
-            let Ok(thread) = started.recv() else { return };
-            *channel = Some((send, thread));
+            let Ok(wake_hwnd) = started.recv() else {
+                return;
+            };
+            *channel = Some((send, wake_hwnd));
         }
-        if let Some((sender, thread)) = channel.as_ref()
+        if let Some((sender, wake_hwnd)) = channel.as_ref()
             && sender.send(message).is_ok()
         {
-            // SAFETY: wakes the overlay thread's message loop.
-            let _ = unsafe { PostThreadMessageW(*thread, WM_APP, WPARAM(0), LPARAM(0)) };
+            // SAFETY: posts to this thread's message-only wake window.
+            let _ = unsafe {
+                PostMessageW(
+                    Some(HWND(*wake_hwnd as *mut _)),
+                    WM_APP,
+                    WPARAM(0),
+                    LPARAM(0),
+                )
+            };
         }
     }
 
@@ -2183,11 +2195,47 @@ mod win {
         }
     }
 
-    fn run(messages: mpsc::Receiver<Message>, ready: mpsc::Sender<u32>) {
+    thread_local! {
+        static INBOX: RefCell<Option<mpsc::Receiver<Message>>> = const { RefCell::new(None) };
+        static INSTANCE_HANDLE: std::cell::Cell<isize> = const { std::cell::Cell::new(0) };
+    }
+
+    fn drain_inbox() {
+        let instance =
+            windows::Win32::Foundation::HINSTANCE(INSTANCE_HANDLE.with(|i| i.get()) as *mut _);
+        loop {
+            let next =
+                INBOX.with(|inbox| inbox.borrow().as_ref().and_then(|rx| rx.try_recv().ok()));
+            let Some(next) = next else { break };
+            FACTORIES.with(|factories| {
+                if let Some((d2d, dwrite)) = factories.borrow().as_ref() {
+                    // SAFETY: overlay thread owns these factories and windows.
+                    unsafe { apply(next, d2d, dwrite, instance) };
+                }
+            });
+        }
+    }
+
+    extern "system" fn wake_proc(
+        hwnd: HWND,
+        message: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
+        if message == WM_APP {
+            drain_inbox();
+            return LRESULT(0);
+        }
+        unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
+    }
+
+    fn run(messages: mpsc::Receiver<Message>, ready: mpsc::Sender<isize>) {
         // SAFETY: this thread's own settings, window class and factories.
         unsafe {
             let _ = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
             let instance = GetModuleHandleW(None).unwrap_or_default();
+            INSTANCE_HANDLE.with(|i| i.set(instance.0 as isize));
+            INBOX.with(|inbox| *inbox.borrow_mut() = Some(messages));
             let class = WNDCLASSEXW {
                 cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
                 lpfnWndProc: Some(window_proc),
@@ -2197,6 +2245,30 @@ mod win {
                 ..Default::default()
             };
             RegisterClassExW(&class);
+            let wake_class = WNDCLASSEXW {
+                cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
+                lpfnWndProc: Some(wake_proc),
+                hInstance: instance.into(),
+                lpszClassName: w!("BernOverlayWake"),
+                ..Default::default()
+            };
+            RegisterClassExW(&wake_class);
+            let Ok(wake_hwnd) = CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                w!("BernOverlayWake"),
+                w!(""),
+                WINDOW_STYLE(0),
+                0,
+                0,
+                0,
+                0,
+                Some(HWND_MESSAGE),
+                None,
+                Some(instance.into()),
+                None,
+            ) else {
+                return;
+            };
             let Ok(d2d) =
                 D2D1CreateFactory::<ID2D1Factory>(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)
             else {
@@ -2209,19 +2281,9 @@ mod win {
             FACTORIES.with(|factories| *factories.borrow_mut() = Some((d2d, dwrite)));
             let thread_id = GetCurrentThreadId();
             set_scanner_thread(thread_id);
-            let _ = ready.send(thread_id);
+            let _ = ready.send(wake_hwnd.0 as isize);
             let mut message = MSG::default();
             while GetMessageW(&mut message, None, 0, 0).as_bool() {
-                if message.hwnd.is_invalid() && message.message == WM_APP {
-                    while let Ok(next) = messages.try_recv() {
-                        FACTORIES.with(|factories| {
-                            if let Some((d2d, dwrite)) = factories.borrow().as_ref() {
-                                apply(next, d2d, dwrite, instance.into());
-                            }
-                        });
-                    }
-                    continue;
-                }
                 if message.hwnd.is_invalid() && message.message == WM_TASKBAR_ROOM {
                     WINDOWS.with(|windows| {
                         let mut windows = windows.borrow_mut();
@@ -2267,7 +2329,7 @@ mod win {
                 }
                 refresh_scanner(&windows);
             }),
-            Message::Lit(id, overlay) => {
+            Message::Lit(id, overlay, style) => {
                 let moved = WINDOWS.with(|windows| {
                     let mut windows = windows.borrow_mut();
                     let Some(window) = windows.get_mut(&id).filter(|window| window.frame.is_some())
@@ -2284,14 +2346,7 @@ mod win {
                 });
                 if !moved {
                     // SAFETY: as this call's own.
-                    unsafe {
-                        apply(
-                            Message::Show(id, overlay, TextStyle::default()),
-                            d2d,
-                            dwrite,
-                            instance,
-                        )
-                    };
+                    unsafe { apply(Message::Show(id, overlay, style), d2d, dwrite, instance) };
                 }
             }
             Message::Show(id, overlay, style) => WINDOWS.with(|windows| {

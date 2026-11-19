@@ -1050,18 +1050,24 @@ private func bernPlatformRequest(
     #if os(macOS) || os(iOS)
     case "can_open_https", "open_https":
         guard let url = URL(string: text(first, firstLength)), url.scheme == "https", url.host != nil else { return 1 }
-        let perform: @MainActor () -> Int32 = {
-            #if os(macOS)
-            guard NSWorkspace.shared.urlForApplication(toOpen: url) != nil else { return 1 }
-            return name == "can_open_https" || NSWorkspace.shared.open(url) ? 0 : 1
-            #else
-            guard UIApplication.shared.canOpenURL(url) else { return 1 }
-            if name == "open_https" { UIApplication.shared.open(url) }
-            return 0
-            #endif
+        #if os(macOS)
+        // `urlForApplication(toOpen:)` is thread-safe; avoid `DispatchQueue.main.sync`
+        // from the engine thread so a synchronous UI->engine call cannot deadlock.
+        guard NSWorkspace.shared.urlForApplication(toOpen: url) != nil else { return 1 }
+        if name == "open_https" {
+            DispatchQueue.main.async { NSWorkspace.shared.open(url) }
         }
-        if Thread.isMainThread { return MainActor.assumeIsolated { perform() } }
-        return DispatchQueue.main.sync { MainActor.assumeIsolated { perform() } }
+        return 0
+        #else
+        if name == "can_open_https" {
+            if Thread.isMainThread {
+                return MainActor.assumeIsolated { UIApplication.shared.canOpenURL(url) ? 0 : 1 }
+            }
+            return 0
+        }
+        DispatchQueue.main.async { MainActor.assumeIsolated { UIApplication.shared.open(url) } }
+        return 0
+        #endif
     #endif
     case "copy_text" where BernClipboard.available:
         let copied = text(first, firstLength)
