@@ -6,6 +6,44 @@ use bern_ir::{Element, Node};
 use bern_protocol::Type;
 
 impl Generator<'_> {
+    /// A `Skeleton` placeholder shape.
+    pub(super) fn skeleton_view(&self, out: &mut Out, element: &Element) {
+        let mut args = Vec::new();
+        if let Some(width) = self.length(element, "width") {
+            args.push(format!("width: {width}"));
+        }
+        if let Some(height) = self.length(element, "height") {
+            args.push(format!("height: {height}"));
+        }
+        if let Some(fraction) = element.number("fraction") {
+            args.push(format!("fraction: {}", double(fraction)));
+        }
+        if let Some(max_width) = self.length(element, "max_width") {
+            args.push(format!("maxWidth: {max_width}"));
+        }
+        if let Some(aspect) = element.number("aspect") {
+            args.push(format!("aspect: {}", double(aspect)));
+        }
+        if let Some(corner) = self.length(element, "corner") {
+            args.push(format!("corner: {corner}"));
+        }
+        if let Some(shape) = element.keyword("shape") {
+            args.push(format!("shape: {}", string(shape)));
+        }
+        let base_opacity = element.number("opacity").unwrap_or_else(|| {
+            match element.keyword("tone").unwrap_or("media") {
+                "primary" => 0.09,
+                "secondary" => 0.06,
+                _ => 0.07,
+            }
+        });
+        args.push(format!("baseOpacity: {}", double(base_opacity)));
+        if element.keyword("pulse") == Some("false") {
+            args.push("pulse: false".into());
+        }
+        out.line(format!("BernSkeleton({})", args.join(", ")));
+    }
+
     /// A `Canvas`.
     pub(super) fn canvas(&self, out: &mut Out, element: &Element) {
         let length = |name| self.length(element, name).unwrap_or_else(|| "nil".into());

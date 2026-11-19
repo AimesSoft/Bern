@@ -14,6 +14,7 @@ fn element(kind: &str, children: Vec<Node>) -> Element {
         template: None,
         children,
         action: None,
+        skeleton: None,
         source: SourceLocation {
             file: "gestures.rs".into(),
             line: 1,

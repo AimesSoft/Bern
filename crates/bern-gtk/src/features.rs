@@ -2280,10 +2280,24 @@ pub fn RuntimeImage(p: &Parent, ctx: &Ctx, props: RuntimeImageProps) {
             Rc::new(move |texture| shown.set_paintable(texture)),
         )
     };
+    let covers = props.width.is_none() && props.height.is_none() && props.aspect.is_none();
+    let placeholder = (!covers).then(|| {
+        let ph = crate::skeleton::SkeletonWidget::media_placeholder();
+        ph.set_visible(false);
+        ph
+    });
+    let display: gtk::Widget = if let Some(ph) = &placeholder {
+        let overlay = gtk::Overlay::new();
+        overlay.set_child(Some(&picture));
+        overlay.add_overlay(ph);
+        overlay.upcast()
+    } else {
+        picture.clone()
+    };
     let ratio = Rc::new(Cell::new(props.aspect.unwrap_or(1.0)));
     let (outer, _, resize) = crate::widgets::framed(
         ctx,
-        &picture,
+        &display,
         crate::widgets::Sizing {
             width: &props.width,
             height: &props.height,
@@ -2326,9 +2340,13 @@ pub fn RuntimeImage(p: &Parent, ctx: &Ctx, props: RuntimeImageProps) {
     let loading: Rc<RefCell<Option<glib::JoinHandle<()>>>> = Rc::default();
     let stop = {
         let loading = Rc::clone(&loading);
+        let placeholder = placeholder.clone();
         move || {
             if let Some(load) = loading.take() {
                 load.abort();
+            }
+            if let Some(ph) = &placeholder {
+                ph.set_visible(false);
             }
         }
     };
@@ -2336,13 +2354,21 @@ pub fn RuntimeImage(p: &Parent, ctx: &Ctx, props: RuntimeImageProps) {
         let loading = Rc::clone(&loading);
         let stop = stop.clone();
         let present = Rc::clone(&present);
+        let placeholder = placeholder.clone();
         move |url: String| {
             stop();
+            if let Some(ph) = &placeholder {
+                ph.set_visible(true);
+            }
             let present = Rc::clone(&present);
             let finished = Rc::clone(&loading);
+            let placeholder = placeholder.clone();
             let load = glib::spawn_future_local(async move {
                 let texture = load_texture(&url, decoded_at).await;
                 finished.take();
+                if let Some(ph) = &placeholder {
+                    ph.set_visible(false);
+                }
                 present(texture);
             });
             *loading.borrow_mut() = Some(load);

@@ -168,6 +168,8 @@ fn showcase_generates_a_gtk_application() {
         "b::SplitView(p, c, b::SplitSpec {",
         "b::Navigation(p, c, Some(\"library\")",
         "b::Query(p, c, b::QueryProps { id: Some(\"library_results\")",
+        "b::SkeletonHost(p, c,",
+        "b::Skeleton(p, c, b::SkeletonProps {",
         "b::Adaptive(p, c, Some(\"clip_choice\")",
         "b::Tabs(p, c, Some(\"tabs\")",
         "b::Video(p, c, b::VideoProps { id: \"preview\", source: None, player: Some(\"preview\")",
@@ -421,6 +423,7 @@ fn add_tab_accessory(app: &mut bern_ir::Application) {
                         template: None,
                         children: vec![],
                         action: None,
+                        skeleton: None,
                         source: SourceLocation {
                             file: "tabs.rs".into(),
                             line: 1,
@@ -428,6 +431,7 @@ fn add_tab_accessory(app: &mut bern_ir::Application) {
                         },
                     })],
                     action: None,
+                    skeleton: None,
                     source: SourceLocation {
                         file: "tabs.rs".into(),
                         line: 1,
@@ -532,6 +536,7 @@ fn node(
         template: None,
         children,
         action: None,
+        skeleton: None,
         source: bern_ir::SourceLocation {
             file: "features.rs".into(),
             line: 1,

@@ -152,6 +152,8 @@ fn showcase_generates_video_queries_and_windows() {
         "{kotlin}"
     );
     assert!(kotlin.contains("BernQueryView("));
+    assert!(kotlin.contains("BernSkeletonHost("));
+    assert!(kotlin.contains("BernSkeleton("));
     assert!(kotlin.contains("BernTabs(content = {"));
     assert!(kotlin.contains("BernToolbarPicker("));
     assert!(kotlin.contains("\"settings\" -> BernWindow"));
@@ -358,6 +360,7 @@ fn add_tab_accessory(app: &mut bern_ir::Application) {
                         template: None,
                         children: vec![],
                         action: None,
+                        skeleton: None,
                         source: SourceLocation {
                             file: "tabs.rs".into(),
                             line: 1,
@@ -365,6 +368,7 @@ fn add_tab_accessory(app: &mut bern_ir::Application) {
                         },
                     })],
                     action: None,
+                    skeleton: None,
                     source: SourceLocation {
                         file: "tabs.rs".into(),
                         line: 1,
@@ -423,6 +427,7 @@ fn node(
         template: None,
         children,
         action: None,
+        skeleton: None,
         source: bern_ir::SourceLocation {
             file: "features.rs".into(),
             line: 1,
@@ -1025,6 +1030,7 @@ fn add_field_in_row(app: &mut bern_ir::Application) {
                     children: vec![Node::Element(beside)],
                     action: None,
                     source: element.source.clone(),
+                    skeleton: None,
                 }));
                 true
             }

@@ -218,6 +218,8 @@ fn showcase_generates_a_winui3_application() {
         "B::SplitView(p, c, {.id = \"pages\", .selection = Field{0, 0}",
         "B::Navigation(p, c, \"library\"",
         "B::Query(p, c, {.id = \"library_results\"",
+        "B::SkeletonHost(p, c,",
+        "B::Skeleton(p, c, {",
         "B::Adaptive(p, c, \"clip_choice\",",
         "B::Tabs(p, c, {.id = \"tabs\"",
         "B::Video(p, c, {.id = \"preview\", .player = \"preview\"",
@@ -612,6 +614,7 @@ fn add_tab_accessory(app: &mut bern_ir::Application) {
                         template: None,
                         children: vec![],
                         action: None,
+                        skeleton: None,
                         source: SourceLocation {
                             file: "tabs.rs".into(),
                             line: 1,
@@ -619,6 +622,7 @@ fn add_tab_accessory(app: &mut bern_ir::Application) {
                         },
                     })],
                     action: None,
+                    skeleton: None,
                     source: SourceLocation {
                         file: "tabs.rs".into(),
                         line: 1,
@@ -692,6 +696,7 @@ fn node(
         template: None,
         children,
         action: None,
+        skeleton: None,
         source: bern_ir::SourceLocation {
             file: "features.rs".into(),
             line: 1,
@@ -1523,6 +1528,7 @@ fn add_field_in_row(app: &mut bern_ir::Application) {
                     children: vec![Node::Element(beside)],
                     action: None,
                     source: element.source.clone(),
+                    skeleton: None,
                 }));
                 true
             }

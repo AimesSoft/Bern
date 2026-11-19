@@ -602,6 +602,7 @@ mod tests {
             children: Vec::new(),
             action: None,
             source: SourceLocation::default(),
+            skeleton: None,
         }
     }
 

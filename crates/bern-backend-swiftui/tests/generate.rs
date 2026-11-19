@@ -83,6 +83,7 @@ fn conditional_progress_rails_keep_the_posters_overlay_layout() {
             template: None,
             children,
             action: None,
+            skeleton: None,
             source: SourceLocation {
                 file: "poster.rs".into(),
                 line: 1,
@@ -155,6 +156,7 @@ fn rows_give_items_their_widths_and_sized_stacks_start_them() {
             template: None,
             children,
             action: None,
+            skeleton: None,
             source: SourceLocation {
                 file: "row.rs".into(),
                 line: 1,
@@ -298,6 +300,7 @@ fn centered_row_keeps_both_spacers() {
             template: None,
             children,
             action: None,
+            skeleton: None,
             source: SourceLocation {
                 file: "centered-row.rs".into(),
                 line: 1,
@@ -461,6 +464,7 @@ fn pictures_with_a_dark_one_follow_the_appearance() {
         template: None,
         children: vec![],
         action: None,
+        skeleton: None,
         source: SourceLocation {
             file: "logo.rs".into(),
             line: 1,
@@ -552,6 +556,9 @@ fn showcase_generates_swift_that_type_checks() {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, &file.contents).unwrap();
     }
+    let swift = std::fs::read_to_string(output.join("Sources/BernGenerated.swift")).unwrap();
+    assert!(swift.contains("BernSkeletonHost("), "{swift}");
+    assert!(swift.contains("BernSkeleton("), "{swift}");
     // The engine learns the declared names; the plan ships them into the
     // bundle next to the generated localizations, before signing.
     let glue = std::fs::read_to_string(output.join("glue/src/lib.rs")).unwrap();
@@ -845,6 +852,7 @@ fn sidebar_title_headers_do_not_repeat_the_native_window_title() {
                 children: Vec::new(),
                 action: None,
                 source: sidebar.source.clone(),
+                skeleton: None,
             }));
         }
         for (name, target) in [
@@ -942,6 +950,9 @@ fn showcase_generates_ios_swift_that_type_checks() {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, &file.contents).unwrap();
     }
+    let swift = std::fs::read_to_string(output.join("Sources/BernGenerated.swift")).unwrap();
+    assert!(swift.contains("BernSkeletonHost("), "{swift}");
+    assert!(swift.contains("BernSkeleton("), "{swift}");
     // Windows are virtual; the channel listens only where `bern run` names
     // a directory the Mac reaches.
     let glue = std::fs::read_to_string(output.join("glue/src/lib.rs")).unwrap();
@@ -1071,6 +1082,9 @@ fn both_ios_front_ends_compile_from_one_source() {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, &file.contents).unwrap();
     }
+    let swift = std::fs::read_to_string(output.join("Sources/BernGenerated.swift")).unwrap();
+    assert!(swift.contains("BernSkeletonHost("), "{swift}");
+    assert!(swift.contains("BernSkeleton("), "{swift}");
     let plist = std::fs::read_to_string(output.join("Showcase.app/Info.plist")).unwrap();
     assert!(
         plist.contains("<key>MinimumOSVersion</key>\n    <string>16.0</string>"),
@@ -1690,6 +1704,7 @@ fn add_tab_accessory(app: &mut bern_ir::Application) {
                         template: None,
                         children: vec![],
                         action: None,
+                        skeleton: None,
                         source: SourceLocation {
                             file: "tabs.rs".into(),
                             line: 1,
@@ -1697,6 +1712,7 @@ fn add_tab_accessory(app: &mut bern_ir::Application) {
                         },
                     })],
                     action: None,
+                    skeleton: None,
                     source: SourceLocation {
                         file: "tabs.rs".into(),
                         line: 1,
@@ -2035,6 +2051,7 @@ fn scene_layers_bleed_and_window_buttons_keep_the_traffic_lights_room() {
             template: None,
             children,
             action: None,
+            skeleton: None,
             source: SourceLocation {
                 file: "scene.rs".into(),
                 line: 1,
@@ -2128,6 +2145,7 @@ fn a_bleeding_canvas_passes_the_safe_area_on_a_phone() {
             template: None,
             children,
             action: None,
+            skeleton: None,
             source: SourceLocation {
                 file: "canvas.rs".into(),
                 line: 1,

@@ -44,6 +44,7 @@ fn navigation_reset_observes_root_identity_with_initial_delivery() {
             template: None,
             children: vec![],
             action: None,
+            skeleton: None,
             source: SourceLocation {
                 file: "navigation.rs".into(),
                 line: 1,

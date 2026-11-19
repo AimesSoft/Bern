@@ -364,11 +364,15 @@ impl Generator<'_> {
         let decoration = self.decoration(element);
         let placement = self.placement(element);
         let (header, body) = element.query_children();
-        if condition.is_some() || header.is_some() {
+        let has_skeleton = element.skeleton.is_some();
+        if condition.is_some() || header.is_some() || has_skeleton {
             out.open("{");
         }
         if let Some(header) = header {
             self.children(out, "let status_header = ", header, ";");
+        }
+        if let Some(skeleton_nodes) = &element.skeleton {
+            self.children(out, "let skeleton = ", skeleton_nodes, ";");
         }
         let open = if condition.is_some() {
             "let draw = b::own_query(c,"
@@ -378,7 +382,7 @@ impl Generator<'_> {
         self.children(
             out,
             &format!(
-                "{open} b::QueryProps {{ id: {}, query: {}, params: vec![{}], loading: {}, failed: {}, empty: {}, icon: {}, var: {}, placed: {}, status_header: {} }}, ",
+                "{open} b::QueryProps {{ id: {}, query: {}, params: vec![{}], loading: {}, failed: {}, empty: {}, icon: {}, var: {}, placed: {}, status_header: {}, skeleton: {} }}, ",
                 some(element.id.as_ref().map(|_| self.id(element))),
                 binding.query,
                 params.join(", "),
@@ -389,6 +393,7 @@ impl Generator<'_> {
                 string(&template.var),
                 placement.is_some() || decoration.is_some(),
                 if header.is_some() { "Some(status_header)" } else { "None" },
+                if has_skeleton { "Some(skeleton)" } else { "None" },
             ),
             body,
             ");",
@@ -409,7 +414,7 @@ impl Generator<'_> {
                 self.getter(condition)
             ));
         }
-        if condition.is_some() || header.is_some() {
+        if condition.is_some() || header.is_some() || has_skeleton {
             out.close("}");
         }
     }

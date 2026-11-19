@@ -2774,14 +2774,37 @@ export function Image(p, ctx, { source, darkSource, url, label, width, height, f
     });
   } else if (source) setSource(resource(source));
   if (url) {
-    // A new source shows nothing until its picture has come, not the
-    // picture before it, which the browser keeps meanwhile.
-    if (!template) node.addEventListener("load", () => { node.style.visibility = ""; });
+    // A new source shows a subtle pulsing placeholder until its picture has
+    // come, never the stale picture before it.
+    if (!template) {
+      node.addEventListener("load", () => {
+        node.classList.remove("bern-image-loading");
+        node.style.visibility = "";
+      });
+      node.addEventListener("error", () => {
+        node.classList.remove("bern-image-loading");
+        node.style.visibility = "hidden";
+      });
+    }
     effect(() => {
       const value = url();
-      if (!template && value && value !== node.getAttribute("src")) node.style.visibility = "hidden";
+      const changing = !template && value && value !== node.getAttribute("src");
+      if (changing) {
+        node.removeAttribute("src");
+        if (!covers) {
+          node.style.visibility = "";
+          node.classList.add("bern-image-loading");
+        } else {
+          node.style.visibility = "hidden";
+        }
+      } else if (!value) {
+        node.classList.remove("bern-image-loading");
+      }
       setSource(value);
-      if (!template && node.complete && node.naturalWidth) node.style.visibility = "";
+      if (!template && node.complete && node.naturalWidth) {
+        node.classList.remove("bern-image-loading");
+        node.style.visibility = "";
+      }
       node.hidden = !value;
     });
   }

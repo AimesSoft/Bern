@@ -1591,6 +1591,16 @@ final class BernHost {
         return context
     }
 
+    private func defaultWindow() throws -> BernWindowContext {
+        if let primary = kinds.first?.id, let context = windows[primary] {
+            return context
+        }
+        if let first = windows.values.first {
+            return first
+        }
+        throw BernCommandFailure(code: "target_not_found", message: "no open window")
+    }
+
     /// Command indices follow the framework session catalog order.
     private func run(_ command: UInt32, request: UInt64, _ reader: inout BernReader) throws {
         switch command {
@@ -1734,6 +1744,12 @@ final class BernHost {
             let overlayID = try reader.text()
             syncOverlay(overlayID)
             complete(request, command: command) { _ in }
+        case 26:  // window.screenshot
+            let targetID = try String?(bern: &reader)
+            _ = try String?(bern: &reader)
+            let context = try targetID.map { try window($0) } ?? defaultWindow()
+            let shot = try screenshot(context)
+            complete(request, command: command) { shot.encode(&$0) }
         default:
             throw BernCommandFailure(code: "unknown_command", message: "unknown session command \(command)")
         }
@@ -1794,6 +1810,26 @@ struct BernCloseResult {
         for decision in decisions { writer.u32(decision.rawValue) }
         message.encode(bern: &writer)
         reason.encode(bern: &writer)
+    }
+}
+
+/// The session catalog's `WindowScreenshot`, encoded field by field.
+struct BernScreenshotResult {
+    let window: String
+    let width: Int64
+    let height: Int64
+    let scale: Double
+    let mime: String = "image/png"
+    let data: String
+
+    func encode(_ writer: inout BernWriter) {
+        writer.text(window)
+        writer.i64(width)
+        writer.i64(height)
+        writer.f64(scale)
+        writer.text(mime)
+        Optional<String>.none.encode(bern: &writer)
+        Optional<String>.some(data).encode(bern: &writer)
     }
 }
 
@@ -2045,7 +2081,7 @@ struct BernQueryScope<Data: BernCodable, Content: View>: View {
 }
 
 /// Standard controls for one presentation of a query, without owning it.
-struct BernQueryView<Data: BernCodable, Shown, Content: View>: View {
+struct BernQueryView<Data: BernCodable, Shown, Content: View, Skeleton: View>: View {
     let phase: BernQueryPhase<Data>
     let retry: () -> Void
     let loading: String
@@ -2053,6 +2089,7 @@ struct BernQueryView<Data: BernCodable, Shown, Content: View>: View {
     let emptyIcon: String
     let failed: String
     let shown: (Data) -> Shown?
+    let skeleton: (() -> Skeleton)?
     let content: (Shown) -> Content
     #if os(iOS)
     @Environment(\.bernSearchEmpty) private var searchEmpty
@@ -2061,6 +2098,7 @@ struct BernQueryView<Data: BernCodable, Shown, Content: View>: View {
     init(
         phase: BernQueryPhase<Data>, retry: @escaping () -> Void, loading: String,
         empty: String?, emptyIcon: String, failed: String, shown: @escaping (Data) -> Shown?,
+        @ViewBuilder skeleton: @escaping () -> Skeleton,
         @ViewBuilder content: @escaping (Shown) -> Content
     ) {
         self.phase = phase
@@ -2070,23 +2108,81 @@ struct BernQueryView<Data: BernCodable, Shown, Content: View>: View {
         self.emptyIcon = emptyIcon
         self.failed = failed
         self.shown = shown
+        self.skeleton = skeleton
         self.content = content
     }
 
-    var body: some View {
+    init(
+        phase: BernQueryPhase<Data>, retry: @escaping () -> Void, loading: String,
+        empty: String?, emptyIcon: String, failed: String, shown: @escaping (Data) -> Shown?,
+        @ViewBuilder content: @escaping (Shown) -> Content
+    ) where Skeleton == EmptyView {
+        self.phase = phase
+        self.retry = retry
+        self.loading = loading
+        self.empty = empty
+        self.emptyIcon = emptyIcon
+        self.failed = failed
+        self.shown = shown
+        self.skeleton = nil
+        self.content = content
+    }
+
+    private var readyData: Data? {
         switch phase {
-        case .idle, .loading:
-            BernQueryProgress(text: loading)
-        case .ready(let data), .refreshing(let data):
-            // Keep one structural identity while parameters refresh, so
-            // keyed grids retain their cells, scroll position and reflow.
-            presented(data)
-                .overlay(alignment: .topTrailing) {
-                    if case .refreshing = phase {
-                        ProgressView().controlSize(.small).accessibilityLabel(Text(verbatim: loading))
-                    }
+        case .ready(let data), .refreshing(let data): return data
+        default: return nil
+        }
+    }
+
+    private var isRefreshing: Bool {
+        if case .refreshing = phase { return true }
+        return false
+    }
+
+    var body: some View {
+        if skeleton != nil, case .failed = phase {
+            failedBody
+        } else if let skeleton {
+            let isLoading: Bool = switch phase {
+            case .idle, .loading: true
+            default: false
+            }
+            BernSkeletonHost(active: isLoading, loadingLabel: loading) {
+                skeleton()
+            } content: {
+                if let data = readyData {
+                    // Keep one structural identity while parameters refresh, so
+                    // keyed grids retain their cells, scroll position and reflow.
+                    presented(data)
+                        .overlay(alignment: .topTrailing) {
+                            if isRefreshing {
+                                ProgressView().controlSize(.small).accessibilityLabel(Text(verbatim: loading))
+                            }
+                        }
                 }
-        case .failed(let previous, _, let message):
+            }
+        } else {
+            switch phase {
+            case .idle, .loading:
+                BernQueryProgress(text: loading)
+            case .ready(let data), .refreshing(let data):
+                // Keep one structural identity while parameters refresh, so
+                // keyed grids retain their cells, scroll position and reflow.
+                presented(data)
+                    .overlay(alignment: .topTrailing) {
+                        if case .refreshing = phase {
+                            ProgressView().controlSize(.small).accessibilityLabel(Text(verbatim: loading))
+                        }
+                    }
+            case .failed:
+                failedBody
+            }
+        }
+    }
+
+    @ViewBuilder private var failedBody: some View {
+        if case .failed(let previous, _, let message) = phase {
             if let previous {
                 BernQueryFailureRow(title: failed, message: message) { retry() }
                 presented(previous)
@@ -2125,6 +2221,209 @@ struct BernQueryView<Data: BernCodable, Shown, Content: View>: View {
                 .frame(maxWidth: .infinity)
             #endif
         }
+    }
+}
+
+/// Gentle breathing opacity modifier for skeleton placeholders, frozen under
+/// Reduce Motion.
+struct BernSkeletonPulse: ViewModifier {
+    let baseOpacity: Double
+    let pulse: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var dimmed = false
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(pulse && !reduceMotion && dimmed ? baseOpacity * 0.55 : baseOpacity)
+            .onAppear {
+                guard pulse, !reduceMotion else { return }
+                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                    dimmed = true
+                }
+            }
+            .onChange(of: reduceMotion) { _, reduced in
+                if reduced {
+                    dimmed = false
+                } else if pulse {
+                    withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                        dimmed = true
+                    }
+                }
+            }
+    }
+}
+
+/// Proportional width layout for flexible skeleton bars: `min(available, maxWidth) * fraction`,
+/// so bars shrink naturally on narrow screens and watches without collapsing inside `HStack` + `Spacer`.
+struct BernSkeletonBarLayout: Layout {
+    let fraction: CGFloat
+    let maxWidth: CGFloat?
+    let height: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let fallback = maxWidth ?? 200
+        let available = proposal.width ?? fallback
+        let bounded = maxWidth.map { min(available, $0) } ?? available
+        let width = bounded.isFinite ? max(0, bounded * fraction) : fallback * fraction
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for subview in subviews {
+            subview.place(at: bounds.origin, proposal: ProposedViewSize(bounds.size))
+        }
+    }
+}
+
+/// Non-interactive theme-aware skeleton placeholder shape.
+struct BernSkeleton: View {
+    var width: CGFloat? = nil
+    var height: CGFloat? = nil
+    var fraction: CGFloat? = nil
+    var maxWidth: CGFloat? = nil
+    var aspect: CGFloat? = nil
+    var corner: CGFloat = 8
+    var shape: String = "rect"
+    var baseOpacity: Double = 0.07
+    var pulse: Bool = true
+
+    @ViewBuilder private var fillShape: some View {
+        Group {
+            switch shape {
+            case "capsule":
+                Capsule(style: .continuous).fill(Color.primary)
+            case "circle":
+                Circle().fill(Color.primary)
+            default:
+                RoundedRectangle(cornerRadius: corner, style: .continuous).fill(Color.primary)
+            }
+        }
+        .modifier(BernSkeletonPulse(baseOpacity: baseOpacity, pulse: pulse))
+    }
+
+    var body: some View {
+        Group {
+            if let width {
+                if let height {
+                    fillShape.frame(width: width, height: height)
+                } else if let aspect, aspect > 0 {
+                    fillShape.frame(width: width, height: width / aspect)
+                } else if shape == "circle" {
+                    fillShape.frame(width: width, height: width)
+                } else {
+                    fillShape.frame(width: width)
+                }
+            } else if let fraction {
+                let h = height ?? 12
+                BernSkeletonBarLayout(fraction: fraction, maxWidth: maxWidth, height: h) {
+                    fillShape
+                }
+            } else if let aspect, aspect > 0 {
+                fillShape
+                    .frame(maxWidth: .infinity)
+                    .aspectRatio(aspect, contentMode: .fit)
+            } else if let height {
+                fillShape.frame(maxWidth: .infinity).frame(height: height)
+            } else {
+                fillShape.frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+/// Stateful timer controller for `BernSkeletonHost`, surviving branch swaps
+/// inside `Group` without cancelling the 120 ms anti-flicker task.
+@MainActor
+@Observable
+private final class BernSkeletonDelay {
+    var showSkeleton = false
+    var hadContent: Bool
+    var contentOpacity: Double = 1.0
+    @ObservationIgnored private var lastActive: Bool?
+    @ObservationIgnored private var delayTask: Task<Void, Never>?
+
+    init(active: Bool) {
+        self.hadContent = !active
+    }
+
+    func update(active: Bool, reduceMotion: Bool) {
+        guard lastActive != active else { return }
+        lastActive = active
+        delayTask?.cancel()
+        delayTask = nil
+        if active {
+            showSkeleton = false
+            delayTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 120_000_000)
+                guard !Task.isCancelled, let self, self.lastActive == true else { return }
+                self.contentOpacity = reduceMotion ? 1.0 : 0.0
+                self.showSkeleton = true
+            }
+        } else {
+            let fromSkeleton = showSkeleton
+            showSkeleton = false
+            hadContent = true
+            if fromSkeleton && !reduceMotion {
+                withAnimation(.easeOut(duration: 0.15)) {
+                    contentOpacity = 1.0
+                }
+            } else {
+                contentOpacity = 1.0
+            }
+        }
+    }
+
+    deinit {
+        delayTask?.cancel()
+    }
+}
+
+/// Anti-flicker host switching between projected skeleton placeholders and real
+/// content: waits 120 ms before revealing the skeleton so fast loads never flash,
+/// and fades the real content in over 150 ms once ready.
+struct BernSkeletonHost<Skeleton: View, Content: View>: View {
+    let active: Bool
+    let loadingLabel: String
+    let skeleton: () -> Skeleton
+    let content: () -> Content
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var delay: BernSkeletonDelay
+
+    init(
+        active: Bool,
+        loadingLabel: String,
+        @ViewBuilder skeleton: @escaping () -> Skeleton,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.active = active
+        self.loadingLabel = loadingLabel
+        self.skeleton = skeleton
+        self.content = content
+        self._delay = State(initialValue: BernSkeletonDelay(active: active))
+    }
+
+    var body: some View {
+        Group {
+            if active {
+                if delay.showSkeleton {
+                    skeleton()
+                        .allowsHitTesting(false)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(Text(verbatim: loadingLabel))
+                } else if delay.hadContent {
+                    content()
+                } else {
+                    Color.clear.frame(width: 0, height: 0).accessibilityHidden(true)
+                }
+            } else {
+                content()
+                    .opacity(reduceMotion ? 1.0 : delay.contentOpacity)
+            }
+        }
+        .onAppear { delay.update(active: active, reduceMotion: reduceMotion) }
+        .onChange(of: active) { _, now in delay.update(active: now, reduceMotion: reduceMotion) }
     }
 }
 
@@ -2323,6 +2622,9 @@ struct BernImage: View {
     /// source changes it is no longer shown, so the old picture does not
     /// stand in for the new one while that loads.
     @State private var fetched: (request: BernPictures.Request, picture: Picture)?
+    /// The last URL request whose async fetch completed (whether it yielded
+    /// an image or failed), so failed URLs do not pulse forever.
+    @State private var finishedRequest: BernPictures.Request?
     @Environment(\.colorScheme) private var scheme
     @Environment(\.displayScale) private var displayScale
     @Environment(BernWindowContext.self) private var window: BernWindowContext?
@@ -2513,7 +2815,7 @@ struct BernImage: View {
         return nil
     }
 
-    @ViewBuilder private func rendered(_ picture: Picture?, in boxSize: CGSize?) -> some View {
+    @ViewBuilder private func rendered(_ picture: Picture?, in boxSize: CGSize?, loading: Bool) -> some View {
         let resolved: Picture? = {
             guard let picture else { return nil }
             #if canImport(CoreImage)
@@ -2532,6 +2834,10 @@ struct BernImage: View {
                 case .cover: image.resizable().aspectRatio(contentMode: .fill)
                 case .fill: image.resizable()
                 }
+            } else if loading && !covers && blur == 0 {
+                Rectangle()
+                    .fill(Color.primary)
+                    .modifier(BernSkeletonPulse(baseOpacity: 0.07, pulse: true))
             } else {
                 Color.clear
             }
@@ -2588,17 +2894,20 @@ struct BernImage: View {
             // its place is not left empty for a frame in between.
             ?? (fetched != nil ? request.flatMap { BernPictures.shared.local($0) } : nil)
         let ratio = picture?.ratio ?? 1
+        let isLoading = request.map { !$0.url.isEmpty } == true
+            && picture == nil
+            && finishedRequest != request
         let shown = Group {
             if covers {
                 Color.clear
                     .overlay {
                         if blur >= 4 {
                             GeometryReader { proxy in
-                                rendered(picture, in: proxy.size)
+                                rendered(picture, in: proxy.size, loading: false)
                                     .frame(width: proxy.size.width, height: proxy.size.height)
                             }
                         } else {
-                            rendered(picture, in: nil)
+                            rendered(picture, in: nil, loading: false)
                         }
                     }
                     .clipped()
@@ -2611,11 +2920,11 @@ struct BernImage: View {
                     .overlay {
                         if blur >= 4 {
                             GeometryReader { proxy in
-                                rendered(picture, in: proxy.size)
+                                rendered(picture, in: proxy.size, loading: isLoading)
                                     .frame(width: proxy.size.width, height: proxy.size.height)
                             }
                         } else {
-                            rendered(picture, in: nil)
+                            rendered(picture, in: nil, loading: isLoading)
                         }
                     }
                     .clipped()
@@ -2624,12 +2933,19 @@ struct BernImage: View {
                 let w = width ?? height.map { $0 * ratio }
                 let h = height ?? width.map { $0 / ratio }
                 let box = (w != nil && h != nil) ? CGSize(width: w!, height: h!) : nil
-                rendered(picture, in: box).frame(width: w, height: h).clipped()
+                rendered(picture, in: box, loading: isLoading).frame(width: w, height: h).clipped()
             }
         }
         .task(id: request) {
-            guard let request else { return }
-            fetched = await BernPictures.shared.load(request).map { (request, $0) }
+            guard let request else {
+                finishedRequest = nil
+                return
+            }
+            let result = await BernPictures.shared.load(request)
+            if !Task.isCancelled {
+                fetched = result.map { (request, $0) }
+                finishedRequest = request
+            }
         }
         .modifier(BernPictureHero(id: hero, picture: picture, fit: fit, corner: heroCorner, motion: heroMotion))
         if let label {

@@ -81,6 +81,7 @@ fn element(kind: &str) -> Element {
         children: vec![],
         action: None,
         source: SourceLocation::default(),
+        skeleton: None,
     }
 }
 

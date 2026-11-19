@@ -54,6 +54,11 @@ fn resolve_node(node: &mut Node, radius: &impl Fn(&str, f64) -> f64) {
             for child in &mut element.children {
                 resolve_node(child, radius);
             }
+            if let Some(skeleton) = &mut element.skeleton {
+                for child in skeleton {
+                    resolve_node(child, radius);
+                }
+            }
         }
         Node::Component(_) => {}
         Node::If(node) => {

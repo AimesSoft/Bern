@@ -464,6 +464,7 @@ fn decode_max_side_bounds_blurred_backdrops_and_transitive_grids() {
         children: Vec::new(),
         action: None,
         source: bern_ir::SourceLocation::default(),
+        skeleton: None,
     };
 
     app.components = vec![bern_ir::ComponentDef {

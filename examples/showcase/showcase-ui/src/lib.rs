@@ -90,6 +90,7 @@ pub struct MainDraft {
     pub brightness: f64,
     #[initial(Density::Regular)]
     pub density: Density,
+    pub preview_skeleton: bool,
 }
 
 /// The application: a main window and a settings window. Each window's

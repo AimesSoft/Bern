@@ -303,6 +303,17 @@ impl OwnedQuery {
         header: impl FnOnce(&Ctx) -> Vec<El>,
         template: impl FnOnce(&Ctx, Value) -> Vec<El>,
     ) -> El {
+        self.present_with_skeleton(c, props, header, None::<fn(&Ctx) -> Vec<El>>, template)
+    }
+
+    pub fn present_with_skeleton(
+        &self,
+        c: &Ctx,
+        props: QueryProps,
+        header: impl FnOnce(&Ctx) -> Vec<El>,
+        skeleton: Option<impl FnOnce(&Ctx) -> Vec<El>>,
+        template: impl FnOnce(&Ctx, Value) -> Vec<El>,
+    ) -> El {
         let key = &self.key;
         let spec = &host().def.descriptor.commands[self.query];
         let state = SUBSCRIPTIONS
@@ -383,8 +394,27 @@ impl OwnedQuery {
                 .children(content)
                 .into_any_element()
         };
-        let status = if state.phase == 1 || (state.phase == 0 && state.data.is_none()) {
-            Some(line(vec![div().child(loading.clone()).into_any_element()]))
+        let is_loading = state.phase == 1 || (state.phase == 0 && state.data.is_none());
+        let skel_phase = skeleton.as_ref().map(|_| {
+            let skel_key = format!("{}/qskel:{}", c.win().id, self.key);
+            crate::skeleton::host_phase(
+                &c.win().id,
+                &skel_key,
+                is_loading,
+                crate::motion::reduced(c),
+                c.listing(),
+            )
+        });
+        let status = if is_loading {
+            if let (Some(skel), Some(phase)) = (skeleton, skel_phase) {
+                let items = match phase {
+                    crate::skeleton::HostPhase::Skeleton => skel(c),
+                    _ => Vec::new(),
+                };
+                Some(div().flex().flex_col().children(items).into_any_element())
+            } else {
+                Some(line(vec![div().child(loading.clone()).into_any_element()]))
+            }
         } else if state.phase == 4 && state.data.is_none() {
             Some(line(vec![
                 icons::icon("exclamationmark.triangle", 16.0, c.color("status.warning")),
@@ -420,7 +450,12 @@ impl OwnedQuery {
             ])),
             _ => None,
         };
-        let content = template(c, visible.unwrap_or(Value::Unit));
+        let fade = match skel_phase {
+            Some(crate::skeleton::HostPhase::Content { fade }) => fade,
+            _ => None,
+        };
+        let content =
+            crate::skeleton::apply_fade(template(c, visible.unwrap_or(Value::Unit)), fade);
         c.grow()
             .apply(div().flex().flex_col().children(note).children(content))
             .into_any_element()

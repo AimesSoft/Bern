@@ -859,6 +859,83 @@ pub(crate) fn named(id: &str) -> Result<Rc<Win>, Failure> {
         .ok_or_else(|| Failure::new("target_not_found", format!("no open window `{id}`")))
 }
 
+pub(crate) fn default_window() -> Result<Rc<Win>, Failure> {
+    let open = all();
+    open.iter()
+        .find(|win| win.window.is_active())
+        .or_else(|| open.first())
+        .cloned()
+        .ok_or_else(|| Failure::new("target_not_found", "no open window"))
+}
+
+fn encode_base64(input: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
+    for chunk in input.chunks(3) {
+        let b0 = u32::from(chunk[0]);
+        let b1 = chunk.get(1).copied().map_or(0, u32::from);
+        let b2 = chunk.get(2).copied().map_or(0, u32::from);
+        let v = (b0 << 16) | (b1 << 8) | b2;
+        out.push(TABLE[((v >> 18) & 0x3f) as usize] as char);
+        out.push(TABLE[((v >> 12) & 0x3f) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            TABLE[((v >> 6) & 0x3f) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[(v & 0x3f) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+pub(crate) fn screenshot(win: &Rc<Win>) -> Result<crate::protocol::Value, Failure> {
+    let w = win.window.width();
+    let h = win.window.height();
+    if w <= 0 || h <= 0 {
+        return Err(Failure::new(
+            "capture_failed",
+            format!("`{}` has empty bounds", win.id),
+        ));
+    }
+    let scale = f64::from(win.window.scale_factor().max(1));
+    let paintable = gtk::WidgetPaintable::new(Some(&win.window));
+    let snapshot = gtk::Snapshot::new();
+    paintable.snapshot(&snapshot, f64::from(w), f64::from(h));
+    let node = snapshot.to_node().ok_or_else(|| {
+        Failure::new(
+            "capture_failed",
+            format!("`{}` produced an empty render node", win.id),
+        )
+    })?;
+    let renderer = win
+        .window
+        .native()
+        .and_then(|native| native.renderer())
+        .ok_or_else(|| {
+            Failure::new(
+                "capture_failed",
+                format!("`{}` has no active GSK renderer", win.id),
+            )
+        })?;
+    let bounds = gtk::graphene::Rect::new(0.0, 0.0, w as f32, h as f32);
+    let texture = renderer.render_texture(&node, Some(&bounds));
+    let png = texture.save_to_png_bytes();
+    let data = encode_base64(png.as_ref());
+    Ok(crate::protocol::Value::Record(vec![
+        crate::protocol::Value::Text(win.id.clone()),
+        crate::protocol::Value::Int(i64::from(texture.width())),
+        crate::protocol::Value::Int(i64::from(texture.height())),
+        crate::protocol::Value::Float(scale),
+        crate::protocol::Value::Text("image/png".into()),
+        crate::protocol::Value::Optional(None),
+        crate::protocol::Value::Optional(Some(Box::new(crate::protocol::Value::Text(data)))),
+    ]))
+}
+
 fn instance_of(kind: usize) -> Option<Rc<Win>> {
     all().into_iter().find(|win| win.kind == kind)
 }

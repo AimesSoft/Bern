@@ -149,6 +149,10 @@ extension BernHost {
     ) throws {
         throw unavailable(context, "resize")
     }
+
+    func screenshot(_ context: BernWindowContext) throws -> BernScreenshotResult {
+        throw unavailable(context, "screenshot")
+    }
 }
 
 struct BernWindowPlatformModifier: ViewModifier {

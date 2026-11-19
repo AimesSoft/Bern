@@ -56,6 +56,7 @@ pub fn generated(target: &dyn Target, platform: &str, ui: Option<&str>) -> Strin
         template: None,
         children: Vec::new(),
         action: None,
+        skeleton: None,
         source: SourceLocation {
             file: "icon_decorations.rs".into(),
             line: 1,
@@ -88,6 +89,7 @@ pub fn generated(target: &dyn Target, platform: &str, ui: Option<&str>) -> Strin
         template: None,
         children: vec![decorated, Node::Element(integer), Node::Element(button)],
         action: None,
+        skeleton: None,
         source: SourceLocation {
             file: "icon_decorations.rs".into(),
             line: 1,

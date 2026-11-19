@@ -462,6 +462,14 @@ impl Generator<'_> {
             Type::Optional { .. } => ("(d) => d", "(d) => (d === null ? 0 : 1)"),
             _ => ("(d) => d", "() => null"),
         };
+        let has_skeleton = element.skeleton.is_some();
+        let condition = element.query_presentation();
+        if condition.is_some() || has_skeleton {
+            out.open("{");
+        }
+        if let Some(skeleton_nodes) = &element.skeleton {
+            self.children(out, "const __skeleton = ", skeleton_nodes, ";");
+        }
         let props = Self::props(vec![
             ("id", Some(self.id(element))),
             ("query", Some(binding.query.to_string())),
@@ -484,10 +492,9 @@ impl Generator<'_> {
             ("emptyIcon", element.icon("icon").map(string)),
             ("count", Some(count.into())),
             ("shown", Some(shown.into())),
+            ("skeleton", has_skeleton.then(|| "__skeleton".into())),
         ]);
-        let condition = element.query_presentation();
         let open = if condition.is_some() {
-            out.open("{");
             "const draw = B.ownQuery(ctx,"
         } else {
             "B.Query(p, ctx,"
@@ -518,6 +525,8 @@ impl Generator<'_> {
                 "B.presentWhen(p, ctx, () => {}, {draw});",
                 self.expr(condition)
             ));
+        }
+        if condition.is_some() || has_skeleton {
             out.close("}");
         }
     }

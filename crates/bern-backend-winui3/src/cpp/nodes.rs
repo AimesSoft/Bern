@@ -164,6 +164,27 @@ impl Generator<'_> {
                 self.query(out, element);
             }
             Node::Element(element) => {
+                if element.kind != "Query"
+                    && let (Some(active), Some(skeleton_nodes)) =
+                        (element.expr("skeleton"), &element.skeleton)
+                {
+                    let mut real = element.clone();
+                    real.props.remove("skeleton");
+                    real.props.remove("skeleton_count");
+                    real.skeleton = None;
+                    let placement = self.placement(element);
+                    if let Some(spec) = &placement {
+                        out.open(format!("B::Place(p, c, {spec}, {BUILDER}"));
+                    }
+                    out.open(format!("B::SkeletonHost(p, c, {},", self.getter(active)));
+                    self.children(out, "", skeleton_nodes, ",");
+                    self.children(out, "", &[Node::Element(real)], ");");
+                    out.indent -= 1;
+                    if placement.is_some() {
+                        out.close("});");
+                    }
+                    return;
+                }
                 let placement = self.placement(element);
                 if let Some(spec) = &placement {
                     out.open(format!("B::Place(p, c, {spec}, {BUILDER}"));
@@ -348,6 +369,7 @@ impl Generator<'_> {
             "Svg" => self.svg(out, element),
             "WebPage" => self.web_page(out, element),
             "Image" => self.image(out, element),
+            "Skeleton" => self.skeleton(out, element),
             "Progress" => self.progress(out, element),
             "Canvas" => self.canvas(out, element),
             "Spacer" => out.line("B::Spacer(p);"),

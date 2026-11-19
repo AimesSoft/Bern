@@ -196,6 +196,7 @@ impl Checker<'_> {
             children,
             action,
             source: self.loc(element.span),
+            skeleton: None,
         })
     }
 

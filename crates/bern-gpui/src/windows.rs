@@ -183,6 +183,7 @@ impl Render for WindowView {
         crate::query::begin(&self.win.id);
         crate::media::begin(&self.win.id);
         crate::motion::begin(&self.win.id);
+        crate::skeleton::begin(&self.win.id);
         self.win.bar_toolbar_built.set(false);
         let content = (self.def.content)(&ctx.grown(crate::Grow::ALL));
         // A toolbar came into the title bar's row or left it: the bar
@@ -193,7 +194,7 @@ impl Render for WindowView {
             window.request_animation_frame();
         }
         // While something moves, the next frame shows where it is by then.
-        if crate::motion::end(&self.win.id) {
+        if crate::motion::end(&self.win.id) || crate::skeleton::end(&self.win.id, false) {
             window.request_animation_frame();
         }
         crate::query::end(&self.win.id, false);
@@ -504,6 +505,7 @@ fn open(kind: usize, def: &'static WindowDef, cx: &mut App) -> Result<String, cr
         window.on_window_should_close(cx, move |_, _| {
             crate::query::end(&instance, true);
             crate::media::end(&instance, true);
+            crate::skeleton::end(&instance, true);
             crate::motion::forget(&instance);
             // SAFETY: the handle is live while windows are open.
             unsafe { bern_ffi::bern_window_closed(host.app(), kind as u32, generation) };
