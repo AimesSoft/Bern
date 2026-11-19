@@ -1554,6 +1554,7 @@ struct Win {
 #if BERN_WINUI
     xaml::Window window{nullptr};
     controls::TitleBar titleBar{nullptr};
+    std::array<double, 3> titleBarInsets{-1, -1, 0};
     xaml::IUIElementProtected idleCursorTarget{nullptr};
     winrt::Microsoft::UI::Input::InputCursor idleCursor{nullptr}, previousCursor{nullptr};
 #else

@@ -1890,6 +1890,27 @@ fn content_in_a_window_starts_at_its_top_leading_corner() {
     assert!(windows.contains("def.render(Parent::Window(content), ctx);"));
     assert!(windows.contains("ReplyMessage(0);"));
     assert!(windows.contains("case WM_ENTERSIZEMOVE:"));
+    let toggle = windows
+        .split_once("inline void ToggleFullscreen(")
+        .expect("ToggleFullscreen in bern_ui_windows.inl")
+        .1;
+    let disable_title_bar = toggle
+        .find("win->window.ExtendsContentIntoTitleBar(false);")
+        .expect("disable extended title bar before entering FullScreen");
+    let enter_fullscreen = toggle
+        .find("app.SetPresenter(AppWindowPresenterKind::FullScreen);")
+        .expect("switch to FullScreen presenter");
+    let leave_fullscreen = toggle
+        .find("app.SetPresenter(AppWindowPresenterKind::Overlapped);")
+        .expect("switch back to Overlapped presenter");
+    let restore_after_leave = toggle[leave_fullscreen..]
+        .find("WindowManager::RestoreTitleBar(*win);")
+        .expect("restore title bar after returning to Overlapped");
+    assert!(disable_title_bar < enter_fullscreen);
+    assert!(restore_after_leave > 0);
+    assert!(windows.contains("inline void RestoreTitleBar(Win& win)"));
+    assert!(windows.contains("bar.ButtonBackgroundColor(transparent);"));
+    assert!(windows.contains("bar.ButtonInactiveBackgroundColor(transparent);"));
     assert!(text("bern_base.cpp").contains("DCompositionBoostCompositorClock"));
     assert!(!text("bern_ui_motion.inl").contains("RenderingTime()"));
     assert!(!text("bern_ui_scene.inl").contains("RenderingTime()"));
