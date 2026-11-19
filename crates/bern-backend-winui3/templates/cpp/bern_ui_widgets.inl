@@ -2463,12 +2463,18 @@ inline void ColorPicker(Parent const& p, Ctx const& ctx, ColorPickerProps props)
     controls::Button button;
     button.Width(44);
     button.Height(26);
-    button.Padding(xaml::Thickness{2, 2, 2, 2});
+    button.Padding(xaml::Thickness{3, 3, 3, 3});
     button.CornerRadius(xaml::CornerRadius{6, 6, 6, 6});
+    button.HorizontalContentAlignment(xaml::HorizontalAlignment::Stretch);
+    button.VerticalContentAlignment(xaml::VerticalAlignment::Stretch);
     controls::Border swatch;
-    swatch.CornerRadius(xaml::CornerRadius{4, 4, 4, 4});
+    swatch.MinWidth(36);
+    swatch.MinHeight(18);
+    swatch.CornerRadius(xaml::CornerRadius{3, 3, 3, 3});
     swatch.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
     swatch.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+    swatch.BorderThickness(xaml::Thickness{1, 1, 1, 1});
+    swatch.BorderBrush(media::SolidColorBrush(winrt::Windows::UI::Color{48, 128, 128, 128}));
     button.Content(swatch);
     BindName(button, text);
 
