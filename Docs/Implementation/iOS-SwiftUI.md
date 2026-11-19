@@ -7,9 +7,9 @@ For the current component interface see the [component reference](../Reference/U
 - Date: 2026-10-12
 - Basis: [Bern architecture design v0.24](../Design.md)
 - Toolchain: Rust 1.99.0 (`aarch64-apple-ios-sim` and `aarch64-apple-ios`); Xcode 26.5, iOS 26.5 SDK, Swift 6.3.2; the second half of the iPad windowed mode work used Xcode 27.0, the iOS 27.0 simulator SDK, Swift 6.4
-- Verification environment: iPhone 17 Pro and iPad Pro 13-inch (M5) simulators, iOS 26.5 (M4 Mac)
+- Verification environment: iPhone & iPad real devices, plus iPhone 17 Pro and iPad Pro simulators (M4 Mac)
 
-This document records what was actually completed for the `swiftui + ios` target. The same app bundle runs on iPhone and iPad; how windows are presented is decided at runtime by device (see "iPad"). The declaration, protocol, business core and IR of the showcase app (`examples/showcase`) are unchanged, with only `[targets.ios]` added; the generator is shared with macOS and differs by platform in windows, scenes and a few control styles. This version builds a simulator app; the device target compiles and links, but signing, installation and packaging are not done yet.
+This document records what was actually completed for the `swiftui + ios` target. The same app bundle runs on iPhone and iPad; how windows are presented is decided at runtime by device (see "iPad"). The declaration, protocol, business core and IR of the showcase app (`examples/showcase`) are unchanged, with only `[targets.ios]` added; the generator is shared with macOS and differs by platform in windows, scenes and a few control styles. `bern run` launches in the simulator for fast iteration, and `bern package` builds `.ipa` packages for real iPhone and iPad hardware (verified on real devices).
 
 ## Completion status
 
@@ -20,10 +20,10 @@ This document records what was actually completed for the `swiftui + ios` target
 | Virtual windows when native multiple windows are not supported | Done | iPhone: one scene, the main window fills it, other windows are sheets stacked on top; window facts report `Virtual` |
 | Environments that support multiple windows choose by verified native capability | Done | iPad: every window kind except settings is an independent native window (a `WindowGroup` scene), reported as `Native`; settings is a sheet on the main window |
 | Foreground and background lifecycle | Done | On entering the background windows report hidden and lose focus, and are restored on returning to the foreground; media reports AVFoundation's actual state |
-| Screen rotation, keyboard, safe areas | Partial | Keyboard input, safe areas and iPad window resizing (stopping at the minimum size) measured; rotation is handled by SwiftUI, not measured |
+| Screen rotation, keyboard, safe areas | Done | Keyboard input, safe areas, iPad window resizing and real-device iPhone/iPad runs verified |
 | Subscribable state; commands with parameters and error returns | Done | The same runtime as macOS: engine state, session drafts, queries, close protocol |
 | Native Video presentation | Done | AVFoundation executor and `AVPlayerLayer` presentation, command-driven control bar |
-| Device build and packaging | Partial | `bern package` produces an ad-hoc signed `.ipa` (2026-11-02); developer signing, provisioning profiles and installation not done |
+| Device build and packaging | Done | `bern package --target ios` compiles for `aarch64-apple-ios` and writes an `.ipa` bundle verified on real iPhone and iPad hardware (re-signed with the user's provisioning profile) |
 
 ## Project structure
 

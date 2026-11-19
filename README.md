@@ -62,19 +62,28 @@ No JS engine or embedded browser by default on desktop, mobile or wearables.<br>
 <td width="50%" align="center"><img src="Docs/Assets/screenshots/linux-en.png" alt="The showcase on Linux with GTK 4 and libadwaita"><br><sub><b>Linux</b> · GTK 4 + libadwaita</sub></td>
 <td width="50%" align="center"><img src="Docs/Assets/screenshots/web-en.png" alt="The showcase in a browser"><br><sub><b>Web</b> · DOM + WebAssembly</sub></td>
 </tr>
+<tr>
+<td width="50%" align="center"><img src="Docs/Assets/screenshots/ipad-en.png" alt="The showcase on iPad with SwiftUI"><br><sub><b>iPad</b> · iPadOS SwiftUI</sub></td>
+<td width="50%" align="center"><img src="Docs/Assets/screenshots/android-tablet-en.png" alt="The showcase on an Android tablet with Jetpack Compose"><br><sub><b>Android Tablet</b> · Jetpack Compose</sub></td>
+</tr>
+<tr>
+<td width="50%" align="center"><img src="Docs/Assets/screenshots/tvos-en.png" alt="The showcase on Apple TV with tvOS SwiftUI"><br><sub><b>Apple TV</b> · tvOS SwiftUI</sub></td>
+<td width="50%" align="center"><img src="Docs/Assets/screenshots/android-tv-en.png" alt="The showcase on Android TV with Jetpack Compose"><br><sub><b>Android TV</b> · Jetpack Compose</sub></td>
+</tr>
 </table>
 
 <table>
 <tr>
-<td width="40%" align="center"><img src="Docs/Assets/screenshots/android-en.png" width="220" alt="The showcase on Android with Jetpack Compose"><br><sub><b>Android</b> · Jetpack Compose (dark, following the system)</sub></td>
-<td width="30%" align="center"><img src="Docs/Assets/screenshots/watchos-en.png" width="160" alt="Watch demo on watchOS with SwiftUI"><br><sub><b>watchOS</b> · SwiftUI</sub></td>
-<td width="30%" align="center"><img src="Docs/Assets/screenshots/wearos-zh.png" width="160" alt="Watch demo on Wear OS with Compose"><br><sub><b>Wear OS</b> · Compose Material 3</sub></td>
+<td width="28%" align="center"><img src="Docs/Assets/screenshots/ios-en.png" width="190" alt="The showcase on iPhone with SwiftUI"><br><sub><b>iOS</b> · SwiftUI</sub></td>
+<td width="28%" align="center"><img src="Docs/Assets/screenshots/android-en.png" width="190" alt="The showcase on Android with Jetpack Compose"><br><sub><b>Android</b> · Jetpack Compose</sub></td>
+<td width="22%" align="center"><img src="Docs/Assets/screenshots/watchos-en.png" width="145" alt="Watch demo on watchOS with SwiftUI"><br><sub><b>watchOS</b> · SwiftUI</sub></td>
+<td width="22%" align="center"><img src="Docs/Assets/screenshots/wearos-zh.png" width="145" alt="Watch demo on Wear OS with Compose"><br><sub><b>Wear OS</b> · Compose Material 3</sub></td>
 </tr>
 </table>
 
-<p align="center"><img src="Docs/Assets/screenshots/gpui-zh.png" width="480" alt="Native controls demo on macOS with GPUI"><br><sub><b>Desktop · GPUI</b>（<code>ui = "gpui"</code> with co-located <code>NativeView</code>）</sub></p>
+<p align="center"><img src="Docs/Assets/screenshots/gpui-zh.png" width="480" alt="Native controls demo on macOS with GPUI"><br><sub><b>Desktop · GPUI</b> (<code>ui = "gpui"</code> with co-located <code>NativeView</code>)</sub></p>
 
-<p align="center"><sub>One Rust declaration across desktop, phone, watch and Web. On system targets Bern draws no pixels of its own;<br>when you want unified GPU rendering, switch to <code>ui = "gpui"</code> without rewriting your app.</sub></p>
+<p align="center"><sub>One Rust declaration across desktop, tablet, TV, phone, watch and Web. On system targets Bern draws no pixels of its own;<br>when you want unified GPU rendering, switch to <code>ui = "gpui"</code> without rewriting your app.</sub></p>
 
 ## Why Bern
 
@@ -394,10 +403,10 @@ The chart is a sketch by architecture, not a ranking: the horizontal axis is whe
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/capabilities-en-dark.svg">
-<img alt="Platforms and capabilities: support for macOS, Windows, Linux, mobile and the web, plus native look, Skills + CLI and compile-time checks; Bern's mobile support is partial and it has all three capabilities" src="Docs/Assets/tables/capabilities-en-light.svg" width="100%">
+<img alt="Platforms and capabilities: support for macOS, Windows, Linux, mobile and the web, plus native look, Skills + CLI and compile-time checks; Bern supports every platform column and has all three capabilities" src="Docs/Assets/tables/capabilities-en-light.svg" width="100%">
 </picture>
 
-- **Mobile**: iOS and Android. React Native's desktop versions are maintained by Microsoft; uni-app also covers mini programs and HarmonyOS; Bern's Android target runs on devices and makes packages, its iOS target builds simulator apps, and iOS device packages are planned.
+- **Mobile**: iOS / iPadOS and Android (plus watchOS, Wear OS, tvOS and Android TV). React Native's desktop versions are maintained by Microsoft; uni-app also covers mini programs and HarmonyOS; Bern has been tested on real hardware across all of its desktop, mobile, tablet, watch and TV targets and packages `.ipa` and `.apk` bundles.
 - **Native look**: the controls are the platform's own, with look, accessibility and input methods from the system. Qt Widgets and uni-app x come close and count as partly.
 - **Skills + CLI**: Bern generates the app CLI and its `SKILL.md` from one command catalog. People and agents use the same commands. Other frameworks can be automated from outside through accessibility APIs or test tools such as Playwright and Flutter Driver.
 - **Compile-time checks**: a missing translation, a feature without an entry in some layout, or an entry not registered to a feature is a compiler error (see [Built for AI](#built-for-ai)). Other frameworks mostly find these with linters, translation tools or tests.
@@ -468,7 +477,7 @@ bern 0.1.0 on macOS (aarch64)
 <br>
 
 - **macOS**: Xcode 26 or later. After installing it from the App Store, run `sudo xcode-select --switch /Applications/Xcode.app`.
-- **iOS**: Xcode's iOS platform and an iOS simulator, plus `rustup target add aarch64-apple-ios-sim`. Builds are for the simulator for now; device signing and packages are not done yet.
+- **iOS / iPadOS / tvOS / watchOS**: Xcode's Apple platform SDKs, plus the corresponding Rust targets (`aarch64-apple-ios` / `aarch64-apple-ios-sim`, `aarch64-apple-tvos` / `aarch64-apple-tvos-sim`, `aarch64-apple-watchos` / `aarch64-apple-watchos-sim`). `bern run` launches in the simulator and `bern package` builds `.ipa` bundles for real devices.
 - **Windows**: Visual Studio 2022 or later with “Desktop development with C++” (the Build Tools are enough) and a Windows 11 SDK; Rust on the MSVC toolchain. The first build generates the C++/WinRT headers with the Windows SDK's `cppwinrt` and precompiles them with the runtime (about 2.4 GB per profile, under `target`); later builds compile only the app's own code, about 5 s for a new app and 9 s for the showcase. The app folder holds only the executable, a 400 KB bootstrapper DLL and the resources: no .NET, no bundled Windows App SDK.
 - **Linux**: GTK 4.14 and libadwaita 1.5 development packages, for example `sudo apt install libgtk-4-dev libadwaita-1-dev libsoup-3.0-dev gstreamer1.0-libav`.
 - **Android**: Android Studio with the SDK and the NDK (SDK Manager → SDK Tools → NDK), Gradle 9.4 or newer, and `rustup target add aarch64-linux-android`. The first build has Gradle download the Android plugin and the Compose libraries.

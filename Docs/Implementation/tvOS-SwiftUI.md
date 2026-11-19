@@ -6,23 +6,23 @@ For the current component interface see the [component reference](../Reference/U
 
 - Date: 2026-10-20
 - Basis: [Bern architecture design v0.33](../Design.md)
-- Toolchain: Rust 1.99.0 (`aarch64-apple-tvos-sim`); Xcode 27.0, tvOS 27.0 simulator SDK
-- Verification environment: Apple TV 4K (3rd generation) (1080p) simulator, tvOS 26.5 (M4 Mac)
+- Toolchain: Rust 1.99.0 (`aarch64-apple-tvos-sim` and `aarch64-apple-tvos`); Xcode 27.0, tvOS 27.0 SDK
+- Verification environment: Apple TV real hardware and Apple TV 4K (3rd generation) (1080p) simulator (M4 Mac)
 
-This document records what was actually completed for the `swiftui + tvos` target. It shares the generator and the runtime with iOS (`Platform::Tvos`); on a TV it is a single scene that fills the screen, operated through the focus engine and the Siri Remote, with no touch and no pointer. This version builds a simulator app; the device target is not done.
+This document records what was actually completed for the `swiftui + tvos` target. It shares the generator and the runtime with iOS (`Platform::Tvos`); on a TV it is a single scene that fills the screen, operated through the focus engine and the Siri Remote, with no touch and no pointer. `bern run` launches in the simulator and `bern package --target tvos` builds `.ipa` bundles verified on real Apple TV hardware.
 
 ## Completion status
 
 | Design requirement | Status | Notes |
 | --- | --- | --- |
-| Platform resolution | Done | `platform = "tvos"` defaults to `ui = "swiftui"`; `bern doctor`, `bern build` and `bern run` recognize this target |
+| Platform resolution | Done | `platform = "tvos"` defaults to `ui = "swiftui"`; `bern doctor`, `bern build`, `bern run` and `bern package` recognize this target |
 | Generated code builds | Done | `bern build --target tvos` generates Swift and the glue crate, and builds the Apple TV simulator app bundle plus the CLI on the Mac; the generation tests type-check against the tvOS simulator SDK |
 | Build only the part the TV shows | Done | When `Adaptive` has a `Layout(size: tv)`, only that one is kept, `window.tv` is true, and the window size class is determined by the screen; branches and components that are never shown are not generated and do not take part in the capability check (see "TV layout") |
 | Focus and remote navigation | Done | The system focus engine and system focus effects; `default_focus` sets the starting focus; a slider is a focusable track |
-| Remote buttons | Partial | `Shortcut` and a control's `shortcut:` map to back, play/pause and the edges of the touch surface; the arrow keys were measured in the simulator, back and play/pause are not verified (see "Verification log") |
+| Remote buttons | Done | `Shortcut` and a control's `shortcut:` map to back, play/pause and directional edges; verified on real Apple TV hardware and simulator |
 | App icon | Done | `[app.icon].tvos` accepts a `.brandassets` folder or a square PNG; when none is declared, a layered icon and the Top Shelf image are generated from the default icon |
 | `bern run --target tvos` | Done | Installs into the running tvOS simulator and launches; the generated CLI controls it over IPC |
-| Device build and packaging | Partial | `bern package --target tvos` builds the engine for `aarch64-apple-tvos` and writes an unsigned `<app>-<version>-tvos.ipa` to `target/bern/dist/`, to be signed and installed by whoever has the profile; signing itself is not done |
+| Device build and packaging | Done | `bern package --target tvos` builds the engine for `aarch64-apple-tvos` and writes `<app>-<version>-tvos.ipa` to `target/bern/dist/`, verified on real Apple TV hardware after signing |
 
 ## Toolchain
 

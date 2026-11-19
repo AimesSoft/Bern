@@ -6,23 +6,23 @@
 
 - 日期：2026-10-20
 - 依据：[Bern 架构设计 v0.33](../Design.md)
-- 工具链：Rust 1.99.0（`aarch64-apple-tvos-sim`）；Xcode 27.0，tvOS 27.0 模拟器 SDK
-- 验证环境：Apple TV 4K（第 3 代）（1080p）模拟器，tvOS 26.5（M4 Mac）
+- 工具链：Rust 1.99.0（`aarch64-apple-tvos-sim` 与 `aarch64-apple-tvos`）；Xcode 27.0，tvOS 27.0 SDK
+- 验证环境：Apple TV 真机与 Apple TV 4K（第 3 代）（1080p）模拟器（M4 Mac）
 
-本文记录 `swiftui + tvos` 目标的实际完成情况。它与 iOS 共用生成器与运行时（`Platform::Tvos`），在电视上是一个铺满屏幕的场景，由焦点引擎与 Siri Remote 操作，没有触摸与指针。这一版构建模拟器应用；真机目标未做。
+本文记录 `swiftui + tvos` 目标的实际完成情况。它与 iOS 共用生成器与运行时（`Platform::Tvos`），在电视上是一个铺满屏幕的场景，由焦点引擎与 Siri Remote 操作，没有触摸与指针。`bern run` 在模拟器启动用于调试，`bern package --target tvos` 构建真机 `.ipa`（已通过 Apple TV 真机实测）。
 
 ## 完成情况
 
 | 设计要求 | 状态 | 说明 |
 | --- | --- | --- |
-| 平台解析 | 完成 | `platform = "tvos"` 默认 `ui = "swiftui"`，`bern doctor`、`bern build`、`bern run` 认得这个目标 |
+| 平台解析 | 完成 | `platform = "tvos"` 默认 `ui = "swiftui"`，`bern doctor`、`bern build`、`bern run`、`bern package` 认得这个目标 |
 | 生成代码可构建 | 完成 | `bern build --target tvos` 生成 Swift 与胶水 crate，构建 Apple TV 模拟器应用包、Mac 上的 CLI；生成测试按 tvOS 模拟器 SDK 类型检查 |
 | 只构建电视显示的部分 | 完成 | `Adaptive` 有 `Layout(size: tv)` 时只保留它，`window.tv` 为真，窗口尺寸档由屏幕决定；永远不显示的分支与组件不生成、不参与能力检查（见“电视布局”） |
 | 焦点与遥控导航 | 完成 | 系统焦点引擎与系统焦点效果；`default_focus` 指定起始焦点；滑块是可聚焦的轨道 |
-| 遥控按键 | 部分 | `Shortcut` 与控件的 `shortcut:` 对应返回、播放/暂停与触控板边缘；方向键在模拟器实测，返回与播放/暂停未验证（见“验证记录”） |
+| 遥控按键 | 完成 | `Shortcut` 与控件的 `shortcut:` 对应返回、播放/暂停与方向键，已在 Apple TV 真机与模拟器实测 |
 | 应用图标 | 完成 | `[app.icon].tvos` 接受 `.brandassets` 文件夹或方形 PNG；未声明时由默认图标生成分层图标与顶部货架图 |
 | `bern run --target tvos` | 完成 | 装进正在运行的 tvOS 模拟器并启动；生成的 CLI 经 IPC 控制 |
-| 真机构建与打包 | 部分完成 | `bern package --target tvos` 为 `aarch64-apple-tvos` 构建引擎，在 `target/bern/dist/` 写出未签名的 `<应用>-<版本>-tvos.ipa`，由持有描述文件的人签名和安装；签名本身未做 |
+| 真机构建与打包 | 完成 | `bern package --target tvos` 为 `aarch64-apple-tvos` 构建引擎，在 `target/bern/dist/` 写出 `<应用>-<版本>-tvos.ipa`，经签名安装后已在 Apple TV 真机实测通过 |
 
 ## 工具链
 

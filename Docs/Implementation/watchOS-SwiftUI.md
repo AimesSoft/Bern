@@ -7,7 +7,7 @@ For the current component interface see the [component reference](../Reference/U
 - Date: 2026-11-14
 - Basis: [Bern architecture design](../Design.md)
 - Toolchain: Rust 1.99.0 (`aarch64-apple-watchos-sim`, `aarch64-apple-watchos`); Xcode 27.2, watchOS 27.2 simulator and device SDKs
-- Verification environment: Apple Watch Series 12 (46mm) simulator, watchOS 27.2
+- Verification environment: Apple Watch real hardware and Apple Watch Series 12 (46mm) simulator, watchOS 27.2
 
 This document records what is implemented and verified for the `swiftui + watchos` target (`Platform::Watchos`). It shares the SwiftUI generator and runtime with macOS, iOS and tvOS, using WatchKit and SwiftUI watchOS controls in `BernWatchKit.swift`, and shares `Layout(size: watch)` and `window.watch` with `compose-wearos`.
 
@@ -22,7 +22,7 @@ This document records what is implemented and verified for the `swiftui + watcho
 | Engine capabilities | Done | `bern-command` provides `Application Support` / `Caches` storage, Keychain `secrets`, `MPNowPlayingInfoCenter` `now_playing`, and Boa JavaScript when `javascript = true` |
 | App icon | Done | `[app.icon].watchos` accepts a square PNG, an `.appiconset` folder or an Icon Composer `.icon` folder |
 | `bern run --target watchos` | Done | Installs into a booted watchOS simulator, passes `SIMCTL_CHILD_BERN_IPC_DIR`, and connects via `--engine watchos` |
-| Watch-Only `.ipa` packaging | Partial | `bern package --target watchos` builds `aarch64-apple-watchos` and writes `<App>-<version>-watchos.ipa` (`ITSWatchOnlyContainer` stub wrapping `Watch/<App>.app`, signed ad hoc); re-signing and installing on a physical watch are not verified |
+| Watch-Only `.ipa` packaging | Done | `bern package --target watchos` builds `aarch64-apple-watchos` and writes `<App>-<version>-watchos.ipa` (`ITSWatchOnlyContainer` stub wrapping `Watch/<App>.app`), verified on real Apple Watch hardware after signing |
 
 ## Project structure
 

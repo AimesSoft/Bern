@@ -37,7 +37,7 @@
 <circle cx="225.0" cy="147.0" r="7" fill="#6EA2F5"/>
 <circle cx="323.0" cy="147.0" r="7" fill="#6EA2F5"/>
 <circle cx="421.0" cy="147.0" r="7" fill="#6EA2F5"/>
-<circle cx="519.0" cy="147.0" r="6.2" fill="none" stroke="#6EA2F5" stroke-width="1.6"/><path d="M519.0 140.8 A6.2 6.2 0 0 0 519.0 153.2 Z" fill="#6EA2F5"/>
+<circle cx="519.0" cy="147.0" r="7" fill="#6EA2F5"/>
 <circle cx="617.0" cy="147.0" r="7" fill="#6EA2F5"/>
 <circle cx="715.0" cy="147.0" r="7" fill="#6EA2F5"/>
 <circle cx="813.0" cy="147.0" r="7" fill="#6EA2F5"/>

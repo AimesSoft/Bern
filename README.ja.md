@@ -62,19 +62,28 @@
 <td width="50%" align="center"><img src="Docs/Assets/screenshots/linux-en.png" alt="Linux（GTK 4 と libadwaita）上のショーケース"><br><sub><b>Linux</b> · GTK 4 + libadwaita</sub></td>
 <td width="50%" align="center"><img src="Docs/Assets/screenshots/web-en.png" alt="ブラウザー上のショーケース"><br><sub><b>Web</b> · DOM + WebAssembly</sub></td>
 </tr>
+<tr>
+<td width="50%" align="center"><img src="Docs/Assets/screenshots/ipad-en.png" alt="iPad（iPadOS SwiftUI）上のショーケース"><br><sub><b>iPad</b> · iPadOS SwiftUI</sub></td>
+<td width="50%" align="center"><img src="Docs/Assets/screenshots/android-tablet-en.png" alt="Android タブレット（Jetpack Compose）上のショーケース"><br><sub><b>Android タブレット</b> · Jetpack Compose</sub></td>
+</tr>
+<tr>
+<td width="50%" align="center"><img src="Docs/Assets/screenshots/tvos-en.png" alt="Apple TV（tvOS SwiftUI）上のショーケース"><br><sub><b>Apple TV</b> · tvOS SwiftUI</sub></td>
+<td width="50%" align="center"><img src="Docs/Assets/screenshots/android-tv-en.png" alt="Android TV（Jetpack Compose）上のショーケース"><br><sub><b>Android TV</b> · Jetpack Compose</sub></td>
+</tr>
 </table>
 
 <table>
 <tr>
-<td width="40%" align="center"><img src="Docs/Assets/screenshots/android-en.png" width="220" alt="Android（Jetpack Compose）上のショーケース"><br><sub><b>Android</b> · Jetpack Compose（システムに合わせたダーク）</sub></td>
-<td width="30%" align="center"><img src="Docs/Assets/screenshots/watchos-en.png" width="160" alt="watchOS（SwiftUI）上のウォッチデモ"><br><sub><b>watchOS</b> · SwiftUI</sub></td>
-<td width="30%" align="center"><img src="Docs/Assets/screenshots/wearos-zh.png" width="160" alt="Wear OS（Compose）上のウォッチデモ"><br><sub><b>Wear OS</b> · Compose Material 3</sub></td>
+<td width="28%" align="center"><img src="Docs/Assets/screenshots/ios-en.png" width="190" alt="iPhone（iOS SwiftUI）上のショーケース"><br><sub><b>iOS</b> · SwiftUI</sub></td>
+<td width="28%" align="center"><img src="Docs/Assets/screenshots/android-en.png" width="190" alt="Android（Jetpack Compose）上のショーケース"><br><sub><b>Android</b> · Jetpack Compose</sub></td>
+<td width="22%" align="center"><img src="Docs/Assets/screenshots/watchos-en.png" width="145" alt="watchOS（SwiftUI）上のウォッチデモ"><br><sub><b>watchOS</b> · SwiftUI</sub></td>
+<td width="22%" align="center"><img src="Docs/Assets/screenshots/wearos-zh.png" width="145" alt="Wear OS（Compose）上のウォッチデモ"><br><sub><b>Wear OS</b> · Compose Material 3</sub></td>
 </tr>
 </table>
 
 <p align="center"><img src="Docs/Assets/screenshots/gpui-zh.png" width="480" alt="macOS GPUI 上のネイティブコントロールデモ"><br><sub><b>デスクトップ · GPUI</b>（<code>ui = "gpui"</code> + 隣接 <code>NativeView</code>）</sub></p>
 
-<p align="center"><sub>ひとつの Rust 宣言でデスクトップ・スマートフォン・ウォッチ・Web へ。システム目標では自前のピクセルを一切描かず、<br>統一された GPU 描画が必要なときは <code>ui = "gpui"</code> で GPUI の宣言的 UI フレームワークとしてそのまま使えます。</sub></p>
+<p align="center"><sub>ひとつの Rust 宣言でデスクトップ・タブレット・テレビ・スマートフォン・ウォッチ・Web へ。システム目標では自前のピクセルを一切描かず、<br>統一された GPU 描画が必要なときは <code>ui = "gpui"</code> で GPUI の宣言的 UI フレームワークとしてそのまま使えます。</sub></p>
 
 ## Bern を選ぶ理由
 
@@ -315,10 +324,10 @@ counter catalog
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/platforms-ja-dark.svg">
-<img alt="対応プラットフォーム：macOS、Windows、Linux、Web アプリ、WebUI、Android が利用可能、iOS と tvOS は現在シミュレータ向けアプリをビルド。次は flutter + macos、iOS 実機パッケージ、HarmonyOS" src="Docs/Assets/tables/platforms-ja-light.svg" width="100%">
+<img alt="対応プラットフォーム：macOS、iOS / iPadOS、watchOS、tvOS、Windows、Linux、Android（スマホ・タブレット・TV）、Wear OS、GPUI、Web アプリ、WebUI がすべて利用可能。次は flutter + macos と HarmonyOS" src="Docs/Assets/tables/platforms-ja-light.svg" width="100%">
 </picture>
 
-実装記録：[macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [tvOS](Docs/Implementation/tvOS-SwiftUI.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web と WebUI](Docs/Implementation/Web.md) · [Android](Docs/Implementation/Android-Compose.md)。次のプラットフォームは[適応仕様](Docs/Adaptation/README.md)にあります。
+実装記録：[macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [watchOS](Docs/Implementation/watchOS-SwiftUI.md) · [tvOS](Docs/Implementation/tvOS-SwiftUI.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Android と Wear OS](Docs/Implementation/Android-Compose.md) · [GPUI](Docs/Implementation/GPUI.md) · [Web と WebUI](Docs/Implementation/Web.md)。次のプラットフォームは[適応仕様](Docs/Adaptation/README.md)にあります。
 
 UI 技術を省略するとプラットフォームの既定が選ばれます。既定が使えないときは、別の技術へ黙って切り替えずにエラーになります。
 
@@ -387,10 +396,10 @@ iOS で両方を残したまま `packages = "separate"` と書くと、`.ipa` �
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/capabilities-ja-dark.svg">
-<img alt="プラットフォームと機能：macOS、Windows、Linux、モバイル、Web への対応と、ネイティブの外観、Skills + CLI、コンパイル時チェック。Bern のモバイルは一部対応で、3 つの機能をすべて備える" src="Docs/Assets/tables/capabilities-ja-light.svg" width="100%">
+<img alt="プラットフォームと機能：macOS、Windows、Linux、モバイル、Web への対応と、ネイティブの外観、Skills + CLI、コンパイル時チェック。Bern は全プラットフォームに対応し、3 つの機能をすべて備える" src="Docs/Assets/tables/capabilities-ja-light.svg" width="100%">
 </picture>
 
-- **モバイル**：iOS と Android。React Native のデスクトップ版は Microsoft が保守し、uni-app はミニプログラムと HarmonyOS にも対応します。Bern の Android ターゲットは実機で動作しパッケージも作れます。iOS ターゲットはシミュレータ用アプリをビルドし、実機パッケージは計画中です。
+- **モバイル**：iOS / iPadOS と Android（さらに watchOS、Wear OS、tvOS、Android TV にも対応）。React Native のデスクトップ版は Microsoft が保守し、uni-app はミニプログラムと HarmonyOS にも対応します。Bern はデスクトップ・スマートフォン・タブレット・ウォッチ・テレビの全ターゲットで実機検証済みで、`.ipa` と `.apk` パッケージを生成できます。
 - **ネイティブの外観**：コントロールがプラットフォーム自身のもので、外観、アクセシビリティ、入力メソッドをシステムが提供します。Qt Widgets と uni-app x はそれに近いため一部対応としました。
 - **Skills + CLI**：Bern はひとつのコマンドカタログからアプリの CLI と `SKILL.md` を生成します。人もエージェントも同じコマンドを使います。ほかのフレームワークは、アクセシビリティ API や Playwright、Flutter Driver などのテストツールで外から自動化できます。
 - **コンパイル時チェック**：翻訳漏れ、あるレイアウトで機能に入口がない、入口が機能に登録されていない、といった問題をコンパイラーが直接エラーにします（[AI のための設計](#ai-のための設計)を参照）。ほかのフレームワークでは多くの場合、リンター、翻訳ツール、テストで見つけます。
@@ -461,7 +470,7 @@ bern 0.1.0 on macOS (aarch64)
 <br>
 
 - **macOS**：Xcode 26 以降。App Store からインストールしたあと `sudo xcode-select --switch /Applications/Xcode.app` を実行します。
-- **iOS**：Xcode の iOS プラットフォームと iOS シミュレータ、および `rustup target add aarch64-apple-ios-sim`。現在はシミュレータ用アプリをビルドします。実機の署名とパッケージはまだです。
+- **iOS / iPadOS / tvOS / watchOS**：Xcode の各 Apple プラットフォーム SDK と対応する Rust ターゲット（`aarch64-apple-ios` / `aarch64-apple-ios-sim`、`aarch64-apple-tvos` / `aarch64-apple-tvos-sim`、`aarch64-apple-watchos` / `aarch64-apple-watchos-sim`）。`bern run` でシミュレータ起動、`bern package` で実機向け `.ipa` を作成できます。
 - **Windows**：Visual Studio 2022 以降の「C++ によるデスクトップ開発」（Build Tools だけでも可）と Windows 11 SDK。Rust は MSVC ツールチェーンを使います。初回のビルドで Windows SDK の `cppwinrt` が C++/WinRT ヘッダーを生成し、ランタイムと一緒にプリコンパイルします（構成ごとに約 2.4 GB、`target` 内）。以降のビルドはアプリ自身のコードだけをコンパイルし、新しいアプリで約 5 秒、ショーケースで約 9 秒です。アプリのフォルダーには実行ファイル、400 KB のブートストラップ DLL、リソースだけがあり、.NET は不要で、Windows App SDK も同梱しません。
 - **Linux**：GTK 4.14 と libadwaita 1.5 の開発パッケージ。例：`sudo apt install libgtk-4-dev libadwaita-1-dev libsoup-3.0-dev gstreamer1.0-libav`。
 - **Android**：SDK と NDK を入れた Android Studio（SDK Manager → SDK Tools → NDK）、Gradle 9.4 以降、`rustup target add aarch64-linux-android`。初回のビルドで Gradle が Android プラグインと Compose ライブラリをダウンロードします。

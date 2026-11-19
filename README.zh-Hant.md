@@ -55,26 +55,35 @@
 
 <table>
 <tr>
-<td width="50%" align="center"><img src="Docs/Assets/screenshots/macos-en.png" alt="展示應用程式在 macOS（SwiftUI）上"><br><sub><b>macOS</b> · SwiftUI</sub></td>
-<td width="50%" align="center"><img src="Docs/Assets/screenshots/windows-en.png" alt="展示應用程式在 Windows（WinUI 3）上"><br><sub><b>Windows</b> · WinUI 3</sub></td>
+<td width="50%" align="center"><img src="Docs/Assets/screenshots/macos-zh.png" alt="展示應用程式在 macOS（SwiftUI）上"><br><sub><b>macOS</b> · SwiftUI</sub></td>
+<td width="50%" align="center"><img src="Docs/Assets/screenshots/windows-zh.png" alt="展示應用程式在 Windows（WinUI 3）上"><br><sub><b>Windows</b> · WinUI 3</sub></td>
 </tr>
 <tr>
 <td width="50%" align="center"><img src="Docs/Assets/screenshots/linux-en.png" alt="展示應用程式在 Linux（GTK 4 與 libadwaita）上"><br><sub><b>Linux</b> · GTK 4 + libadwaita</sub></td>
-<td width="50%" align="center"><img src="Docs/Assets/screenshots/web-en.png" alt="展示應用程式在瀏覽器中"><br><sub><b>Web</b> · DOM + WebAssembly</sub></td>
+<td width="50%" align="center"><img src="Docs/Assets/screenshots/web-zh.png" alt="展示應用程式在瀏覽器中"><br><sub><b>Web</b> · DOM + WebAssembly</sub></td>
+</tr>
+<tr>
+<td width="50%" align="center"><img src="Docs/Assets/screenshots/ipad-zh.png" alt="展示應用程式在 iPad（iPadOS SwiftUI）上"><br><sub><b>iPad</b> · iPadOS SwiftUI</sub></td>
+<td width="50%" align="center"><img src="Docs/Assets/screenshots/android-tablet-zh.png" alt="展示應用程式在 Android 平板（Jetpack Compose）上"><br><sub><b>Android 平板</b> · Jetpack Compose</sub></td>
+</tr>
+<tr>
+<td width="50%" align="center"><img src="Docs/Assets/screenshots/tvos-zh.png" alt="展示應用程式在 Apple TV（tvOS SwiftUI）上"><br><sub><b>Apple TV</b> · tvOS SwiftUI</sub></td>
+<td width="50%" align="center"><img src="Docs/Assets/screenshots/android-tv-zh.png" alt="展示應用程式在 Android 電視（Jetpack Compose）上"><br><sub><b>Android 電視</b> · Jetpack Compose</sub></td>
 </tr>
 </table>
 
 <table>
 <tr>
-<td width="40%" align="center"><img src="Docs/Assets/screenshots/android-en.png" width="220" alt="展示應用程式在 Android（Jetpack Compose）上"><br><sub><b>Android</b> · Jetpack Compose（跟隨系統深色）</sub></td>
-<td width="30%" align="center"><img src="Docs/Assets/screenshots/watchos-en.png" width="160" alt="手錶應用在 watchOS（SwiftUI）上"><br><sub><b>watchOS</b> · SwiftUI</sub></td>
-<td width="30%" align="center"><img src="Docs/Assets/screenshots/wearos-zh.png" width="160" alt="手錶應用在 Wear OS（Compose）上"><br><sub><b>Wear OS</b> · Compose Material 3</sub></td>
+<td width="28%" align="center"><img src="Docs/Assets/screenshots/ios-zh.png" width="190" alt="展示應用程式在 iPhone（iOS SwiftUI）上"><br><sub><b>iOS</b> · SwiftUI</sub></td>
+<td width="28%" align="center"><img src="Docs/Assets/screenshots/android-zh.png" width="190" alt="展示應用程式在 Android（Jetpack Compose）上"><br><sub><b>Android</b> · Jetpack Compose</sub></td>
+<td width="22%" align="center"><img src="Docs/Assets/screenshots/watchos-en.png" width="145" alt="手錶應用在 watchOS（SwiftUI）上"><br><sub><b>watchOS</b> · SwiftUI</sub></td>
+<td width="22%" align="center"><img src="Docs/Assets/screenshots/wearos-zh.png" width="145" alt="手錶應用在 Wear OS（Compose）上"><br><sub><b>Wear OS</b> · Compose Material 3</sub></td>
 </tr>
 </table>
 
 <p align="center"><img src="Docs/Assets/screenshots/gpui-zh.png" width="480" alt="原生控制項範例在 macOS GPUI 上"><br><sub><b>桌面端 · GPUI</b>（<code>ui = "gpui"</code>，搭配緊鄰 <code>NativeView</code>）</sub></p>
 
-<p align="center"><sub>同一份 Rust 宣告涵蓋桌面、手機、手錶與網頁。在系統原生目標上 Bern 不自行繪製任何像素；<br>需要統一 GPU 渲染時，切換到 <code>ui = "gpui"</code> 即可直接將 Bern 作為 GPUI 的宣告式 UI 框架。</sub></p>
+<p align="center"><sub>同一份 Rust 宣告涵蓋桌面、平板、電視、手機、手錶與網頁。在系統原生目標上 Bern 不自行繪製任何像素；<br>需要統一 GPU 渲染時，切換到 <code>ui = "gpui"</code> 即可直接將 Bern 作為 GPUI 的宣告式 UI 框架。</sub></p>
 
 ## 為什麼選擇 Bern
 
@@ -315,10 +324,10 @@ counter catalog
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/platforms-zh-Hant-dark.svg">
-<img alt="支援的平台：macOS、Windows、Linux、Web 應用程式、WebUI 與 Android 可用，iOS 與 tvOS 目前建置模擬器應用程式；下一步是 flutter + macos、iOS 實機打包與 HarmonyOS" src="Docs/Assets/tables/platforms-zh-Hant-light.svg" width="100%">
+<img alt="支援的平台：macOS、iOS / iPadOS、watchOS、tvOS、Windows、Linux、Android（手機、平板、電視）、Wear OS、GPUI、Web 應用程式與 WebUI 均已可用；下一步是 flutter + macos 與 HarmonyOS" src="Docs/Assets/tables/platforms-zh-Hant-light.svg" width="100%">
 </picture>
 
-實作紀錄：[macOS](Docs/zh-CN/Implementation/macOS-SwiftUI.md) · [iOS](Docs/zh-CN/Implementation/iOS-SwiftUI.md) · [tvOS](Docs/zh-CN/Implementation/tvOS-SwiftUI.md) · [Windows](Docs/zh-CN/Implementation/Windows-WinUI3.md) · [Linux](Docs/zh-CN/Implementation/Linux-GTK.md) · [Web 與 WebUI](Docs/zh-CN/Implementation/Web.md) · [Android](Docs/zh-CN/Implementation/Android-Compose.md)；下一步的平台見[適配規範](Docs/zh-CN/Adaptation/README.md)。
+實作紀錄：[macOS](Docs/zh-CN/Implementation/macOS-SwiftUI.md) · [iOS](Docs/zh-CN/Implementation/iOS-SwiftUI.md) · [watchOS](Docs/zh-CN/Implementation/watchOS-SwiftUI.md) · [tvOS](Docs/zh-CN/Implementation/tvOS-SwiftUI.md) · [Windows](Docs/zh-CN/Implementation/Windows-WinUI3.md) · [Linux](Docs/zh-CN/Implementation/Linux-GTK.md) · [Android 與 Wear OS](Docs/zh-CN/Implementation/Android-Compose.md) · [GPUI](Docs/zh-CN/Implementation/GPUI.md) · [Web 與 WebUI](Docs/zh-CN/Implementation/Web.md)；下一步的平台見[適配規範](Docs/zh-CN/Adaptation/README.md)。
 
 未指定 UI 技術時採用平台的預設技術；預設技術無法使用時直接回報錯誤，不會悄悄換成另一套技術。
 
@@ -387,10 +396,10 @@ iOS 兩個前端都保留時，寫 `packages = "separate"` 可以打成兩個 `.
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/capabilities-zh-Hant-dark.svg">
-<img alt="平台與能力：各框架對 macOS、Windows、Linux、行動端、Web 的支援，以及原生外觀、Skills + CLI 與編譯期檢查；Bern 的行動端為部分支援，三項能力都具備" src="Docs/Assets/tables/capabilities-zh-Hant-light.svg" width="100%">
+<img alt="平台與能力：各框架對 macOS、Windows、Linux、行動端、Web 的支援，以及原生外觀、Skills + CLI 與編譯期檢查；Bern 全平台支援且三項能力都具備" src="Docs/Assets/tables/capabilities-zh-Hant-light.svg" width="100%">
 </picture>
 
-- **行動端**：iOS 與 Android。React Native 的桌面版本由微軟維護，uni-app 另涵蓋小程式與鴻蒙；Bern 的 Android 目標已能在實機執行並打包，iOS 目標目前建置模擬器應用程式，實機打包在規劃中。
+- **行動端**：iOS / iPadOS 與 Android（並涵蓋 watchOS、Wear OS、tvOS 與 Android 電視）。React Native 的桌面版本由微軟維護，uni-app 另涵蓋小程式與鴻蒙；Bern 涵蓋的桌面、手機、平板、手錶與電視目標均已通過實機測試，並支援打包 `.ipa` 與 `.apk`。
 - **原生外觀**：控制項就是平台自己的控制項，外觀、無障礙與輸入法由系統提供。Qt Widgets 與 uni-app x 接近原生，記為部分。
 - **Skills + CLI**：Bern 從同一份命令目錄產生應用程式的 CLI 和 `SKILL.md`，使用者與 Agent 使用相同的指令。其他框架可以透過無障礙介面，或 Playwright、Flutter Driver 等測試工具從外部自動化。
 - **編譯期檢查**：翻譯缺漏、功能在某個版面沒有入口、入口沒有登記功能，都由編譯器直接報錯（見[為 AI 而建](#為-ai-而建)）。其他框架多藉助 lint、翻譯工具或測試發現這類問題。
@@ -461,7 +470,7 @@ bern 0.1.0 on macOS (aarch64)
 <br>
 
 - **macOS**：Xcode 26 或更新版本。從 App Store 安裝後執行 `sudo xcode-select --switch /Applications/Xcode.app`。
-- **iOS**：Xcode 的 iOS 平台與一個 iOS 模擬器，以及 `rustup target add aarch64-apple-ios-sim`。目前建置模擬器應用程式，實機的簽署與打包還沒有做。
+- **iOS / iPadOS / tvOS / watchOS**：Xcode 對應的 Apple 平台 SDK 與 Rust 目標（`aarch64-apple-ios` / `aarch64-apple-ios-sim`、`aarch64-apple-tvos` / `aarch64-apple-tvos-sim`、`aarch64-apple-watchos` / `aarch64-apple-watchos-sim`）。`bern run` 可在模擬器除錯，`bern package` 產生可供實機安裝執行的 `.ipa`。
 - **Windows**：Visual Studio 2022 或更新版本的「使用 C++ 的桌面開發」（只裝建置工具也可以），含 Windows 11 SDK；Rust 使用 MSVC 工具鏈。首次建置時以 Windows SDK 的 `cppwinrt` 產生 C++/WinRT 標頭檔，並把它們與執行階段預先編譯（每個設定約 2.4 GB，放在 `target` 中）；之後的建置只編譯應用程式自己的程式碼，新專案約 5 秒，展示應用程式約 9 秒。應用程式目錄只有執行檔、400 KB 的啟動程式 DLL 與資源，不需要 .NET，也不隨附 Windows App SDK。
 - **Linux**：GTK 4.14 與 libadwaita 1.5 的開發套件，例如 `sudo apt install libgtk-4-dev libadwaita-1-dev libsoup-3.0-dev gstreamer1.0-libav`。
 - **Android**：Android Studio（帶 SDK 與 NDK，在 SDK Manager 的 SDK Tools 中勾選 NDK）、Gradle 9.4 或更新版本，以及 `rustup target add aarch64-linux-android`。第一次建置時 Gradle 會下載 Android 外掛與 Compose 程式庫。

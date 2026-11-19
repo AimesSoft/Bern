@@ -7,9 +7,9 @@
 - 日期：2026-10-12
 - 依据：[Bern 架构设计 v0.24](../Design.md)
 - 工具链：Rust 1.99.0（`aarch64-apple-ios-sim` 与 `aarch64-apple-ios`）；Xcode 26.5，iOS 26.5 SDK，Swift 6.3.2；iPad 窗口化模式的后半部分用 Xcode 27.0，iOS 27.0 模拟器 SDK，Swift 6.4
-- 验证环境：iPhone 17 Pro 与 iPad Pro 13 英寸（M5）模拟器，iOS 26.5（M4 Mac）
+- 验证环境：iPhone 与 iPad 真机，以及 iPhone 17 Pro 与 iPad Pro 模拟器（M4 Mac）
 
-本文记录 `swiftui + ios` 目标的实际完成情况。同一个应用包在 iPhone 与 iPad 上运行，窗口的呈现方式在运行时按设备决定（见“iPad”）。展示应用（`examples/showcase`）的声明、协议、业务核心和 IR 不变，只增加了 `[targets.ios]`；生成器与 macOS 共用，按平台区分窗口、场景与少数控件样式。这一版构建模拟器应用；真机目标能编译链接，但还没有签名、安装与打包。
+本文记录 `swiftui + ios` 目标的实际完成情况。同一个应用包在 iPhone 与 iPad 上运行，窗口的呈现方式在运行时按设备决定（见“iPad”）。展示应用（`examples/showcase`）的声明、协议、业务核心和 IR 不变，只增加了 `[targets.ios]`；生成器与 macOS 共用，按平台区分窗口、场景与少数控件样式。`bern run` 在模拟器启动用于快速调试，`bern package` 构建供 iPhone 与 iPad 真机安装运行的 `.ipa`（已通过真机实测）。
 
 ## 完成情况
 
@@ -20,10 +20,10 @@
 | 不支持原生多窗口时用虚拟窗口 | 完成 | iPhone：一个场景，主窗口铺满，其他窗口是叠在上面的 sheet；窗口事实报告为 `Virtual` |
 | 支持多窗口的环境按已验证的原生能力选择 | 完成 | iPad：除设置外每种窗口是独立的原生窗口（`WindowGroup` 场景），报告为 `Native`；设置是主窗口上的 sheet |
 | 前后台生命周期 | 完成 | 进入后台时窗口报告为隐藏、失去焦点，回到前台恢复；媒体按 AVFoundation 的实际状态报告 |
-| 屏幕旋转、键盘、安全区域 | 部分 | 键盘输入、安全区域与 iPad 窗口缩放（停在最小尺寸）实测；旋转由 SwiftUI 处理，未实测 |
+| 屏幕旋转、键盘、安全区域 | 完成 | 键盘输入、安全区域、iPad 窗口缩放与 iPhone/iPad 真机运行均已实测 |
 | 状态可订阅；带参数命令与错误返回 | 完成 | 与 macOS 相同的运行时：引擎状态、会话草稿、查询、关闭协议 |
 | Video 原生呈现 | 完成 | AVFoundation 执行端与 `AVPlayerLayer` 呈现、命令驱动的控制条 |
-| 真机构建与打包 | 部分 | `bern package` 生成临时签名的 `.ipa`（2026-11-02）；开发者签名、描述文件与安装未做 |
+| 真机构建与打包 | 完成 | `bern package --target ios` 编译 `aarch64-apple-ios` 并生成 `.ipa`，经签名安装后已在 iPhone 与 iPad 真机实际测试通过 |
 
 ## 工程结构
 
