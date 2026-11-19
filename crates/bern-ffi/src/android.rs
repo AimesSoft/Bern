@@ -857,7 +857,7 @@ pub unsafe extern "system" fn Java_dev_bern_runtime_BernNative_overlayPanelChang
 ) {
     let (overlay, control) = unsafe { (string_value(env, overlay), string_value(env, control)) };
     if let (Some(overlay), Some(control)) = (overlay, control) {
-        bern_command::overlay::panel_changed(&overlay, &control, value, committed != 0);
+        bern_command::overlay::panel_changed(&overlay, &control, value, committed);
     }
 }
 
