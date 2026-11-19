@@ -7,24 +7,16 @@
 //! so where it stands and whether it stays above other windows is the
 //! desktop's choice.
 
-use bern_ffi::overlay::{
-    Control, Host, Line, Overlay, Panel, Place, TextEffect, TextStyle, panel_changed,
-    panel_dismissed,
-};
+use bern_ffi::overlay::{Host, Line, Overlay, Place, TextEffect, TextStyle};
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{gdk, graphene, gsk};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::rc::Rc;
 
 pub(crate) struct Overlays;
 
 impl Host for Overlays {
-    fn supports_panel(&self) -> bool {
-        true
-    }
-
     fn show(&self, id: &str, overlay: &Overlay) {
         self.show_styled(id, overlay, TextStyle::default());
     }
@@ -39,24 +31,12 @@ impl Host for Overlays {
         glib::MainContext::default().invoke(move || lit(&id, &overlay));
     }
 
-    fn panel(&self, id: &str, panel: Option<&Panel>) {
-        let (id, panel) = (id.to_string(), panel.cloned());
-        glib::MainContext::default().invoke(move || {
-            if let Some(parts) = WINDOWS.with(|windows| windows.borrow().get(&id).cloned()) {
-                match panel {
-                    Some(panel) if parts.window.is_visible() => parts.panel.show(&panel),
-                    _ => parts.panel.close(),
-                }
-            }
-        });
-    }
-
     fn hide(&self, id: &str) {
         let id = id.to_string();
         glib::MainContext::default().invoke(move || {
+            crate::windows::sync_overlay(&id, false);
             WINDOWS.with(|windows| {
                 if let Some(parts) = windows.borrow().get(&id) {
-                    parts.panel.close();
                     parts.window.set_visible(false);
                 }
             });
@@ -70,7 +50,6 @@ struct Parts {
     window: gtk::Window,
     bar: gtk::Box,
     lines: gtk::Box,
-    panel: Rc<SettingsPanel>,
 }
 
 thread_local! {
@@ -121,7 +100,6 @@ fn parts(id: &str) -> Parts {
                 plate.append(&bar);
                 plate.append(&lines);
                 window.set_child(Some(&plate));
-                let panel = SettingsPanel::new(id, &window, &plate);
                 // The bar and the plate show while the pointer is over it.
                 let motion = gtk::EventControllerMotion::new();
                 let entered = window.clone();
@@ -176,12 +154,7 @@ fn parts(id: &str) -> Parts {
                         }
                     });
                 });
-                Parts {
-                    window,
-                    bar,
-                    lines,
-                    panel,
-                }
+                Parts { window, bar, lines }
             })
             .clone()
     })
@@ -262,12 +235,7 @@ fn lit(id: &str, overlay: &Overlay) {
 }
 
 fn show(id: &str, overlay: &Overlay, style: TextStyle) {
-    let Parts {
-        window,
-        bar,
-        lines,
-        panel,
-    } = parts(id);
+    let Parts { window, bar, lines } = parts(id);
     for class in ["effect-none", "effect-shadow", "effect-outline"] {
         window.remove_css_class(class);
     }
@@ -316,12 +284,12 @@ fn show(id: &str, overlay: &Overlay, style: TextStyle) {
     bar.set_visible(bar.first_child().is_some());
     if overlay.locked {
         window.remove_css_class("unlocked");
-        panel.close();
+        crate::windows::sync_overlay(id, false);
     } else {
         window.add_css_class("unlocked");
     }
     if lines.first_child().is_none() {
-        panel.close();
+        crate::windows::sync_overlay(id, false);
         window.set_visible(false);
         return;
     }
@@ -522,302 +490,5 @@ impl RubyLine {
             id.remove();
         }
         self.queue_draw();
-    }
-}
-
-struct SettingsPanel {
-    id: String,
-    window: glib::WeakRef<gtk::Window>,
-    popover: gtk::Popover,
-    title: gtk::Label,
-    column: gtk::Box,
-    rows: RefCell<Vec<PanelRow>>,
-    open: Rc<Cell<bool>>,
-    syncing: Rc<Cell<bool>>,
-}
-
-impl SettingsPanel {
-    fn new(id: &str, window: &gtk::Window, parent: &gtk::Box) -> Rc<Self> {
-        let popover = gtk::Popover::new();
-        popover.set_parent(parent);
-        popover.set_position(gtk::PositionType::Right);
-        popover.set_autohide(false);
-        popover.set_has_arrow(true);
-
-        let outer = gtk::Box::new(gtk::Orientation::Vertical, 8);
-        outer.set_margin_top(10);
-        outer.set_margin_bottom(10);
-        outer.set_margin_start(12);
-        outer.set_margin_end(12);
-        outer.set_width_request(248);
-
-        let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        let title = gtk::Label::new(None);
-        title.set_xalign(0.0);
-        title.set_hexpand(true);
-        title.add_css_class("heading");
-        let close = gtk::Button::from_icon_name("window-close-symbolic");
-        close.add_css_class("flat");
-        close.add_css_class("circular");
-        header.append(&title);
-        header.append(&close);
-        outer.append(&header);
-
-        let column = gtk::Box::new(gtk::Orientation::Vertical, 10);
-        let scroll = gtk::ScrolledWindow::builder()
-            .hscrollbar_policy(gtk::PolicyType::Never)
-            .vscrollbar_policy(gtk::PolicyType::Automatic)
-            .propagate_natural_height(true)
-            .max_content_height(420)
-            .child(&column)
-            .build();
-        outer.append(&scroll);
-        popover.set_child(Some(&outer));
-
-        let open = Rc::new(Cell::new(false));
-        let syncing = Rc::new(Cell::new(false));
-        let panel = Rc::new(Self {
-            id: id.to_owned(),
-            window: window.downgrade(),
-            popover: popover.clone(),
-            title,
-            column,
-            rows: RefCell::new(Vec::new()),
-            open: Rc::clone(&open),
-            syncing: Rc::clone(&syncing),
-        });
-
-        let pop_close = popover.clone();
-        close.connect_clicked(move |_| pop_close.popdown());
-
-        let weak = Rc::downgrade(&panel);
-        popover.connect_closed(move |_| {
-            if let Some(panel) = weak.upgrade() {
-                if let Some(win) = panel.window.upgrade() {
-                    win.set_focusable(false);
-                }
-                if panel.open.replace(false) && !panel.syncing.get() {
-                    panel_dismissed(&panel.id);
-                }
-            }
-        });
-
-        panel
-    }
-
-    fn close(&self) {
-        self.syncing.set(true);
-        if self.open.replace(false) {
-            self.popover.popdown();
-        }
-        if let Some(win) = self.window.upgrade() {
-            win.set_focusable(false);
-        }
-        self.syncing.set(false);
-    }
-
-    fn show(&self, model: &Panel) {
-        self.syncing.set(true);
-        self.title.set_label(&model.title);
-        let mut rows = self.rows.borrow_mut();
-        let same_shape = rows.len() == model.controls.len()
-            && rows.iter().zip(&model.controls).all(|(r, c)| r.matches(c));
-        if !same_shape {
-            rows.clear();
-            while let Some(child) = self.column.first_child() {
-                self.column.remove(&child);
-            }
-            for control in &model.controls {
-                let row = PanelRow::new(&self.id, &self.syncing, control);
-                self.column.append(&row.body);
-                rows.push(row);
-            }
-        }
-        for (row, control) in rows.iter_mut().zip(&model.controls) {
-            row.sync(control);
-        }
-        drop(rows);
-        self.syncing.set(false);
-        if !self.open.replace(true) {
-            if let Some(win) = self.window.upgrade() {
-                win.set_focusable(true);
-            }
-            self.popover.popup();
-        }
-    }
-}
-
-struct PanelRow {
-    id: String,
-    body: gtk::Box,
-    label: gtk::Label,
-    kind: PanelKind,
-}
-
-enum PanelKind {
-    Range(gtk::Scale, gtk::Label),
-    Color(gtk::ColorDialogButton),
-    Choice(gtk::DropDown, Vec<String>),
-}
-
-impl PanelRow {
-    fn id_of(c: &Control) -> &str {
-        match c {
-            Control::Range { id, .. } | Control::Color { id, .. } | Control::Choice { id, .. } => {
-                id
-            }
-        }
-    }
-
-    fn matches(&self, control: &Control) -> bool {
-        self.id == Self::id_of(control)
-            && matches!(
-                (&self.kind, control),
-                (PanelKind::Range(..), Control::Range { .. })
-                    | (PanelKind::Color(..), Control::Color { .. })
-                    | (PanelKind::Choice(..), Control::Choice { .. })
-            )
-    }
-
-    fn new(overlay_id: &str, syncing: &Rc<Cell<bool>>, control: &Control) -> Self {
-        let id = Self::id_of(control).to_owned();
-        let body = gtk::Box::new(gtk::Orientation::Vertical, 4);
-        let label = gtk::Label::new(None);
-        label.set_xalign(0.0);
-
-        let kind = match control {
-            Control::Range { min, max, step, .. } => {
-                let top = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-                label.set_hexpand(true);
-                let readout = gtk::Label::new(None);
-                readout.add_css_class("dim-label");
-                top.append(&label);
-                top.append(&readout);
-                body.append(&top);
-
-                let step = if *step > 0.0 && step.is_finite() {
-                    *step
-                } else {
-                    1.0
-                };
-                let scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, *min, *max, step);
-                scale.set_draw_value(false);
-                let oid = overlay_id.to_owned();
-                let cid = id.clone();
-                let sync = Rc::clone(syncing);
-                let read = readout.clone();
-                scale.connect_value_changed(move |s| {
-                    let v = s.value();
-                    read.set_label(&format!("{}", v.round() as i64));
-                    if !sync.get() {
-                        panel_changed(&oid, &cid, v, true);
-                    }
-                });
-                body.append(&scale);
-                PanelKind::Range(scale, readout)
-            }
-            Control::Color { .. } => {
-                let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-                label.set_hexpand(true);
-                let dialog = gtk::ColorDialog::new();
-                dialog.set_with_alpha(false);
-                let btn = gtk::ColorDialogButton::new(Some(dialog));
-                let oid = overlay_id.to_owned();
-                let cid = id.clone();
-                let sync = Rc::clone(syncing);
-                btn.connect_rgba_notify(move |b| {
-                    if sync.get() {
-                        return;
-                    }
-                    let rgba = b.rgba();
-                    let byte = |f: f32| (f.clamp(0.0, 1.0) * 255.0).round() as u32;
-                    let rgb =
-                        (byte(rgba.red()) << 16) | (byte(rgba.green()) << 8) | byte(rgba.blue());
-                    panel_changed(&oid, &cid, f64::from(rgb), true);
-                });
-                row.append(&label);
-                row.append(&btn);
-                body.append(&row);
-                PanelKind::Color(btn)
-            }
-            Control::Choice { options, .. } => {
-                body.append(&label);
-                let refs: Vec<&str> = options.iter().map(String::as_str).collect();
-                let dropdown = gtk::DropDown::from_strings(&refs);
-                let oid = overlay_id.to_owned();
-                let cid = id.clone();
-                let sync = Rc::clone(syncing);
-                dropdown.connect_selected_notify(move |d| {
-                    if sync.get() {
-                        return;
-                    }
-                    let idx = d.selected();
-                    if idx != gtk::INVALID_LIST_POSITION {
-                        panel_changed(&oid, &cid, f64::from(idx), true);
-                    }
-                });
-                body.append(&dropdown);
-                PanelKind::Choice(dropdown, options.clone())
-            }
-        };
-
-        Self {
-            id,
-            body,
-            label,
-            kind,
-        }
-    }
-
-    fn sync(&mut self, control: &Control) {
-        match (&mut self.kind, control) {
-            (
-                PanelKind::Range(scale, readout),
-                Control::Range {
-                    label,
-                    min,
-                    max,
-                    step,
-                    value,
-                    ..
-                },
-            ) => {
-                self.label.set_label(label);
-                scale.set_range(*min, *max);
-                if *step > 0.0 && step.is_finite() {
-                    scale.set_increments(*step, *step * 5.0);
-                }
-                scale.set_value(value.clamp(*min, *max));
-                readout.set_label(&format!("{}", value.round() as i64));
-            }
-            (PanelKind::Color(btn), Control::Color { label, rgb, .. }) => {
-                self.label.set_label(label);
-                let r = ((*rgb >> 16) & 0xff) as f32 / 255.0;
-                let g = ((*rgb >> 8) & 0xff) as f32 / 255.0;
-                let b = (*rgb & 0xff) as f32 / 255.0;
-                btn.set_rgba(&gdk::RGBA::new(r, g, b, 1.0));
-            }
-            (
-                PanelKind::Choice(dropdown, prev),
-                Control::Choice {
-                    label,
-                    options,
-                    selected,
-                    ..
-                },
-            ) => {
-                self.label.set_label(label);
-                if prev != options {
-                    let refs: Vec<&str> = options.iter().map(String::as_str).collect();
-                    let model = gtk::StringList::new(&refs);
-                    dropdown.set_model(Some(&model));
-                    *prev = options.clone();
-                }
-                if *selected < options.len() {
-                    dropdown.set_selected(*selected as u32);
-                }
-            }
-            _ => {}
-        }
     }
 }

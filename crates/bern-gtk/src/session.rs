@@ -375,6 +375,10 @@ fn run(request: u64, index: u32, reader: &mut Reader<'_>) -> Result<(), Failure>
             give(url);
             ok(Value::Unit);
         }
+        25 => {
+            let _overlay = reader.text().map_err(malformed)?;
+            ok(Value::Unit);
+        }
         other => {
             return Err(Failure::new(
                 "unknown_command",

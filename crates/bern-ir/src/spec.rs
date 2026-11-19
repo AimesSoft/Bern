@@ -584,8 +584,9 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 ),
                 opt(
                     "role",
-                    PropKind::Keyword(&["standard", "settings", "dialog"]),
+                    PropKind::Keyword(&["standard", "settings", "dialog", "utility"]),
                 ),
+                opt("overlay", PropKind::Id),
                 opt("width", PropKind::Number),
                 opt("height", PropKind::Number),
                 opt("min_width", PropKind::Number),
@@ -1723,6 +1724,23 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         )
     },
     ComponentSpec {
+        action: ActionRule::Optional,
+        interactive: true,
+        ..spec(
+            "ColorPicker",
+            &[
+                req("id", PropKind::Id),
+                req("label", PropKind::DisplayText),
+                opt("label_hidden", PropKind::Flag),
+                opt("value", PropKind::NumberField),
+                opt("current", PropKind::NumberValue),
+                FEATURE,
+            ],
+            Children::None,
+            "24-bit sRGB color (`0xRRGGBB`) previewed in the session or driven by engine state; the action runs when chosen",
+        )
+    },
+    ComponentSpec {
         interactive: true,
         ..spec(
             "Video",
@@ -2155,10 +2173,14 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
             });
         }
     }
-    if matches!(spec.name, "Switch" | "SplitButton" | "Picker" | "Slider") && !login_item {
+    if matches!(
+        spec.name,
+        "Switch" | "SplitButton" | "Picker" | "Slider" | "ColorPicker"
+    ) && !login_item
+    {
         let controlled = if matches!(spec.name, "Switch" | "SplitButton") {
             "checked"
-        } else if spec.name == "Slider" {
+        } else if matches!(spec.name, "Slider" | "ColorPicker") {
             "current"
         } else {
             "selected"

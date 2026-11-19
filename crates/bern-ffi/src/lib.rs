@@ -536,6 +536,49 @@ pub unsafe fn start_app<E: EngineProtocol>(
     }
 }
 
+/// Window host backed by a live UI session bridge.
+pub(crate) struct EngineWindowHost(pub(crate) Arc<UiBridge>);
+
+impl bern_command::window::Host for EngineWindowHost {
+    fn open(&self, id: &str) {
+        let _ = self.0.run(
+            SessionCommand::WindowOpen,
+            vec![Value::Text(id.to_string())],
+            Box::new(|_| {}),
+        );
+    }
+
+    fn close(&self, id: &str) {
+        let windows: Vec<String> = self
+            .0
+            .session
+            .lock()
+            .map(|session| {
+                session
+                    .window_infos()
+                    .into_iter()
+                    .filter(|info| info.kind == id)
+                    .map(|info| info.window)
+                    .collect()
+            })
+            .unwrap_or_default();
+        for instance in windows {
+            let _ = self.0.run(
+                SessionCommand::WindowClose,
+                vec![Value::Text(instance)],
+                Box::new(|_| {}),
+            );
+        }
+    }
+
+    fn is_open(&self, id: &str) -> bool {
+        self.0
+            .session
+            .lock()
+            .is_ok_and(|session| session.window_infos().iter().any(|info| info.kind == id))
+    }
+}
+
 /// The application around an engine link and a media link: the UI
 /// session, its bridge for external session commands, query
 /// subscriptions and the state and media listeners.
@@ -558,6 +601,15 @@ pub(crate) fn assemble(
         session: Arc::clone(&session),
         pending: Mutex::new(BTreeMap::new()),
         next: AtomicU64::new(1),
+    });
+    bern_command::window::install(EngineWindowHost(Arc::clone(&bridge)));
+    let sync_bridge = Arc::clone(&bridge);
+    bern_command::overlay::set_sync_hook(move |overlay| {
+        let _ = sync_bridge.run(
+            SessionCommand::WindowSyncOverlay,
+            vec![Value::Text(overlay.to_string())],
+            Box::new(|_| {}),
+        );
     });
     let queries = query::Subscriptions::default();
     let mirrored: MirroredState = Arc::new(Mutex::new(None));
@@ -1239,6 +1291,46 @@ pub unsafe extern "C" fn bern_platform_language(tag: *const u8, len: usize) {
     if let Some(tag) = unsafe { url_text(tag, len) } {
         bern_command::platform::set_ui_language(tag);
     }
+}
+
+/// Screen rectangle `(x, y, width, height)` of an unlocked free overlay in
+/// native platform coordinates, or false when absent, locked, or taskbar-anchored.
+///
+/// # Safety
+/// `id` must point to `len` readable UTF-8 bytes; any non-null output pointers
+/// must be valid for writing `f64`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bern_overlay_rect(
+    id: *const u8,
+    len: usize,
+    x: *mut f64,
+    y: *mut f64,
+    w: *mut f64,
+    h: *mut f64,
+) -> u8 {
+    // SAFETY: the caller keeps `id` readable for this call.
+    let Some(id) = (unsafe { url_text(id, len) }) else {
+        return 0;
+    };
+    let Some((rx, ry, rw, rh)) = bern_command::overlay::screen_rect(id) else {
+        return 0;
+    };
+    // SAFETY: the caller guarantees non-null pointers are valid for writing.
+    unsafe {
+        if !x.is_null() {
+            *x = rx;
+        }
+        if !y.is_null() {
+            *y = ry;
+        }
+        if !w.is_null() {
+            *w = rw;
+        }
+        if !h.is_null() {
+            *h = rh;
+        }
+    }
+    1
 }
 
 /// The system opened the application with the file at `url` (UTF-8), of a

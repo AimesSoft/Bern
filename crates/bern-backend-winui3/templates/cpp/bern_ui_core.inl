@@ -51,6 +51,10 @@ struct WindowDef {
     std::function<CloseCheck(Ctx const&)> close;
     /// `role: dialog`: shown modally over the primary window.
     bool dialog = false;
+    /// `role: utility`: compact floating always-on-top tool window.
+    bool utility = false;
+    /// `overlay: "..."`: anchors beside the named `bern::overlay`.
+    std::string overlay;
     /// `chrome: unified`: content under the title bar.
     bool unified = false;
     std::optional<double> idleAfter;

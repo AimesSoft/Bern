@@ -577,8 +577,8 @@ fn controlled_values(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     if let Some(control) = first_element(app, |e| {
-        if e.kind == "Slider" {
-            // Draft-backed sliders already support commit actions on every target.
+        if e.kind == "Slider" || e.kind == "ColorPicker" {
+            // Draft-backed sliders and color pickers already support commit actions on every target.
             e.prop("current").is_some()
         } else if e.kind == "PopoverButton" {
             e.prop("open").is_some()

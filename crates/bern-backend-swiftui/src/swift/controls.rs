@@ -840,6 +840,41 @@ impl Generator<'_> {
         }
     }
 
+    pub(super) fn color_picker(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let label = self.text_prop(element, "label").unwrap_or_default();
+        let label_hidden = element.keyword("label_hidden") == Some("true");
+        if let Some(current) = element.expr("current") {
+            let (value, _, commit) = self.control_value(element, "current");
+            let value = if current.ty == Type::Int {
+                format!("Double({value})")
+            } else {
+                value
+            };
+            out.line(format!(
+                "BernControlledColorPicker(value: {value}, label: {label}, labelHidden: {label_hidden}, commit: {commit})"
+            ));
+            out.line(format!(
+                ".bernControl({}, role: \"color_picker\", label: {label}, actions: BernControlActions(setNumber: {commit}, value: {{ BernText.text({value}) }}))",
+                self.target(element, ctx)
+            ));
+            return;
+        }
+        let field = self.field(element, "value").expect("number field");
+        let commit = element
+            .action
+            .as_ref()
+            .map(|action| self.action(action))
+            .unwrap_or_default();
+        let binding = self.binding_of(&field);
+        out.line(format!(
+            "BernControlledColorPicker(value: {binding}.wrappedValue, label: {label}, labelHidden: {label_hidden}) {{ next in {binding}.wrappedValue = next; {commit} }}"
+        ));
+        out.line(format!(
+            ".bernControl({}, role: \"color_picker\", label: {label}, actions: BernControlActions(setNumber: {{ value in {field} = value; {commit} }}, value: {{ BernText.text({field}) }}))",
+            self.target(element, ctx)
+        ));
+    }
+
     pub(super) fn picker(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         let ty = element
             .expr("selected")

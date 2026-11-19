@@ -22,6 +22,11 @@ import UniformTypeIdentifiers
 #if os(watchOS)
 import WatchKit
 #endif
+#if os(macOS)
+import AppKit
+#elseif os(iOS)
+import UIKit
+#endif
 
 // MARK: - Binary values
 
@@ -985,6 +990,10 @@ struct BernWindowKind {
     let isSettings: Bool
     /// Shown modally over the primary window.
     var isDialog = false
+    /// Compact floating utility window.
+    var isUtility = false
+    /// Name of a `bern::overlay` this utility window anchors beside.
+    var overlay: String? = nil
     /// The declared content size, used when a window has no other size to
     /// return to.
     let defaultSize: CGSize?
@@ -1714,6 +1723,10 @@ final class BernHost {
                     message: "`\(entry.target)` takes \(entry.actions.fileKinds), not `\(url.lastPathComponent)`")
             }
             give(url)
+            complete(request, command: command) { _ in }
+        case 25:  // window.sync_overlay
+            let overlayID = try reader.text()
+            syncOverlay(overlayID)
             complete(request, command: command) { _ in }
         default:
             throw BernCommandFailure(code: "unknown_command", message: "unknown session command \(command)")
@@ -3339,6 +3352,57 @@ struct BernSliderLabelHidden: ViewModifier {
     let hidden: Bool
     func body(content: Content) -> some View { if hidden { content.labelsHidden() } else { content } }
 }
+
+#if os(macOS) || os(iOS)
+struct BernControlledColorPicker: View {
+    let value: Double
+    let label: String
+    let labelHidden: Bool
+    let commit: (Double) -> Void
+
+    private static func clampRgb(_ raw: Double) -> Int {
+        guard raw.isFinite else { return 0xffffff }
+        return min(max(Int(raw.rounded()), 0), 0xffffff)
+    }
+
+    private static func toRgb(_ color: Color) -> Int {
+        #if os(macOS)
+        let native = NSColor(color).usingColorSpace(.sRGB) ?? NSColor.white
+        let r = native.redComponent
+        let g = native.greenComponent
+        let b = native.blueComponent
+        #else
+        var r: CGFloat = 1, g: CGFloat = 1, b: CGFloat = 1, a: CGFloat = 1
+        UIColor(color).getRed(&r, green: &g, blue: &b, alpha: &a)
+        #endif
+        let byte = { (v: CGFloat) in min(max(Int((v * 255.0).rounded()), 0), 255) }
+        return (byte(r) << 16) | (byte(g) << 8) | byte(b)
+    }
+
+    private var colorBinding: Binding<Color> {
+        Binding(
+            get: {
+                let rgb = Self.clampRgb(value)
+                let r = Double((rgb >> 16) & 0xff) / 255.0
+                let g = Double((rgb >> 8) & 0xff) / 255.0
+                let b = Double(rgb & 0xff) / 255.0
+                return Color(.sRGB, red: r, green: g, blue: b, opacity: 1.0)
+            },
+            set: { next in
+                let rgb = Self.toRgb(next)
+                if rgb != Self.clampRgb(value) {
+                    commit(Double(rgb))
+                }
+            }
+        )
+    }
+
+    var body: some View {
+        SwiftUI.ColorPicker(label, selection: colorBinding, supportsOpacity: false)
+            .modifier(BernSliderLabelHidden(hidden: labelHidden))
+    }
+}
+#endif
 
 struct BernMarquee<Content: View>: View {
     let duration: Double

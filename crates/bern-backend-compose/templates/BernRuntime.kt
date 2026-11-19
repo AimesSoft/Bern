@@ -992,6 +992,8 @@ class BernWindowKind(
     val isSettings: Boolean,
     /// Shown over the primary window at its declared size.
     val isDialog: Boolean = false,
+    val isUtility: Boolean = false,
+    val overlay: String? = null,
     val width: Double? = null,
     val height: Double? = null,
 )
@@ -1005,8 +1007,6 @@ object BernNative {
     external fun start(fingerprint: Long, resources: ByteArray, bridge: BernBridge): ByteArray
     external fun nowPlayingCommand(name: ByteArray)
     external fun overlayPressed(overlay: ByteArray, button: ByteArray)
-    external fun overlayPanelChanged(overlay: String, control: String, value: Double, committed: Boolean)
-    external fun overlayPanelDismissed(overlay: String)
     external fun allFilesAnswered()
     external fun filesOpened(url: ByteArray)
     external fun filesRead(url: ByteArray): ByteArray?
@@ -1171,7 +1171,6 @@ class BernBridge(context: Context) {
             "overlay_ask" -> onMain { BernOverlay.ask(application); "" }
             "overlay_show" -> onMain { BernOverlay.show(application, first, second); "" }
             "overlay_lit" -> onMain { BernOverlay.lit(first, second); "" }
-            "overlay_panel" -> onMain { BernOverlay.panel(application, first, second); "" }
             "overlay_hide" -> onMain { BernOverlay.hide(application, first); "" }
             "all_files_allowed" -> if (BernFiles.allFilesAllowed(application)) "yes" else "no"
             "all_files_ask" -> onMain { BernFiles.askAllFiles(application); "" }
@@ -1475,6 +1474,9 @@ object BernHost {
         private set
     /// Window kinds shown over the primary window, bottom first.
     val sheets = mutableStateListOf<String>()
+    var appContext: Context? = null
+        private set
+    var overlayRenderer: (@Composable (String) -> Unit)? = null
 
     /// Start the engine in this process and load the first state snapshot.
     /// The engine lives as long as the process, across activities.
@@ -1487,6 +1489,7 @@ object BernHost {
         primary: String,
         apply: (Int, BernReader) -> Unit,
     ) {
+        this.appContext = context.applicationContext
         BernMotionState.readSystem(context)
         if (handle != 0L) return
         touch = context.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_TOUCHSCREEN)
@@ -1665,9 +1668,11 @@ object BernHost {
     /// Open a window kind: the primary fills the screen again, any other
     /// becomes the top sheet.
     fun open(kindID: String) {
-        if (kinds.none { it.id == kindID }) return
+        val kind = kinds.firstOrNull { it.id == kindID } ?: return
         if (kindID == primary) {
             primaryOpen = true
+        } else if (kind.overlay != null && BernOverlay.isActive(kind.overlay) && BernOverlay.openWindow(appContext, kind)) {
+            return
         } else if (kindID !in sheets) {
             sheets.add(kindID)
         }
@@ -1682,11 +1687,26 @@ object BernHost {
 
     /// Request closing a window kind's instance through the close protocol.
     fun close(kindID: String) {
-        val context = windows[kindID] ?: return
+        val context = windows[kindID] ?: run {
+            BernOverlay.closeWindow(appContext, kindID)
+            return
+        }
         try {
             requestClose(context)
         } catch (problem: BernCommandFailure) {
             failure = BernFailure(context.id, problem.code, problem.message)
+        }
+    }
+
+    fun syncOverlay(overlayID: String) {
+        val active = BernOverlay.isActive(overlayID)
+        for (kind in kinds) {
+            if (kind.overlay != overlayID) continue
+            if (active) {
+                BernOverlay.repositionWindow(appContext, kind.id)
+            } else {
+                close(kind.id)
+            }
         }
     }
 
@@ -1712,6 +1732,7 @@ object BernHost {
         if (context.kindID == primary) {
             primaryOpen = false
         } else {
+            BernOverlay.closeWindow(appContext, context.kindID)
             val index = sheets.indexOf(context.kindID)
             if (index >= 0) while (sheets.size > index) sheets.removeAt(sheets.size - 1)
         }
@@ -2004,6 +2025,10 @@ object BernHost {
                 give(url)
                 complete(request, command) {}
             }
+            25 -> { // window.sync_overlay
+                BernHost.syncOverlay(reader.text())
+                complete(request, command) {}
+            }
             else -> throw BernCommandFailure("unknown_command", "unknown session command $command")
         }
     }
@@ -2140,7 +2165,7 @@ fun BernVirtualHost(window: @Composable (String) -> Unit) {
             BernClosedPrimary()
         }
         for (kind in BernHost.sheets) {
-            val dialog = BernHost.kinds.firstOrNull { it.id == kind && it.isDialog }
+            val dialog = BernHost.kinds.firstOrNull { it.id == kind && (it.isDialog || it.isUtility) }
             if (dialog != null) {
                 // A dialog window floats over the primary window at its
                 // declared size, with its title bar.
@@ -2775,9 +2800,6 @@ class BernPlaybackService : android.app.Service() {
 internal object BernOverlay {
     private val views = mutableMapOf<String, android.widget.LinearLayout>()
     private val layouts = mutableMapOf<String, android.view.WindowManager.LayoutParams>()
-    private val panels = mutableMapOf<String, android.view.View>()
-    private val panelLayouts = mutableMapOf<String, android.view.WindowManager.LayoutParams>()
-    private val panelSpecs = mutableMapOf<String, String>()
     /// What each overlay last showed, and those whose bar shows.
     private val shown = mutableMapOf<String, String>()
     private val barred = mutableSetOf<String>()
@@ -2785,6 +2807,38 @@ internal object BernOverlay {
     private const val BAR_SECONDS = 5L
     /// The bar's height: its buttons and the room under them.
     private const val BAR_HEIGHT = 48
+
+    fun isActive(id: String): Boolean {
+        val view = views[id] ?: return false
+        val json = shown[id] ?: return false
+        val locked = org.json.JSONObject(json).optBoolean("locked")
+        return view.visibility == android.view.View.VISIBLE && !locked
+    }
+
+    fun openWindow(context: Context?, kind: BernWindowKind): Boolean {
+        // @bern:wear-skip-start
+        if (context != null && allowed(context)) {
+            return BernOverlayWindows.open(context, kind)
+        }
+        // @bern:wear-skip-end
+        return false
+    }
+
+    fun closeWindow(context: Context?, kindID: String) {
+        // @bern:wear-skip-start
+        if (context != null) {
+            BernOverlayWindows.close(context, kindID)
+        }
+        // @bern:wear-skip-end
+    }
+
+    fun repositionWindow(context: Context?, kindID: String) {
+        // @bern:wear-skip-start
+        if (context != null) {
+            BernOverlayWindows.reposition(context, kindID)
+        }
+        // @bern:wear-skip-end
+    }
 
     /// Mark the bar of `id` as showing or not, raising the window by it or
     /// lowering it back.
@@ -2943,186 +2997,7 @@ internal object BernOverlay {
         }
         view.visibility = if (hasLines) android.view.View.VISIBLE else android.view.View.GONE
         manager.updateViewLayout(view, layout)
-        if (locked || !hasLines) closePanel(context, id, notify = false) else positionPanel(context, id)
-    }
-
-    private fun closePanel(context: Context, id: String, notify: Boolean) {
-        panelSpecs.remove(id)
-        panelLayouts.remove(id)
-        val panelView = panels.remove(id) ?: return
-        try {
-            (context.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager).removeView(panelView)
-        } catch (_: Exception) {}
-        if (notify) BernNative.overlayPanelDismissed(id)
-    }
-
-    private fun positionPanel(context: Context, id: String) {
-        val panelView = panels[id] ?: return
-        val lp = panelLayouts[id] ?: return
-        val anchor = views[id] ?: return
-        if (!anchor.isAttachedToWindow || anchor.width <= 0 || anchor.height <= 0) return
-        val loc = IntArray(2)
-        anchor.getLocationOnScreen(loc)
-        val metrics = context.resources.displayMetrics
-        val density = metrics.density
-        val gap = (8 * density).toInt()
-        val width = minOf((272 * density).toInt(), (metrics.widthPixels * 0.85).toInt())
-        panelView.measure(
-            android.view.View.MeasureSpec.makeMeasureSpec(width, android.view.View.MeasureSpec.EXACTLY),
-            android.view.View.MeasureSpec.makeMeasureSpec((metrics.heightPixels * 0.7).toInt(), android.view.View.MeasureSpec.AT_MOST)
-        )
-        val height = panelView.measuredHeight.coerceAtLeast(1)
-        val rightRoom = metrics.widthPixels - (loc[0] + anchor.width + gap)
-        val leftRoom = loc[0] - gap
-        lp.gravity = android.view.Gravity.TOP or android.view.Gravity.START
-        if (rightRoom >= width) {
-            lp.x = loc[0] + anchor.width + gap
-            lp.y = loc[1].coerceIn(0, (metrics.heightPixels - height).coerceAtLeast(0))
-        } else if (leftRoom >= width) {
-            lp.x = loc[0] - gap - width
-            lp.y = loc[1].coerceIn(0, (metrics.heightPixels - height).coerceAtLeast(0))
-        } else {
-            lp.x = ((metrics.widthPixels - width) / 2).coerceAtLeast(0)
-            val below = metrics.heightPixels - (loc[1] + anchor.height + gap)
-            lp.y = if (below >= height || below >= loc[1]) {
-                (loc[1] + anchor.height + gap).coerceIn(0, (metrics.heightPixels - height).coerceAtLeast(0))
-            } else {
-                (loc[1] - gap - height).coerceAtLeast(0)
-            }
-        }
-        lp.width = width
-        lp.height = height
-        try {
-            (context.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager).updateViewLayout(panelView, lp)
-        } catch (_: Exception) {}
-    }
-
-    fun panel(context: Context, id: String, json: String) {
-        if (!allowed(context) || json.isEmpty()) {
-            closePanel(context, id, notify = false)
-            return
-        }
-        if (panelSpecs[id] == json && panels.containsKey(id)) {
-            positionPanel(context, id)
-            return
-        }
-        closePanel(context, id, notify = false)
-        val anchor = views[id] ?: return
-        val spec = org.json.JSONObject(json)
-        val themed = android.view.ContextThemeWrapper(context, android.R.style.Theme_DeviceDefault_Dialog)
-        val density = context.resources.displayMetrics.density
-        val pad = (14 * density).toInt()
-        val card = android.widget.LinearLayout(themed).apply {
-            orientation = android.widget.LinearLayout.VERTICAL
-            setPadding(pad, pad, pad, pad)
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(0xEE1E1E1E.toInt())
-                cornerRadius = 16 * density
-            }
-        }
-        val header = android.widget.LinearLayout(themed).apply {
-            orientation = android.widget.LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
-        }
-        header.addView(android.widget.TextView(themed).apply {
-            text = spec.optString("title")
-            setTextColor(0xFFFFFFFF.toInt())
-            textSize = 15f
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-        }, android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        header.addView(android.widget.Button(themed, null, 0, android.R.style.Widget_Material_Button_Borderless).apply {
-            text = "✕"
-            setTextColor(0xFFFFFFFF.toInt())
-            setOnClickListener { closePanel(context, id, notify = true) }
-        })
-        card.addView(header)
-        val controls = spec.optJSONArray("controls") ?: org.json.JSONArray()
-        val swatches = intArrayOf(0xFFFFFF, 0xFFE066, 0xFF6B8B, 0x7ED6DF, 0xA3CB38, 0xD980FA, 0xFFA502, 0x70A1FF)
-        for (i in 0 until controls.length()) {
-            val ctrl = controls.getJSONObject(i)
-            val cid = ctrl.optString("id")
-            val label = ctrl.optString("label")
-            val titleView = android.widget.TextView(themed).apply {
-                text = label
-                setTextColor(0xDDFFFFFF.toInt())
-                textSize = 13f
-                setPadding(0, (8 * density).toInt(), 0, (4 * density).toInt())
-            }
-            card.addView(titleView)
-            when (ctrl.optString("type")) {
-                "range" -> {
-                    val min = ctrl.optDouble("min", 0.0)
-                    val max = ctrl.optDouble("max", 100.0)
-                    val step = ctrl.optDouble("step", 1.0).let { if (it > 0) it else 1.0 }
-                    val value = ctrl.optDouble("value", min)
-                    val total = kotlin.math.round((max - min) / step).toInt().coerceAtLeast(1)
-                    val seek = android.widget.SeekBar(themed).apply {
-                        this.max = total
-                        progress = kotlin.math.round((value - min) / step).toInt().coerceIn(0, total)
-                        setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
-                            override fun onProgressChanged(sb: android.widget.SeekBar?, p: Int, fromUser: Boolean) {
-                                if (fromUser) BernNative.overlayPanelChanged(id, cid, min + p * step, false)
-                            }
-                            override fun onStartTrackingTouch(sb: android.widget.SeekBar?) {}
-                            override fun onStopTrackingTouch(sb: android.widget.SeekBar?) {
-                                BernNative.overlayPanelChanged(id, cid, min + (sb?.progress ?: 0) * step, true)
-                            }
-                        })
-                    }
-                    card.addView(seek)
-                }
-                "color" -> {
-                    val row = android.widget.LinearLayout(themed).apply { orientation = android.widget.LinearLayout.HORIZONTAL }
-                    val dot = (24 * density).toInt()
-                    val gap = (6 * density).toInt()
-                    val currentRgb = ctrl.optInt("rgb", 0xFFFFFF) and 0xFFFFFF
-                    for (rgb in swatches) {
-                        row.addView(android.view.View(themed).apply {
-                            background = android.graphics.drawable.GradientDrawable().apply {
-                                shape = android.graphics.drawable.GradientDrawable.OVAL
-                                setColor((0xFF shl 24) or rgb)
-                                setStroke(if (rgb == currentRgb) (2.5f * density).toInt() else (1 * density).toInt(),
-                                    if (rgb == currentRgb) 0xFFFFFFFF.toInt() else 0x55FFFFFF)
-                            }
-                            setOnClickListener {
-                                BernNative.overlayPanelChanged(id, cid, rgb.toDouble(), true)
-                            }
-                        }, android.widget.LinearLayout.LayoutParams(dot, dot).apply { marginEnd = gap })
-                    }
-                    card.addView(row)
-                }
-                "choice" -> {
-                    val options = ctrl.optJSONArray("options") ?: org.json.JSONArray()
-                    val selected = ctrl.optInt("selected", 0)
-                    val group = android.widget.RadioGroup(themed).apply { orientation = android.widget.LinearLayout.HORIZONTAL }
-                    for (j in 0 until options.length()) {
-                        group.addView(android.widget.RadioButton(themed).apply {
-                            this.id = android.view.View.generateViewId()
-                            text = options.optString(j)
-                            setTextColor(0xFFFFFFFF.toInt())
-                            isChecked = j == selected
-                            setOnClickListener { BernNative.overlayPanelChanged(id, cid, j.toDouble(), true) }
-                        })
-                    }
-                    card.addView(group)
-                }
-            }
-        }
-        val scroll = android.widget.ScrollView(themed).apply { addView(card) }
-        val lp = android.view.WindowManager.LayoutParams(
-            android.view.WindowManager.LayoutParams.WRAP_CONTENT,
-            android.view.WindowManager.LayoutParams.WRAP_CONTENT,
-            if (android.os.Build.VERSION.SDK_INT >= 26) android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            else @Suppress("DEPRECATION") android.view.WindowManager.LayoutParams.TYPE_PHONE,
-            android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or android.view.WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
-            android.graphics.PixelFormat.TRANSLUCENT
-        )
-        val manager = context.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
-        manager.addView(scroll, lp)
-        panels[id] = scroll
-        panelLayouts[id] = lp
-        panelSpecs[id] = json
-        anchor.post { positionPanel(context, id) }
+        BernHost.syncOverlay(id)
     }
 
     /// Only how far the lines are lit changed: they draw again.
@@ -3142,15 +3017,129 @@ internal object BernOverlay {
     }
 
     fun hide(context: Context, id: String) {
-        closePanel(context, id, notify = false)
         main.removeCallbacksAndMessages(id)
         barred(context, id, false)
         shown.remove(id)
-        val view = views.remove(id) ?: return
+        val view = views.remove(id) ?: run {
+            BernHost.syncOverlay(id)
+            return
+        }
         layouts.remove(id)
         (context.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager).removeView(view)
+        BernHost.syncOverlay(id)
+    }
+
+    internal fun anchorView(id: String): android.view.View? = views[id]
+}
+
+// @bern:wear-skip-start
+internal object BernOverlayWindows {
+    private class Entry(
+        val kind: BernWindowKind,
+        val view: androidx.compose.ui.platform.ComposeView,
+        val layout: android.view.WindowManager.LayoutParams,
+    ) : androidx.lifecycle.LifecycleOwner, androidx.lifecycle.ViewModelStoreOwner, androidx.savedstate.SavedStateRegistryOwner {
+        val registry = androidx.lifecycle.LifecycleRegistry(this)
+        val store = androidx.lifecycle.ViewModelStore()
+        val saved = androidx.savedstate.SavedStateRegistryController.create(this)
+        override val lifecycle: androidx.lifecycle.Lifecycle get() = registry
+        override val viewModelStore: androidx.lifecycle.ViewModelStore get() = store
+        override val savedStateRegistry: androidx.savedstate.SavedStateRegistry get() = saved.savedStateRegistry
+    }
+
+    private val open = mutableMapOf<String, Entry>()
+
+    fun open(context: Context, kind: BernWindowKind): Boolean {
+        val renderer = BernHost.overlayRenderer ?: return false
+        if (open.containsKey(kind.id)) {
+            reposition(context, kind.id)
+            return true
+        }
+        val metrics = context.resources.displayMetrics
+        val density = metrics.density
+        val wPx = ((kind.width ?: 300.0) * density).toInt().coerceAtMost((metrics.widthPixels * 0.9).toInt())
+        val hPx = (((kind.height ?: 420.0) + 56.0) * density).toInt().coerceAtMost((metrics.heightPixels * 0.75).toInt())
+        val view = androidx.compose.ui.platform.ComposeView(context)
+        val lp = android.view.WindowManager.LayoutParams(
+            wPx,
+            hPx,
+            if (android.os.Build.VERSION.SDK_INT >= 26) android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else @Suppress("DEPRECATION") android.view.WindowManager.LayoutParams.TYPE_PHONE,
+            android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            android.graphics.PixelFormat.TRANSLUCENT,
+        )
+        val entry = Entry(kind, view, lp)
+        entry.saved.performAttach()
+        entry.saved.performRestore(null)
+        entry.registry.handleLifecycleEvent(androidx.lifecycle.Lifecycle.Event.ON_CREATE)
+        entry.registry.handleLifecycleEvent(androidx.lifecycle.Lifecycle.Event.ON_START)
+        entry.registry.handleLifecycleEvent(androidx.lifecycle.Lifecycle.Event.ON_RESUME)
+        androidx.lifecycle.setViewTreeLifecycleOwner(view, entry)
+        androidx.lifecycle.setViewTreeViewModelStoreOwner(view, entry)
+        androidx.savedstate.setViewTreeSavedStateRegistryOwner(view, entry)
+        view.setContent {
+            BernTheme {
+                androidx.compose.material3.Surface(
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
+                    tonalElevation = 6.dp,
+                ) {
+                    renderer(kind.id)
+                }
+            }
+        }
+        position(context, kind, lp)
+        val manager = context.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
+        manager.addView(view, lp)
+        open[kind.id] = entry
+        return true
+    }
+
+    fun reposition(context: Context, kindID: String) {
+        val entry = open[kindID] ?: return
+        position(context, entry.kind, entry.layout)
+        try {
+            (context.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager)
+                .updateViewLayout(entry.view, entry.layout)
+        } catch (_: Exception) {}
+    }
+
+    fun close(context: Context, kindID: String) {
+        val entry = open.remove(kindID) ?: return
+        try {
+            (context.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager).removeView(entry.view)
+        } catch (_: Exception) {}
+        entry.registry.handleLifecycleEvent(androidx.lifecycle.Lifecycle.Event.ON_DESTROY)
+        entry.store.clear()
+    }
+
+    private fun position(context: Context, kind: BernWindowKind, lp: android.view.WindowManager.LayoutParams) {
+        val anchor = kind.overlay?.let(BernOverlay::anchorView) ?: return
+        if (!anchor.isAttachedToWindow || anchor.width <= 0 || anchor.height <= 0) return
+        val loc = IntArray(2)
+        anchor.getLocationOnScreen(loc)
+        val metrics = context.resources.displayMetrics
+        val gap = (8 * metrics.density).toInt()
+        lp.gravity = android.view.Gravity.TOP or android.view.Gravity.START
+        val rightRoom = metrics.widthPixels - (loc[0] + anchor.width + gap)
+        val leftRoom = loc[0] - gap
+        if (rightRoom >= lp.width) {
+            lp.x = loc[0] + anchor.width + gap
+            lp.y = loc[1].coerceIn(0, (metrics.heightPixels - lp.height).coerceAtLeast(0))
+        } else if (leftRoom >= lp.width) {
+            lp.x = loc[0] - gap - lp.width
+            lp.y = loc[1].coerceIn(0, (metrics.heightPixels - lp.height).coerceAtLeast(0))
+        } else {
+            lp.x = ((metrics.widthPixels - lp.width) / 2).coerceAtLeast(0)
+            val below = metrics.heightPixels - (loc[1] + anchor.height + gap)
+            lp.y = if (below >= lp.height || below >= loc[1]) {
+                (loc[1] + anchor.height + gap).coerceIn(0, (metrics.heightPixels - lp.height).coerceAtLeast(0))
+            } else {
+                (loc[1] - gap - lp.height).coerceAtLeast(0)
+            }
+        }
     }
 }
+// @bern:wear-skip-end
 
 /// A symbol of an overlay's bar, drawn in white in a 24-unit square: the
 /// ones `bern::overlay::Button` names.

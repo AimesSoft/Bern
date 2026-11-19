@@ -132,7 +132,7 @@ fn watch_component_names() -> &'static [&'static str] {
         component_names()
             .iter()
             .copied()
-            .filter(|name| *name != "WebPage")
+            .filter(|name| !matches!(*name, "WebPage" | "ColorPicker"))
             .collect()
     })
 }

@@ -5741,3 +5741,89 @@ fn declarations_read_player_state() {
         ]
     );
 }
+
+#[test]
+fn utility_overlay_windows_and_color_picker_compile_and_validate() {
+    let valid = compile_ui(
+        r#"
+        use bern::prelude::*;
+        use demo_protocol::demo;
+
+        #[bern::session]
+        pub struct StyleDraft {
+            pub color: f64,
+        }
+
+        #[component]
+        pub fn app(app: demo::Client) -> impl View {
+            ui! {
+                WindowSet(handle: AppWindows, primary: main) {
+                    Window(id: main, title: tr! { "en" => "Main", "ja" => "Main" }, initial: open) {
+                        page(app: app)
+                    }
+                    Window(id: tool, title: tr! { "en" => "Tool", "ja" => "Tool" }, initial: closed, role: utility, overlay: "lyrics", width: 320, height: 400) {
+                        tool_panel(app: app)
+                    }
+                }
+            }
+        }
+
+        #[component]
+        pub fn page(app: demo::Client) -> impl View {
+            ui! { Text(content: app.title) }
+        }
+
+        #[component]
+        pub fn tool_panel(app: demo::Client, #[session] draft: StyleDraft) -> impl View {
+            ui! {
+                Column {
+                    ColorPicker(id: swatch, label: tr! { "en" => "Color", "ja" => "Color" }, value: draft.color)
+                }
+            }
+        }"#,
+    )
+    .unwrap_or_else(|errors| panic!("{errors:?}"));
+    let tool = valid.app.window("tool").expect("utility window");
+    assert_eq!(tool.role, ir::WindowRole::Utility);
+    assert_eq!(tool.overlay.as_deref(), Some("lyrics"));
+
+    let errors = |ui: &str| match compile_ui(ui) {
+        Ok(_) => panic!("expected error"),
+        Err(errors) => errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    };
+
+    let message = errors(
+        r#"
+        use bern::prelude::*;
+        use demo_protocol::demo;
+
+        #[component]
+        pub fn app(app: demo::Client) -> impl View {
+            ui! {
+                WindowSet(handle: AppWindows, primary: main) {
+                    Window(id: main, title: tr! { "en" => "Main", "ja" => "Main" }, initial: open) {
+                        page(app: app)
+                    }
+                    Window(id: tool, title: tr! { "en" => "Tool", "ja" => "Tool" }, initial: closed, overlay: "lyrics") {
+                        page(app: app)
+                    }
+                }
+            }
+        }
+
+        #[component]
+        pub fn page(app: demo::Client) -> impl View {
+            ui! { Text(content: app.title) }
+        }"#,
+    );
+    assert!(message.contains("requires `role: utility`"), "{message}");
+
+    let message = errors(&wrap(
+        r#"ColorPicker(id: bad, label: app.title, current: app.count)"#,
+    ));
+    assert!(message.contains("needs an action"), "{message}");
+}

@@ -286,6 +286,13 @@ impl Generator<'_> {
                 window.role == WindowRole::Settings
             ));
             out.line(format!("w.dialog = {};", window.role == WindowRole::Dialog));
+            out.line(format!(
+                "w.utility = {};",
+                window.role == WindowRole::Utility
+            ));
+            if let Some(overlay) = &window.overlay {
+                out.line(format!("w.overlay = {};", string(overlay)));
+            }
             out.line(format!("w.width = {};", optional(window.width)));
             out.line(format!("w.height = {};", optional(window.height)));
             out.line(format!("w.minWidth = {};", optional(window.min_width)));

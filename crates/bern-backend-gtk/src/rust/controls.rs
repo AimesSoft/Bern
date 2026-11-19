@@ -161,6 +161,21 @@ impl Generator<'_> {
         ));
     }
 
+    pub(super) fn color_picker(&self, out: &mut Out, element: &Element) {
+        out.line(format!(
+            "b::ColorPicker(p, c, b::ColorPickerProps {{ id: {}, label: {}, model: {}, label_hidden: {} }}, {});",
+            self.id(element),
+            some(self.text_prop(element, "label")),
+            some(self.model(element, "current", false)),
+            element.keyword("label_hidden") == Some("true"),
+            if element.expr("current").is_some() {
+                "None".into()
+            } else {
+                self.action(element)
+            },
+        ));
+    }
+
     pub(super) fn picker(&self, out: &mut Out, element: &Element) {
         let ty = element
             .expr("selected")

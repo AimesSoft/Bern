@@ -298,6 +298,34 @@ impl Generator<'_> {
         out.line(format!("B::Slider(p, c, {});", designated(&fields)));
     }
 
+    pub(super) fn color_picker(&self, out: &mut Out, element: &Element) {
+        let controlled = element.expr("current").is_some();
+        let mut fields = vec![
+            ("id", Some(self.id(element))),
+            ("label", self.text_prop(element, "label")),
+        ];
+        if controlled {
+            fields.extend(self.model(element, "current"));
+        } else {
+            fields.push(("field", self.field(element, "value")));
+        }
+        fields.extend([
+            (
+                "commit",
+                if controlled {
+                    None
+                } else {
+                    self.action(element)
+                },
+            ),
+            (
+                "labelHidden",
+                (element.keyword("label_hidden") == Some("true")).then(|| "true".to_string()),
+            ),
+        ]);
+        out.line(format!("B::ColorPicker(p, c, {});", designated(&fields)));
+    }
+
     pub(super) fn picker(&self, out: &mut Out, element: &Element) {
         let ty = element
             .expr("selected")

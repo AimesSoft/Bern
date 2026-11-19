@@ -1197,3 +1197,57 @@ fn a_platform_request_the_user_refused_says_so() {
     assert_eq!(answer(2).unwrap_err().code, "refused");
     assert_eq!(answer(1).unwrap_err().code, "platform_unavailable");
 }
+
+#[test]
+fn engine_window_host_dispatches_open_and_close_and_overlay_rect_reports_absent() {
+    use bern_command::window::Host as _;
+    let mut x = 1.0;
+    let mut y = 2.0;
+    let mut w = 3.0;
+    let mut h = 4.0;
+    let id = b"missing_overlay";
+    assert_eq!(
+        unsafe { bern_overlay_rect(id.as_ptr(), id.len(), &mut x, &mut y, &mut w, &mut h) },
+        0
+    );
+
+    let frontend = Frontend::default();
+    let app = start(&frontend, descriptor().fingerprint()).unwrap();
+    let host = EngineWindowHost(Arc::clone(&unsafe { &*app }.bridge));
+    assert!(!host.is_open("main"));
+
+    host.open("main");
+    let (request, bytes) = frontend.wait_for("session");
+    let mut reader = Reader::new(&bytes);
+    let index = reader.u32().unwrap();
+    assert_eq!(
+        SessionCommand::ALL[index as usize],
+        SessionCommand::WindowOpen
+    );
+    assert_eq!(reader.text().unwrap(), "main");
+    let mut answer = Writer::new();
+    answer.u8(0);
+    answer.u32(index);
+    answer.text("main#1");
+    unsafe { bern_session_complete(app, request, answer.bytes.as_ptr(), answer.bytes.len()) };
+
+    let opened = take(unsafe { bern_window_opened(app, 0) });
+    let mut open_reader = Reader::new(&opened);
+    assert_eq!(open_reader.u8().unwrap(), 0);
+    let _generation = open_reader.u64().unwrap();
+    let instance_id = open_reader.text().unwrap();
+    assert!(host.is_open("main"));
+
+    host.close("main");
+    let (close_req, close_bytes) = frontend.wait_for("session");
+    let mut close_reader = Reader::new(&close_bytes);
+    let close_index = close_reader.u32().unwrap();
+    assert_eq!(
+        SessionCommand::ALL[close_index as usize],
+        SessionCommand::WindowClose
+    );
+    assert_eq!(close_reader.text().unwrap(), instance_id);
+    let _ = close_req;
+
+    unsafe { bern_app_stop(app) };
+}

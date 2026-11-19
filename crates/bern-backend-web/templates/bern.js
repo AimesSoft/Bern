@@ -1188,6 +1188,10 @@ function sessionRequest(request, bytes) {
         ok();
         break;
       }
+      case 25: // window.sync_overlay
+        reader.text();
+        ok();
+        break;
       default:
         throw new CommandFailure("unknown_command", `unknown session command ${index}`);
     }
@@ -2444,6 +2448,38 @@ export function Slider(p, ctx, { id, label, field, hover, min, max, step, minIco
     bindAttr(input, "aria-label", label);
     p.append(track);
   } else p.append(labelled(track, label, true, input));
+}
+
+export function ColorPicker(p, ctx, { id, label, field, labelHidden }, commit) {
+  const input = el("input", { class: "bern-color-picker", type: "color" });
+  const toHex = (raw) => {
+    const n = Math.min(0xffffff, Math.max(0, Math.round(Number(raw) || 0)));
+    return `#${n.toString(16).padStart(6, "0")}`;
+  };
+  const fromHex = (hex) => parseInt(String(hex).replace(/^#/, ""), 16) || 0;
+  effect(() => {
+    const hex = toHex(field.get());
+    if (input.value !== hex) input.value = hex;
+  });
+  input.addEventListener("input", () => {
+    field.set(fromHex(input.value));
+    commit?.();
+  });
+  mark(input, ctx, id);
+  control(ctx, {
+    target: () => target(ctx, id), role: "color_picker", label,
+    actions: {
+      setNumber: (value) => {
+        field.set(Math.min(0xffffff, Math.max(0, Math.round(Number(value) || 0))));
+        commit?.();
+      },
+      value: () => String(Math.round(Number(field.peek()) || 0)),
+    },
+  });
+  if (labelHidden) {
+    bindAttr(input, "aria-label", label);
+    p.append(input);
+  } else p.append(labelled(input, label, true, input));
 }
 
 /// `hover`: where a mouse or pen over the slider stands along its track,

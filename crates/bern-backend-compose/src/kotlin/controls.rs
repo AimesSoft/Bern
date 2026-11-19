@@ -430,6 +430,54 @@ impl Generator<'_> {
         ));
     }
 
+    pub(super) fn color_picker(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let label = self.text_prop(element, "label").unwrap_or_default();
+        let target = self.target(element, ctx);
+        let label_hidden = element.keyword("label_hidden") == Some("true");
+        let convert = |ty: &Type| match ty {
+            Type::Int => "Math.round(it)".to_string(),
+            _ => "it".to_string(),
+        };
+        if element.expr("current").is_some() {
+            let Some((value, change)) = self.model(element, "current", &convert) else {
+                return;
+            };
+            out.line(format!(
+                "BernControl({target}, \"color_picker\", {label}, actions = BernControlActions(setNumber = {{ it: Double -> {change} }}, value = {{ BernText.text({value}) }}))"
+            ));
+            out.line(format!(
+                "BernColorPicker({label}, ({value}).toLong(), {{ next: Long -> val it = next.toDouble(); {change} }}, labelHidden = {label_hidden}, modifier = Modifier.testTag({target}))"
+            ));
+            return;
+        }
+        let Some(field) = self.field(element, "value") else {
+            return;
+        };
+        let integer = matches!(
+            element.field("value").map(|field| &field.ty),
+            Some(Type::Int)
+        );
+        let action = element.action.as_ref().map(|a| self.action(a));
+        let (read, write) = if integer {
+            (
+                format!("{field}.toLong()"),
+                format!("{field} = Math.round(it)"),
+            )
+        } else {
+            (format!("({field}).toLong()"), format!("{field} = it"))
+        };
+        let commit = action
+            .as_ref()
+            .map(|action| format!("; {action}"))
+            .unwrap_or_default();
+        out.line(format!(
+            "BernControl({target}, \"color_picker\", {label}, actions = BernControlActions(setNumber = {{ {write}{commit} }}, value = {{ BernText.text({field}) }}))"
+        ));
+        out.line(format!(
+            "BernColorPicker({label}, {read}, {{ next: Long -> val it = next.toDouble(); {write}{commit} }}, labelHidden = {label_hidden}, modifier = Modifier.testTag({target}))"
+        ));
+    }
+
     /// The options of a picker: its `PickerOption`s, or every variant of
     /// its enum; a Kotlin list of the values and a lambda naming each.
     pub(super) fn picker_options(&self, element: &Element, ty: &Type) -> Option<(String, String)> {

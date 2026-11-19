@@ -182,6 +182,8 @@ extension BernHost {
         #endif
     }
 
+    func syncOverlay(_ overlayID: String) {}
+
     /// Windows of their own and the primary can close; a covered sheet holds
     /// the sheets over it.
     func checkClosable(_ context: BernWindowContext) throws {
