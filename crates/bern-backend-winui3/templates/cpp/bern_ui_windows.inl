@@ -143,6 +143,12 @@ inline Facts Win::CurrentFacts() {
     return Facts{visibility, size, frame[0], frame[1], frame[2], frame[3], focused, actions};
 }
 
+#if BERN_WINUI
+namespace WindowManager {
+inline void RestoreTitleBar(Win& win);
+}
+#endif
+
 /// Report the current facts to the session runtime, then finish the
 /// presentation commands they satisfy.
 inline void Win::Report() {
@@ -150,7 +156,12 @@ inline void Win::Report() {
 #if BERN_WINUI
     if (presenterDirty) {
         presenterDirty = false;
-        fullscreen.Set(window.AppWindow().Presenter().Kind() == winrt::Microsoft::UI::Windowing::AppWindowPresenterKind::FullScreen);
+        bool full = !owner && window
+            && window.AppWindow().Presenter().Kind() == winrt::Microsoft::UI::Windowing::AppWindowPresenterKind::FullScreen;
+        if (!full && !owner && window && !window.ExtendsContentIntoTitleBar()) {
+            WindowManager::RestoreTitleBar(*this);
+        }
+        fullscreen.Set(full);
     }
 #endif
     auto facts = CurrentFacts();
@@ -1102,6 +1113,54 @@ inline void PlaceHeader(Win& win) {
     if (margin.Top != top || margin.Right != trailing) win.header.Margin(xaml::Thickness{16, top, trailing, 8});
 }
 
+#if BERN_WINUI
+/// Restore custom title-bar extension and its chrome after leaving `FullScreen`.
+/// Entering `FullScreen` turns `ExtendsContentIntoTitleBar` off to work around
+/// WinUI 3's 1px top gap (`microsoft-ui-xaml#12138`) and caption-button
+/// teardown UAF (`WindowsAppSDK#6981`). Re-enabling it does not re-apply
+/// WinUI's first-time transparent caption-button background, cached drag
+/// region/insets, or non-default `OverlappedPresenter` flags.
+inline void RestoreTitleBar(Win& win) {
+    if (!win.window || win.owner) return;
+    auto const& def = win.Def();
+    if (def.settings || def.utility) {
+        try {
+            if (auto presenter = win.window.AppWindow().Presenter().try_as<winrt::Microsoft::UI::Windowing::OverlappedPresenter>()) {
+                presenter.IsMaximizable(false);
+                presenter.IsMinimizable(false);
+                if (def.utility) {
+                    presenter.IsAlwaysOnTop(true);
+                    presenter.IsResizable(def.minWidth.has_value() || def.minHeight.has_value());
+                }
+            }
+        } catch (winrt::hresult_error const&) {
+        }
+    }
+    if (!win.window.ExtendsContentIntoTitleBar()) {
+        win.window.ExtendsContentIntoTitleBar(true);
+    }
+    if (win.titleBar) {
+        win.window.SetTitleBar(win.titleBar);
+    }
+    try {
+        auto bar = win.window.AppWindow().TitleBar();
+        auto transparent = winrt::Windows::UI::Colors::Transparent();
+        bar.ButtonBackgroundColor(transparent);
+        bar.ButtonInactiveBackgroundColor(transparent);
+    } catch (winrt::hresult_error const&) {
+    }
+    ShowCaptionTheme(win);
+    win.titleBarInsets = {-1, -1, 0};
+    if (win.titleBar) {
+        FitTitleBarInsets(win.titleBar, win.window, win.titleBarInsets);
+    }
+    PlaceHeader(win);
+    if (win.immersive.Peek()) {
+        ShowChrome(win, true);
+    }
+}
+#endif
+
 #if !BERN_WINUI
 /// The caption buttons over a page that covers the window: the system's
 /// own stand only on the title bar, and the system XAML has none.
@@ -1463,11 +1522,9 @@ inline std::string Open(std::string const& kindId) {
     root.Children().Append(host);
     window.Content(root);
     window.SetTitleBar(titleBar);
-    titleBar.LayoutUpdated([weakBar = winrt::make_weak(titleBar), weakWindow = winrt::make_weak(window),
-                               fitted = std::array<double, 3>{-1, -1, 0}](auto&&, auto&&) mutable {
-        auto titleBar = weakBar.get();
-        auto window = weakWindow.get();
-        if (titleBar && window) FitTitleBarInsets(titleBar, window, fitted);
+    titleBar.LayoutUpdated([weakWin = std::weak_ptr<Win>(win)](auto&&, auto&&) {
+        if (auto current = weakWin.lock(); current && current->titleBar && current->window)
+            FitTitleBarInsets(current->titleBar, current->window, current->titleBarInsets);
     });
     titleBar.SizeChanged([raw = win.get()](auto&&, auto&&) { PlaceHeader(*raw); });
     originals[win->hwnd] = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(win->hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(Subclass)));
@@ -1895,10 +1952,29 @@ inline void ToggleFullscreen(Ctx const& ctx, std::string const& kind) {
     for (auto const& win : WindowManager::all) {
         if (win->Def().id != kind) continue;
 #if BERN_WINUI
+        if (!win->window || win->owner) continue;
         auto app = win->window.AppWindow();
         using winrt::Microsoft::UI::Windowing::AppWindowPresenterKind;
-        app.SetPresenter(app.Presenter().Kind() == AppWindowPresenterKind::FullScreen
-            ? AppWindowPresenterKind::Overlapped : AppWindowPresenterKind::FullScreen);
+        if (app.Presenter().Kind() != AppWindowPresenterKind::FullScreen) {
+            // Work around WinUI 3 reserving a 1px top border row above the
+            // XAML bridge in FullScreen while ExtendsContentIntoTitleBar is
+            // enabled (`microsoft-ui-xaml#12138`, also `WindowsAppSDK#6981`).
+            if (win->window.ExtendsContentIntoTitleBar()) {
+                win->window.ExtendsContentIntoTitleBar(false);
+            }
+            try {
+                app.SetPresenter(AppWindowPresenterKind::FullScreen);
+            } catch (...) {
+                WindowManager::RestoreTitleBar(*win);
+                throw;
+            }
+            if (app.Presenter().Kind() != AppWindowPresenterKind::FullScreen) {
+                WindowManager::RestoreTitleBar(*win);
+            }
+        } else {
+            app.SetPresenter(AppWindowPresenterKind::Overlapped);
+            WindowManager::RestoreTitleBar(*win);
+        }
         win->fullscreen.Set(app.Presenter().Kind() == AppWindowPresenterKind::FullScreen);
 #else
         // The system XAML has no presenters: a window without a frame over
