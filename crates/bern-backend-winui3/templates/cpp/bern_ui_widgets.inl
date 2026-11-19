@@ -3769,6 +3769,151 @@ struct AspectPanel : controls::PanelT<AspectPanel> {
     }
 };
 
+/// Proportional width panel for skeleton bars: `min(available, maxWidth) * fraction`,
+/// shrinking cleanly in narrow columns while keeping a non-zero fallback in rows.
+struct SkeletonBarPanel : controls::PanelT<SkeletonBarPanel> {
+    double fraction = 1.0;
+    double maxWidth = 0.0;
+    double height = 12.0;
+    float barWidth = 0.0f;
+    Size MeasureOverride(Size available) {
+        double fallback = maxWidth > 0 ? maxWidth : 200.0;
+        double avail = std::isinf(available.Width) ? fallback : static_cast<double>(available.Width);
+        double bounded = maxWidth > 0 ? (std::min)(avail, maxWidth) : avail;
+        barWidth = static_cast<float>((std::max)(0.0, bounded * fraction));
+        float h = static_cast<float>((std::max)(0.0, height));
+        for (auto child : Children()) child.Measure(Size{barWidth, h});
+        return Size{barWidth, h};
+    }
+    Size ArrangeOverride(Size final) {
+        float w = (std::max)(0.0f, (std::min)(final.Width, barWidth));
+        float h = static_cast<float>((std::max)(0.0, static_cast<double>(final.Height)));
+        for (auto child : Children()) child.Arrange(Rect{0, 0, w, h});
+        return final;
+    }
+};
+
+/// The pulsing fill shape inside a `Skeleton` or loading `Image`.
+inline controls::Border MakeSkeletonShape(double baseOpacity, bool pulse, double corner, char const* shapeKind) {
+    controls::Border shape;
+    Background(shape, B::Paint{"text.primary"});
+    shape.IsHitTestVisible(false);
+    xaml::Automation::AutomationProperties::SetAccessibilityView(shape, xaml::Automation::Peers::AccessibilityView::Raw);
+    std::string kind = shapeKind ? shapeKind : "rect";
+    if (kind == "capsule" || kind == "circle") {
+        shape.SizeChanged([](IInspectable const& sender, xaml::SizeChangedEventArgs const& args) {
+            auto border = sender.as<controls::Border>();
+            auto s = args.NewSize();
+            double r = (std::min)(s.Width, s.Height) * 0.5;
+            border.CornerRadius(xaml::CornerRadius{r, r, r, r});
+        });
+    } else if (corner > 0) {
+        shape.CornerRadius(xaml::CornerRadius{corner, corner, corner, corner});
+    }
+    double opacity = (std::clamp)(baseOpacity, 0.0, 1.0);
+    if (pulse && !Reduced()) {
+        shape.Opacity(1.0);
+        auto startPulse = [opacity](controls::Border const& border) {
+            if (Reduced()) {
+                border.Opacity(opacity);
+                return;
+            }
+            auto visual = xaml::Hosting::ElementCompositionPreview::GetElementVisual(border);
+            auto compositor = visual.Compositor();
+            auto anim = compositor.CreateScalarKeyFrameAnimation();
+            auto ease = compositor.CreateCubicBezierEasingFunction(float2{0.42f, 0.0f}, float2{0.58f, 1.0f});
+            anim.InsertKeyFrame(0.0f, static_cast<float>(opacity));
+            anim.InsertKeyFrame(0.5f, static_cast<float>(opacity * 0.55), ease);
+            anim.InsertKeyFrame(1.0f, static_cast<float>(opacity), ease);
+            anim.Duration(std::chrono::milliseconds(1800));
+            anim.IterationBehavior(composition::AnimationIterationBehavior::Forever);
+            visual.StartAnimation(L"Opacity", anim);
+        };
+        shape.Loaded([startPulse](IInspectable const& sender, auto&&) {
+            startPulse(sender.as<controls::Border>());
+        });
+        shape.Unloaded([](IInspectable const& sender, auto&&) {
+            auto visual = xaml::Hosting::ElementCompositionPreview::GetElementVisual(sender.as<xaml::UIElement>());
+            visual.StopAnimation(L"Opacity");
+        });
+    } else {
+        shape.Opacity(opacity);
+    }
+    return shape;
+}
+
+struct SkeletonProps {
+    Len width;
+    Len height;
+    std::optional<double> fraction;
+    Len maxWidth;
+    std::optional<double> aspect;
+    Len corner;
+    char const* shape = nullptr;
+    double baseOpacity = 0.07;
+    bool pulse = true;
+};
+
+/// Non-interactive theme-aware skeleton placeholder shape.
+inline void Skeleton(Parent const& p, Ctx const& ctx, SkeletonProps props) {
+    double corner = props.corner.Given() ? Reactive::Untrack([&] { return props.corner.Now(ctx); }) : 8.0;
+    auto shape = MakeSkeletonShape(props.baseOpacity, props.pulse, corner, props.shape);
+    std::string kind = props.shape ? props.shape : "rect";
+    std::optional<double> w = props.width.Given() ? std::optional<double>(Reactive::Untrack([&] { return props.width.Now(ctx); })) : std::nullopt;
+    std::optional<double> h = props.height.Given() ? std::optional<double>(Reactive::Untrack([&] { return props.height.Now(ctx); })) : std::nullopt;
+    if (w) {
+        controls::Grid host;
+        host.IsHitTestVisible(false);
+        xaml::Automation::AutomationProperties::SetAccessibilityView(host, xaml::Automation::Peers::AccessibilityView::Raw);
+        host.Width((std::max)(0.0, *w));
+        if (h) host.Height((std::max)(0.0, *h));
+        else if (props.aspect && *props.aspect > 0) host.Height((std::max)(0.0, *w / *props.aspect));
+        else if (kind == "circle") host.Height((std::max)(0.0, *w));
+        host.HorizontalAlignment(xaml::HorizontalAlignment::Left);
+        host.VerticalAlignment(xaml::VerticalAlignment::Top);
+        host.Children().Append(shape);
+        Place(p, host);
+        return;
+    }
+    if (props.fraction) {
+        auto impl = winrt::make_self<SkeletonBarPanel>();
+        impl->fraction = *props.fraction;
+        impl->maxWidth = props.maxWidth.Given() ? Reactive::Untrack([&] { return props.maxWidth.Now(ctx); }) : 0.0;
+        impl->height = h.value_or(12.0);
+        controls::Panel panel = impl.as<controls::Panel>();
+        panel.IsHitTestVisible(false);
+        xaml::Automation::AutomationProperties::SetAccessibilityView(panel, xaml::Automation::Peers::AccessibilityView::Raw);
+        SetRole(panel, L"bern-skeleton-bar");
+        panel.Children().Append(shape);
+        Place(p, panel);
+        return;
+    }
+    if (props.aspect && *props.aspect > 0) {
+        auto impl = winrt::make_self<AspectPanel>();
+        impl->aspect = *props.aspect;
+        controls::Panel panel = impl.as<controls::Panel>();
+        panel.IsHitTestVisible(false);
+        xaml::Automation::AutomationProperties::SetAccessibilityView(panel, xaml::Automation::Peers::AccessibilityView::Raw);
+        SetRole(panel, L"bern-fill-width");
+        panel.Children().Append(shape);
+        Place(p, panel);
+        return;
+    }
+    controls::Grid host;
+    host.IsHitTestVisible(false);
+    xaml::Automation::AutomationProperties::SetAccessibilityView(host, xaml::Automation::Peers::AccessibilityView::Raw);
+    SetRole(host, L"bern-fill-width");
+    host.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+    if (h) {
+        host.Height((std::max)(0.0, *h));
+    } else {
+        SetRole(host, L"bern-fill");
+        host.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+    }
+    host.Children().Append(shape);
+    Place(p, host);
+}
+
 /// The full path of a declared resource next to the executable.
 inline std::wstring ResourcePath(std::string_view name) {
     std::wstring path(MAX_PATH, L'\0');
@@ -3870,7 +4015,9 @@ inline winrt::fire_and_forget ShowDownloaded(winrt::weak_ref<controls::Grid> wea
     auto buffer = co_await Pictures::Download(url, waiter);
     co_await ui;
     auto frame = weak.get();
-    if (!buffer || !frame || owner->disposed) co_return;
+    if (!frame || owner->disposed) co_return;
+    frame.Children().Clear();
+    if (!buffer) co_return;
     auto bytes = std::make_shared<std::vector<uint8_t>>(buffer.data(), buffer.data() + buffer.Length());
     Recent::Keep(key, bytes);
     owner->Run([&] { ShowPicture(frame, ctx, bytes, picture, name); });
@@ -3972,8 +4119,9 @@ inline void Image(Parent const& p, Ctx const& ctx, ImageProps props) {
         ShowRead(frame, ctx, L"resource:" + std::wstring(Wide(source)), [source] { return ResourceBytes(source); }, source, picture, name);
     } else if (props.url) {
         auto url = props.url;
+        bool covers = props.covers;
         auto shown = std::make_shared<std::optional<std::string>>();
-        Reactive::Run([frame, url, ctx, picture, name, shown] {
+        Reactive::Run([frame, url, ctx, picture, name, shown, covers] {
             auto next = R::Url(url(ctx));
             if (*shown == next && frame.Children().Size() > 0) return;
             *shown = next;
@@ -3990,7 +4138,15 @@ inline void Image(Parent const& p, Ctx const& ctx, ImageProps props) {
                 } else {
                     std::wstring key = L"url:" + std::wstring(Wide(*next));
                     if (auto bytes = Recent::Find(key)) ShowPicture(frame, ctx, bytes, picture, name);
-                    else ShowDownloaded(winrt::make_weak(frame), ctx, std::move(key), *next, picture, name, LaterScope());
+                    else {
+                        if (!covers) {
+                            auto placeholder = MakeSkeletonShape(0.07, true, 0.0, "rect");
+                            placeholder.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+                            placeholder.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+                            frame.Children().Append(placeholder);
+                        }
+                        ShowDownloaded(winrt::make_weak(frame), ctx, std::move(key), *next, picture, name, LaterScope());
+                    }
                 }
                 return 0;
             });

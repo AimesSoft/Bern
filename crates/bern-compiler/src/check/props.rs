@@ -520,6 +520,32 @@ impl Checker<'_> {
                 );
                 return None;
             }
+            if prop_name == "skeleton_count"
+                && (!value.is_finite() || value.fract() != 0.0 || !(1.0..=30.0).contains(&value))
+            {
+                self.error(
+                    expr.span(),
+                    "`skeleton_count` must be a whole number from 1 to 30",
+                );
+                return None;
+            }
+            if element == "Skeleton" {
+                if prop_name == "fraction" && !(value > 0.0 && value <= 1.0) {
+                    self.error(
+                        expr.span(),
+                        "`fraction` must be greater than 0 and at most 1",
+                    );
+                    return None;
+                }
+                if prop_name == "opacity" && !(0.0..=1.0).contains(&value) {
+                    self.error(expr.span(), "`opacity` must be from 0 to 1");
+                    return None;
+                }
+                if prop_name == "aspect" && (!value.is_finite() || value <= 0.0) {
+                    self.error(expr.span(), "`aspect` must be finite and greater than zero");
+                    return None;
+                }
+            }
             Some(ir::Prop::Number { value })
         })
     }

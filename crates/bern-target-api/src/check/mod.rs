@@ -225,6 +225,8 @@ fn check_motion(descriptor: &TargetDescriptor, app: &Application) -> Vec<Diagnos
                     && prop.name != "tint"
                     && prop.name != "spin_period"
                     && prop.name != "glow_opacity"
+                    && prop.name != "skeleton"
+                    && prop.name != "skeleton_count"
                     && element.props.contains_key(prop.name)
                     && !descriptor.motion.contains(&prop.name)
                 {

@@ -62,6 +62,8 @@ const COMMON: &[&str] = &[
     "from",
     "to",
     "reveal",
+    "skeleton",
+    "skeleton_count",
 ];
 
 /// The components this target builds, each with the properties it shows;
@@ -307,12 +309,28 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
     ("Layout", &["size"]),
     ("ForEach", &["items", "key"]),
     (
+        "Skeleton",
+        &[
+            "width",
+            "height",
+            "fraction",
+            "max_width",
+            "aspect",
+            "corner",
+            "shape",
+            "tone",
+            "opacity",
+            "pulse",
+        ],
+    ),
+    (
         "Query",
         &[
             "id",
             "query",
             "presented",
             "loading",
+            "loading_style",
             "empty",
             "failed",
             "icon",
@@ -563,6 +581,7 @@ pub const COMPONENT_NAMES: &[&str] = &[
     "Label",
     "Svg",
     "Image",
+    "Skeleton",
     "Progress",
     "Button",
     "IconButton",
@@ -1672,6 +1691,13 @@ pub fn app() -> b::AppDef {{
                 width: element.prop("aspect").is_some() && element.prop("height").is_none(),
                 height: false,
             },
+            "Skeleton" => Greed {
+                width: element.prop("width").is_none(),
+                height: element.prop("width").is_none()
+                    && element.prop("height").is_none()
+                    && element.prop("fraction").is_none()
+                    && element.prop("aspect").is_none(),
+            },
             "Toolbar" | "Search" => Greed {
                 width: true,
                 height: false,
@@ -1917,6 +1943,29 @@ pub fn app() -> b::AppDef {{
 
     fn push(&self, out: &mut String, node: &Node, axis: Axis) {
         match node {
+            Node::Element(element)
+                if element.kind != "Query"
+                    && element.expr("skeleton").is_some()
+                    && element.skeleton.is_some() =>
+            {
+                let active = element.expr("skeleton").unwrap();
+                let skeleton_nodes = element.skeleton.as_ref().unwrap();
+                let mut real = element.clone();
+                real.props.remove("skeleton");
+                real.props.remove("skeleton_count");
+                real.skeleton = None;
+                let mut skel_out = String::new();
+                for child in skeleton_nodes {
+                    self.push(&mut skel_out, child, axis);
+                }
+                let mut real_out = String::new();
+                self.push(&mut real_out, &Node::Element(real), axis);
+                out.push_str(&format!(
+                    "v.extend(b::skeleton_host(c, {}, {}, |c| {{ let mut v: Vec<b::El> = Vec::new(); {skel_out} v }}, |c| {{ let mut v: Vec<b::El> = Vec::new(); {real_out} v }})); ",
+                    string(&element.path),
+                    self.condition(active),
+                ));
+            }
             Node::Element(element) if element.kind == "ForEach" => {
                 self.for_each(out, element, axis)
             }
@@ -2143,6 +2192,25 @@ pub fn app() -> b::AppDef {{
     /// context, which its children build in too, adds its local appearance
     /// and a `Stack`'s `enabled`.
     fn element(&self, element: &Element, ctx: &str) -> Option<String> {
+        if element.kind != "Query"
+            && let (Some(active), Some(skeleton_nodes)) =
+                (element.expr("skeleton"), &element.skeleton)
+        {
+            let mut real = element.clone();
+            real.props.remove("skeleton");
+            real.props.remove("skeleton_count");
+            real.skeleton = None;
+            let mut skel_out = String::new();
+            for child in skeleton_nodes {
+                self.push(&mut skel_out, child, Axis::Column);
+            }
+            let real_code = self.element(&real, "c")?;
+            return Some(format!(
+                "b::skeleton_host_one({ctx}, {}, {}, |c| {{ let mut v: Vec<b::El> = Vec::new(); {skel_out} v }}, |c| {real_code})",
+                string(&element.path),
+                self.condition(active),
+            ));
+        }
         // Built as it leaves, it plays its `disappear`; what it contains is
         // built as ever.
         let leaving = self.leaving.replace(false);
@@ -2738,12 +2806,22 @@ pub fn app() -> b::AppDef {{
                     string(&template.var),
                     column(body)
                 );
-                match header {
-                    Some(header) => format!(
-                        "bern_owned_query.present_with_header(c, {props}, |c: &b::Ctx| {}, {success})",
-                        column(header)
+                let header_fn = match header {
+                    Some(header) => format!("|c: &b::Ctx| {}", column(header)),
+                    None => "|_: &b::Ctx| Vec::new()".to_string(),
+                };
+                match &element.skeleton {
+                    Some(skeleton_nodes) => format!(
+                        "bern_owned_query.present_with_skeleton(c, {props}, {header_fn}, Some(|c: &b::Ctx| {}), {success})",
+                        column(skeleton_nodes)
                     ),
-                    None => format!("bern_owned_query.present(c, {props}, {success})"),
+                    None => match header {
+                        Some(header) => format!(
+                            "bern_owned_query.present_with_header(c, {props}, |c: &b::Ctx| {}, {success})",
+                            column(header)
+                        ),
+                        None => format!("bern_owned_query.present(c, {props}, {success})"),
+                    },
                 }
             }
             "Text" => format!(
@@ -2859,6 +2937,39 @@ pub fn app() -> b::AppDef {{
                     self.optional_length(element, "width"),
                     self.optional_length(element, "height"),
                     self.optional_length(element, "corner"),
+                )
+            }
+            "Skeleton" => {
+                let shape = match element.keyword("shape") {
+                    Some("capsule") => "b::SkeletonShape::Capsule",
+                    Some("circle") => "b::SkeletonShape::Circle",
+                    _ => "b::SkeletonShape::Rect",
+                };
+                let base_opacity = element.number("opacity").unwrap_or_else(|| {
+                    match element.keyword("tone").unwrap_or("media") {
+                        "primary" => 0.09,
+                        "secondary" => 0.06,
+                        _ => 0.07,
+                    }
+                });
+                let corner = self
+                    .length_value(element, "corner")
+                    .unwrap_or_else(|| "8.0".into());
+                let fraction = match element.number("fraction") {
+                    Some(f) => format!("Some({})", float(f)),
+                    None => "None".into(),
+                };
+                let aspect = match element.number("aspect") {
+                    Some(a) => format!("Some({})", float(a)),
+                    None => "None".into(),
+                };
+                format!(
+                    "b::skeleton(c, b::SkeletonProps {{ width: {}, height: {}, fraction: {fraction}, max_width: {}, aspect: {aspect}, corner: {corner}, shape: {shape}, base_opacity: {}, pulse: {} }})",
+                    self.optional_length(element, "width"),
+                    self.optional_length(element, "height"),
+                    self.optional_length(element, "max_width"),
+                    float(base_opacity),
+                    element.keyword("pulse") != Some("false"),
                 )
             }
             "Progress"

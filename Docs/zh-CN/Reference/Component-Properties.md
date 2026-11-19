@@ -152,7 +152,7 @@
 | `Slider` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag`<br>`value: NumberField`<br>`current: NumberValue`<br>`continuous: Flag`（仅 `current`）<br>`hover: OptionalNumberField`<br>**`min: Number`**<br>**`max: Number`**<br>`step: Number`<br>`min_icon: Icon`<br>`max_icon: Icon`<br>`feature: Feature` | 除指针事件外不含子节点；动作可选；指针停在滑块上时 `hover` 是指针在轨道上的位置，`min` 处为 0，`max` 处为 1，其余时候为 `None`；它不改变滑块的值 |
 | `ColorPicker` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag`<br>`value: NumberField`<br>`current: NumberValue`<br>`feature: Feature` | 不含子节点；`value` 时动作可选，`current` 时必须绑定动作；以 24 位 sRGB 整数（`0xRRGGBB`）表示颜色；tvOS、watchOS 与 Wear OS 不支持 |
 | `Video` | **`id: Id`**<br>`source: MediaSource`<br>`player: Player`<br>`label: DisplayText`<br>`controls: standard / none`<br>`fit: contain / cover / fill`<br>`sizing: standard / fill`<br>`corner: Length` | 不含子节点；无动作。`controls: none` 的视频只显示画面，可以作为 `Button` 的内容。`sizing: fill` 让播放表面占满有明确大小的父容器，`fit` 只控制视频内容如何放进表面；内核弹幕可以使用黑边。默认 `standard` 保持原有布局。应用登记了媒体内核时由内核画进视图给它的表面，见[设计文档](../Design.md#应用自带的媒体内核) |
-| `Query` | **`id: Id`**<br>**`query: Query`**<br>`presented: Bool`<br>`loading: DisplayText`<br>`empty: DisplayText`<br>`failed: DisplayText`<br>`icon: Icon` | 结果模板；开头可放一个 `QueryStatusHeader`；无动作 |
+| `Query` | **`id: Id`**<br>**`query: Query`**<br>`presented: Bool`<br>`loading: DisplayText`<br>`loading_style: automatic / skeleton / spinner`<br>`empty: DisplayText`<br>`failed: DisplayText`<br>`icon: Icon` | 结果模板；开头可放一个 `QueryStatusHeader`；无动作；`automatic` 在未显式指定 `loading` 时默认投影编译期骨架图，显式指定 `loading` 时保持原生菊花与提示文案 |
 | `QueryStatusHeader` | — | 恰好一个子节点；必须是 `Query` 的第一个直接子节点，至多一次；无动作 |
 | `Picker` | **`id: Id`**<br>**`label: DisplayText`**<br>`value: PickerField`<br>`selected: KeyValue`<br>`label_hidden: Flag`<br>`shape: capsule`<br>`height: Length`<br>`style: automatic / menu / segmented / radio / inline / chips` | 仅含 ["PickerOption"]；动作可选；`chips` 不接受 `shape` / `height` |
 | `NativeView` | **`id: Id`**<br>**`label: DisplayText`**<br>`swiftui: NativeFile`<br>`winui3: NativeFile`<br>`compose: NativeFile`<br>`gtk: NativeFile`<br>`gpui: NativeFile`<br>`web: NativeFile` | 仅含 ["NativeValue", "NativeText", "NativeDraft", "NativeAction", "NativeNumber", "NativeBool", "NativeInput", "Fallback", "DoubleTap", "ContextMenu", "WheelUp", "WheelDown"]；至少声明一个后端文件且至少声明一个 CLI 功能入口（`NativeAction` / `NativeNumber` / `NativeBool` / `NativeInput`），最多一个 `Fallback`；缺少当前后端文件时渲染 `Fallback`（若无则编译报错） |
@@ -164,6 +164,7 @@
 | `NativeBool` | **`id: Id`**<br>**`label: DisplayText`**<br>**`checked: Bool`**<br>`enabled: Bool`<br>`feature: Feature` | 不含子节点；必须绑定动作；直接位于 ["NativeView"]；以 `<component>.<view>.<id>` 自动注册到 CLI（`ui set-bool`） |
 | `NativeInput` | **`id: Id`**<br>**`label: DisplayText`**<br>**`current: TextValue`**<br>`enabled: Bool`<br>`feature: Feature` | 不含子节点；必须绑定动作；直接位于 ["NativeView"]；以 `<component>.<view>.<id>` 自动注册到 CLI（`ui edit` / `ui submit`） |
 | `Fallback` | 无 | 可含子内容；无动作；直接位于 ["NativeView"]，最多一个；在未提供原生文件的目标平台上渲染 |
+| `Skeleton` | `width: Length`<br>`height: Length`<br>`fraction: Number`<br>`max_width: Length`<br>`aspect: Number`<br>`corner: Length`<br>`shape: rect / capsule / circle`<br>`tone: primary / secondary / media`<br>`opacity: Number`<br>`pulse: Flag` | 不含子节点；无动作；以 `text.primary` 低透明度绘制的非交互占位形状（`primary` 0.09、`media` 0.07、`secondary` 0.06 或显式 `opacity`），附带随系统减少动态效果冻结的轻柔呼吸脉冲；`fraction` 不可与 `width` 同用，按 `min(可用宽, max_width) * fraction` 计算宽度 |
 
 `Grid` 给出 `cell_ratio` 时每行一样高：列宽 ÷ `cell_ratio` + `cell_extra`（如海报 2 : 3 加两行字的高度：`cell_ratio: 0.6667, cell_extra: 54`），各项从格子顶部排，内容更高时伸进下方的行间距，与按最高一项定行高的默认方式不同。
 
@@ -263,6 +264,8 @@ Query(id: results, query: app.search(draft.text, 20), presented: draft.show_resu
 | `at` | `NumberValue` |
 | `from` | `NumberValue` |
 | `to` | `NumberValue` |
+| `skeleton` | `Bool`：为真时在 120 ms 防闪烁延迟后切换为由当前元素子树编译期投影出的骨架图，为假时在 150 ms 内淡入真实内容；不可用于 `Query` 或 `Skeleton` |
+| `skeleton_count` | `Number`：1–30 之间的整数，控制 `ForEach`、`List`、`Table`、`PreviewList` 或 `Query` 投影出的占位条数 |
 
 不接受上述通用属性的当前组件：`WindowSet`、`Window`、`Detail`、`SidebarItem`、`Section`、`Slot`、`Pages`、`PageContent`、`Destination`、`Tab`、`Layout`、`MenuItem`。
 

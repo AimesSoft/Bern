@@ -1192,6 +1192,10 @@ function sessionRequest(request, bytes) {
         reader.text();
         ok();
         break;
+      case 26: // window.screenshot
+        if (reader.u8() !== 0) reader.text();
+        if (reader.u8() !== 0) reader.text();
+        throw new CommandFailure("target_unavailable", "window.screenshot is not supported in the browser runtime");
       default:
         throw new CommandFailure("unknown_command", `unknown session command ${index}`);
     }
@@ -3428,6 +3432,147 @@ export function presentWhen(p, ctx, condition, view) {
   When(p, ctx, () => condition() ? 0 : -1, [view], true);
 }
 
+/// Non-interactive theme-aware skeleton placeholder shape.
+export function Skeleton(p, ctx, { width, height, fraction, maxWidth, aspect, corner = 8, shape = "rect", baseOpacity = 0.07, pulse = true } = {}) {
+  const num = (v) => (typeof v === "function" ? v() : v);
+  const node = el("div", {
+    class: pulse ? "bern-skeleton bern-skeleton-pulse" : "bern-skeleton",
+    "aria-hidden": "true",
+  });
+  node.style.setProperty("--bern-skeleton-opacity", String(baseOpacity));
+  if (shape === "capsule" || shape === "circle") {
+    node.style.borderRadius = "9999px";
+  } else {
+    const r = num(corner);
+    if (r !== undefined) node.style.borderRadius = `${Math.max(0, r)}px`;
+  }
+  const w = num(width);
+  const h = num(height);
+  if (w !== undefined) {
+    node.style.width = `${Math.max(0, w)}px`;
+    if (h !== undefined) node.style.height = `${Math.max(0, h)}px`;
+    else if (aspect && aspect > 0) node.style.height = `${Math.max(0, w / aspect)}px`;
+    else if (shape === "circle") node.style.height = `${Math.max(0, w)}px`;
+  } else if (fraction !== undefined) {
+    node.classList.add("bern-skeleton-bar");
+    const pct = `${(fraction * 100).toFixed(2)}%`;
+    const mw = num(maxWidth);
+    if (mw !== undefined) {
+      node.style.width = `min(${pct}, ${(mw * fraction).toFixed(2)}px)`;
+    } else {
+      node.style.width = pct;
+    }
+    node.style.maxWidth = "100%";
+    node.style.height = `${Math.max(0, h ?? 12)}px`;
+  } else if (aspect && aspect > 0) {
+    node.classList.add("bern-fill-width");
+    node.style.width = "100%";
+    node.style.aspectRatio = String(aspect);
+  } else if (h !== undefined) {
+    node.classList.add("bern-fill-width");
+    node.style.width = "100%";
+    node.style.height = `${Math.max(0, h)}px`;
+  } else {
+    node.classList.add("bern-fill");
+    node.style.width = "100%";
+    node.style.height = "100%";
+  }
+  p.append(node);
+}
+
+function fadeInNodes(nodes) {
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  for (const node of nodes) {
+    if (node.nodeType !== 1) continue;
+    node.classList.add("bern-skeleton-fade-in");
+    node.addEventListener("animationend", () => node.classList.remove("bern-skeleton-fade-in"), { once: true });
+  }
+}
+
+function markSkeletonNodes(nodes, label) {
+  let announced = false;
+  for (const node of nodes) {
+    if (node.nodeType !== 1) continue;
+    node.style.pointerEvents = "none";
+    if (!announced) {
+      announced = true;
+      node.setAttribute("aria-busy", "true");
+      node.setAttribute("aria-label", label);
+    } else {
+      node.setAttribute("aria-hidden", "true");
+    }
+  }
+}
+
+/// Anti-flicker host switching between projected skeleton placeholders and real
+/// content: waits 120 ms before revealing the skeleton so fast loads never flash,
+/// and fades the real content in over 150 ms once ready.
+export function SkeletonHost(p, ctx, active, skeleton, content) {
+  const region = new Region(p);
+  const clock = hooks.clock?.() ?? null;
+  let owner = null;
+  let timer = null;
+  let started = false;
+  let wasActive = false;
+  let showingSkeleton = false;
+  let disposed = false;
+
+  const clearTimer = () => {
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+    }
+  };
+
+  effect(() => {
+    const now = Boolean(active());
+    if (started && wasActive === now) return;
+    started = true;
+    wasActive = now;
+    clearTimer();
+    untrack(() => {
+      if (now) {
+        timer = setTimeout(() => {
+          timer = null;
+          if (disposed || !wasActive) return;
+          showingSkeleton = true;
+          owner?.dispose();
+          region.clear(true);
+          owner = new Scope(null);
+          within(owner, () => structural(true, () => withClock(clock, () => {
+            const added = [];
+            region.fill((fragment) => {
+              skeleton(fragment, ctx);
+              for (const child of fragment.childNodes) added.push(child);
+            });
+            markSkeletonNodes(added, tr("bern.query.loading"));
+          })));
+        }, 120);
+      } else {
+        const fromSkeleton = showingSkeleton;
+        showingSkeleton = false;
+        owner?.dispose();
+        region.clear(true);
+        owner = new Scope(null);
+        within(owner, () => structural(fromSkeleton, () => withClock(clock, () => {
+          const added = [];
+          region.fill((fragment) => {
+            content(fragment, ctx);
+            for (const child of fragment.childNodes) added.push(child);
+          });
+          if (fromSkeleton) fadeInNodes(added);
+        })));
+      }
+    });
+  });
+
+  onCleanup(() => {
+    disposed = true;
+    clearTimer();
+    owner?.dispose();
+  });
+}
+
 /// The nodes from `start` to `end`, inclusive.
 const nodesBetween = (start, end) => range(start, end);
 function range(start, end) {
@@ -4637,9 +4782,10 @@ function presentQuery(p, ctx, spec, template, state, retry, statusHeader) {
   p.append(node);
 }
 
-function queryBody(p, ctx, { loading, failed, empty, emptyIcon, shown }, template, state, retry) {
+function queryBody(p, ctx, { loading, failed, empty, emptyIcon, shown, skeleton }, template, state, retry) {
   const status = el("div", { class: "bern-query-status" });
   p.append(status);
+  let showedSkeleton = false;
   const retryButton = () => {
     const text = el("span");
     bindText(text, () => tr("bern.query.retry"));
@@ -4664,6 +4810,32 @@ function queryBody(p, ctx, { loading, failed, empty, emptyIcon, shown }, templat
     return key === "data" ? "none" : key;
   }, {
     loading: (f) => {
+      if (skeleton) {
+        const slot = el("div", { class: "bern-query-skeleton" });
+        f.append(slot);
+        let alive = true;
+        let inner = null;
+        const clock = hooks.clock?.() ?? null;
+        const timer = setTimeout(() => {
+          if (!alive) return;
+          showedSkeleton = true;
+          inner = new Scope(null);
+          within(inner, () => structural(true, () => withClock(clock, () => {
+            const added = [];
+            const frag = document.createDocumentFragment();
+            skeleton(frag, ctx);
+            for (const child of frag.childNodes) added.push(child);
+            slot.append(frag);
+            markSkeletonNodes(added, loading());
+          })));
+        }, 120);
+        onCleanup(() => {
+          alive = false;
+          clearTimeout(timer);
+          inner?.dispose();
+        });
+        return;
+      }
       const text = el("span");
       bindText(text, loading);
       f.append(el("div", { class: "bern-query-center", role: "status" }, spinner(), text));
@@ -4693,10 +4865,18 @@ function queryBody(p, ctx, { loading, failed, empty, emptyIcon, shown }, templat
   const content = el("div", { class: "bern-query-content" });
   p.append(content);
   When(content, ctx, () => (phaseKey() === "data" ? "data" : "none"), {
-    data: (f) => template(f, ctx, () => {
-      const { data } = state.get();
-      return data === null ? null : shown(data);
-    }),
+    data: (f) => {
+      const added = [];
+      template(f, ctx, () => {
+        const { data } = state.get();
+        return data === null ? null : shown(data);
+      });
+      if (showedSkeleton) {
+        showedSkeleton = false;
+        for (const child of f.childNodes) added.push(child);
+        fadeInNodes(added);
+      }
+    },
   });
   // Carry the result's layout intent through its wrapper when data changes.
   trackLayout(content, "column");

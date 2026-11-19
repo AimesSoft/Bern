@@ -147,6 +147,40 @@ pub fn layout_page(app: showcase::Client, #[session] draft: MainDraft) -> impl V
     ui! {
         Form {
             Section(
+                title: tr! { "zh-Hans" => "骨架图", "en" => "Skeleton" },
+                footer: tr! { "zh-Hans" => "开启后在 120 ms 防闪烁延迟后切换为由真实布局树在编译期自动投影出的骨架图，关闭后真实内容淡入。", "en" => "When enabled, switches after a 120 ms anti-flicker delay to a skeleton projected at compile time from the real layout tree, and fades real content back in once cleared." }
+            ) {
+                Switch(
+                    id: preview_skeleton,
+                    label: tr! { "zh-Hans" => "模拟加载状态", "en" => "Simulate Loading" },
+                    value: draft.preview_skeleton
+                )
+                Grid(min_width: 140, gap: 12, skeleton: draft.preview_skeleton, skeleton_count: 6) {
+                    ForEach(items: app.items, key: id) |item| {
+                        Column(gap: 6) {
+                            Image(source: "images/landscape.jpg", aspect: 1.5, fit: cover, corner: 8)
+                            match item.kind {
+                                ItemKind::Documents => { Label(title: item.kind, icon: "doc") }
+                                ItemKind::Photos => { Label(title: item.kind, icon: "photo") }
+                                ItemKind::Music => { Label(title: item.kind, icon: "music.note") }
+                                ItemKind::Movies => { Label(title: item.kind, icon: "film") }
+                                ItemKind::Downloads => { Label(title: item.kind, icon: "arrow.down.circle") }
+                            }
+                            showcase_widgets::item_count(count: item.count)
+                        }
+                    }
+                }
+                Row(gap: 12, align: center) {
+                    Skeleton(width: 36, height: 36, shape: circle, tone: media)
+                    Column(gap: 6) {
+                        Skeleton(fraction: 0.72, max_width: 240, height: 13, corner: 4, tone: primary)
+                        Skeleton(fraction: 0.48, max_width: 200, height: 11, corner: 4, tone: secondary)
+                    }
+                    Spacer
+                    Skeleton(width: 56, height: 22, shape: capsule, tone: secondary)
+                }
+            }
+            Section(
                 title: tr! { "zh-Hans" => "图片", "en" => "Images" },
                 footer: tr! { "zh-Hans" => "图片是随包资源。同一张 16:9 的图片放进 120×90 的框：完整显示留出空白，填满会裁掉两边，拉伸会变形。", "en" => "Pictures are bundled resources. The same 16:9 picture in a 120×90 frame: Contain leaves bars, Cover crops the sides, Fill stretches it." }
             ) {

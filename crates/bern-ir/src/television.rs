@@ -244,6 +244,10 @@ impl Known {
                     element.children.retain(|child| !matches!(child, Node::Element(layout) if layout.keyword("size") == Some("watch")));
                 }
                 element.children = self.prune_nodes(&element.children);
+                element.skeleton = element
+                    .skeleton
+                    .as_ref()
+                    .map(|nodes| self.prune_nodes(nodes));
                 for prop in element.props.values_mut() {
                     match prop {
                         crate::Prop::Expr { expr } => self.resolve_expr(expr),

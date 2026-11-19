@@ -17,6 +17,7 @@ fn element(kind: &str, children: Vec<Node>) -> Element {
         template: None,
         children,
         action: None,
+        skeleton: None,
         source: SourceLocation {
             file: "pointer_events.rs".into(),
             line: 1,

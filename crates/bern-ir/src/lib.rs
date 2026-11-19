@@ -5,8 +5,11 @@
 //! [`Application`] and decides privately how to realize it.
 
 pub mod native;
+pub mod skeleton;
 pub mod spec;
 pub mod style;
+
+pub use skeleton::lower_skeletons;
 
 use bern_protocol::{LocalizedText, ProtocolDescriptor, Type, TypeTable, Value};
 
@@ -1158,6 +1161,10 @@ pub struct Element {
     pub children: Vec<Node>,
     pub action: Option<Action>,
     pub source: SourceLocation,
+    /// Compile-time projected skeleton subtree for `Query` (default loading)
+    /// or elements carrying `skeleton: <bool>`, populated by [`lower_skeletons`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skeleton: Option<Vec<Node>>,
 }
 
 impl Element {
@@ -1385,7 +1392,11 @@ impl Node {
         let children: Vec<&mut Node> = match self {
             Node::Element(element) => {
                 visit(element);
-                element.children.iter_mut().collect()
+                element
+                    .children
+                    .iter_mut()
+                    .chain(element.skeleton.iter_mut().flatten())
+                    .collect()
             }
             Node::Component(_) => Vec::new(),
             Node::If(node) => node
@@ -2047,6 +2058,7 @@ fn lower_rows(children: &mut [Node], look: &ListLook, count: &mut usize) {
                     children: vec![each],
                     action: None,
                     source,
+                    skeleton: None,
                 });
             }
             Node::If(node) => {
@@ -2097,6 +2109,7 @@ fn stack_parts(each: &mut Element, look: &ListLook, path: &str) {
         children: std::mem::take(&mut each.children),
         action: None,
         source: each.source.clone(),
+        skeleton: None,
     })];
 }
 
@@ -2119,6 +2132,7 @@ mod tests {
             children,
             action: None,
             source: SourceLocation::default(),
+            skeleton: None,
         })
     }
 

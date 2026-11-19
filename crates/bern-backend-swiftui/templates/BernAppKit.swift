@@ -522,6 +522,60 @@ extension BernHost {
         perform(context, request: request, command: command) { window.setFrame(frame, display: true) }
     }
 
+    func screenshot(_ context: BernWindowContext) throws -> BernScreenshotResult {
+        let window = try nsWindow(context)
+        let scale = max(window.backingScaleFactor, 1.0)
+        // Prefer compositing the app's own window directly through CoreGraphics
+        // so vibrancy, Liquid Glass sidebars, and Metal-backed layers appear
+        // accurately without needing Screen Recording permission for other apps.
+        typealias WindowImageFn = @convention(c) (
+            CGRect, CGWindowListOption, CGWindowID, CGWindowImageOption
+        ) -> Unmanaged<CGImage>?
+        if window.windowNumber > 0,
+           let sym = dlsym(dlopen(nil, RTLD_NOW), "CGWindowListCreateImage")
+        {
+            let capture = unsafeBitCast(sym, to: WindowImageFn.self)
+            if let image = capture(
+                .null,
+                .optionIncludingWindow,
+                CGWindowID(window.windowNumber),
+                [.boundsIgnoreFraming, .bestResolution]
+            )?.takeRetainedValue() {
+                let rep = NSBitmapImageRep(cgImage: image)
+                if let png = rep.representation(using: .png, properties: [:]) {
+                    return BernScreenshotResult(
+                        window: context.id,
+                        width: Int64(image.width),
+                        height: Int64(image.height),
+                        scale: Double(scale),
+                        data: png.base64EncodedString()
+                    )
+                }
+            }
+        }
+        guard let rootView = window.contentView?.superview ?? window.contentView else {
+            throw BernCommandFailure(code: "capture_failed", message: "`\(context.id)` has no view to capture")
+        }
+        rootView.layoutSubtreeIfNeeded()
+        let bounds = rootView.bounds
+        guard bounds.width > 0, bounds.height > 0,
+              let rep = rootView.bitmapImageRepForCachingDisplay(in: bounds)
+        else {
+            throw BernCommandFailure(code: "capture_failed", message: "cannot allocate bitmap for `\(context.id)`")
+        }
+        rootView.cacheDisplay(in: bounds, to: rep)
+        guard let png = rep.representation(using: .png, properties: [:]) else {
+            throw BernCommandFailure(code: "capture_failed", message: "cannot encode PNG for `\(context.id)`")
+        }
+        return BernScreenshotResult(
+            window: context.id,
+            width: Int64(rep.pixelsWide),
+            height: Int64(rep.pixelsHigh),
+            scale: Double(scale),
+            data: png.base64EncodedString()
+        )
+    }
+
     func finishClose(_ context: BernWindowContext) {
         context.allowsClose = true
         if let index = platform.dialogs.firstIndex(of: context.kindID) {

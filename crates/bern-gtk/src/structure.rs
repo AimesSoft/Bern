@@ -77,7 +77,7 @@ pub fn FocusRegion(p: &Parent, ctx: &Ctx, children: Build) {
 }
 
 /// Content that a builder replaces: the current scope and region.
-struct Slot {
+pub(crate) struct Slot {
     region: Parent,
     owner: RefCell<Option<Scope>>,
     /// Whether it showed content before: what comes later appears in an
@@ -88,7 +88,7 @@ struct Slot {
 }
 
 impl Slot {
-    fn new(region: Parent) -> Rc<Self> {
+    pub(crate) fn new(region: Parent) -> Rc<Self> {
         let slot = Rc::new(Self {
             region,
             owner: RefCell::new(None),
@@ -100,7 +100,7 @@ impl Slot {
         slot
     }
 
-    fn end(&self) {
+    pub(crate) fn end(&self) {
         let owner = self.owner.borrow_mut().take();
         if let Some(owner) = owner {
             owner.dispose();
@@ -110,7 +110,7 @@ impl Slot {
     /// Replace the content with what `build` makes, outside any effect.
     /// `structural` content (of `if`, `match` and `ForEach`) appears with
     /// its transitions after the first time.
-    fn fill(&self, structural: bool, build: impl FnOnce(&Parent)) {
+    pub(crate) fn fill(&self, structural: bool, build: impl FnOnce(&Parent)) {
         let entering = structural && (self.filled.replace(true) || motion::entering());
         untrack(|| {
             self.end();

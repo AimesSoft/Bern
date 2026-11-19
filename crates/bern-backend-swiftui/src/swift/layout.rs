@@ -910,10 +910,20 @@ impl Generator<'_> {
         out.line(format!(
             "shown: {{ (data: {data}) -> {shown}? in {shown_body} }}"
         ));
-        out.close(format!(") {{ {} in", member(&template.var)));
-        out.indent += 1;
-        self.nodes(out, body, ctx);
-        out.close("}");
+        if let Some(skeleton_nodes) = &element.skeleton {
+            out.close(") {");
+            out.indent += 1;
+            self.nodes(out, skeleton_nodes, ctx);
+            out.close(format!("}} content: {{ {} in", member(&template.var)));
+            out.indent += 1;
+            self.nodes(out, body, ctx);
+            out.close("}");
+        } else {
+            out.close(format!(") {{ {} in", member(&template.var)));
+            out.indent += 1;
+            self.nodes(out, body, ctx);
+            out.close("}");
+        }
         if header.is_some() {
             out.close("}");
         }

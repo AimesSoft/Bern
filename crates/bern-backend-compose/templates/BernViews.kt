@@ -200,6 +200,17 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import kotlinx.coroutines.delay
 
 // @bern:wear-icons-start
 // MARK: - Icons
@@ -2233,6 +2244,8 @@ fun <T, S> BernQueryView(
     emptyIcon: String,
     failed: String,
     shown: (T) -> S?,
+    skeleton: (@Composable () -> Unit)? = null,
+    wrappedSkeleton: Boolean = true,
     content: @Composable (S) -> Unit,
 ) {
     val searchEmpty = LocalBernSearchEmpty.current
@@ -2252,7 +2265,27 @@ fun <T, S> BernQueryView(
             }
         }
     }
-    when (val phase = state.phase) {
+    val phase = state.phase
+    if (skeleton != null && phase !is BernQueryPhase.Failed) {
+        val isLoading = phase is BernQueryPhase.Idle || phase is BernQueryPhase.Loading
+        BernSkeletonHost(
+            active = isLoading,
+            loadingLabel = loading,
+            wrapped = wrappedSkeleton,
+            skeleton = skeleton,
+        ) {
+            when (phase) {
+                is BernQueryPhase.Ready -> presented(phase.data)
+                is BernQueryPhase.Refreshing -> {
+                    BernQueryProgress(loading)
+                    presented(phase.data)
+                }
+                else -> {}
+            }
+        }
+        return
+    }
+    when (phase) {
         is BernQueryPhase.Idle, is BernQueryPhase.Loading -> BernQueryProgress(loading)
         is BernQueryPhase.Ready -> presented(phase.data)
         is BernQueryPhase.Refreshing -> {
@@ -2275,6 +2308,135 @@ fun <T, S> BernQueryView(
             } else {
                 BernUnavailable(failed, Icons.Filled.Warning, phase.message) { state.retry() }
             }
+        }
+    }
+}
+
+/// Gentle breathing alpha for skeleton placeholders, frozen under Reduce Motion.
+@Composable
+fun bernSkeletonAlpha(baseOpacity: Float, pulse: Boolean): Float {
+    val clamped = baseOpacity.coerceIn(0f, 1f)
+    if (!pulse || bernReduceMotion()) return clamped
+    val transition = rememberInfiniteTransition(label = "bern-skeleton")
+    val factor by transition.animateFloat(
+        initialValue = 1f,
+        targetValue = 0.55f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 900, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "bern-skeleton-pulse",
+    )
+    return clamped * factor
+}
+
+/// Non-interactive theme-aware skeleton placeholder shape.
+@Composable
+fun BernSkeleton(
+    width: Dp? = null,
+    height: Dp? = null,
+    fraction: Float? = null,
+    maxWidth: Dp? = null,
+    aspect: Float? = null,
+    corner: Dp = 8.dp,
+    shape: String = "rect",
+    baseOpacity: Float = 0.07f,
+    pulse: Boolean = true,
+) {
+    val clipShape = when (shape) {
+        "capsule", "circle" -> CircleShape
+        else -> RoundedCornerShape(corner)
+    }
+    val alpha = bernSkeletonAlpha(baseOpacity, pulse)
+    val fillColor = LocalContentColor.current.copy(alpha = alpha)
+    val sized: Modifier = when {
+        width != null && height != null -> Modifier.size(width, height)
+        width != null && aspect != null && aspect > 0f -> Modifier.size(width, width / aspect)
+        width != null && shape == "circle" -> Modifier.size(width)
+        width != null -> Modifier.width(width)
+        fraction != null -> {
+            val barHeight = height ?: 12.dp
+            val clampedFraction = fraction.coerceIn(0.01f, 1f)
+            Modifier.layout { measurable, constraints ->
+                val maxPx = maxWidth?.roundToPx()
+                val fallback = maxPx ?: 200.dp.roundToPx()
+                val available = if (constraints.hasBoundedWidth) constraints.maxWidth else fallback
+                val bounded = if (maxPx != null) minOf(available, maxPx) else available
+                val w = constraints.constrainWidth((bounded * clampedFraction).toInt().coerceAtLeast(0))
+                val h = constraints.constrainHeight(barHeight.roundToPx().coerceAtLeast(0))
+                val placeable = measurable.measure(Constraints.fixed(w, h))
+                layout(w, h) { placeable.placeRelative(0, 0) }
+            }
+        }
+        aspect != null && aspect > 0f -> Modifier.fillMaxWidth().aspectRatio(aspect)
+        height != null -> Modifier.fillMaxWidth().height(height)
+        else -> Modifier.fillMaxSize()
+    }
+    Box(
+        sized
+            .clip(clipShape)
+            .background(fillColor)
+            .clearAndSetSemantics {}
+    )
+}
+
+/// Anti-flicker host switching between projected skeleton placeholders and real
+/// content: waits 120 ms before revealing the skeleton so fast loads never flash,
+/// and fades the real content in over 150 ms once ready.
+@Composable
+fun BernSkeletonHost(
+    active: Boolean,
+    loadingLabel: String,
+    wrapped: Boolean = true,
+    skeleton: @Composable () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    val reduced = bernReduceMotion()
+    var showSkeleton by remember { mutableStateOf(false) }
+    var hadContent by remember { mutableStateOf(!active) }
+    var fadeTarget by remember { mutableFloatStateOf(1f) }
+    val contentAlpha by animateFloatAsState(
+        targetValue = if (reduced) 1f else fadeTarget,
+        animationSpec = tween(durationMillis = 150),
+        label = "bern-skeleton-fade",
+    )
+    LaunchedEffect(active) {
+        if (active) {
+            showSkeleton = false
+            delay(120)
+            if (!reduced) fadeTarget = 0f
+            showSkeleton = true
+        } else {
+            showSkeleton = false
+            hadContent = true
+            fadeTarget = 1f
+        }
+    }
+    if (active) {
+        if (showSkeleton) {
+            if (wrapped) {
+                Box(Modifier.clearAndSetSemantics { contentDescription = loadingLabel }) {
+                    skeleton()
+                }
+            } else {
+                skeleton()
+            }
+        } else if (hadContent) {
+            if (wrapped) {
+                Box(Modifier.graphicsLayer { alpha = contentAlpha }) {
+                    content()
+                }
+            } else {
+                content()
+            }
+        }
+    } else {
+        if (wrapped) {
+            Box(Modifier.graphicsLayer { alpha = contentAlpha }) {
+                content()
+            }
+        } else {
+            content()
         }
     }
 }

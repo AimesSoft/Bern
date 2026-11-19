@@ -379,6 +379,21 @@ fn run(request: u64, index: u32, reader: &mut Reader<'_>) -> Result<(), Failure>
             let _overlay = reader.text().map_err(malformed)?;
             ok(Value::Unit);
         }
+        26 => {
+            let target_id = if reader.u8().map_err(malformed)? != 0 {
+                Some(reader.text().map_err(malformed)?)
+            } else {
+                None
+            };
+            if reader.u8().map_err(malformed)? != 0 {
+                let _ = reader.text().map_err(malformed)?;
+            }
+            let win = match target_id {
+                Some(id) => windows::named(&id)?,
+                None => windows::default_window()?,
+            };
+            ok(windows::screenshot(&win)?);
+        }
         other => {
             return Err(Failure::new(
                 "unknown_command",

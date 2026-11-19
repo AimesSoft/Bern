@@ -240,6 +240,52 @@ impl<'a> Generator<'a> {
     fn node_view(&self, out: &mut Out, node: &Node, ctx: &Ctx) {
         match node {
             Node::Element(element) => {
+                if element.kind != "Query"
+                    && let (Some(active), Some(skeleton_nodes)) =
+                        (element.expr("skeleton"), &element.skeleton)
+                {
+                    let mut real = element.clone();
+                    real.props.remove("skeleton");
+                    real.props.remove("skeleton_count");
+                    real.skeleton = None;
+                    let wrapped = element.kind != "ForEach" && skeleton_nodes.len() == 1;
+                    let active_expr = self.expr(active);
+                    let window = ctx.window.then(|| window_box(element)).flatten();
+                    if let Some(open) = &window {
+                        out.open(open);
+                    }
+                    let placement = self.placement(element);
+                    if let Some(place) = &placement {
+                        out.open(format!("BernPlace({place}) {{"));
+                    }
+                    let inner_ctx = if wrapped {
+                        Ctx {
+                            window: false,
+                            scope: Scope::Other,
+                            ..ctx.clone()
+                        }
+                    } else {
+                        Ctx {
+                            window: false,
+                            ..ctx.clone()
+                        }
+                    };
+                    out.open(format!(
+                        "BernSkeletonHost(active = {active_expr}, loadingLabel = BernText.string(\"bern.query.loading\"), wrapped = {wrapped}, skeleton = {{"
+                    ));
+                    self.nodes(out, skeleton_nodes, &inner_ctx);
+                    out.close("}) {");
+                    out.indent += 1;
+                    self.node_view(out, &Node::Element(real), &inner_ctx);
+                    out.close("}");
+                    if placement.is_some() {
+                        out.close("}");
+                    }
+                    if window.is_some() {
+                        out.close("}");
+                    }
+                    return;
+                }
                 // Written in the window itself, the element takes the
                 // window's room; what it holds does not.
                 let window = ctx.window.then(|| window_box(element)).flatten();
@@ -712,6 +758,7 @@ impl<'a> Generator<'a> {
             "Svg" => self.svg(out, element),
             "WebPage" => self.web_page(out, element),
             "Image" => self.image(out, element),
+            "Skeleton" => self.skeleton_view(out, element),
             "Spacer" => match ctx.scope {
                 Scope::Row => out.line("Spacer(Modifier.weight(1f).bernRowSpacer())"),
                 Scope::Column | Scope::Flow => out.line("Spacer(Modifier.weight(1f))"),

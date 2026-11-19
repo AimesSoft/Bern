@@ -27,7 +27,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-const MAX_LINE: usize = 1 << 20;
+const MAX_LINE: usize = 32 << 20;
 
 /// How long a media command waits for the executor before its outcome is
 /// reported as unknown.

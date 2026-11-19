@@ -2792,3 +2792,65 @@ test("player state in declarations follows the media hub", () => {
   B.media.players.set(new Map());
   assert.equal(seen.length, count + 1);
 });
+
+test("Skeleton renders proportional and fixed placeholders with accessibility hidden", () => {
+  const { B, Element } = runtime();
+  const root = new Element("div");
+  const ctx = { win: "main", comp: "app" };
+  B.Skeleton(root, ctx, { fraction: 0.72, maxWidth: 240, height: 13, shape: "capsule", baseOpacity: 0.09, pulse: true });
+  B.Skeleton(root, ctx, { width: 44, height: 44, corner: 8, baseOpacity: 0.07, pulse: false });
+  assert.equal(root.children.length, 2);
+  const [bar, thumb] = root.children;
+  assert.equal(bar.attributes["aria-hidden"], "true");
+  assert.equal(bar.classList.contains("bern-skeleton-bar"), true);
+  assert.equal(bar.classList.contains("bern-skeleton-pulse"), true);
+  assert.equal(bar.style.borderRadius, "9999px");
+  assert.equal(bar.style.width, "min(72.00%, 172.80px)");
+  assert.equal(bar.style.height, "13px");
+  assert.equal(thumb.classList.contains("bern-skeleton-pulse"), false);
+  assert.equal(thumb.style.width, "44px");
+  assert.equal(thumb.style.height, "44px");
+  assert.equal(thumb.style.borderRadius, "8px");
+});
+
+test("SkeletonHost delays 120 ms to prevent flicker and fades real content in after slow loads", () => {
+  const { B, Element, timers } = runtime();
+  const root = new Element("div");
+  const loading = B.cell(true);
+  const scope = new B.Scope();
+  const ctx = { win: "main", comp: "app" };
+  B.within(scope, () => {
+    B.SkeletonHost(
+      root,
+      ctx,
+      () => loading.get(),
+      (p) => { const s = new Element("div"); s.className = "skel"; p.append(s); },
+      (p) => { const c = new Element("div"); c.className = "real"; p.append(c); },
+    );
+  });
+  // Before 120 ms: nothing flashed yet, one 120 ms timer pending.
+  assert.equal(root.children.filter((n) => n.className === "skel").length, 0);
+  assert.equal(timers.length, 1);
+  assert.equal(timers[0].delay, 120);
+  // Fast load (< 120 ms): cancels timer and mounts real content without fade-in.
+  loading.set(false);
+  assert.equal(timers[0].cancelled, true);
+  const fastReal = root.children.find((n) => n.className === "real");
+  assert.ok(fastReal);
+  assert.equal(fastReal.classList.contains("bern-skeleton-fade-in"), false);
+  // Slow reload (>= 120 ms): keeps real content during wait, then swaps to skeleton.
+  loading.set(true);
+  assert.equal(timers.length, 2);
+  assert.ok(root.children.find((n) => n.className === "real"), "existing content stays visible during anti-flicker delay");
+  timers[1].callback();
+  const skel = root.children.find((n) => n.className === "skel");
+  assert.ok(skel);
+  assert.equal(skel.attributes["aria-busy"], "true");
+  assert.equal(skel.style.pointerEvents, "none");
+  // Ready after skeleton was shown: fades real content in over 150 ms.
+  loading.set(false);
+  const slowReal = root.children.find((n) => n.classList?.contains("real"));
+  assert.ok(slowReal);
+  assert.equal(slowReal.classList.contains("bern-skeleton-fade-in"), true);
+  scope.dispose();
+});

@@ -223,6 +223,115 @@ inline std::shared_ptr<Win> Named(std::string const& id) {
     throw Fault{"target_not_found", "no open window `" + id + "`"};
 }
 
+inline std::shared_ptr<Win> Default() {
+    HWND fg = GetForegroundWindow();
+    for (auto const& win : all)
+        if (win->hwnd && win->hwnd == fg) return win;
+    for (auto const& win : all)
+        if (win->hwnd && !win->owner) return win;
+    for (auto const& win : all)
+        if (win->hwnd) return win;
+    throw Fault{"target_not_found", "no open window"};
+}
+
+inline std::string Base64Encode(uint8_t const* data, size_t len) {
+    static char const kTable[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    out.reserve(((len + 2) / 3) * 4);
+    for (size_t i = 0; i < len; i += 3) {
+        uint32_t v = static_cast<uint32_t>(data[i]) << 16;
+        if (i + 1 < len) v |= static_cast<uint32_t>(data[i + 1]) << 8;
+        if (i + 2 < len) v |= static_cast<uint32_t>(data[i + 2]);
+        out.push_back(kTable[(v >> 18) & 0x3F]);
+        out.push_back(kTable[(v >> 12) & 0x3F]);
+        out.push_back(i + 1 < len ? kTable[(v >> 6) & 0x3F] : '=');
+        out.push_back(i + 2 < len ? kTable[v & 0x3F] : '=');
+    }
+    return out;
+}
+
+inline Value Screenshot(Win const& win) {
+    HWND hwnd = win.hwnd;
+    if (!hwnd) throw Fault{"capture_failed", "`" + win.id + "` has no native window handle"};
+    RECT rect{};
+    if (!GetWindowRect(hwnd, &rect)) throw Fault{"capture_failed", "GetWindowRect failed for `" + win.id + "`"};
+    int w = rect.right - rect.left;
+    int h = rect.bottom - rect.top;
+    if (w <= 0 || h <= 0) throw Fault{"capture_failed", "`" + win.id + "` has empty bounds"};
+
+    HDC memDC = CreateCompatibleDC(nullptr);
+    if (!memDC) throw Fault{"capture_failed", "CreateCompatibleDC failed"};
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = w;
+    bmi.bmiHeader.biHeight = -h;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+    void* bits = nullptr;
+    HBITMAP bmp = CreateDIBSection(memDC, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+    if (!bmp || !bits) {
+        if (bmp) DeleteObject(bmp);
+        DeleteDC(memDC);
+        throw Fault{"capture_failed", "CreateDIBSection failed"};
+    }
+    HGDIOBJ old = SelectObject(memDC, bmp);
+    BOOL okPrint = PrintWindow(hwnd, memDC, 2 /* PW_RENDERFULLCONTENT */);
+    SelectObject(memDC, old);
+    DeleteDC(memDC);
+    if (!okPrint) {
+        DeleteObject(bmp);
+        throw Fault{"capture_failed", "PrintWindow failed for `" + win.id + "`"};
+    }
+
+    // Encode top-down 32bpp BGRA pixels to PNG in memory via WIC.
+    winrt::com_ptr<IWICImagingFactory> factory;
+    HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(factory.put()));
+    winrt::com_ptr<IStream> stream;
+    if (SUCCEEDED(hr)) hr = CreateStreamOnHGlobal(nullptr, TRUE, stream.put());
+    winrt::com_ptr<IWICBitmapEncoder> encoder;
+    if (SUCCEEDED(hr)) hr = factory->CreateEncoder(GUID_ContainerFormatPng, nullptr, encoder.put());
+    if (SUCCEEDED(hr)) hr = encoder->Initialize(stream.get(), WICBitmapEncoderNoCache);
+    winrt::com_ptr<IWICBitmapFrameEncode> frame;
+    if (SUCCEEDED(hr)) hr = encoder->CreateNewFrame(frame.put(), nullptr);
+    if (SUCCEEDED(hr)) hr = frame->Initialize(nullptr);
+    if (SUCCEEDED(hr)) hr = frame->SetSize(static_cast<UINT>(w), static_cast<UINT>(h));
+    WICPixelFormatGUID fmt = GUID_WICPixelFormat32bppBGRA;
+    if (SUCCEEDED(hr)) hr = frame->SetPixelFormat(&fmt);
+    if (SUCCEEDED(hr)) {
+        UINT stride = static_cast<UINT>(w) * 4;
+        hr = frame->WritePixels(static_cast<UINT>(h), stride, stride * static_cast<UINT>(h), static_cast<BYTE*>(bits));
+    }
+    if (SUCCEEDED(hr)) hr = frame->Commit();
+    if (SUCCEEDED(hr)) hr = encoder->Commit();
+    DeleteObject(bmp);
+    if (FAILED(hr)) throw Fault{"capture_failed", "WIC PNG encoding failed"};
+
+    HGLOBAL hMem = nullptr;
+    if (FAILED(GetHGlobalFromStream(stream.get(), &hMem)) || !hMem) {
+        throw Fault{"capture_failed", "cannot read encoded PNG stream"};
+    }
+    STATSTG stat{};
+    size_t pngLen = SUCCEEDED(stream->Stat(&stat, STATFLAG_NONAME)) ? static_cast<size_t>(stat.cbSize.QuadPart) : GlobalSize(hMem);
+    void* locked = GlobalLock(hMem);
+    if (!locked || pngLen == 0) {
+        if (locked) GlobalUnlock(hMem);
+        throw Fault{"capture_failed", "encoded PNG buffer was empty"};
+    }
+    std::string b64 = Base64Encode(static_cast<uint8_t const*>(locked), pngLen);
+    GlobalUnlock(hMem);
+
+    return Value::Record({
+        Value::Text(win.id),
+        Value::Int(static_cast<int64_t>(w)),
+        Value::Int(static_cast<int64_t>(h)),
+        Value::Float(win.Scale()),
+        Value::Text("image/png"),
+        Value::None(),
+        Value::Some(Value::Text(std::move(b64))),
+    });
+}
+
 inline std::shared_ptr<Win> OfHwnd(HWND hwnd) {
     for (auto const& win : all)
         if (win->hwnd == hwnd) return win;
@@ -2231,6 +2340,14 @@ inline void Run(uint64_t request, uint32_t index, Reader& reader) {
             }
         }
         ok(Value::Unit());
+        break;
+    }
+    case 26: {
+        std::optional<std::string> targetId;
+        if (reader.U8() != 0) targetId = reader.Text();
+        if (reader.U8() != 0) (void)reader.Text();
+        auto win = targetId ? WindowManager::Named(*targetId) : WindowManager::Default();
+        ok(WindowManager::Screenshot(*win));
         break;
     }
     default: throw Fault{"unknown_command", "unknown session command " + std::to_string(index)};

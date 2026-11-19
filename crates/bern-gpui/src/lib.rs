@@ -41,6 +41,7 @@ mod scene;
 mod scroll;
 mod search;
 mod session;
+mod skeleton;
 mod spin;
 mod svg;
 pub use bar::{BarEntry, BarMenu, bar_item, bar_menu, bar_submenu};
@@ -77,7 +78,6 @@ pub use filters::{blur_scope, glow};
 pub use form::{FormProps, SectionProps, form, section};
 pub use gpui;
 pub use host::{WindowOp, dispatch, window_command};
-pub use session::{NativeControlActions, register_native};
 pub use layout::{
     AccordionProps, Align, Flex, GridProps, Grow, Layers, Len, Pad, PreviewProps, Size, Style,
     accordion, adaptive, column, cover, divider, flow, grid, lazy_grid, preview_list, reveal, row,
@@ -100,6 +100,8 @@ pub use query::{OwnedQuery, QueryProps, own_query, query};
 pub use scene::{Anchor as RailAnchor, Place, Placement, positioned, rail, scale_box};
 pub use scroll::{ScrollProps, Snap, scroll_items, scroll_key, scroll_view};
 pub use search::{SearchItemProps, SearchProps, search, search_item, toolbar};
+pub use session::{NativeControlActions, register_native};
+pub use skeleton::{SkeletonProps, SkeletonShape, skeleton, skeleton_host, skeleton_host_one};
 
 use bern_ffi::protocol::{ProtocolDescriptor, Type, TypeTable, Value};
 

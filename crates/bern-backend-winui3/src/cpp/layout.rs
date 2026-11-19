@@ -444,11 +444,15 @@ impl Generator<'_> {
         let params: Vec<_> = binding.args.iter().map(|arg| self.getter(arg)).collect();
         let (header, body) = element.query_children();
         let condition = element.query_presentation();
-        if condition.is_some() || header.is_some() {
+        let has_skeleton = element.skeleton.is_some();
+        if condition.is_some() || header.is_some() || has_skeleton {
             out.open("{");
         }
         if let Some(header) = header {
             self.children(out, "auto statusHeader = ", header, ";");
+        }
+        if let Some(skeleton_nodes) = &element.skeleton {
+            self.children(out, "auto skeleton = ", skeleton_nodes, ";");
         }
         let decoration = self.decoration(element);
         let placement = self.placement(element);
@@ -469,6 +473,7 @@ impl Generator<'_> {
                 (decoration.is_some() || placement.is_some()).then(|| "true".into()),
             ),
             ("statusHeader", header.map(|_| "statusHeader".into())),
+            ("skeleton", has_skeleton.then(|| "skeleton".into())),
         ]);
         if let Some(condition) = condition {
             self.call(out, &format!("auto draw = B::OwnQuery(c, {props}, "), body);
@@ -484,7 +489,7 @@ impl Generator<'_> {
         } else {
             self.call(out, &format!("B::Query(p, c, {props}, "), body);
         }
-        if condition.is_some() || header.is_some() {
+        if condition.is_some() || header.is_some() || has_skeleton {
             out.close("}");
         }
     }

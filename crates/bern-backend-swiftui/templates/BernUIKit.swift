@@ -253,6 +253,42 @@ extension BernHost {
     ) throws {
         throw unavailable(context, "resize")
     }
+
+    func screenshot(_ context: BernWindowContext) throws -> BernScreenshotResult {
+        let window: UIWindow? = context.platform.window ?? UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+            .first(where: { $0.isKeyWindow }) ?? UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+            .first
+        guard let window else {
+            throw BernCommandFailure(code: "capture_failed", message: "`\(context.id)` has no UIWindow to capture")
+        }
+        window.layoutIfNeeded()
+        let bounds = window.bounds
+        guard bounds.width > 0, bounds.height > 0 else {
+            throw BernCommandFailure(code: "capture_failed", message: "`\(context.id)` has empty bounds")
+        }
+        let scale = window.traitCollection.displayScale > 0 ? window.traitCollection.displayScale : 1.0
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = scale
+        format.opaque = false
+        let renderer = UIGraphicsImageRenderer(bounds: bounds, format: format)
+        let image = renderer.image { _ in
+            window.drawHierarchy(in: bounds, afterScreenUpdates: true)
+        }
+        guard let png = image.pngData() else {
+            throw BernCommandFailure(code: "capture_failed", message: "cannot encode PNG for `\(context.id)`")
+        }
+        return BernScreenshotResult(
+            window: context.id,
+            width: Int64((bounds.width * scale).rounded()),
+            height: Int64((bounds.height * scale).rounded()),
+            scale: Double(scale),
+            data: png.base64EncodedString()
+        )
+    }
 }
 
 /// The window root's iOS part: finds the system window, follows the

@@ -282,6 +282,16 @@ pub fn run_with(
         return USAGE_ERROR;
     }
 
+    let screenshot_output = if matches!(target, Target::Session(spec) if spec.id == "window.screenshot")
+    {
+        match params.remove("output") {
+            Some(Json::String(path)) => Some(path),
+            _ => None,
+        }
+    } else {
+        None
+    };
+
     let mut client = match Client::connect(
         bundle_id,
         options.engine.as_deref(),
@@ -317,7 +327,13 @@ pub fn run_with(
         Ok(ServerMessage::Result {
             ok: true, result, ..
         }) => {
-            if let Some(result) = result.filter(|result| !result.is_null()) {
+            if let Some(mut result) = result.filter(|result| !result.is_null()) {
+                if let Some(output_path) = screenshot_output
+                    && let Err(message) = write_screenshot_output(&mut result, &output_path)
+                {
+                    eprintln!("error[capture_failed]: {message}");
+                    return 1;
+                }
                 print(&result);
             }
             0
@@ -361,6 +377,72 @@ pub fn run_with(
             CONNECTION_ERROR
         }
     }
+}
+
+fn write_screenshot_output(result: &mut Json, output_path: &str) -> Result<(), String> {
+    let Some(object) = result.as_object_mut() else {
+        return Err("screenshot reply was not a JSON object".into());
+    };
+    let Some(data) = object.get("data").and_then(Json::as_str) else {
+        return Err("screenshot reply contained no image data".into());
+    };
+    let bytes = decode_base64(data)?;
+    let path = std::path::Path::new(output_path);
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("cannot create `{}`: {error}", parent.display()))?;
+    }
+    std::fs::write(path, bytes)
+        .map_err(|error| format!("cannot write `{output_path}`: {error}"))?;
+    object.insert("path".into(), Json::String(output_path.to_string()));
+    object.insert("data".into(), Json::Null);
+    Ok(())
+}
+
+fn decode_base64(input: &str) -> Result<Vec<u8>, String> {
+    let mut out = Vec::with_capacity((input.len() * 3) / 4);
+    let mut buf = [0u8; 4];
+    let mut len = 0usize;
+    for byte in input.bytes() {
+        if byte.is_ascii_whitespace() {
+            continue;
+        }
+        if byte == b'=' {
+            buf[len] = 255;
+            len += 1;
+        } else {
+            let val = match byte {
+                b'A'..=b'Z' => byte - b'A',
+                b'a'..=b'z' => byte - b'a' + 26,
+                b'0'..=b'9' => byte - b'0' + 52,
+                b'+' => 62,
+                b'/' => 63,
+                _ => return Err(format!("invalid base64 byte: 0x{byte:02x}")),
+            };
+            buf[len] = val;
+            len += 1;
+        }
+        if len == 4 {
+            if buf[0] == 255 || buf[1] == 255 {
+                return Err("malformed base64 padding".into());
+            }
+            out.push((buf[0] << 2) | (buf[1] >> 4));
+            if buf[2] != 255 {
+                out.push((buf[1] << 4) | (buf[2] >> 2));
+                if buf[3] != 255 {
+                    out.push((buf[2] << 6) | buf[3]);
+                }
+            }
+            len = 0;
+        }
+    }
+    if len != 0 {
+        return Err("truncated base64 payload".into());
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -424,6 +506,31 @@ mod tests {
         assert!(text.find("library add").unwrap() < queries);
         assert!(text.find("library search").unwrap() > queries);
         assert!(text.contains("--search-text <text>"));
+        assert!(text.contains("window screenshot"));
+        assert!(text.contains("--output <text?>"));
+    }
+
+    #[test]
+    fn screenshot_output_writes_decoded_png_and_clears_data() {
+        let dir = std::env::temp_dir().join(format!("bern-cli-shot-{}", std::process::id()));
+        let path = dir.join("nested").join("shot.png");
+        let mut reply = serde_json::json!({
+            "window": "main#1",
+            "width": 2,
+            "height": 2,
+            "scale": 2.0,
+            "mime": "image/png",
+            "path": null,
+            "data": "iVBORw0KGgo=",
+        });
+        write_screenshot_output(&mut reply, path.to_str().unwrap()).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"\x89PNG\r\n\x1a\n");
+        assert_eq!(
+            reply["path"],
+            Json::String(path.to_string_lossy().into_owned())
+        );
+        assert_eq!(reply["data"], Json::Null);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

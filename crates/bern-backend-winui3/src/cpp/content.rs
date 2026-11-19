@@ -144,6 +144,33 @@ impl Generator<'_> {
         ));
     }
 
+    pub(super) fn skeleton(&self, out: &mut Out, element: &Element) {
+        let base_opacity = element.number("opacity").unwrap_or_else(|| {
+            match element.keyword("tone").unwrap_or("media") {
+                "primary" => 0.09,
+                "secondary" => 0.06,
+                _ => 0.07,
+            }
+        });
+        out.line(format!(
+            "B::Skeleton(p, c, {});",
+            designated(&[
+                ("width", self.len(element, "width")),
+                ("height", self.len(element, "height")),
+                ("fraction", Self::number(element, "fraction")),
+                ("maxWidth", self.len(element, "max_width")),
+                ("aspect", Self::number(element, "aspect")),
+                ("corner", self.len(element, "corner")),
+                ("shape", Self::keyword(element, "shape")),
+                ("baseOpacity", Some(float(base_opacity))),
+                (
+                    "pulse",
+                    (element.keyword("pulse") == Some("false")).then(|| "false".to_string()),
+                ),
+            ])
+        ));
+    }
+
     pub(super) fn progress(&self, out: &mut Out, element: &Element) {
         out.line(format!(
             "B::Progress(p, c, {});",

@@ -463,3 +463,25 @@ FocusRegion {
 ### Runtime semantic palette
 
 `WindowSet(palette: app.palette)` binds a text field whose content is a JSON object mapping semantic roles to light and dark `#RRGGBB` values, for example `{"accent":{"light":"#006A60","dark":"#4FDAC8"},"surface.canvas":{"light":"#F4FBF8","dark":"#101815"}}`. The palette can be replaced at runtime, and roles that are not written keep the platform default. Both appearances must be given, and foreground and background must be readable as pairs. The `accent` pair also tints native controls. SwiftUI (macOS, iOS, tvOS), GTK and WinUI 3 support `runtime_palette`; on other targets, using this property fails the build. Without a palette, the existing `accent:` and `appearance:` work as before.
+
+## Automatic skeleton screens
+
+Bern projects skeleton screens directly from the real UI tree at compile time across all six backends, so apps do not hand-write duplicate placeholder layouts that drift out of sync with real pages:
+
+- **Default on `Query`**: a `Query` without an explicit `loading:` text automatically projects its body into a matching skeleton while the first answer is pending. Passing `loading:` keeps the traditional spinner + text; `loading_style: skeleton` or `loading_style: spinner` overrides the default explicitly.
+- **State-driven `skeleton: <bool>`**: any layout or content container can bind `skeleton: app.loading` (and optional `skeleton_count: 8` for repeated collections) to switch between its projected skeleton and real content:
+
+```rust
+Grid(min_width: 160, gap: 16, skeleton: app.loading, skeleton_count: 6) {
+    ForEach(items: app.albums, key: id) |album| {
+        Column(gap: 6) {
+            Image(source: album.cover, aspect: 1.0, fit: cover, corner: 12)
+            Text(content: album.title, style: headline)
+            Text(content: album.artist, style: caption, emphasis: secondary)
+        }
+    }
+}
+```
+
+- **Explicit `Skeleton` primitive**: for pure loading-only placeholders with no corresponding real layout (for example buffering lines), use `Skeleton(width:, height:, fraction:, max_width:, aspect:, corner:, shape:, tone:, opacity:, pulse:)`.
+- **Anti-flicker, motion and accessibility**: skeletons wait 120 ms before appearing so fast loads never flash, reveal projected lists with a gentle staggered rise (`stagger: 0.04`, `appear: slide`), breathe softly in `text.primary` at low opacity (`0.06`–`0.09`), freeze pulsing under reduced motion, fade real content in over 150 ms when ready, ignore pointer/focus input, and expose one localized loading announcement to assistive technologies. Async `Image` URLs also display a subtle pulsing media placeholder until loaded.

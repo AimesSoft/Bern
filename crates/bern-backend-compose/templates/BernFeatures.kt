@@ -1176,6 +1176,7 @@ fun BernImageURL(
     // Double-sampled (`twice`), it is read for the size it is drawn at.
     val key = if (doubleSample && url != null) BernPictures.twiceKey(url, wide, tall) else url
     var picture by remember(key) { mutableStateOf(key?.let(BernPictures::cached)) }
+    var finished by remember(key) { mutableStateOf(picture != null) }
     val proportion = aspect ?: picture?.ratio ?: ratio ?: url?.let(BernPictures::known)
     val frame = bernPictureFrame(width, height, proportion, corner, covers)
     val modifier = if (fills) frame.onSizeChanged { laid = it.width } else frame
@@ -1185,10 +1186,15 @@ fun BernImageURL(
             if (fills && wide == 0) return@LaunchedEffect
             if (doubleSample) {
                 BernPictures.twice(context, url, wide, tall, fit)?.let { picture = it }
+                finished = true
                 return@LaunchedEffect
             }
-            if (picture?.let { BernPictures.enough(it, wide, tall) } == true) return@LaunchedEffect
+            if (picture?.let { BernPictures.enough(it, wide, tall) } == true) {
+                finished = true
+                return@LaunchedEffect
+            }
             BernPictures.read(context, url, wide, tall)?.let { picture = it }
+            finished = true
         }
     }
     val shown = picture
@@ -1199,6 +1205,13 @@ fun BernImageURL(
             modifier = modifier,
             contentScale = fit,
             colorFilter = if (template) androidx.compose.ui.graphics.ColorFilter.tint(LocalContentColor.current, androidx.compose.ui.graphics.BlendMode.SrcIn) else null,
+        )
+    } else if (!url.isNullOrEmpty() && !finished && !covers) {
+        val alpha = bernSkeletonAlpha(0.07f, true)
+        Box(
+            modifier
+                .background(LocalContentColor.current.copy(alpha = alpha))
+                .semantics { if (label != null) contentDescription = label }
         )
     } else {
         Box(modifier.semantics { if (label != null) contentDescription = label })

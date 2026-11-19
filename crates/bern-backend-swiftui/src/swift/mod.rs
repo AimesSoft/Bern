@@ -320,6 +320,31 @@ impl<'a> Generator<'a> {
                 } else {
                     ctx
                 };
+                // Elements with `skeleton: <bool>` swap to their compile-time
+                // projected skeleton after an anti-flicker delay.
+                if element.kind != "Query"
+                    && let (Some(active), Some(skeleton_nodes)) =
+                        (element.expr("skeleton"), &element.skeleton)
+                {
+                    let mut real = element.clone();
+                    real.props.remove("skeleton");
+                    real.props.remove("skeleton_count");
+                    real.skeleton = None;
+                    let active_expr = self.expr(active);
+                    out.open(format!(
+                        "BernSkeletonHost(active: {active_expr}, loadingLabel: BernText.string(\"bern.query.loading\")) {{"
+                    ));
+                    self.nodes(out, skeleton_nodes, ctx);
+                    out.close("} content: {");
+                    out.indent += 1;
+                    self.node_view(out, &Node::Element(real), ctx);
+                    out.close("}");
+                    self.placement(out, element);
+                    if let Some(frame) = window {
+                        out.line(frame);
+                    }
+                    return;
+                }
                 // A staggering container's children take turns appearing.
                 let stagger = element.number("stagger");
                 if let Some(step) = stagger {
@@ -528,6 +553,7 @@ impl<'a> Generator<'a> {
             "Svg" => self.svg(out, element),
             "WebPage" => self.web_page(out, element),
             "Image" => self.image(out, element),
+            "Skeleton" => self.skeleton_view(out, element),
             "Progress" => self.progress(out, element),
             // A spacer shrinks to nothing, as on the other targets, not to
             // the system's gap (8 points on macOS, 60 on tvOS).

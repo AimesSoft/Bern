@@ -608,7 +608,7 @@ inline std::optional<float> BaselineOf(xaml::UIElement const& element) {
 inline bool Yields(xaml::UIElement const& element) {
     if (Sized(element, false)) return false;
     auto inner = Unwrapped(element);
-    if (inner.try_as<controls::TextBlock>()) return true;
+    if (inner.try_as<controls::TextBlock>() || RoleOf(inner) == L"bern-skeleton-bar") return true;
     auto role = std::wstring(RoleOf(inner));
     if (role != L"bern-column" && role != L"bern-row" && !role.starts_with(L"bern-layers")) return false;
     for (auto child : inner.as<controls::Panel>().Children())

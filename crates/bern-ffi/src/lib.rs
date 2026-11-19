@@ -148,7 +148,99 @@ struct PendingRequest {
     command: SessionCommand,
     /// The window a presentation command acts on; its facts are the result.
     presented: Option<bern_runtime::WindowInstance>,
+    /// File path requested via `window.screenshot`'s `output` parameter.
+    screenshot_output: Option<String>,
     reply: SessionReply,
+}
+
+fn decode_base64(input: &str) -> Result<Vec<u8>, String> {
+    let mut out = Vec::with_capacity((input.len() * 3) / 4);
+    let mut buf = [0u8; 4];
+    let mut len = 0usize;
+    for byte in input.bytes() {
+        if byte.is_ascii_whitespace() {
+            continue;
+        }
+        if byte == b'=' {
+            buf[len] = 255;
+            len += 1;
+        } else {
+            let val = match byte {
+                b'A'..=b'Z' => byte - b'A',
+                b'a'..=b'z' => byte - b'a' + 26,
+                b'0'..=b'9' => byte - b'0' + 52,
+                b'+' => 62,
+                b'/' => 63,
+                _ => return Err(format!("invalid base64 byte: 0x{byte:02x}")),
+            };
+            buf[len] = val;
+            len += 1;
+        }
+        if len == 4 {
+            if buf[0] == 255 || buf[1] == 255 {
+                return Err("malformed base64 padding".into());
+            }
+            out.push((buf[0] << 2) | (buf[1] >> 4));
+            if buf[2] != 255 {
+                out.push((buf[1] << 4) | (buf[2] >> 2));
+                if buf[3] != 255 {
+                    out.push((buf[2] << 6) | buf[3]);
+                }
+            }
+            len = 0;
+        }
+    }
+    if len != 0 {
+        return Err("truncated base64 payload".into());
+    }
+    Ok(out)
+}
+
+fn finalize_screenshot_output(value: Value, output: Option<String>) -> Result<Value, CommandError> {
+    let Some(path) = output else {
+        return Ok(value);
+    };
+    let Value::Record(mut fields) = value else {
+        return Ok(value);
+    };
+    let data = match fields.get(6) {
+        Some(Value::Optional(Some(inner))) => match inner.as_ref() {
+            Value::Text(text) => text.clone(),
+            _ => {
+                return Err(CommandError::new(
+                    "capture_failed",
+                    "screenshot reply had non-text data",
+                ));
+            }
+        },
+        _ => {
+            return Err(CommandError::new(
+                "capture_failed",
+                "screenshot reply contained no image data",
+            ));
+        }
+    };
+    let bytes = decode_base64(&data).map_err(|error| {
+        CommandError::new("capture_failed", format!("invalid PNG data: {error}"))
+    })?;
+    let target = std::path::Path::new(&path);
+    if let Some(parent) = target
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(parent).map_err(|error| {
+            CommandError::new(
+                "capture_failed",
+                format!("cannot create `{}`: {error}", parent.display()),
+            )
+        })?;
+    }
+    std::fs::write(target, bytes).map_err(|error| {
+        CommandError::new("capture_failed", format!("cannot write `{path}`: {error}"))
+    })?;
+    fields[5] = Value::Optional(Some(Box::new(Value::Text(path))));
+    fields[6] = Value::Optional(None);
+    Ok(Value::Record(fields))
 }
 
 fn write_error(writer: &mut Writer, error: &CommandError) {
@@ -261,6 +353,17 @@ impl UiBridge {
                 _ => None,
             }
         };
+        let screenshot_output = if command == SessionCommand::WindowScreenshot {
+            match params.get(1) {
+                Some(Value::Optional(Some(inner))) => match inner.as_ref() {
+                    Value::Text(path) => Some(path.clone()),
+                    _ => None,
+                },
+                _ => None,
+            }
+        } else {
+            None
+        };
         let mut writer = Writer::new();
         writer.u32(index as u32);
         for (value, param) in params.iter().zip(&spec.params) {
@@ -272,6 +375,7 @@ impl UiBridge {
             PendingRequest {
                 command,
                 presented,
+                screenshot_output,
                 reply,
             },
         );
@@ -324,7 +428,11 @@ impl UiBridge {
                                     format!("invalid UI result: {error}"),
                                 )
                             })?;
-                            Ok(value)
+                            if pending.command == SessionCommand::WindowScreenshot {
+                                finalize_screenshot_output(value, pending.screenshot_output)
+                            } else {
+                                Ok(value)
+                            }
                         })
                 }
             }

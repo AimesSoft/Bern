@@ -1465,7 +1465,11 @@ mod tests {
             motion: (0.45, 1.0),
         };
         assert_eq!(start_of(&slide, false, (100.0, 100.0)).y, 12.0);
-        assert_eq!(start_of(&slide, true, (100.0, 100.0)).y, 0.0, "less motion only fades");
+        assert_eq!(
+            start_of(&slide, true, (100.0, 100.0)).y,
+            0.0,
+            "less motion only fades"
+        );
         let grow = Transition {
             kind: TransitionKind::Grow(Edge::Leading),
             motion: (0.45, 1.0),

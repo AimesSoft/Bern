@@ -38,6 +38,7 @@ mod query;
 pub mod reactive;
 mod scene;
 mod session;
+mod skeleton;
 mod snapshot;
 mod status;
 mod structure;
@@ -56,12 +57,10 @@ mod windows;
 pub use adw;
 pub use bern_ffi;
 pub use bern_ffi::protocol;
-pub use controls::{NativeControlActions, register_native};
-pub use gio;
-pub use gtk;
 pub use canvas::{
     Band, Canvas, CanvasProps, Op, PatternDef, SeriesOp, ShapeOp, Source, numbers, url,
 };
+pub use controls::{NativeControlActions, register_native};
 pub use ctx::{Ctx, Field, session_pop, session_push_str, session_set, session_toggle};
 pub use features::{
     ContentButton, ContentButtonProps, Drop, DropProps, GestureProps, Inspector, InspectorProps,
@@ -71,7 +70,9 @@ pub use features::{
     Swipe, Toast, ToastProps, activate_target, bound_shortcut, default_focus, focus_target,
     shortcut,
 };
+pub use gio;
 pub use glib;
+pub use gtk;
 pub use host::{dispatch, run};
 pub use lazy::LazyGrid;
 pub use media::{MediaOp, Video, VideoProps, media, media_open, player_state};
@@ -85,6 +86,7 @@ pub use scene::{
     MarqueeProps, Modal, ModalProps, Positioned, PositionedProps, ScaleBox, ScaleBoxProps, Timer,
     TimerProps, Watch, WatchProps,
 };
+pub use skeleton::{Skeleton, SkeletonHost, SkeletonProps};
 pub use status::{StatusItemDef, StatusMenu, login_model};
 pub use structure::*;
 pub use style::{Look, StyleDef};

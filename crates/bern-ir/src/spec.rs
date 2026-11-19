@@ -419,6 +419,13 @@ pub const MOTION_PROPS: &[PropSpec] = &[
     // before its window goes idle; with such areas on screen a mouse
     // anywhere else keeps the window awake.
     opt("idle_area", PropKind::Number),
+    // While true, shows a compile-time projected skeleton placeholder in place
+    // of this element after a brief anti-flicker delay, fading smoothly into
+    // the real content once ready.
+    opt("skeleton", PropKind::Bool),
+    // Sample item count (1..=30) for repeated containers (`ForEach`, `List`,
+    // `Grid`, `Table`, `PreviewList`) inside a `skeleton` or `Query`.
+    opt("skeleton_count", PropKind::Number),
 ];
 
 /// Where an element sits on the `Rail` it stands in: at a fraction of its
@@ -1788,12 +1795,16 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 req("query", PropKind::Query),
                 opt("presented", PropKind::Bool),
                 opt("loading", PropKind::DisplayText),
+                opt(
+                    "loading_style",
+                    PropKind::Keyword(&["automatic", "skeleton", "spinner"]),
+                ),
                 opt("empty", PropKind::DisplayText),
                 opt("failed", PropKind::DisplayText),
                 opt("icon", PropKind::Icon),
             ],
             Children::Any,
-            "Result of an asynchronous query: loading, ready, refreshing, failed and empty states; the template shows the data; `presented: false` keeps the subscription but builds no views",
+            "Result of an asynchronous query: loading, ready, refreshing, failed and empty states; the template shows the data; by default shows a compile-time projected skeleton on initial load unless `loading:` text or `loading_style: spinner` is given; `presented: false` keeps the subscription but builds no views",
         )
     },
     ComponentSpec {
@@ -1980,6 +1991,26 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             "Standard Bern subtree rendered when a target has no co-located native implementation file for its `NativeView`",
         )
     },
+    spec(
+        "Skeleton",
+        &[
+            opt("width", PropKind::Length),
+            opt("height", PropKind::Length),
+            opt("fraction", PropKind::Number),
+            opt("max_width", PropKind::Length),
+            opt("aspect", PropKind::Number),
+            opt("corner", PropKind::Length),
+            opt("shape", PropKind::Keyword(&["rect", "capsule", "circle"])),
+            opt(
+                "tone",
+                PropKind::Keyword(&["primary", "secondary", "media"]),
+            ),
+            opt("opacity", PropKind::Number),
+            opt("pulse", PropKind::Flag),
+        ],
+        Children::None,
+        "Non-interactive placeholder shape drawn in `text.primary` at low opacity (`primary` 0.09, `media` 0.07, `secondary` 0.06, or explicit `opacity`) with a gentle pulse that stops under reduced motion; `fraction` sizes its width relative to the available room (capped by `max_width`) so it never overflows narrow screens",
+    ),
 ];
 
 pub fn component(name: &str) -> Option<&'static ComponentSpec> {
@@ -2283,6 +2314,39 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
             prop: Some("appear_delay".into()),
             message: "`appear_delay` needs an `appear` transition".into(),
         });
+    }
+    if shape.props.contains(&"skeleton_count")
+        && !shape.props.contains(&"skeleton")
+        && spec.name != "Query"
+    {
+        errors.push(ShapeError {
+            prop: Some("skeleton_count".into()),
+            message: "`skeleton_count` needs `skeleton` or a `Query`".into(),
+        });
+    }
+    if shape.props.contains(&"skeleton") && matches!(spec.name, "Query" | "Skeleton") {
+        errors.push(ShapeError {
+            prop: Some("skeleton".into()),
+            message: format!(
+                "`{}` manages its own placeholder; omit `skeleton`",
+                spec.name
+            ),
+        });
+    }
+    if spec.name == "Skeleton" {
+        if shape.props.contains(&"width") && shape.props.contains(&"fraction") {
+            errors.push(ShapeError {
+                prop: Some("fraction".into()),
+                message: "choose `width` or `fraction`, not both".into(),
+            });
+        }
+        if shape.props.contains(&"width") && shape.props.contains(&"max_width") {
+            errors.push(ShapeError {
+                prop: Some("max_width".into()),
+                message: "`max_width` caps a flexible `Skeleton`; omit it when `width` is fixed"
+                    .into(),
+            });
+        }
     }
     if spec.name == "Slider"
         && shape.props.contains(&"continuous")

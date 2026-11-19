@@ -39,11 +39,12 @@ pub enum SessionCommand {
     TraceStop,
     TraceReport,
     WindowSyncOverlay,
+    WindowScreenshot,
 }
 
 impl SessionCommand {
     /// Frontends address commands by position: new commands go last.
-    pub const ALL: [SessionCommand; 26] = [
+    pub const ALL: [SessionCommand; 27] = [
         SessionCommand::Inspect,
         SessionCommand::Activate,
         SessionCommand::Edit,
@@ -70,6 +71,7 @@ impl SessionCommand {
         SessionCommand::TraceStop,
         SessionCommand::TraceReport,
         SessionCommand::WindowSyncOverlay,
+        SessionCommand::WindowScreenshot,
     ];
 
     pub fn id(self) -> &'static str {
@@ -100,6 +102,7 @@ impl SessionCommand {
             SessionCommand::TraceStop => "trace.stop",
             SessionCommand::TraceReport => "trace.report",
             SessionCommand::WindowSyncOverlay => "window.sync_overlay",
+            SessionCommand::WindowScreenshot => "window.screenshot",
         }
     }
 
@@ -331,6 +334,26 @@ pub fn session_catalog() -> (TypeTable, Vec<CommandSpec>) {
                     ),
                     field("width", Type::Float, "Outer width in points"),
                     field("height", Type::Float, "Outer height in points"),
+                ],
+            },
+            RecordDef {
+                name: "WindowScreenshot".into(),
+                fields: vec![
+                    field("window", Type::Text, "Captured window instance id"),
+                    field("width", Type::Int, "Image width in pixels"),
+                    field("height", Type::Int, "Image height in pixels"),
+                    field("scale", Type::Float, "Backing pixel scale factor"),
+                    field("mime", Type::Text, "Image MIME type, such as `image/png`"),
+                    field(
+                        "path",
+                        Type::optional(Type::Text),
+                        "Output file path written when `--output` was requested",
+                    ),
+                    field(
+                        "data",
+                        Type::optional(Type::Text),
+                        "Base64-encoded PNG bytes, returned when `--output` is omitted",
+                    ),
                 ],
             },
             trace_record(
@@ -878,6 +901,28 @@ pub fn session_catalog() -> (TypeTable, Vec<CommandSpec>) {
             vec![param("overlay", Type::Text, "Overlay identifier")],
             Type::Unit,
             Retry::Idempotent,
+        ),
+        with_errors(
+            spec(
+                SessionCommand::WindowScreenshot,
+                OperationKind::Query,
+                "Capture an in-process PNG screenshot of an open window without screen recording permission",
+                vec![
+                    param(
+                        "window",
+                        Type::optional(Type::Text),
+                        "Window instance id from window.list; defaults to the focused or primary open window",
+                    ),
+                    param(
+                        "output",
+                        Type::optional(Type::Text),
+                        "Save the PNG to this file path and omit `data` from the JSON reply",
+                    ),
+                ],
+                named("WindowScreenshot"),
+                Retry::Idempotent,
+            ),
+            &["capture_failed"],
         ),
     ];
     (types, commands)

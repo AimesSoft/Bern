@@ -1487,6 +1487,7 @@ object BernHost {
     val sheets = mutableStateListOf<String>()
     var appContext: Context? = null
         private set
+    var activeActivity: java.lang.ref.WeakReference<android.app.Activity>? = null
     var overlayRenderer: (@Composable (String) -> Unit)? = null
 
     /// Start the engine in this process and load the first state snapshot.
@@ -1501,6 +1502,9 @@ object BernHost {
         apply: (Int, BernReader) -> Unit,
     ) {
         this.appContext = context.applicationContext
+        if (context is android.app.Activity) {
+            this.activeActivity = java.lang.ref.WeakReference(context)
+        }
         BernMotionState.readSystem(context)
         if (handle != 0L) return
         touch = context.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_TOUCHSCREEN)
@@ -1899,6 +1903,67 @@ object BernHost {
     private fun window(id: String): BernWindowContext =
         windows.values.firstOrNull { it.id == id } ?: throw BernCommandFailure("target_not_found", "no open window `$id`")
 
+    private fun defaultWindow(): BernWindowContext =
+        windows[primary] ?: windows.values.firstOrNull() ?: throw BernCommandFailure("target_not_found", "no open window")
+
+    private fun captureScreenshot(context: BernWindowContext, request: Long, command: Int) {
+        val activity = activeActivity?.get()
+            ?: throw BernCommandFailure("capture_failed", "no active Activity for `${context.id}`")
+        val win = activity.window
+            ?: throw BernCommandFailure("capture_failed", "Activity has no window for `${context.id}`")
+        val decor = win.decorView
+        val w = decor.width
+        val h = decor.height
+        if (w <= 0 || h <= 0) {
+            throw BernCommandFailure("capture_failed", "`${context.id}` has empty bounds")
+        }
+        val scale = activity.resources.displayMetrics.density.toDouble().coerceAtLeast(1.0)
+        val finish: (android.graphics.Bitmap) -> Unit = { bmp ->
+            try {
+                val out = java.io.ByteArrayOutputStream()
+                bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
+                bmp.recycle()
+                val data = android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP)
+                complete(request, command) { writer ->
+                    writer.text(context.id)
+                    writer.i64(w.toLong())
+                    writer.i64(h.toLong())
+                    writer.f64(scale)
+                    writer.text("image/png")
+                    writer.u8(0)
+                    writer.u8(1)
+                    writer.text(data)
+                }
+            } catch (error: Exception) {
+                fail(request, BernCommandFailure("capture_failed", error.message ?: "PNG encoding failed"))
+            }
+        }
+        val bitmap = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+        if (android.os.Build.VERSION.SDK_INT >= 26) {
+            try {
+                android.view.PixelCopy.request(
+                    win,
+                    bitmap,
+                    { code ->
+                        if (code == android.view.PixelCopy.SUCCESS) {
+                            finish(bitmap)
+                        } else {
+                            decor.draw(android.graphics.Canvas(bitmap))
+                            finish(bitmap)
+                        }
+                    },
+                    android.os.Handler(android.os.Looper.getMainLooper()),
+                )
+            } catch (_: Exception) {
+                decor.draw(android.graphics.Canvas(bitmap))
+                finish(bitmap)
+            }
+        } else {
+            decor.draw(android.graphics.Canvas(bitmap))
+            finish(bitmap)
+        }
+    }
+
     private fun unsupported(entry: BernControlEntry, action: String) =
         BernCommandFailure("target_unavailable", "`${entry.target}` (${entry.role}) does not support $action")
 
@@ -2040,6 +2105,12 @@ object BernHost {
                 BernHost.syncOverlay(reader.text())
                 complete(request, command) {}
             }
+            26 -> { // window.screenshot
+                val targetId = if (reader.u8() != 0) reader.text() else null
+                if (reader.u8() != 0) reader.text()
+                val context = targetId?.let { window(it) } ?: defaultWindow()
+                captureScreenshot(context, request, command)
+            }
             else -> throw BernCommandFailure("unknown_command", "unknown session command $command")
         }
     }
@@ -2145,6 +2216,9 @@ fun BernTheme(content: @Composable () -> Unit) {
     val view = LocalView.current
     val activity = LocalContext.current as? android.app.Activity
     SideEffect {
+        if (activity != null) {
+            BernHost.activeActivity = java.lang.ref.WeakReference(activity)
+        }
         activity?.window?.let { window ->
             val controller = WindowCompat.getInsetsController(window, view)
             controller.isAppearanceLightStatusBars = !dark

@@ -1289,10 +1289,29 @@ impl Generator<'_> {
             string(icon)
         ));
         out.line(format!("{{ data: {data} -> {shown} }},"));
-        out.close(format!(") {{ {} ->", member(&template.var)));
-        out.indent += 1;
-        self.nodes(out, body, ctx);
-        out.close("}");
+        if let Some(skeleton_nodes) = &element.skeleton {
+            let wrapped = body.len() == 1
+                && skeleton_nodes.len() == 1
+                && !matches!(&body[0], Node::Element(el) if el.kind == "ForEach");
+            let skel_ctx = if wrapped {
+                ctx.within(Scope::Other)
+            } else {
+                ctx.clone()
+            };
+            out.open("skeleton = {");
+            self.nodes(out, skeleton_nodes, &skel_ctx);
+            out.close("},");
+            out.line(format!("wrappedSkeleton = {wrapped},"));
+            out.close(format!(") {{ {} ->", member(&template.var)));
+            out.indent += 1;
+            self.nodes(out, body, &skel_ctx);
+            out.close("}");
+        } else {
+            out.close(format!(") {{ {} ->", member(&template.var)));
+            out.indent += 1;
+            self.nodes(out, body, ctx);
+            out.close("}");
+        }
         if header.is_some() {
             out.close("}");
         }

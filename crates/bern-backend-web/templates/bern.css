@@ -2840,6 +2840,68 @@ button.bern-menu-item:disabled .bern-icon {
   }
 }
 
+/* MARK: Skeleton */
+
+.bern-skeleton {
+  display: block;
+  flex: none;
+  pointer-events: none;
+  user-select: none;
+  background-color: var(--bern-text-primary);
+  opacity: var(--bern-skeleton-opacity, 0.07);
+  border-radius: 8px;
+}
+
+.bern-skeleton-pulse {
+  animation: bern-skeleton-pulse 1.8s ease-in-out infinite;
+}
+
+.bern-row > .bern-column:not(.bern-sized-width):has(.bern-skeleton-bar) {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.bern-column > .bern-row:not(.bern-sized-width):has(.bern-skeleton-bar) {
+  align-self: stretch;
+}
+
+@keyframes bern-skeleton-pulse {
+  0%, 100% {
+    opacity: var(--bern-skeleton-opacity, 0.07);
+  }
+  50% {
+    opacity: calc(var(--bern-skeleton-opacity, 0.07) * 0.55);
+  }
+}
+
+.bern-skeleton-fade-in {
+  animation: bern-skeleton-fade-in 150ms ease-out both;
+}
+
+@keyframes bern-skeleton-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.bern-image-loading {
+  background-color: var(--bern-text-primary);
+  --bern-skeleton-opacity: 0.07;
+  opacity: 0.07;
+  animation: bern-skeleton-pulse 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bern-skeleton-pulse,
+  .bern-skeleton-fade-in,
+  .bern-image-loading {
+    animation: none;
+  }
+}
+
 /* MARK: Video */
 
 .bern-video {

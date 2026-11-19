@@ -790,9 +790,11 @@ mod tests {
         assert!(text.contains("| `title` | `text` | Title \\| shown |"));
         assert!(text.contains("### `Priority`\n\nOne of `\"Low\"`, `\"High\"`."));
         assert!(text.contains("### `ControlInfo`"));
+        assert!(text.contains("### `my-planner window screenshot`"));
+        assert!(text.contains("### `WindowScreenshot`"));
         // Media only for an application with players.
         assert!(!text.contains("## Media"));
-        assert!(text.ends_with(".\n") && !text.ends_with("\n\n"));
+        assert!(text.ends_with('\n') && !text.ends_with("\n\n"));
     }
 
     #[test]

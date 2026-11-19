@@ -73,6 +73,87 @@ inline void PresentWhen(Parent const& p, Ctx const& ctx, Get condition, Build vi
     }, {std::move(view)}, true);
 }
 
+/// Fade elements newly mounted into `region` from 0 to 1 over 150 ms unless
+/// motion is reduced.
+inline void FadeInRegion(Parent const& region) {
+    if (Reduced() || !region.region) return;
+    static Motion const fadeMotion{0.15, 1.0};
+    std::vector<xaml::UIElement> mounted;
+    region.region->Elements(mounted, false);
+    for (auto const& element : mounted) {
+        if (!element.try_as<xaml::FrameworkElement>()) continue;
+        auto layer = LayersOf(element)->Get("skeleton");
+        layer->opacity->Set(0.0);
+        layer->opacity->To(1.0, &fadeMotion);
+    }
+}
+
+/// Mark a mounted skeleton region non-interactive and announce it once as
+/// loading to screen readers.
+inline void MarkSkeletonRegion(Parent const& region, std::wstring const& label) {
+    if (!region.region) return;
+    std::vector<xaml::UIElement> mounted;
+    region.region->Elements(mounted, false);
+    bool announced = false;
+    for (auto const& element : mounted) {
+        element.IsHitTestVisible(false);
+        if (!announced) {
+            announced = true;
+            xaml::Automation::AutomationProperties::SetAccessibilityView(element, xaml::Automation::Peers::AccessibilityView::Control);
+            xaml::Automation::AutomationProperties::SetName(element, label);
+        } else {
+            xaml::Automation::AutomationProperties::SetAccessibilityView(element, xaml::Automation::Peers::AccessibilityView::Raw);
+        }
+    }
+}
+
+/// Anti-flicker skeleton host: waits 120 ms before revealing `skeleton` when
+/// `active` is truthy so fast loads never flash, and fades `content` in over
+/// 150 ms once ready.
+inline void SkeletonHost(Parent const& p, Ctx const& ctx, Get active, Build skeleton, Build content) {
+    auto slot = Slot::In(p.Sub());
+    struct State {
+        bool started = false;
+        bool wasActive = false;
+        bool showingSkeleton = false;
+        bool hadContent = false;
+        uint64_t generation = 0;
+        bool disposed = false;
+    };
+    auto state = std::make_shared<State>();
+    Reactive::OnCleanup([state] {
+        state->disposed = true;
+        ++state->generation;
+    });
+    Reactive::Run([slot, state, active, skeleton, content, ctx] {
+        bool now = R::Truthy(active(ctx));
+        if (state->started && state->wasActive == now) return;
+        state->started = true;
+        state->wasActive = now;
+        uint64_t mine = ++state->generation;
+        if (now) {
+            Host::After(std::chrono::milliseconds(120), [slot, state, skeleton, ctx, mine] {
+                if (state->disposed || state->generation != mine || !state->wasActive) return;
+                state->showingSkeleton = true;
+                Structure::Scope structural(true);
+                slot->Fill([&](Parent const& region) {
+                    skeleton(region, ctx);
+                    MarkSkeletonRegion(region, std::wstring(bern::Text::Tr("bern.query.loading")));
+                }, true);
+            });
+        } else {
+            bool fromSkeleton = state->showingSkeleton;
+            state->showingSkeleton = false;
+            state->hadContent = true;
+            Structure::Scope structural(fromSkeleton);
+            slot->Fill([&](Parent const& region) {
+                content(region, ctx);
+                if (fromSkeleton) FadeInRegion(region);
+            }, true);
+        }
+    });
+}
+
 /// An arm builder that runs in a fixed context.
 inline Build In(Build build, Ctx fixed) {
     return [build, fixed](Parent const& p, Ctx const&) { build(p, fixed); };
@@ -1298,6 +1379,7 @@ struct QueryProps {
     char const* variable = "item";
     bool grouped = false;
     Build statusHeader;
+    Build skeleton;
 };
 
 inline std::optional<QueryState> ReadQueryState(Bytes const& bytes, BType const& result) {
@@ -1463,8 +1545,25 @@ inline void PresentQuery(Parent const& p, Ctx const& ctx, QueryProps const& prop
         }
         return column;
     };
+    auto showedSkeleton = std::make_shared<bool>(false);
+    auto skeletonBuild = props.skeleton;
     std::vector<Build> arms{
-        [=](Parent const& target, Ctx const&) {
+        [=](Parent const& target, Ctx const& c) {
+            if (skeletonBuild) {
+                auto delayed = Slot::In(target.Sub());
+                auto alive = std::make_shared<bool>(true);
+                Reactive::OnCleanup([alive] { *alive = false; });
+                Host::After(std::chrono::milliseconds(120), [delayed, alive, showedSkeleton, skeletonBuild, loadingText, c] {
+                    if (!*alive) return;
+                    *showedSkeleton = true;
+                    Structure::Scope structural(true);
+                    delayed->Fill([&](Parent const& region) {
+                        skeletonBuild(region, c);
+                        MarkSkeletonRegion(region, std::wstring(loadingText()));
+                    }, true);
+                });
+                return;
+            }
             controls::StackPanel line;
             line.Orientation(controls::Orientation::Horizontal);
             line.Spacing(8);
@@ -1529,10 +1628,17 @@ inline void PresentQuery(Parent const& p, Ctx const& ctx, QueryProps const& prop
         if (!current.data) return Value::Unit();
         return ShownData(*current.data, result, hasEmpty).value_or(Value::Unit());
     });
-    Build answered = [drawStatus, key, templ, inner](Parent const& target, Ctx const& c) {
+    Build answered = [drawStatus, key, templ, inner, showedSkeleton](Parent const& target, Ctx const& c) {
         drawStatus(target, c);
+        Build contentArm = [templ, inner, showedSkeleton](Parent const& region, Ctx const&) {
+            templ(region, inner);
+            if (*showedSkeleton) {
+                *showedSkeleton = false;
+                FadeInRegion(region);
+            }
+        };
         When(target, c, [key](Ctx const&) -> std::optional<int> { if (key() == "data") return 0; return std::nullopt; },
-            {In(templ, inner)});
+            {std::move(contentArm)});
     };
     if (auto header = props.statusHeader) {
         Build cold = [header, drawStatus, add](Parent const& target, Ctx const& c) {

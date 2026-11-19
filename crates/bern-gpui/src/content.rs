@@ -854,6 +854,14 @@ pub fn image_url(
         Fit::Cover => ObjectFit::Cover,
         Fit::Fill => ObjectFit::Fill,
     });
+    let element = if !covers {
+        let fg = c.color("text.primary");
+        let reduced = crate::motion::reduced(c);
+        let r = corner.unwrap_or(0.0);
+        element.with_loading(move || crate::skeleton::media_placeholder(fg, reduced, r))
+    } else {
+        element
+    };
     let element = match width {
         Some(width) => element.w(px(width)),
         None => element,

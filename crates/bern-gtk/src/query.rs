@@ -28,6 +28,8 @@ pub struct QueryProps {
     pub placed: bool,
     /// Outer-scope content above a loading/failure state with no prior answer.
     pub status_header: Option<Build>,
+    /// Compile-time projected skeleton shown while loading with no prior answer.
+    pub skeleton: Option<Build>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -312,10 +314,39 @@ fn present(
             }
         })
     };
+    let showed_skeleton = Rc::new(std::cell::Cell::new(false));
+    let skeleton_build = props.skeleton.clone();
     let arms: Vec<Build> = vec![
         {
             let loading = Rc::clone(&loading);
-            Rc::new(move |p: &Parent, _: &Ctx| {
+            let showed_skeleton = Rc::clone(&showed_skeleton);
+            Rc::new(move |p: &Parent, ctx: &Ctx| {
+                if let Some(skel) = skeleton_build.clone() {
+                    let delayed = crate::structure::Slot::new(p.presentation_region());
+                    let alive = Rc::new(std::cell::Cell::new(true));
+                    let drop_alive = Rc::clone(&alive);
+                    on_cleanup(move || drop_alive.set(false));
+                    let showed = Rc::clone(&showed_skeleton);
+                    let loading = Rc::clone(&loading);
+                    let ctx = ctx.clone();
+                    glib::timeout_add_local_once(
+                        std::time::Duration::from_millis(120),
+                        move || {
+                            if !alive.get() {
+                                return;
+                            }
+                            showed.set(true);
+                            delayed.fill(true, |region| {
+                                skel(region, &ctx);
+                                crate::skeleton::mark_skeleton_widgets(
+                                    &region.widgets(),
+                                    &loading(),
+                                );
+                            });
+                        },
+                    );
+                    return;
+                }
                 let line = gtk::Box::new(gtk::Orientation::Horizontal, 8);
                 line.set_halign(gtk::Align::Center);
                 line.set_margin_top(18);
@@ -404,7 +435,13 @@ fn present(
     let answered: Build = {
         let status = Rc::clone(&status);
         let branch: Branch = Rc::new(move |_| (data_key() == "data").then_some(0));
-        let data: Build = Rc::new(move |p, _| template(p, &inner));
+        let showed_skeleton = Rc::clone(&showed_skeleton);
+        let data: Build = Rc::new(move |p, _| {
+            template(p, &inner);
+            if showed_skeleton.replace(false) {
+                crate::skeleton::fade_in_widgets(&p.widgets());
+            }
+        });
         Rc::new(move |p, ctx| {
             status(p, ctx);
             crate::When(p, ctx, Rc::clone(&branch), vec![Rc::clone(&data)]);

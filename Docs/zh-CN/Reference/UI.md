@@ -463,3 +463,25 @@ FocusRegion {
 ### 运行时语义调色板
 
 `WindowSet(palette: app.palette)` 绑定一个文本字段，内容是从语义角色到浅色与深色 `#RRGGBB` 的 JSON 对象，例如 `{"accent":{"light":"#006A60","dark":"#4FDAC8"},"surface.canvas":{"light":"#F4FBF8","dark":"#101815"}}`。调色板可以在运行时更换，没写的角色保持平台默认。两种外观都要给出，前景与背景要成对可读。`accent` 这一对也给原生控件着色。SwiftUI（macOS、iOS、tvOS）、GTK 与 WinUI 3 支持 `runtime_palette`，其他目标用到这个属性时构建报错。不写调色板时，原有的 `accent:` 与 `appearance:` 照常有效。
+
+## 默认骨架图
+
+Bern 会在编译期直接把真实界面树投影为匹配的骨架图，覆盖全部六个后端，避免手写一套与真实布局脱节的占位界面：
+
+- **`Query` 默认启用**：未显式填写 `loading:` 文案的 `Query` 在首次结果返回前默认显示编译期投影骨架图；显式传入 `loading:` 时保留传统菊花与提示文案；也可以通过 `loading_style: skeleton` 或 `loading_style: spinner` 显式覆盖默认行为。
+- **状态驱动的 `skeleton: <bool>`**：任意布局或内容容器都可以直接绑定 `skeleton: app.loading`（以及可选的 `skeleton_count: 8` 指定列表占位条数），在骨架图与真实内容之间平滑切换：
+
+```rust
+Grid(min_width: 160, gap: 16, skeleton: app.loading, skeleton_count: 6) {
+    ForEach(items: app.albums, key: id) |album| {
+        Column(gap: 6) {
+            Image(source: album.cover, aspect: 1.0, fit: cover, corner: 12)
+            Text(content: album.title, style: headline)
+            Text(content: album.artist, style: caption, emphasis: secondary)
+        }
+    }
+}
+```
+
+- **显式 `Skeleton` 原语**：针对没有对应真实内容结构的纯加载占位（如缓冲行），可直接使用 `Skeleton(width:, height:, fraction:, max_width:, aspect:, corner:, shape:, tone:, opacity:, pulse:)`。
+- **防闪烁、动效与无障碍**：骨架图在加载超过 120 ms 后才显示，避免瞬时闪屏；列表占位自带错峰轻浮入场（`stagger: 0.04`、`appear: slide`），以低透明度 `text.primary`（`0.06`–`0.09`）轻柔呼吸脉冲，系统开启减少动态效果时自动冻结脉冲；真实数据就绪后在 150 ms 内淡入；占位元素不拦截点击或焦点，并向读屏软件统一播报一次加载状态。异步网络 `Image` 在加载完成前也会自动显示轻柔脉冲的媒体占位。
