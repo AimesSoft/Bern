@@ -206,6 +206,7 @@ impl ComponentSpec {
                 | "Detail"
                 | "Tab"
                 | "MenuItem"
+                | "AlertAction"
                 | "SidebarItem"
                 | "Section"
                 | "MenuBar"
@@ -1826,6 +1827,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 req("label", PropKind::DisplayText),
                 opt("value", PropKind::PickerField),
                 opt("selected", PropKind::KeyValue),
+                opt("items", PropKind::Items),
+                opt("key", PropKind::KeyField),
+                opt("item_label", PropKind::KeyField),
+                opt("prompt", PropKind::DisplayText),
                 opt("label_hidden", PropKind::Flag),
                 opt("shape", PropKind::Keyword(&["capsule"])),
                 opt("height", PropKind::Length),
@@ -1838,11 +1843,12 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                         "radio",
                         "inline",
                         "chips",
+                        "combobox",
                     ]),
                 ),
             ],
             Children::Only(&["PickerOption"]),
-            "Single choice among the labelled variants of an enum, with optional explicit labels; `style: chips` shows a chip per option, which in a `Flow` are items of the flow",
+            "Single choice among the labelled variants of an enum (with optional `PickerOption` labels) or a dynamic list of records (`items:`, `key:`, `item_label:`); `style: chips` shows a chip per option, which in a `Flow` are items of the flow; `style: combobox` presents a searchable dropdown with optional `prompt:` placeholder",
         )
     },
     ComponentSpec {
@@ -2011,6 +2017,102 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         Children::None,
         "Non-interactive placeholder shape drawn in `text.primary` at low opacity (`primary` 0.09, `media` 0.07, `secondary` 0.06, or explicit `opacity`) with a gentle pulse that stops under reduced motion; `fraction` sizes its width relative to the available room (capped by `max_width`) so it never overflows narrow screens",
     ),
+    spec(
+        "Tooltip",
+        &[req("content", PropKind::DisplayText)],
+        Children::One,
+        "Native hover or long-press help text attached to its single child",
+    ),
+    ComponentSpec {
+        action: ActionRule::Optional,
+        ..spec(
+            "Banner",
+            &[
+                opt("id", PropKind::Id),
+                opt(
+                    "severity",
+                    PropKind::Keyword(&["info", "success", "warning", "error"]),
+                ),
+                opt("title", PropKind::DisplayText),
+                req("content", PropKind::DisplayText),
+                opt("icon", PropKind::Icon),
+                opt("dismiss_label", PropKind::DisplayText),
+            ],
+            Children::Any,
+            "Persistent inline semantic status banner (`info`, `success`, `warning` or `error`) with optional `title`, custom `icon`, trailing action children, and an optional dismiss action (`=> ...`) that requires `id:`",
+        )
+    },
+    ComponentSpec {
+        action: ActionRule::Optional,
+        interactive: true,
+        ..spec(
+            "Disclosure",
+            &[
+                req("id", PropKind::Id),
+                req("label", PropKind::DisplayText),
+                opt("icon", PropKind::Icon),
+                opt("expanded", PropKind::BoolField),
+                opt("open", PropKind::Bool),
+                FEATURE,
+            ],
+            Children::Any,
+            "Collapsible section with a native disclosure header; binds a session flag (`expanded`), follows engine state (`open` with an action), or manages local collapsed state when neither is given",
+        )
+    },
+    ComponentSpec {
+        action: ActionRule::Optional,
+        interactive: true,
+        ..spec(
+            "NumberInput",
+            &[
+                req("id", PropKind::Id),
+                req("label", PropKind::DisplayText),
+                opt("label_hidden", PropKind::Flag),
+                opt("value", PropKind::NumberField),
+                opt("current", PropKind::NumberValue),
+                opt("min", PropKind::Number),
+                opt("max", PropKind::Number),
+                opt("step", PropKind::Number),
+                opt("precision", PropKind::Number),
+                opt("enabled", PropKind::Bool),
+                FEATURE,
+            ],
+            Children::None,
+            "Numeric field with stepper controls bound to a session field (`value`) or engine state (`current` with an action), optionally clamped to `min`..`max` with `step` and decimal `precision` (0..=6)",
+        )
+    },
+    ComponentSpec {
+        action: ActionRule::Optional,
+        ..spec(
+            "Alert",
+            &[
+                req("title", PropKind::DisplayText),
+                opt("message", PropKind::DisplayText),
+            ],
+            Children::Only(&["AlertAction"]),
+            "System confirmation dialog shown while mounted, with `title`, optional `message`, one or more `AlertAction` buttons, and an optional dismiss action",
+        )
+    },
+    ComponentSpec {
+        placement: Placement::Within(&["Alert"]),
+        action: ActionRule::Required,
+        interactive: true,
+        ..spec(
+            "AlertAction",
+            &[
+                req("id", PropKind::Id),
+                req("label", PropKind::DisplayText),
+                opt(
+                    "role",
+                    PropKind::Keyword(&["default", "cancel", "destructive"]),
+                ),
+                opt("enabled", PropKind::Bool),
+                FEATURE,
+            ],
+            Children::None,
+            "Action button inside an `Alert`, with `default`, `cancel` or `destructive` semantic role",
+        )
+    },
 ];
 
 pub fn component(name: &str) -> Option<&'static ComponentSpec> {
@@ -2377,6 +2479,52 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
             });
         }
     }
+    if spec.name == "Disclosure" {
+        if shape.props.contains(&"open") && shape.props.contains(&"expanded") {
+            errors.push(ShapeError {
+                prop: None,
+                message: "choose `expanded` or `open`, not both".into(),
+            });
+        }
+        if shape.props.contains(&"open") && !shape.has_action {
+            errors.push(ShapeError {
+                prop: None,
+                message: "`open` needs an action to commit the new value".into(),
+            });
+        }
+    }
+    if spec.name == "Banner" {
+        if shape.has_action && !shape.props.contains(&"id") {
+            errors.push(ShapeError {
+                prop: None,
+                message: "a dismissible `Banner` requires an `id:`".into(),
+            });
+        }
+        if shape.props.contains(&"dismiss_label") && !shape.has_action {
+            errors.push(ShapeError {
+                prop: Some("dismiss_label".into()),
+                message: "`dismiss_label` needs a dismiss action `=> ...`".into(),
+            });
+        }
+    }
+    if spec.name == "Picker" {
+        let has_items = shape.props.contains(&"items");
+        let has_key = shape.props.contains(&"key");
+        let has_label = shape.props.contains(&"item_label");
+        if (has_items || has_key || has_label) && !(has_items && has_key && has_label) {
+            errors.push(ShapeError {
+                prop: None,
+                message: "a dynamic `Picker` requires `items:`, `key:` and `item_label:` together"
+                    .into(),
+            });
+        }
+        if has_items && shape.children.as_deref().is_some_and(|c| !c.is_empty()) {
+            errors.push(ShapeError {
+                prop: None,
+                message: "a dynamic `Picker` takes its options from `items:`; remove `PickerOption` children".into(),
+            });
+        }
+    }
     if spec.name == "Text" && shape.props.contains(&"color") && shape.props.contains(&"emphasis") {
         errors.push(ShapeError {
             prop: Some("color".into()),
@@ -2405,12 +2553,12 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
     }
     if matches!(
         spec.name,
-        "Switch" | "SplitButton" | "Picker" | "Slider" | "ColorPicker"
+        "Switch" | "SplitButton" | "Picker" | "Slider" | "ColorPicker" | "NumberInput"
     ) && !login_item
     {
         let controlled = if matches!(spec.name, "Switch" | "SplitButton") {
             "checked"
-        } else if matches!(spec.name, "Slider" | "ColorPicker") {
+        } else if matches!(spec.name, "Slider" | "ColorPicker" | "NumberInput") {
             "current"
         } else {
             "selected"
@@ -2544,6 +2692,12 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
         errors.push(ShapeError {
             prop: None,
             message: "a `Table` needs at least one `TableColumn`".into(),
+        });
+    }
+    if spec.name == "Alert" && count("AlertAction") == 0 {
+        errors.push(ShapeError {
+            prop: None,
+            message: "an `Alert` needs at least one `AlertAction`".into(),
         });
     }
     if spec.name == "NativeView" {

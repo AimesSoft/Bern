@@ -251,7 +251,196 @@ impl Generator<'_> {
         ));
     }
 
+    pub(super) fn tooltip(&self, out: &mut Out, element: &Element) {
+        self.children(
+            out,
+            &format!(
+                "B.Tooltip(p, ctx, {}, ",
+                Self::props(vec![("content", self.text_prop(element, "content"))]),
+            ),
+            &element.children,
+            ");",
+        );
+    }
+
+    pub(super) fn banner(&self, out: &mut Out, element: &Element) {
+        let props = Self::props(vec![
+            ("id", element.id.as_deref().map(string)),
+            ("severity", Self::keyword(element, "severity")),
+            ("title", self.text_prop(element, "title")),
+            ("content", self.text_prop(element, "content")),
+            ("icon", element.icon("icon").map(string)),
+            ("dismissLabel", self.text_prop(element, "dismiss_label")),
+        ]);
+        if element.children.is_empty() {
+            out.line(format!(
+                "B.Banner(p, ctx, {props}, {}, null);",
+                self.action_fn(element)
+            ));
+        } else {
+            self.children(
+                out,
+                &format!("B.Banner(p, ctx, {props}, {}, ", self.action_fn(element)),
+                &element.children,
+                ");",
+            );
+        }
+    }
+
+    pub(super) fn disclosure(&self, out: &mut Out, element: &Element) {
+        let field = if element.expr("open").is_some() {
+            self.control_field(element, "open")
+        } else {
+            self.field(element, "expanded")
+                .map(|f| match &element.action {
+                    Some(action) => format!(
+                        "{{ get: () => {f}.get(), peek: () => {f}.peek(), set: (v) => {{ {f}.set(v); {}; }} }}",
+                        self.action(action)
+                    ),
+                    None => f,
+                })
+        };
+        let on_toggle = if field.is_none() {
+            element
+                .action
+                .as_ref()
+                .map(|a| format!("() => {{ {}; }}", self.action(a)))
+        } else {
+            None
+        };
+        let props = Self::props(vec![
+            ("id", Some(self.id(element))),
+            ("label", self.text_prop(element, "label")),
+            ("icon", element.icon("icon").map(string)),
+            ("field", field),
+            ("onToggle", on_toggle),
+        ]);
+        self.children(
+            out,
+            &format!("B.Disclosure(p, ctx, {props}, "),
+            &element.children,
+            ");",
+        );
+    }
+
+    pub(super) fn number_input(&self, out: &mut Out, element: &Element) {
+        let is_int = matches!(element.expr("current").map(|e| &e.ty), Some(Type::Int));
+        let precision =
+            infer_precision(element.number("precision"), element.number("step"), is_int);
+        let controlled = element.expr("current").is_some();
+        let props = Self::props(vec![
+            ("id", Some(self.id(element))),
+            ("label", self.text_prop(element, "label")),
+            (
+                "field",
+                if controlled {
+                    self.control_field(element, "current")
+                } else {
+                    self.field(element, "value")
+                },
+            ),
+            ("min", element.number("min").map(number)),
+            ("max", element.number("max").map(number)),
+            ("step", element.number("step").map(number)),
+            ("precision", Some(precision.to_string())),
+            (
+                "enabled",
+                element
+                    .expr("enabled")
+                    .map(|e| format!("() => {}", self.expr(e))),
+            ),
+            (
+                "labelHidden",
+                Some((element.keyword("label_hidden") == Some("true")).to_string()),
+            ),
+        ]);
+        let commit = if controlled {
+            "null".into()
+        } else {
+            self.action_fn(element)
+        };
+        out.line(format!("B.NumberInput(p, ctx, {props}, {commit});"));
+    }
+
+    pub(super) fn alert(&self, out: &mut Out, element: &Element) {
+        let mut actions = Vec::new();
+        for node in &element.children {
+            let Node::Element(act) = node else { continue };
+            if act.kind != "AlertAction" {
+                continue;
+            }
+            actions.push(Self::props(vec![
+                ("id", Some(self.id(act))),
+                ("label", self.text_prop(act, "label")),
+                ("role", Self::keyword(act, "role")),
+                (
+                    "enabled",
+                    act.expr("enabled")
+                        .map(|e| format!("() => {}", self.expr(e))),
+                ),
+                ("action", Some(self.action_fn(act))),
+            ]));
+        }
+        let props = Self::props(vec![
+            ("title", self.text_prop(element, "title")),
+            ("message", self.text_prop(element, "message")),
+            ("actions", Some(format!("[{}]", actions.join(", ")))),
+            ("onDismiss", Some(self.action_fn(element))),
+        ]);
+        out.line(format!("B.Alert(p, ctx, {props});"));
+    }
+
     pub(super) fn picker(&self, out: &mut Out, element: &Element) {
+        if let Some(items_expr) = element.expr("items") {
+            let Type::List { inner } = &items_expr.ty else {
+                return;
+            };
+            let Type::Record { name: rec_name } = inner.as_ref() else {
+                return;
+            };
+            let def = self.types().record_def(rec_name).expect("picker record");
+            let Some(Prop::Key { field: key_idx, .. }) = element.prop("key") else {
+                return;
+            };
+            let Some(Prop::Key {
+                field: label_idx, ..
+            }) = element.prop("item_label")
+            else {
+                return;
+            };
+            let key_name = &def.fields[*key_idx].name;
+            let label_def = &def.fields[*label_idx];
+            let label_name = &label_def.name;
+            let label_expr = match &label_def.ty {
+                Type::Enum { name } => format!("L.{name}(row.{label_name})"),
+                Type::Text => format!("String(row.{label_name} ?? \"\")"),
+                Type::Int => format!("B.int(row.{label_name})"),
+                Type::Float => format!("B.num(row.{label_name})"),
+                _ => format!("String(row.{label_name} ?? \"\")"),
+            };
+            let items_code = self.expr(items_expr);
+            let options = format!(
+                "() => ({items_code}).map((row) => ({{ value: row.{key_name}, name: String(row.{key_name}), label: () => {label_expr} }}))"
+            );
+            out.line(format!(
+                "B.Picker(p, ctx, {});",
+                Self::props(vec![
+                    ("id", Some(self.id(element))),
+                    ("label", self.text_prop(element, "label")),
+                    ("field", self.control_field(element, "selected")),
+                    ("options", Some(options)),
+                    ("prompt", self.text_prop(element, "prompt")),
+                    ("style", Self::keyword(element, "style")),
+                    ("shape", Self::keyword(element, "shape")),
+                    ("height", self.length(element, "height")),
+                    (
+                        "labelHidden",
+                        Some((element.keyword("label_hidden") == Some("true")).to_string())
+                    ),
+                ])
+            ));
+            return;
+        }
         let ty = element
             .expr("selected")
             .map(|expr| &expr.ty)
@@ -296,6 +485,7 @@ impl Generator<'_> {
                 ("label", self.text_prop(element, "label")),
                 ("field", self.control_field(element, "selected")),
                 ("options", Some(format!("[{}]", options.join(", ")))),
+                ("prompt", self.text_prop(element, "prompt")),
                 ("style", Self::keyword(element, "style")),
                 ("shape", Self::keyword(element, "shape")),
                 ("height", self.length(element, "height")),
@@ -518,4 +708,21 @@ impl Generator<'_> {
             self.action_fn(element)
         ));
     }
+}
+
+fn infer_precision(precision: Option<f64>, step: Option<f64>, is_int: bool) -> u32 {
+    if let Some(p) = precision {
+        return p.round().clamp(0.0, 6.0) as u32;
+    }
+    if is_int {
+        return 0;
+    }
+    if let Some(s) = step {
+        let formatted = format!("{s:.4}");
+        let trimmed = formatted.trim_end_matches('0');
+        if let Some((_, frac)) = trimmed.split_once('.') {
+            return (frac.len() as u32).min(4);
+        }
+    }
+    0
 }

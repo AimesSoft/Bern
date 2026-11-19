@@ -252,6 +252,10 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "label",
             "value",
             "selected",
+            "items",
+            "key",
+            "item_label",
+            "prompt",
             "label_hidden",
             "style",
             "shape",
@@ -563,6 +567,36 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
     ("SidebarHeader", &["role"]),
     ("SidebarFooter", &[]),
     ("Detail", &["titled"]),
+    ("Tooltip", &["content"]),
+    (
+        "Banner",
+        &[
+            "id",
+            "severity",
+            "title",
+            "content",
+            "icon",
+            "dismiss_label",
+        ],
+    ),
+    ("Disclosure", &["id", "label", "icon", "expanded", "open"]),
+    (
+        "NumberInput",
+        &[
+            "id",
+            "label",
+            "label_hidden",
+            "value",
+            "current",
+            "min",
+            "max",
+            "step",
+            "precision",
+            "enabled",
+        ],
+    ),
+    ("Alert", &["title", "message"]),
+    ("AlertAction", &["id", "label", "role", "enabled"]),
 ];
 
 /// The names [`COMPONENTS`] lists, with the window catalog's.
@@ -658,16 +692,26 @@ pub const COMPONENT_NAMES: &[&str] = &[
     "SidebarFooter",
     "ContextMenu",
     "Detail",
+    "Tooltip",
+    "Banner",
+    "Disclosure",
+    "NumberInput",
+    "Alert",
+    "AlertAction",
 ];
 
 /// Icons the runtime draws itself, whatever the application declares.
 const RUNTIME_ICONS: &[&str] = &[
     "checkmark",
+    "checkmark.circle",
     "chevron.down",
     "chevron.left",
     "chevron.right",
     "exclamationmark.triangle",
+    "info.circle",
     "magnifyingglass",
+    "minus",
+    "plus",
     "tray",
     "xmark",
     "xmark.circle.fill",
@@ -679,6 +723,23 @@ fn string(text: &str) -> String {
 
 fn float(value: f64) -> String {
     format!("{:?}", value as f32)
+}
+
+fn infer_precision(precision: Option<f64>, step: Option<f64>, is_int: bool) -> u32 {
+    if let Some(p) = precision {
+        return p.round().clamp(0.0, 6.0) as u32;
+    }
+    if is_int {
+        return 0;
+    }
+    if let Some(s) = step {
+        let formatted = format!("{s:.4}");
+        let trimmed = formatted.trim_end_matches('0');
+        if let Some((_, frac)) = trimmed.split_once('.') {
+            return (frac.len() as u32).min(4);
+        }
+    }
+    0
 }
 
 /// The direction a container lays its children out in.
@@ -1651,8 +1712,14 @@ pub fn app() -> b::AppDef {{
                 width: parent == Axis::Column,
                 height: false,
             },
-            "TextInput" | "Progress" | "Slider" | "Section" | "NavLink" | "SearchItem" => Greed {
+            "TextInput" | "NumberInput" | "Banner" | "Disclosure" | "Progress" | "Slider"
+            | "Section" | "NavLink" | "SearchItem" => Greed {
                 width: true,
+                height: false,
+            },
+            "Tooltip" => self.children_greed(&element.children, parent),
+            "Alert" | "AlertAction" => Greed {
+                width: false,
                 height: false,
             },
             "Picker" => Greed {
@@ -3112,11 +3179,40 @@ pub fn app() -> b::AppDef {{
             }
             "Picker" => {
                 let model = self.model(element, "selected")?;
-                let ty = element
-                    .expr("selected")
-                    .map(|expr| expr.ty.clone())
-                    .or_else(|| element.field("value").map(|field| self.field_type(field)));
-                let options = self.options(element, ty.as_ref())?;
+                let options = if let Some(items_expr) = element.expr("items") {
+                    let Type::List { inner } = &items_expr.ty else {
+                        return None;
+                    };
+                    let Type::Record { name: rec_name } = inner.as_ref() else {
+                        return None;
+                    };
+                    let def = self.app.types.record_def(rec_name)?;
+                    let Some(Prop::Key { field: key_idx, .. }) = element.prop("key") else {
+                        return None;
+                    };
+                    let Some(Prop::Key {
+                        field: label_idx, ..
+                    }) = element.prop("item_label")
+                    else {
+                        return None;
+                    };
+                    let label_code = match &def.fields[*label_idx].ty {
+                        Type::Enum { name } => {
+                            format!("b::text::display(&lv, Some({}))", string(name))
+                        }
+                        _ => "rt::plain(&lv)".into(),
+                    };
+                    format!(
+                        "rt::as_list({}).into_iter().map(|row| {{ let k = rt::at(row.clone(), &[{key_idx}]); let lv = rt::at(row, &[{label_idx}]); (k, {label_code}) }}).collect::<Vec<_>>()",
+                        self.expr(items_expr, at)
+                    )
+                } else {
+                    let ty = element
+                        .expr("selected")
+                        .map(|expr| expr.ty.clone())
+                        .or_else(|| element.field("value").map(|field| self.field_type(field)));
+                    self.options(element, ty.as_ref())?
+                };
                 format!(
                     "b::picker(c, {}, {}, {}, {model}, {options}, b::PickerStyle::{}, {}, {})",
                     id(),
@@ -3129,6 +3225,120 @@ pub fn app() -> b::AppDef {{
                     },
                     shape(),
                     self.optional_length(element, "height"),
+                )
+            }
+            "Tooltip" => {
+                let children = self.children(&element.children, Axis::Column);
+                format!(
+                    "b::tooltip(c, {}, {}, ({children}).into_iter().next().unwrap_or_else(|| b::column(c, b::Flex::default(), vec![])))",
+                    string(&element.path),
+                    text("content"),
+                )
+            }
+            "Banner" => {
+                let id_opt = element
+                    .id
+                    .as_deref()
+                    .map(|v| format!("Some({})", string(v)))
+                    .unwrap_or_else(|| "None".into());
+                let title_opt = element
+                    .text("title")
+                    .map(|t| format!("Some({})", self.text(t, at)))
+                    .unwrap_or_else(|| "None".into());
+                let dismiss_label_opt = element
+                    .text("dismiss_label")
+                    .map(|t| format!("Some({})", self.text(t, at)))
+                    .unwrap_or_else(|| "None".into());
+                let children = self.children(&element.children, Axis::Row);
+                format!(
+                    "b::banner(c, b::BannerProps {{ id: {id_opt}, severity: {}, title: {title_opt}, content: {}, icon: {}, dismiss_label: {dismiss_label_opt} }}, {}, {children})",
+                    string(element.keyword("severity").unwrap_or("info")),
+                    text("content"),
+                    self.icon(element.icon("icon")),
+                    self.action(element),
+                )
+            }
+            "Disclosure" => {
+                let model = if let Some(open) = element.expr("open") {
+                    format!(
+                        "Some(b::Model::Controlled({}, {}))",
+                        self.expr(open, at),
+                        self.commit(element, open)
+                    )
+                } else if let Some(field) = element.field("expanded") {
+                    format!(
+                        "Some(b::Model::Field({}, {}))",
+                        field_ref(self.session_index(&field.session), field.field),
+                        self.action(element),
+                    )
+                } else {
+                    "None".into()
+                };
+                let then = if element.expr("open").is_some() || element.field("expanded").is_some()
+                {
+                    "None".into()
+                } else {
+                    self.action(element)
+                };
+                let children = self.children(&element.children, Axis::Column);
+                format!(
+                    "b::disclosure(c, {}, {}, {}, {model}, {then}, || {children})",
+                    id(),
+                    text("label"),
+                    self.icon(element.icon("icon")),
+                )
+            }
+            "NumberInput" => {
+                let model = self.model(element, "current")?;
+                let is_int = matches!(element.expr("current").map(|e| &e.ty), Some(Type::Int));
+                let precision =
+                    infer_precision(element.number("precision"), element.number("step"), is_int);
+                let opt_f64 = |name: &str| {
+                    element
+                        .number(name)
+                        .map(|n| format!("Some({n:?}_f64)"))
+                        .unwrap_or_else(|| "None".into())
+                };
+                format!(
+                    "b::number_input(c, {}, b::NumberInputProps {{ label: {}, label_hidden: {}, min: {}, max: {}, step: {:?}_f64, precision: {precision}, enabled: {} }}, {model})",
+                    id(),
+                    text("label"),
+                    element.prop("label_hidden").is_some(),
+                    opt_f64("min"),
+                    opt_f64("max"),
+                    element.number("step").unwrap_or(1.0),
+                    self.enabled(element),
+                )
+            }
+            "Alert" => {
+                let msg_opt = element
+                    .text("message")
+                    .map(|t| format!("Some({})", self.text(t, at)))
+                    .unwrap_or_else(|| "None".into());
+                let mut specs = Vec::new();
+                for child in &element.children {
+                    let Node::Element(act) = child else { continue };
+                    if act.kind != "AlertAction" {
+                        continue;
+                    }
+                    let act_at = Some(&act.source);
+                    let act_label = act
+                        .text("label")
+                        .map(|t| self.text(t, act_at))
+                        .unwrap_or_else(|| "String::new()".into());
+                    specs.push(format!(
+                        "b::AlertActionSpec {{ id: {}, label: {act_label}, role: {}, enabled: {}, action: {} }}",
+                        string(act.id.as_deref().unwrap_or("")),
+                        string(act.keyword("role").unwrap_or("default")),
+                        self.enabled(act),
+                        self.action(act),
+                    ));
+                }
+                format!(
+                    "b::alert(c, {}, {msg_opt}, vec![{}], {})",
+                    text("title"),
+                    specs.join(", "),
+                    self.action(element),
                 )
             }
             "LanguagePicker" => format!(

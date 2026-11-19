@@ -2854,3 +2854,80 @@ test("SkeletonHost delays 120 ms to prevent flicker and fades real content in af
   assert.equal(slowReal.classList.contains("bern-skeleton-fade-in"), true);
   scope.dispose();
 });
+
+test("M2 controls: Tooltip, Banner, Disclosure, NumberInput, Alert and dynamic combobox Picker", () => {
+  const { B, Element, frames } = runtime();
+  const root = new Element("div");
+  const scope = new B.Scope();
+  const ctx = { win: "main", comp: "demo" };
+  let dismissed = 0;
+  let alertChoice = null;
+  const open = B.cell(false);
+  const count = B.cell(10);
+  const picked = B.cell(2n);
+  const items = B.cell([
+    { name: "1", value: 1n, label: () => "Alpha" },
+    { name: "2", value: 2n, label: () => "Beta" },
+    { name: "3", value: 3n, label: () => "Gamma" },
+  ]);
+
+  B.within(scope, () => {
+    B.Tooltip(root, ctx, { content: () => "Helpful tip" }, (p) => {
+      const btn = new Element("button");
+      p.append(btn);
+    });
+    B.Banner(root, ctx, { id: "notice", severity: "warning", title: () => "Heads up", content: () => "Low disk" }, () => { dismissed += 1; });
+    B.Disclosure(root, ctx, { id: "more", label: () => "Advanced", field: open }, (p) => {
+      const inner = new Element("p");
+      p.append(inner);
+    });
+    B.NumberInput(root, ctx, { id: "port", label: () => "Port", field: count, min: 1, max: 12, step: 2, precision: 0 });
+    B.Picker(root, ctx, { id: "item", label: () => "Item", field: picked, options: () => items.get(), style: "combobox", prompt: () => "Filter" });
+    B.Alert(root, ctx, {
+      title: () => "Confirm",
+      message: () => "Delete item?",
+      actions: [
+        { id: "cancel", label: () => "Cancel", role: "cancel", action: () => { alertChoice = "cancel"; } },
+        { id: "delete", label: () => "Delete", role: "destructive", action: () => { alertChoice = "delete"; } },
+      ],
+    });
+  });
+
+  // Tooltip attached title + dataset to child.
+  assert.equal(root.children[0].title, "Helpful tip");
+  assert.equal(root.children[0].dataset.bernTooltip, "Helpful tip");
+
+  // Banner exposes role=alert and CLI dismiss control.
+  const banner = root.children[1];
+  assert.equal(banner.attributes.role, "alert");
+  const dismissCtrl = B.controlEntries().find((e) => e.target() === "demo.notice");
+  dismissCtrl.actions.activate();
+  assert.equal(dismissed, 1);
+
+  // Disclosure syncs field and CLI toggle.
+  const discCtrl = B.controlEntries().find((e) => e.target() === "demo.more");
+  assert.equal(discCtrl.actions.value(), "false");
+  discCtrl.actions.setBool(true);
+  assert.equal(open.peek(), true);
+  assert.equal(discCtrl.actions.value(), "true");
+
+  // NumberInput clamps to [min, max] and supports CLI setNumber.
+  const numCtrl = B.controlEntries().find((e) => e.target() === "demo.port");
+  numCtrl.actions.setNumber(25);
+  assert.equal(count.peek(), 12);
+  numCtrl.actions.setNumber(-5);
+  assert.equal(count.peek(), 1);
+
+  // Dynamic combobox Picker filters & selects by BigInt key.
+  const pickCtrl = B.controlEntries().find((e) => e.target() === "demo.item");
+  assert.equal(pickCtrl.actions.value(), "2");
+  assert.equal(pickCtrl.actions.select("3"), true);
+  assert.equal(picked.peek(), 3n);
+
+  // Alert registers AlertAction CLI controls and invokes chosen action.
+  while (frames.length) frames.shift()();
+  const delCtrl = B.controlEntries().find((e) => e.target() === "demo.delete");
+  delCtrl.actions.activate();
+  assert.equal(alertChoice, "delete");
+  scope.dispose();
+});

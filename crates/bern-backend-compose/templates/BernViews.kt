@@ -95,8 +95,15 @@ import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.PlainTooltip
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.rememberTooltipState
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
@@ -1220,8 +1227,9 @@ fun <T> BernPicker(
     /// option in words that open the others, as a setting's value at the
     /// end of its row.
     inRow: Boolean = false,
+    prompt: String = "",
 ) {
-    val menu = style != "segmented" && style != "radio" && style != "inline" && style != "chips"
+    val menu = style != "segmented" && style != "radio" && style != "inline" && style != "chips" && style != "combobox"
     if (inRow && shape == null && menu) {
         var expanded by remember { mutableStateOf(false) }
         Box(modifier) {
@@ -1352,11 +1360,67 @@ fun <T> BernPicker(
                 }
             }
         }
+        "combobox" -> {
+            var expanded by remember { mutableStateOf(false) }
+            val selectedLabel = optionLabel(selected)
+            var query by remember(selectedLabel) { mutableStateOf(selectedLabel) }
+            val filtered = remember(options, query, expanded) {
+                val trimmed = query.trim()
+                if (!expanded || trimmed.isEmpty() || trimmed == selectedLabel) options
+                else options.filter { optionLabel(it).contains(trimmed, ignoreCase = true) }
+            }
+            ExposedDropdownMenuBox(
+                expanded = expanded,
+                onExpandedChange = { next ->
+                    expanded = next
+                    if (next) query = ""
+                    else query = selectedLabel
+                },
+                modifier = modifier,
+            ) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = {
+                        query = it
+                        expanded = true
+                    },
+                    singleLine = true,
+                    label = if (labelHidden) null else { { Text(label) } },
+                    placeholder = if (prompt.isNotEmpty()) { { Text(prompt) } } else null,
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+                    modifier = Modifier
+                        .menuAnchor(MenuAnchorType.PrimaryEditable)
+                        .then(if (inFlow || inRow) Modifier.widthIn(min = 160.dp) else Modifier.fillMaxWidth()),
+                )
+                ExposedDropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = {
+                        expanded = false
+                        query = selectedLabel
+                    },
+                ) {
+                    for (option in filtered) {
+                        val text = optionLabel(option)
+                        DropdownMenuItem(
+                            text = { Text(text) },
+                            leadingIcon = if (option == selected) {
+                                { Icon(Icons.Filled.Check, contentDescription = null) }
+                            } else null,
+                            onClick = {
+                                onSelect(option)
+                                query = text
+                                expanded = false
+                            },
+                        )
+                    }
+                }
+            }
+        }
         else -> {
             var expanded by remember { mutableStateOf(false) }
             ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }, modifier = modifier) {
                 OutlinedTextField(
-                    value = optionLabel(selected),
+                    value = optionLabel(selected).ifEmpty { prompt },
                     onValueChange = {},
                     readOnly = true,
                     label = if (labelHidden) null else { { Text(label) } },
@@ -2736,3 +2800,282 @@ private data class BernRubyDrawing(
     val layout: androidx.compose.ui.text.TextLayoutResult, val x: Float, val y: Float,
     val scale: Float, val scalarStart: Int, val scalarCount: Int,
 )
+
+data class BernAlertActionSpec(
+    val target: String,
+    val label: String,
+    val role: String,
+    val enabled: Boolean,
+    val onClick: () -> Unit,
+)
+
+// @bern:wear-skip-start
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun BernTooltip(content: String, child: @Composable () -> Unit) {
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+        tooltip = { PlainTooltip { Text(content) } },
+        state = rememberTooltipState(),
+    ) {
+        child()
+    }
+}
+
+@Composable
+fun BernBanner(
+    severity: String,
+    title: String?,
+    content: String,
+    icon: ImageVector?,
+    dismissLabel: String?,
+    dismissTarget: String?,
+    onDismiss: (() -> Unit)?,
+    actions: @Composable RowScope.() -> Unit,
+) {
+    val palette = bernPalette()
+    val tint = when (severity) {
+        "success" -> palette.color(BernColor.Role("status.success"))
+        "warning" -> palette.color(BernColor.Role("status.warning"))
+        "error" -> palette.color(BernColor.Role("status.error"))
+        else -> MaterialTheme.colorScheme.primary
+    }
+    if (dismissTarget != null && onDismiss != null) {
+        BernControl(
+            dismissTarget,
+            "button",
+            dismissLabel ?: content,
+            actions = BernControlActions(activate = onDismiss),
+        )
+    }
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        color = tint.copy(alpha = 0.11f),
+        border = BorderStroke(1.dp, tint.copy(alpha = 0.28f)),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            if (icon != null) {
+                Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                if (!title.isNullOrEmpty()) {
+                    Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                }
+                Text(content, style = MaterialTheme.typography.bodyMedium)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically, content = actions)
+            if (onDismiss != null) {
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Filled.Close, contentDescription = dismissLabel ?: "Dismiss")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun BernDisclosure(
+    target: String,
+    label: String,
+    icon: ImageVector?,
+    externalExpanded: Boolean?,
+    onToggle: ((Boolean) -> Unit)?,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    var localExpanded by remember { mutableStateOf(false) }
+    val expanded = externalExpanded ?: localExpanded
+    val setExpanded: (Boolean) -> Unit = { next ->
+        if (externalExpanded != null) {
+            onToggle?.invoke(next)
+        } else {
+            localExpanded = next
+            onToggle?.invoke(next)
+        }
+    }
+    BernControl(
+        target,
+        "disclosure",
+        label,
+        actions = BernControlActions(
+            activate = { setExpanded(!expanded) },
+            setBool = { setExpanded(it) },
+            value = { if (expanded) "true" else "false" },
+        ),
+    )
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(role = Role.Button) { setExpanded(!expanded) }
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(
+                if (expanded) Icons.Filled.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (icon != null) {
+                Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
+            }
+            Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        }
+        AnimatedVisibility(visible = expanded) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 24.dp, top = 4.dp, bottom = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                content = content,
+            )
+        }
+    }
+}
+
+@Composable
+fun BernNumberInput(
+    target: String,
+    label: String,
+    value: Double,
+    onCommit: (Double) -> Unit,
+    min: Double?,
+    max: Double?,
+    step: Double,
+    precision: Int,
+    enabled: Boolean,
+    labelHidden: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val clampedPrecision = precision.coerceIn(0, 6)
+    fun clampRound(raw: Double): Double {
+        if (!raw.isFinite()) return value
+        var v = raw
+        if (min != null) v = maxOf(v, min)
+        if (max != null) v = minOf(v, max)
+        val factor = Math.pow(10.0, clampedPrecision.toDouble())
+        return Math.round(v * factor) / factor
+    }
+    fun formatValue(raw: Double): String {
+        return if (clampedPrecision == 0) Math.round(raw).toString()
+        else String.format(java.util.Locale.US, "%.${clampedPrecision}f", raw)
+    }
+    var text by remember(value) { mutableStateOf(formatValue(value)) }
+    val commitText = {
+        val parsed = text.trim().toDoubleOrNull()
+        if (parsed != null && parsed.isFinite()) {
+            val next = clampRound(parsed)
+            text = formatValue(next)
+            onCommit(next)
+        } else {
+            text = formatValue(value)
+        }
+    }
+    BernControl(
+        target,
+        "number_input",
+        label,
+        enabled = enabled,
+        actions = BernControlActions(
+            edit = { raw ->
+                val parsed = raw.trim().toDoubleOrNull()
+                if (parsed != null && parsed.isFinite()) onCommit(clampRound(parsed))
+            },
+            setNumber = { v -> if (v.isFinite()) onCommit(clampRound(v)) },
+            value = { BernText.text(value) },
+        ),
+    )
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (!labelHidden) {
+            Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        }
+        FilledTonalIconButton(
+            onClick = { onCommit(clampRound(value - step)) },
+            enabled = enabled && (min == null || value > min),
+        ) {
+            Icon(BernIcons.get("minus"), contentDescription = "Decrease")
+        }
+        OutlinedTextField(
+            value = text,
+            onValueChange = { text = it },
+            singleLine = true,
+            enabled = enabled,
+            keyboardOptions = KeyboardOptions(
+                keyboardType = if (clampedPrecision > 0) KeyboardType.Decimal else KeyboardType.Number,
+                imeAction = ImeAction.Done,
+            ),
+            keyboardActions = KeyboardActions(onDone = { commitText() }),
+            modifier = Modifier
+                .widthIn(min = 76.dp, max = 120.dp)
+                .onFocusChanged { if (!it.isFocused) commitText() },
+        )
+        FilledTonalIconButton(
+            onClick = { onCommit(clampRound(value + step)) },
+            enabled = enabled && (max == null || value < max),
+        ) {
+            Icon(Icons.Filled.Add, contentDescription = "Increase")
+        }
+    }
+}
+
+@Composable
+fun BernAlert(
+    title: String,
+    message: String?,
+    actions: List<BernAlertActionSpec>,
+    onDismiss: (() -> Unit)?,
+) {
+    for (act in actions) {
+        BernControl(
+            act.target,
+            "button",
+            act.label,
+            enabled = act.enabled,
+            actions = BernControlActions(activate = act.onClick),
+        )
+    }
+    val cancel = actions.firstOrNull { it.role == "cancel" }
+    val nonCancel = actions.filter { it.role != "cancel" }
+    AlertDialog(
+        onDismissRequest = {
+            if (onDismiss != null) onDismiss()
+            else if (cancel != null && cancel.enabled) cancel.onClick()
+        },
+        title = { Text(title) },
+        text = if (!message.isNullOrEmpty()) { { Text(message) } } else null,
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for (act in nonCancel) {
+                    TextButton(
+                        onClick = act.onClick,
+                        enabled = act.enabled,
+                        colors = if (act.role == "destructive") {
+                            ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                        } else {
+                            ButtonDefaults.textButtonColors()
+                        },
+                    ) {
+                        Text(act.label)
+                    }
+                }
+            }
+        },
+        dismissButton = cancel?.let { c ->
+            {
+                TextButton(onClick = c.onClick, enabled = c.enabled) {
+                    Text(c.label)
+                }
+            }
+        },
+    )
+}
+// @bern:wear-skip-end

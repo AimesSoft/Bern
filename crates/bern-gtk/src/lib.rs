@@ -82,9 +82,9 @@ pub use parent::Parent;
 pub use pointer::{Pointer, PointerProps};
 pub use query::{Query, QueryProps, own_query};
 pub use scene::{
-    Accordion, AccordionProps, ControlGroup, ControlGroupProps, Flow, FlowProps, Marquee,
-    MarqueeProps, Modal, ModalProps, Positioned, PositionedProps, ScaleBox, ScaleBoxProps, Timer,
-    TimerProps, Watch, WatchProps,
+    Accordion, AccordionProps, Alert, AlertActionDef, AlertProps, ControlGroup, ControlGroupProps,
+    Flow, FlowProps, Marquee, MarqueeProps, Modal, ModalProps, Positioned, PositionedProps,
+    ScaleBox, ScaleBoxProps, Timer, TimerProps, Watch, WatchProps,
 };
 pub use skeleton::{Skeleton, SkeletonHost, SkeletonProps};
 pub use status::{StatusItemDef, StatusMenu, login_model};

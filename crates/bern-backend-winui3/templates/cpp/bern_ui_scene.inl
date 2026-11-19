@@ -716,6 +716,165 @@ inline void Modal(Parent const&, Ctx const& ctx, ModalProps props, Build const& 
 }
 
 // ---------------------------------------------------------------------------
+// Alerts
+
+struct AlertActionDef {
+    char const* id = "";
+    Str label;
+    char const* role = nullptr;
+    Get enabled;
+    Act action;
+};
+
+struct AlertProps {
+    Str title;
+    Str message;
+    std::vector<AlertActionDef> actions;
+    Act dismiss;
+};
+
+inline void Alert(Parent const&, Ctx const& ctx, AlertProps props) {
+    if (!ctx.win || !ctx.win->root) return;
+    auto root = ctx.win->root;
+    controls::ContentDialog dialog;
+    if (auto style = Styles::Named(L"DefaultContentDialogStyle")) dialog.Style(style);
+    auto title = Bound(ctx, props.title);
+    auto message = Bound(ctx, props.message);
+    if (title) Reactive::Run([dialog, title] { dialog.Title(winrt::box_value(title())); });
+    auto didAct = std::make_shared<bool>(false);
+    auto closing = std::make_shared<bool>(false);
+    auto dismiss = Run(ctx, props.dismiss);
+
+    int cancelIdx = -1;
+    int primaryIdx = -1;
+    int secondaryIdx = -1;
+    std::vector<int> extraIdx;
+    for (int i = 0; i < static_cast<int>(props.actions.size()); ++i) {
+        std::string role = props.actions[i].role ? props.actions[i].role : "default";
+        if (role == "cancel" && cancelIdx < 0) cancelIdx = i;
+        else if (primaryIdx < 0) primaryIdx = i;
+        else if (secondaryIdx < 0) secondaryIdx = i;
+        else extraIdx.push_back(i);
+    }
+
+    auto makeTrigger = [ctx, didAct, closing, weak = winrt::make_weak(dialog)](Act const& act) {
+        auto run = Run(ctx, act);
+        return [didAct, closing, weak, run] {
+            *didAct = true;
+            *closing = true;
+            if (auto d = weak.get()) d.Hide();
+            if (run) run();
+        };
+    };
+
+    if (message || !extraIdx.empty()) {
+        controls::StackPanel content;
+        content.Spacing(12);
+        if (message) {
+            controls::TextBlock tb;
+            tb.TextWrapping(xaml::TextWrapping::Wrap);
+            Reactive::Run([tb, message] { tb.Text(message()); });
+            content.Children().Append(tb);
+        }
+        for (int idx : extraIdx) {
+            auto const& act = props.actions[idx];
+            auto actLabel = Bound(ctx, act.label);
+            auto trigger = makeTrigger(act.action);
+            controls::Button btn;
+            btn.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+            if (actLabel) Reactive::Run([btn, actLabel] { btn.Content(winrt::box_value(actLabel())); });
+            if (act.enabled) {
+                auto en = act.enabled;
+                Reactive::Run([btn, ctx, en] { btn.IsEnabled(R::Truthy(en(ctx))); });
+            }
+            btn.Click([trigger](auto&&, auto&&) { trigger(); });
+            content.Children().Append(btn);
+        }
+        dialog.Content(content);
+    }
+
+    if (primaryIdx >= 0) {
+        auto const& act = props.actions[primaryIdx];
+        auto actLabel = Bound(ctx, act.label);
+        auto run = Run(ctx, act.action);
+        if (actLabel) Reactive::Run([dialog, actLabel] { dialog.PrimaryButtonText(actLabel()); });
+        if (act.enabled) {
+            auto en = act.enabled;
+            Reactive::Run([dialog, ctx, en] { dialog.IsPrimaryButtonEnabled(R::Truthy(en(ctx))); });
+        }
+        dialog.PrimaryButtonClick([didAct, run](auto&&, auto&&) {
+            *didAct = true;
+            if (run) run();
+        });
+        std::string role = act.role ? act.role : "default";
+        dialog.DefaultButton(role == "destructive" ? controls::ContentDialogButton::Close : controls::ContentDialogButton::Primary);
+    }
+    if (secondaryIdx >= 0) {
+        auto const& act = props.actions[secondaryIdx];
+        auto actLabel = Bound(ctx, act.label);
+        auto run = Run(ctx, act.action);
+        if (actLabel) Reactive::Run([dialog, actLabel] { dialog.SecondaryButtonText(actLabel()); });
+        if (act.enabled) {
+            auto en = act.enabled;
+            Reactive::Run([dialog, ctx, en] { dialog.IsSecondaryButtonEnabled(R::Truthy(en(ctx))); });
+        }
+        dialog.SecondaryButtonClick([didAct, run](auto&&, auto&&) {
+            *didAct = true;
+            if (run) run();
+        });
+    }
+    if (cancelIdx >= 0) {
+        auto const& act = props.actions[cancelIdx];
+        auto actLabel = Bound(ctx, act.label);
+        auto run = Run(ctx, act.action);
+        if (actLabel) Reactive::Run([dialog, actLabel] { dialog.CloseButtonText(actLabel()); });
+        dialog.CloseButtonClick([didAct, run](auto&&, auto&&) {
+            *didAct = true;
+            if (run) run();
+        });
+    }
+
+    for (auto const& act : props.actions) {
+        auto actLabel = Bound(ctx, act.label);
+        auto trigger = makeTrigger(act.action);
+        auto en = act.enabled;
+        Controls::Register(ctx, act.id, "button", actLabel,
+            en ? std::function<bool()>([ctx, en] { return R::Truthy(en(ctx)); }) : nullptr,
+            Actions{.activate = trigger});
+    }
+
+    dialog.RequestedTheme(root.ActualTheme());
+    dialog.Language(root.Language());
+    auto themeToken = root.ActualThemeChanged([weak = winrt::make_weak(dialog)](xaml::FrameworkElement const& sender, auto&&) {
+        if (auto d = weak.get()) d.RequestedTheme(sender.ActualTheme());
+    });
+    auto cancelRun = cancelIdx >= 0 ? Run(ctx, props.actions[cancelIdx].action) : std::function<void()>();
+    dialog.Closing([closing, didAct, dismiss, cancelRun](controls::ContentDialog const&, controls::ContentDialogClosingEventArgs const&) {
+        if (*closing || *didAct) return;
+        *didAct = true;
+        if (dismiss) dismiss();
+        else if (cancelRun) cancelRun();
+    });
+    auto show = [weak = winrt::make_weak(dialog), root, closing] { ShowModal(weak, root, [] {}, closing); };
+    winrt::event_token loadedToken{};
+    if (root.XamlRoot() && root.IsLoaded()) show();
+    else {
+        auto token = std::make_shared<winrt::event_token>();
+        *token = root.Loaded([root, show, token](auto&&, auto&&) {
+            root.Loaded(*token);
+            show();
+        });
+        loadedToken = *token;
+    }
+    Reactive::OnCleanup([dialog, closing, root, themeToken, loadedToken] {
+        *closing = true;
+        root.ActualThemeChanged(themeToken);
+        if (loadedToken.value) root.Loaded(loadedToken);
+        dialog.Hide();
+    });
+}
+
+// ---------------------------------------------------------------------------
 // Timers
 
 struct TimerProps {

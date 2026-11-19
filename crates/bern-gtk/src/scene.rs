@@ -42,7 +42,12 @@ list.bern-plain-list > row > box.header { padding: 0; min-height: 0; }\n\
 .bern-palette-trigger { padding: 4px 12px; }\n\
 .bern-search-item { padding: 8px 12px; border-radius: 10px; }\n\
 .bern-search-item.bern-active { background-color: alpha(@accent_bg_color, 0.18); }\n\
-.bern-search-item-card { padding: 0; }\n";
+.bern-search-item-card { padding: 0; }\n\
+.bern-banner { border-radius: 10px; padding: 10px 14px; border: 1px solid alpha(@accent_bg_color, 0.30); background-color: alpha(@accent_bg_color, 0.11); }\n\
+.bern-banner-info { border-color: alpha(@accent_bg_color, 0.30); background-color: alpha(@accent_bg_color, 0.11); }\n\
+.bern-banner-success { border-color: alpha(@success_bg_color, 0.32); background-color: alpha(@success_bg_color, 0.12); }\n\
+.bern-banner-warning { border-color: alpha(@warning_bg_color, 0.35); background-color: alpha(@warning_bg_color, 0.13); }\n\
+.bern-banner-error { border-color: alpha(@error_bg_color, 0.35); background-color: alpha(@error_bg_color, 0.12); }\n";
 
 fn children(widget: &gtk::Widget) -> Vec<gtk::Widget> {
     let mut children = Vec::new();
@@ -1434,6 +1439,145 @@ pub fn Modal(_p: &Parent, ctx: &Ctx, props: ModalProps, children: Build) {
         // the frame leaves after it.
         cards.clear();
         frame.queue_allocate();
+    });
+}
+
+// MARK: - Alert
+
+pub struct AlertActionDef {
+    pub id: &'static str,
+    pub label: Option<Str>,
+    pub role: Option<&'static str>,
+    pub enabled: Option<Get>,
+    pub action: Option<Act>,
+}
+
+pub struct AlertProps {
+    pub title: Option<Str>,
+    pub message: Option<Str>,
+    pub actions: Vec<AlertActionDef>,
+    pub dismiss: Option<Act>,
+}
+
+/// System confirmation dialog (`adw::AlertDialog`), shown while mounted.
+#[allow(non_snake_case)]
+pub fn Alert(_p: &Parent, ctx: &Ctx, props: AlertProps) {
+    let win = Rc::clone(ctx.win());
+    let heading = props.title.as_ref().map(|t| t(ctx)).unwrap_or_default();
+    let body = props.message.as_ref().map(|m| m(ctx));
+    let dialog = adw::AlertDialog::new(Some(&heading), body.as_deref());
+    if let Some(title) = props.title.clone() {
+        let d = dialog.clone();
+        let at = ctx.clone();
+        effect(move || d.set_heading(Some(&title(&at))));
+    }
+    if let Some(message) = props.message.clone() {
+        let d = dialog.clone();
+        let at = ctx.clone();
+        effect(move || d.set_body(&message(&at)));
+    }
+    let handled = Rc::new(Cell::new(false));
+    let mut handlers: Vec<(String, Rc<dyn Fn()>)> = Vec::new();
+    let mut cancel_id: Option<String> = None;
+    let mut cancel_run: Option<Rc<dyn Fn()>> = None;
+    let mut default_id: Option<String> = None;
+    for (idx, act) in props.actions.iter().enumerate() {
+        let resp_id = format!("{}_{idx}", act.id);
+        let label_text = act.label.as_ref().map(|l| l(ctx)).unwrap_or_default();
+        dialog.add_response(&resp_id, &label_text);
+        if let Some(label_fn) = act.label.clone() {
+            let d = dialog.clone();
+            let rid = resp_id.clone();
+            let at = ctx.clone();
+            effect(move || d.set_response_label(&rid, &label_fn(&at)));
+        }
+        let role = act.role.unwrap_or("default");
+        match role {
+            "destructive" => {
+                dialog.set_response_appearance(&resp_id, adw::ResponseAppearance::Destructive);
+            }
+            "cancel" => {
+                cancel_id = Some(resp_id.clone());
+            }
+            _ => {
+                dialog.set_response_appearance(&resp_id, adw::ResponseAppearance::Suggested);
+                if default_id.is_none() {
+                    default_id = Some(resp_id.clone());
+                }
+            }
+        }
+        if let Some(enabled_get) = act.enabled.clone() {
+            let d = dialog.clone();
+            let rid = resp_id.clone();
+            let at = ctx.clone();
+            effect(move || {
+                d.set_response_enabled(&rid, crate::value::truthy(&enabled_get(&at)));
+            });
+        }
+        let run: Rc<dyn Fn()> = match &act.action {
+            Some(a) => {
+                let a = Rc::clone(a);
+                let at = ctx.clone();
+                Rc::new(move || a(&at))
+            }
+            None => Rc::new(|| {}),
+        };
+        if role == "cancel" {
+            cancel_run = Some(Rc::clone(&run));
+        }
+        handlers.push((resp_id.clone(), Rc::clone(&run)));
+        let d_cli = dialog.clone();
+        let handled_cli = Rc::clone(&handled);
+        let run_cli = Rc::clone(&run);
+        let label_cli = act
+            .label
+            .as_ref()
+            .map(|l| crate::widgets::bound_text(ctx, l));
+        let enabled_cli = crate::widgets::bound_enabled(ctx, &act.enabled);
+        crate::controls::register(
+            ctx,
+            act.id,
+            "button",
+            label_cli,
+            enabled_cli,
+            crate::controls::Actions {
+                activate: Some(Rc::new(move || {
+                    handled_cli.set(true);
+                    d_cli.force_close();
+                    run_cli();
+                })),
+                ..crate::controls::Actions::default()
+            },
+        );
+    }
+    if let Some(cid) = &cancel_id {
+        dialog.set_close_response(cid);
+    }
+    if let Some(did) = &default_id {
+        dialog.set_default_response(Some(did));
+    } else if let Some(cid) = &cancel_id {
+        dialog.set_default_response(Some(cid));
+    }
+    let dismiss = crate::widgets::bound_action(ctx, &props.dismiss);
+    let handled_resp = Rc::clone(&handled);
+    dialog.connect_response(None, move |_, response| {
+        if handled_resp.get() {
+            return;
+        }
+        handled_resp.set(true);
+        if let Some((_, run)) = handlers.iter().find(|(id, _)| id == response) {
+            run();
+        } else if let Some(dismiss) = &dismiss {
+            dismiss();
+        } else if let Some(cancel) = &cancel_run {
+            cancel();
+        }
+    });
+    dialog.present(Some(&win.window));
+    let dialog_cleanup = dialog.clone();
+    on_cleanup(move || {
+        handled.set(true);
+        dialog_cleanup.force_close();
     });
 }
 

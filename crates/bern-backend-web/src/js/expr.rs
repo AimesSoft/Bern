@@ -213,9 +213,9 @@ impl Generator<'_> {
                         if arg != expr {
                             self.expr(arg)
                         } else if arg.ty == Type::Int {
-                            // A whole number takes the slider's value
-                            // rounded.
-                            "BigInt(Math.round(Number(newValue)))".into()
+                            // A whole number takes the slider/stepper's value
+                            // rounded while preserving BigInt picker keys.
+                            "typeof newValue === 'bigint' ? newValue : BigInt(Math.round(Number(newValue)))".into()
                         } else {
                             "newValue".into()
                         }
@@ -228,6 +228,20 @@ impl Generator<'_> {
                         self.app.protocol.command_symbol(spec),
                         values.join(", ")
                     )
+                }
+                Action::Session {
+                    field,
+                    op: bern_ir::SessionOp::Set { value },
+                } if value == expr => {
+                    let session = self.app.session(&field.session).expect("session");
+                    let spec = &session.fields[field.field];
+                    let target = format!("ctx.s.{}.{}", field.session, spec.name);
+                    let rhs = if spec.ty == Type::Int {
+                        "typeof newValue === 'bigint' ? newValue : BigInt(Math.round(Number(newValue)))"
+                    } else {
+                        "newValue"
+                    };
+                    format!("{target}.set({rhs})")
                 }
                 _ => self.action(action),
             };

@@ -3,7 +3,7 @@
 
 use super::values::swift_type;
 use super::{Ctx, Generator, Out, Platform};
-use crate::names::{double, string};
+use crate::names::{double, member, string};
 use bern_ir::{Element, Node, Prop};
 use bern_protocol::Type;
 
@@ -900,7 +900,204 @@ impl Generator<'_> {
         ));
     }
 
+    pub(super) fn tooltip(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let content = self.text_prop(element, "content").unwrap_or_default();
+        if let Some(child) = element.children.first() {
+            self.node(out, child, ctx);
+            out.line(format!(".bernTooltip({content})"));
+        }
+    }
+
+    pub(super) fn banner(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let severity = element.keyword("severity").unwrap_or("info");
+        let default_icon = match severity {
+            "success" => "checkmark.circle",
+            "warning" => "exclamationmark.triangle",
+            "error" => "xmark.circle.fill",
+            _ => "info.circle",
+        };
+        let icon = element.icon("icon").unwrap_or(default_icon);
+        let title = self
+            .text_prop(element, "title")
+            .unwrap_or_else(|| "nil".into());
+        let content = self.text_prop(element, "content").unwrap_or_default();
+        let dismiss_label = self
+            .text_prop(element, "dismiss_label")
+            .unwrap_or_else(|| "nil".into());
+        let (dismiss_target, on_dismiss) = match &element.action {
+            Some(action) => (
+                element
+                    .id
+                    .as_ref()
+                    .map(|_| self.target(element, ctx))
+                    .unwrap_or_else(|| "nil".into()),
+                format!("{{ {} }}", self.action(action)),
+            ),
+            None => ("nil".into(), "nil".into()),
+        };
+        out.open(format!(
+            "BernBanner(severity: {}, title: {title}, content: {content}, systemImage: {}, dismissLabel: {dismiss_label}, dismissTarget: {dismiss_target}, onDismiss: {on_dismiss}) {{",
+            string(severity),
+            string(icon),
+        ));
+        self.nodes(out, &element.children, ctx);
+        out.close("}");
+    }
+
+    pub(super) fn disclosure(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let label = self.text_prop(element, "label").unwrap_or_default();
+        let icon = element
+            .icon("icon")
+            .map(string)
+            .unwrap_or_else(|| "nil".into());
+        let (external_binding, on_toggle) = if element.expr("open").is_some() {
+            let (_, binding, _) = self.control_value(element, "open");
+            (binding, "nil".into())
+        } else if let Some(field) = self.field(element, "expanded") {
+            let action = element
+                .action
+                .as_ref()
+                .map(|a| format!("; {}", self.action(a)))
+                .unwrap_or_default();
+            (
+                format!(
+                    "SwiftUI.Binding(get: {{ {field} }}, set: {{ newValue in {field} = newValue{action} }})"
+                ),
+                "nil".into(),
+            )
+        } else {
+            let on_toggle = element
+                .action
+                .as_ref()
+                .map(|a| format!("{{ _ in {} }}", self.action(a)))
+                .unwrap_or_else(|| "nil".into());
+            ("nil".into(), on_toggle)
+        };
+        out.open(format!(
+            "BernDisclosure(label: {label}, systemImage: {icon}, externalExpanded: {external_binding}, onToggle: {on_toggle}, target: {}) {{",
+            self.target(element, ctx)
+        ));
+        self.nodes(out, &element.children, ctx);
+        out.close("}");
+    }
+
+    pub(super) fn number_input(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let label = self.text_prop(element, "label").unwrap_or_default();
+        let label_hidden = element.keyword("label_hidden") == Some("true");
+        let min_arg = element
+            .number("min")
+            .map(double)
+            .unwrap_or_else(|| "nil".into());
+        let max_arg = element
+            .number("max")
+            .map(double)
+            .unwrap_or_else(|| "nil".into());
+        let step_val = element.number("step").unwrap_or(1.0);
+        let is_int = matches!(element.expr("current").map(|e| &e.ty), Some(Type::Int));
+        let precision =
+            infer_precision(element.number("precision"), element.number("step"), is_int);
+        let enabled = element
+            .expr("enabled")
+            .map(|e| self.expr(e))
+            .unwrap_or_else(|| "true".into());
+        let clamp_expr = |raw: &str| {
+            let mut expr = raw.to_string();
+            if let Some(min) = element.number("min") {
+                expr = format!("max({expr}, {})", double(min));
+            }
+            if let Some(max) = element.number("max") {
+                expr = format!("min({expr}, {})", double(max));
+            }
+            let factor = 10_f64.powi(precision as i32);
+            format!(
+                "(({expr} * {}).rounded() / {})",
+                double(factor),
+                double(factor)
+            )
+        };
+        if let Some(current) = element.expr("current") {
+            let (raw_val, _, commit) = self.control_value(element, "current");
+            let value = if current.ty == Type::Int {
+                format!("Double({raw_val})")
+            } else {
+                raw_val
+            };
+            let clamped = clamp_expr("v");
+            out.line(format!(
+                "BernNumberInput(value: {value}, minimum: {min_arg}, maximum: {max_arg}, step: {}, precision: {precision}, label: {label}, labelHidden: {label_hidden}, enabled: {enabled}, commit: {commit})",
+                double(step_val)
+            ));
+            out.line(format!(
+                ".bernControl({}, role: \"number_input\", label: {label}, enabled: {enabled}, actions: BernControlActions(edit: {{ text in if let v = Double(text.trimmingCharacters(in: .whitespacesAndNewlines)), v.isFinite {{ ({commit})({clamped}) }} }}, setNumber: {{ v in guard v.isFinite else {{ return }}; ({commit})({clamped}) }}, value: {{ BernText.text({value}) }}))",
+                self.target(element, ctx)
+            ));
+            return;
+        }
+        let field = self.field(element, "value").expect("number field");
+        let action = element
+            .action
+            .as_ref()
+            .map(|a| format!("; {}", self.action(a)))
+            .unwrap_or_default();
+        let clamped = clamp_expr("v");
+        let commit = format!("{{ next in {field} = next{action} }}");
+        out.line(format!(
+            "BernNumberInput(value: {field}, minimum: {min_arg}, maximum: {max_arg}, step: {}, precision: {precision}, label: {label}, labelHidden: {label_hidden}, enabled: {enabled}, commit: {commit})",
+            double(step_val)
+        ));
+        out.line(format!(
+            ".bernControl({}, role: \"number_input\", label: {label}, enabled: {enabled}, actions: BernControlActions(edit: {{ text in if let v = Double(text.trimmingCharacters(in: .whitespacesAndNewlines)), v.isFinite {{ {field} = {clamped}{action} }} }}, setNumber: {{ v in guard v.isFinite else {{ return }}; {field} = {clamped}{action} }}, value: {{ BernText.text({field}) }}))",
+            self.target(element, ctx)
+        ));
+    }
+
+    pub(super) fn alert(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let title = self.text_prop(element, "title").unwrap_or_default();
+        let message = self
+            .text_prop(element, "message")
+            .unwrap_or_else(|| "nil".into());
+        let on_dismiss = element
+            .action
+            .as_ref()
+            .map(|a| format!("{{ {} }}", self.action(a)))
+            .unwrap_or_else(|| "nil".into());
+        let mut specs = Vec::new();
+        for (idx, child) in element.children.iter().enumerate() {
+            let Node::Element(act) = child else {
+                continue;
+            };
+            if act.kind != "AlertAction" {
+                continue;
+            }
+            let id = act.id.as_deref().unwrap_or("action");
+            let target = self.target(act, ctx);
+            let label = self.text_prop(act, "label").unwrap_or_default();
+            let role = act.keyword("role").unwrap_or("default");
+            let enabled = act
+                .expr("enabled")
+                .map(|e| self.expr(e))
+                .unwrap_or_else(|| "true".into());
+            let code = act
+                .action
+                .as_ref()
+                .map(|a| self.action(a))
+                .unwrap_or_default();
+            specs.push(format!(
+                "BernAlertActionSpec(id: {}, target: {target}, label: {label}, role: {}, enabled: {enabled}, action: {{ {code} }})",
+                string(&format!("{id}_{idx}")),
+                string(role)
+            ));
+        }
+        out.line(format!(
+            "BernAlertView(title: {title}, message: {message}, actions: [{}], onDismiss: {on_dismiss})",
+            specs.join(", ")
+        ));
+    }
+
     pub(super) fn picker(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        if element.expr("items").is_some() {
+            return self.dynamic_picker(out, element, ctx);
+        }
         let ty = element
             .expr("selected")
             .map(|e| &e.ty)
@@ -932,6 +1129,25 @@ impl Generator<'_> {
         let actions = format!(
             "BernControlActions(select: {{ name in guard let value = {enum_type}(bernName: name) else {{ return false }}; ({setter})(value); return true }}, value: {{ {field}.bernName }})"
         );
+        if element.keyword("style") == Some("combobox") {
+            let prompt = self
+                .text_prop(element, "prompt")
+                .unwrap_or_else(|| "\"\"".into());
+            let height = self
+                .length(element, "height")
+                .unwrap_or_else(|| "nil".into());
+            out.line(format!(
+                "BernComboBox(selection: {binding}, label: {label}, labelHidden: {}, prompt: {prompt}, options: {}, capsule: {}, height: {height})",
+                element.keyword("label_hidden") == Some("true"),
+                pairs(),
+                element.keyword("shape") == Some("capsule"),
+            ));
+            out.line(format!(
+                ".bernControl({}, role: \"picker\", label: {label}, actions: {actions})",
+                self.target(element, ctx)
+            ));
+            return;
+        }
         // A chip per option; in a flow the chips are the flow's items, so
         // the picker has no view of its own to carry its label.
         if element.keyword("style") == Some("chips") {
@@ -1062,6 +1278,205 @@ impl Generator<'_> {
                 ));
                 out.close("}");
             }
+            if arrow {
+                out.line("SwiftUI.Image(systemName: \"chevron.down\").font(.system(size: 10, weight: .semibold)).frame(width: 12, height: 12).opacity(0.6)");
+                out.close("}");
+                out.line(".padding(.trailing, -3)");
+            }
+            out.close("}");
+            if self.platform == Platform::Macos {
+                out.line(".menuStyle(.borderlessButton)");
+            }
+            out.line(format!(
+                ".bernCapsuleControl(height: {}{})",
+                self.length(element, "height").unwrap_or_else(|| {
+                    if row && self.platform == Platform::Tvos {
+                        "46.0".into()
+                    } else {
+                        "32.0".into()
+                    }
+                }),
+                if row && self.platform == Platform::Ios {
+                    ", filled: true"
+                } else {
+                    ""
+                }
+            ));
+            out.line(format!(
+                ".accessibilityLabel(SwiftUI.Text(verbatim: {label}))"
+            ));
+        }
+        if row {
+            if self.platform == Platform::Ios {
+                out.close("} label: {");
+                out.indent += 1;
+                out.line(format!("SwiftUI.Text(verbatim: {label})"));
+            }
+            out.close("}");
+        }
+        out.line(format!(
+            ".bernControl({}, role: \"picker\", label: {label}, actions: {actions})",
+            self.target(element, ctx)
+        ));
+    }
+
+    fn dynamic_picker(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let items_expr = element.expr("items").expect("dynamic picker items");
+        let items_code = self.expr(items_expr);
+        let Type::List { inner } = &items_expr.ty else {
+            return;
+        };
+        let Type::Record { name: rec_name } = inner.as_ref() else {
+            return;
+        };
+        let def = self.types().record_def(rec_name).expect("picker record");
+        let Some(Prop::Key { field: key_idx, .. }) = element.prop("key") else {
+            return;
+        };
+        let Some(Prop::Key {
+            field: label_idx, ..
+        }) = element.prop("item_label")
+        else {
+            return;
+        };
+        let key_def = &def.fields[*key_idx];
+        let label_def = &def.fields[*label_idx];
+        let key_member = member(&key_def.name);
+        let label_member = member(&label_def.name);
+        let item_label_expr = |var: &str| match &label_def.ty {
+            Type::Text => format!("{var}.{label_member}"),
+            Type::Int | Type::Float | Type::Enum { .. } => {
+                format!("BernText.text({var}.{label_member})")
+            }
+            _ => format!("String(describing: {var}.{label_member})"),
+        };
+        let (field, binding, setter) = self.control_value(element, "selected");
+        let label = self.text_prop(element, "label").unwrap_or_default();
+        let prompt = self
+            .text_prop(element, "prompt")
+            .unwrap_or_else(|| "\"\"".into());
+        let pairs = format!(
+            "({items_code}).map {{ item in ({}, item.{key_member}) }}",
+            item_label_expr("item")
+        );
+        let actions = if key_def.ty == Type::Int {
+            format!(
+                "BernControlActions(select: {{ name in guard let parsed = Int64(name), ({items_code}).contains(where: {{ $0.{key_member} == parsed }}) else {{ return false }}; ({setter})(parsed); return true }}, value: {{ String({field}) }})"
+            )
+        } else {
+            format!(
+                "BernControlActions(select: {{ name in guard ({items_code}).contains(where: {{ $0.{key_member} == name }}) else {{ return false }}; ({setter})(name); return true }}, value: {{ {field} }})"
+            )
+        };
+        if element.keyword("style") == Some("combobox") {
+            let height = self
+                .length(element, "height")
+                .unwrap_or_else(|| "nil".into());
+            out.line(format!(
+                "BernComboBox(selection: {binding}, label: {label}, labelHidden: {}, prompt: {prompt}, options: {pairs}, capsule: {}, height: {height})",
+                element.keyword("label_hidden") == Some("true"),
+                element.keyword("shape") == Some("capsule"),
+            ));
+            out.line(format!(
+                ".bernControl({}, role: \"picker\", label: {label}, actions: {actions})",
+                self.target(element, ctx)
+            ));
+            return;
+        }
+        if element.keyword("style") == Some("chips") {
+            out.line(format!(
+                "BernChips(selection: {binding}, options: {pairs}, flat: {}, target: {}, label: {label}, actions: {actions})",
+                ctx.flow && element.keyword("label_hidden") == Some("true"),
+                self.target(element, ctx)
+            ));
+            return;
+        }
+        if self.platform == Platform::Watchos && element.keyword("style") != Some("inline") {
+            out.line(format!(
+                "BernWatchPicker(selection: {binding}, label: {label}, options: {pairs}, labelHidden: {}, capsule: {}, height: {})",
+                element.keyword("label_hidden") == Some("true"),
+                element.keyword("shape") == Some("capsule"),
+                self.length(element, "height").unwrap_or_else(|| "32.0".into())
+            ));
+            out.line(format!(
+                ".bernControl({}, role: \"picker\", label: {label}, actions: {actions})",
+                self.target(element, ctx)
+            ));
+            return;
+        }
+        if self.platform == Platform::Tvos && element.keyword("style") == Some("segmented") {
+            out.line(format!(
+                "BernSegments(selection: {binding}, options: {pairs}).bernAccentTint()"
+            ));
+            out.line(format!(
+                ".accessibilityLabel(SwiftUI.Text(verbatim: {label}))"
+            ));
+            out.line(format!(
+                ".bernControl({}, role: \"picker\", label: {label}, actions: {actions})",
+                self.target(element, ctx)
+            ));
+            return;
+        }
+        let menu = matches!(
+            element.keyword("style"),
+            None | Some("automatic") | Some("menu")
+        );
+        let row = matches!(self.platform, Platform::Tvos | Platform::Ios)
+            && menu
+            && element.keyword("shape") != Some("capsule")
+            && element.keyword("label_hidden") != Some("true");
+        let capsule = row || element.keyword("shape") == Some("capsule");
+        if row {
+            if self.platform == Platform::Ios {
+                out.open("SwiftUI.LabeledContent {");
+            } else {
+                out.open("SwiftUI.HStack(spacing: 12) {");
+                out.line(format!("SwiftUI.Text(verbatim: {label})"));
+                out.line("SwiftUI.Spacer(minLength: 12)");
+            }
+        }
+        if capsule {
+            out.open("SwiftUI.Menu {");
+        }
+        out.open(format!("SwiftUI.Picker(selection: {binding}) {{"));
+        out.open(format!(
+            "SwiftUI.ForEach({items_code}, id: \\.{key_member}) {{ item in"
+        ));
+        out.line(format!(
+            "SwiftUI.Text(verbatim: {}).tag(item.{key_member})",
+            item_label_expr("item")
+        ));
+        out.close("}");
+        out.close("} label: {");
+        out.indent += 1;
+        out.line(format!("SwiftUI.Text(verbatim: {label})"));
+        out.close("}");
+        if element.keyword("label_hidden") == Some("true") {
+            out.line(".labelsHidden()");
+        }
+        match element.keyword("style") {
+            _ if menu && capsule => out.line(".pickerStyle(.inline)"),
+            _ if menu => out.line(format!(".pickerStyle(.menu){}", menu_tint(self.platform))),
+            Some("segmented") => out.line(".pickerStyle(.segmented).tint(SwiftUI.Color.secondary)"),
+            Some("radio") if self.platform.uikit() => out.line(".pickerStyle(.inline)"),
+            Some("radio") => out.line(".pickerStyle(.radioGroup)"),
+            Some("inline") => out.line(".pickerStyle(.inline)"),
+            _ => {}
+        }
+        if element.keyword("label_hidden") == Some("true") {
+            out.line(".labelsHidden()");
+        }
+        if capsule {
+            out.close("} label: {");
+            out.indent += 1;
+            let arrow = self.platform.uikit();
+            if arrow {
+                out.open("SwiftUI.HStack(spacing: 6) {");
+            }
+            out.line(format!(
+                "SwiftUI.Text(verbatim: ({items_code}).first(where: {{ $0.{key_member} == {field} }}).map {{ {} }} ?? ({prompt}.isEmpty ? {label} : {prompt}))",
+                item_label_expr("$0")
+            ));
             if arrow {
                 out.line("SwiftUI.Image(systemName: \"chevron.down\").font(.system(size: 10, weight: .semibold)).frame(width: 12, height: 12).opacity(0.6)");
                 out.close("}");
@@ -1333,6 +1748,23 @@ fn remote_key(text: &str) -> Option<&'static str> {
 /// accent, which the system would give them. macOS draws the system's own
 /// pop-up button, in the words' color as in System Settings; iOS and tvOS
 /// the value in the secondary color, as Settings lists a choice.
+fn infer_precision(precision: Option<f64>, step: Option<f64>, is_int: bool) -> u32 {
+    if let Some(p) = precision {
+        return p.round().clamp(0.0, 6.0) as u32;
+    }
+    if is_int {
+        return 0;
+    }
+    if let Some(s) = step {
+        let formatted = format!("{s:.4}");
+        let trimmed = formatted.trim_end_matches('0');
+        if let Some((_, frac)) = trimmed.split_once('.') {
+            return (frac.len() as u32).min(4);
+        }
+    }
+    0
+}
+
 fn menu_tint(platform: Platform) -> &'static str {
     match platform {
         Platform::Macos => ".tint(nil as SwiftUI.Color?)",

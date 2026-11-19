@@ -307,3 +307,119 @@ fun BernSearchItem(target: String, label: String, icon: ImageVector?, detail: St
         }
     }
 }
+
+@Composable
+fun BernTooltip(content: String, child: @Composable () -> Unit) {
+    child()
+}
+
+@Composable
+fun BernBanner(
+    severity: String,
+    title: String?,
+    content: String,
+    icon: ImageVector?,
+    dismissLabel: String?,
+    dismissTarget: String?,
+    onDismiss: (() -> Unit)?,
+    actions: @Composable RowScope.() -> Unit,
+) {
+    if (dismissTarget != null && onDismiss != null) {
+        BernControl(dismissTarget, "button", dismissLabel ?: content, actions = BernControlActions(activate = onDismiss))
+    }
+    Column(Modifier.fillMaxWidth().padding(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (!title.isNullOrEmpty()) Text(title, style = MaterialTheme.typography.titleSmall)
+        Text(content, style = MaterialTheme.typography.bodySmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), content = actions)
+        if (onDismiss != null) {
+            TextButton(onClick = onDismiss) { Text(dismissLabel ?: "Dismiss") }
+        }
+    }
+}
+
+@Composable
+fun BernDisclosure(
+    target: String,
+    label: String,
+    icon: ImageVector?,
+    externalExpanded: Boolean?,
+    onToggle: ((Boolean) -> Unit)?,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    var localExpanded by remember { mutableStateOf(false) }
+    val expanded = externalExpanded ?: localExpanded
+    val setExpanded: (Boolean) -> Unit = { next ->
+        if (externalExpanded != null) onToggle?.invoke(next)
+        else { localExpanded = next; onToggle?.invoke(next) }
+    }
+    BernControl(target, "disclosure", label, actions = BernControlActions(
+        activate = { setExpanded(!expanded) }, setBool = { setExpanded(it) },
+        value = { if (expanded) "true" else "false" }))
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        FilledTonalButton(onClick = { setExpanded(!expanded) }, modifier = Modifier.fillMaxWidth()) {
+            icon?.let { Icon(it, null, Modifier.size(18.dp)) }
+            Text(label)
+        }
+        if (expanded) content()
+    }
+}
+
+@Composable
+fun BernNumberInput(
+    target: String,
+    label: String,
+    value: Double,
+    onCommit: (Double) -> Unit,
+    min: Double?,
+    max: Double?,
+    step: Double,
+    precision: Int,
+    enabled: Boolean,
+    labelHidden: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val clampedPrecision = precision.coerceIn(0, 6)
+    fun clampRound(raw: Double): Double {
+        if (!raw.isFinite()) return value
+        var v = raw
+        if (min != null) v = maxOf(v, min)
+        if (max != null) v = minOf(v, max)
+        val factor = Math.pow(10.0, clampedPrecision.toDouble())
+        return Math.round(v * factor) / factor
+    }
+    BernControl(target, "number_input", label, enabled = enabled, actions = BernControlActions(
+        edit = { it.trim().toDoubleOrNull()?.let { v -> if (v.isFinite()) onCommit(clampRound(v)) } },
+        setNumber = { v -> if (v.isFinite()) onCommit(clampRound(v)) },
+        value = { BernText.text(value) }))
+    Column(modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        if (!labelHidden) Text(label, style = MaterialTheme.typography.labelMedium)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilledTonalButton(onClick = { onCommit(clampRound(value - step)) }, enabled = enabled) { Text("-") }
+            Text(if (clampedPrecision == 0) Math.round(value).toString() else String.format(java.util.Locale.US, "%.${clampedPrecision}f", value))
+            FilledTonalButton(onClick = { onCommit(clampRound(value + step)) }, enabled = enabled) { Text("+") }
+        }
+    }
+}
+
+@Composable
+fun BernAlert(
+    title: String,
+    message: String?,
+    actions: List<BernAlertActionSpec>,
+    onDismiss: (() -> Unit)?,
+) {
+    for (act in actions) {
+        BernControl(act.target, "button", act.label, enabled = act.enabled, actions = BernControlActions(activate = act.onClick))
+    }
+    val cancel = actions.firstOrNull { it.role == "cancel" }
+    BernWearDialog(onDismiss = {
+        if (onDismiss != null) onDismiss()
+        else if (cancel != null && cancel.enabled) cancel.onClick()
+    }) {
+        Text(title, style = MaterialTheme.typography.titleMedium)
+        if (!message.isNullOrEmpty()) Text(message, style = MaterialTheme.typography.bodySmall)
+        for (act in actions) {
+            BernButton(act.label, null, BernProminence.Standard, destructive = act.role == "destructive", enabled = act.enabled, fill = true, onClick = act.onClick)
+        }
+    }
+}

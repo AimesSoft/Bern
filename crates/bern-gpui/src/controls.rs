@@ -904,15 +904,18 @@ pub fn picker(
     let select: Rc<dyn Fn(&str) -> bool> = {
         let choose = Rc::clone(&choose);
         let options = options.clone();
-        Rc::new(
-            move |wanted: &str| match options.iter().find(|(_, label)| label == wanted) {
+        Rc::new(move |wanted: &str| {
+            let found = options
+                .iter()
+                .find(|(value, label)| label == wanted || crate::value::key_text(value) == wanted);
+            match found {
                 Some((value, _)) => {
                     choose(value.clone());
                     true
                 }
                 None => false,
-            },
-        )
+            }
+        })
     };
     c.list(Control {
         target: c.target(id),

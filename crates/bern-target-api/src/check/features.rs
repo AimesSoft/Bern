@@ -578,10 +578,10 @@ fn controlled_values(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     if let Some(control) = first_element(app, |e| {
-        if e.kind == "Slider" || e.kind == "ColorPicker" {
-            // Draft-backed sliders and color pickers already support commit actions on every target.
+        if e.kind == "Slider" || e.kind == "ColorPicker" || e.kind == "NumberInput" {
+            // Draft-backed sliders, color pickers and number inputs already support commit actions on every target.
             e.prop("current").is_some()
-        } else if e.kind == "PopoverButton" {
+        } else if e.kind == "PopoverButton" || e.kind == "Disclosure" {
             e.prop("open").is_some()
         } else {
             matches!(e.kind.as_str(), "Switch" | "Picker")

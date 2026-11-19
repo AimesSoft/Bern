@@ -215,7 +215,7 @@ private class BernWearPickerHistory<T> {
 @Composable
 fun <T> BernPicker(label: String, options: List<T>, selected: T, optionLabel: (T) -> String,
     onSelect: (T) -> Unit, style: String, modifier: Modifier = Modifier, labelHidden: Boolean = false,
-    shape: BernShape? = null, inFlow: Boolean = false, inRow: Boolean = false) {
+    shape: BernShape? = null, inFlow: Boolean = false, inRow: Boolean = false, prompt: String = "") {
     var open by remember { mutableStateOf(false) }
     val inline = style in listOf("radio", "inline", "segmented", "chips")
     // An empty/replaced inline picker must not reopen an old dialog when its
