@@ -2126,6 +2126,49 @@ extension BernFiles {
             panel.begin { response in MainActor.assumeIsolated { done(response) } }
         }
     }
+
+    /// Asks for one or more files of `kinds` with the system's open panel.
+    static func pickMany(_ kinds: String, then give: @escaping @MainActor ([URL]) -> Void) {
+        let words = words(kinds)
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = words.contains("folder")
+        panel.canChooseFiles = words != ["folder"]
+        if !words.contains("any") {
+            let types = types(kinds).filter { $0 != .folder }
+            if !types.isEmpty { panel.allowedContentTypes = types }
+        }
+        let done: @MainActor (NSApplication.ModalResponse) -> Void = { response in
+            if response == .OK, !panel.urls.isEmpty { give(panel.urls) }
+        }
+        if let window = NSApp.keyWindow {
+            panel.beginSheetModal(for: window) { response in MainActor.assumeIsolated { done(response) } }
+        } else {
+            panel.begin { response in MainActor.assumeIsolated { done(response) } }
+        }
+    }
+
+    /// Asks for a save destination with the system's save panel.
+    static func save(_ kinds: String, suggestedName: String?, then give: @escaping @MainActor (URL) -> Void) {
+        let words = words(kinds)
+        let panel = NSSavePanel()
+        panel.canCreateDirectories = true
+        if let suggestedName, !suggestedName.isEmpty {
+            panel.nameFieldStringValue = suggestedName
+        }
+        if !words.contains("any") {
+            let types = types(kinds).filter { $0 != .folder }
+            if !types.isEmpty { panel.allowedContentTypes = types }
+        }
+        let done: @MainActor (NSApplication.ModalResponse) -> Void = { response in
+            if response == .OK, let url = panel.url { give(url) }
+        }
+        if let window = NSApp.keyWindow {
+            panel.beginSheetModal(for: window) { response in MainActor.assumeIsolated { done(response) } }
+        } else {
+            panel.begin { response in MainActor.assumeIsolated { done(response) } }
+        }
+    }
 }
 
 // MARK: - Menus in a part with its own appearance

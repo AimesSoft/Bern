@@ -345,15 +345,52 @@ impl Generator<'_> {
                 None,
             );
         }
+        if let Some(save_ref) = element.field("save") {
+            let field = self.field(element, "save").expect("save field");
+            let kinds = string(element.keyword("files").unwrap_or("any"));
+            let suggested = self
+                .text_prop(element, "suggested_name")
+                .unwrap_or_else(|| "null".into());
+            let (give_save, give_cli) = match &save_ref.ty {
+                Type::Text => (
+                    format!("(url, name) => {{ {field}.set(name || url); {inner} }}"),
+                    format!("(url) => {{ {field}.set(url); {inner} }}"),
+                ),
+                _ => (
+                    format!("(url) => {{ {field}.set({{ url }}); {inner} }}"),
+                    format!("(url) => {{ {field}.set({{ url }}); {inner} }}"),
+                ),
+            };
+            return (
+                format!("() => F.saveFile({kinds}, {suggested}, {give_save})"),
+                Some(give_cli),
+                Some(kinds),
+            );
+        }
         match self.field(element, "pick") {
             Some(field) => {
                 let kinds = string(element.keyword("files").unwrap_or("any"));
-                let give = format!("(url) => {{ {field}.set({{ url }}); {inner} }}");
-                (
-                    format!("() => F.pick({kinds}, {give})"),
-                    Some(give),
-                    Some(kinds),
-                )
+                if matches!(
+                    element.field("pick").map(|f| &f.ty),
+                    Some(Type::List { .. })
+                ) {
+                    let give_cli = format!("(url) => {{ {field}.set([{{ url }}]); {inner} }}");
+                    let give_many = format!(
+                        "(urls) => {{ {field}.set(urls.map((url) => ({{ url }}))); {inner} }}"
+                    );
+                    (
+                        format!("() => F.pickMany({kinds}, {give_many})"),
+                        Some(give_cli),
+                        Some(kinds),
+                    )
+                } else {
+                    let give = format!("(url) => {{ {field}.set({{ url }}); {inner} }}");
+                    (
+                        format!("() => F.pick({kinds}, {give})"),
+                        Some(give),
+                        Some(kinds),
+                    )
+                }
             }
             None => (self.action_fn(element), None, None),
         }

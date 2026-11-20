@@ -641,6 +641,18 @@ impl Checker<'_> {
                 self.field_prop(value, scope, FieldExpect::OptionalNumber)
             }
             PropKind::FileField => self.field_prop(value, scope, FieldExpect::File),
+            PropKind::SaveFileField => self.field_prop(value, scope, FieldExpect::SaveFile),
+            PropKind::DateField => self.field_prop(value, scope, FieldExpect::Date),
+            PropKind::DateValue => self
+                .expect(
+                    value,
+                    &Type::Record {
+                        name: bern_protocol::format::CALENDAR_DATE.into(),
+                    },
+                    scope,
+                    "a date",
+                )
+                .map(|expr| ir::Prop::Expr { expr }),
             PropKind::PositionField => self.field_prop(value, scope, FieldExpect::Position),
             PropKind::KeysField => self.field_prop(value, scope, FieldExpect::Keys),
             PropKind::FileKinds => self.file_kinds(value),

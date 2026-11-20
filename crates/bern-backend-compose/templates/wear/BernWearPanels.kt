@@ -12,6 +12,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.graphics.Color
@@ -420,6 +421,164 @@ fun BernAlert(
         if (!message.isNullOrEmpty()) Text(message, style = MaterialTheme.typography.bodySmall)
         for (act in actions) {
             BernButton(act.label, null, BernProminence.Standard, destructive = act.role == "destructive", enabled = act.enabled, fill = true, onClick = act.onClick)
+        }
+    }
+}
+
+@Composable
+fun BernSelectable(content: @Composable () -> Unit) {
+    content()
+}
+
+@Composable
+fun BernDatePicker(
+    target: String,
+    label: String,
+    year: Long,
+    month: Long,
+    day: Long,
+    onCommit: (Long, Long, Long) -> Unit,
+    minDate: Triple<Long, Long, Long>? = null,
+    maxDate: Triple<Long, Long, Long>? = null,
+    enabled: Boolean = true,
+    labelHidden: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
+    val iso = String.format(java.util.Locale.US, "%04d-%02d-%02d", year.coerceIn(1L, 9999L), month.coerceIn(1L, 12L), day.coerceIn(1L, 31L))
+    fun stepDay(delta: Int) {
+        val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
+        cal.clear()
+        cal.set(year.coerceIn(1L, 9999L).toInt(), (month.coerceIn(1L, 12L) - 1L).toInt(), day.coerceIn(1L, 31L).toInt())
+        cal.add(java.util.Calendar.DAY_OF_MONTH, delta)
+        onCommit(cal.get(java.util.Calendar.YEAR).toLong(), (cal.get(java.util.Calendar.MONTH) + 1).toLong(), cal.get(java.util.Calendar.DAY_OF_MONTH).toLong())
+    }
+    BernControl(
+        target,
+        "date_picker",
+        label,
+        enabled = enabled,
+        actions = BernControlActions(
+            edit = { text ->
+                val parts = text.trim().split("-")
+                if (parts.size == 3) {
+                    val y = parts[0].toLongOrNull()
+                    val m = parts[1].toLongOrNull()
+                    val d = parts[2].toLongOrNull()
+                    if (y != null && m != null && d != null) onCommit(y, m, d)
+                }
+            },
+            value = { iso },
+        ),
+    )
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (!labelHidden) Text(label, style = MaterialTheme.typography.labelMedium)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FilledTonalButton(onClick = { stepDay(-1) }, enabled = enabled) { Text("-") }
+            Text(iso, style = MaterialTheme.typography.bodySmall)
+            FilledTonalButton(onClick = { stepDay(1) }, enabled = enabled) { Text("+") }
+        }
+    }
+}
+
+@Composable
+fun BernTimePicker(
+    target: String,
+    label: String,
+    minutes: Double,
+    onCommit: (Double) -> Unit,
+    minMinutes: Double = 0.0,
+    maxMinutes: Double = 1439.0,
+    step: Double = 1.0,
+    enabled: Boolean = true,
+    labelHidden: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
+    val lo = minMinutes.coerceIn(0.0, 1439.0)
+    val hi = maxMinutes.coerceIn(lo, 1439.0)
+    val st = kotlin.math.round(step).coerceIn(1.0, 60.0)
+    val total = minutes.coerceIn(lo, hi).toInt()
+    val formatted = String.format(java.util.Locale.US, "%02d:%02d", total / 60, total % 60)
+    BernControl(
+        target,
+        "time_picker",
+        label,
+        enabled = enabled,
+        actions = BernControlActions(
+            setNumber = { v -> if (v.isFinite()) onCommit(v.coerceIn(lo, hi)) },
+            value = { formatted },
+        ),
+    )
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (!labelHidden) Text(label, style = MaterialTheme.typography.labelMedium)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FilledTonalButton(onClick = { onCommit((minutes - st).coerceIn(lo, hi)) }, enabled = enabled) { Text("-") }
+            Text(formatted, style = MaterialTheme.typography.bodySmall)
+            FilledTonalButton(onClick = { onCommit((minutes + st).coerceIn(lo, hi)) }, enabled = enabled) { Text("+") }
+        }
+    }
+}
+
+@Composable
+fun BernEmptyState(
+    title: String,
+    message: String?,
+    icon: ImageVector?,
+    actions: @Composable RowScope.() -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        if (icon != null) Icon(icon, contentDescription = null, modifier = Modifier.size(28.dp))
+        Text(title, style = MaterialTheme.typography.titleSmall)
+        if (!message.isNullOrEmpty()) Text(message, style = MaterialTheme.typography.bodySmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { actions() }
+    }
+}
+
+@Composable
+fun BernBadge(
+    content: String,
+    tone: String,
+    icon: ImageVector?,
+) {
+    val tint = when (tone) {
+        "accent" -> bernPalette().role("accent")
+        "success" -> bernPalette().role("status.success")
+        "warning" -> bernPalette().role("status.warning")
+        "error" -> bernPalette().role("status.error")
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Row(
+        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        if (icon != null) Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(10.dp))
+        Text(content, style = MaterialTheme.typography.labelSmall, color = tint, maxLines = 1)
+    }
+}
+
+@Composable
+fun BernAvatar(
+    label: String,
+    name: String?,
+    url: String?,
+    size: Dp,
+    rounded: Boolean,
+) {
+    val trimmed = label.trim()
+    val initials = if (trimmed.isEmpty()) "?" else trimmed.substring(0, 1).uppercase()
+    Box(
+        modifier = Modifier.size(size),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(initials, style = MaterialTheme.typography.labelMedium)
+        if (!name.isNullOrEmpty()) {
+            BernImage(name, null, size, size, ContentScale.Crop)
+        } else if (!url.isNullOrEmpty()) {
+            BernImageURL(url, null, size, size, ContentScale.Crop)
         }
     }
 }

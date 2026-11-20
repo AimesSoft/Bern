@@ -37,7 +37,7 @@ pub fn menu_item(
     icon: Option<&'static str>,
     destructive: bool,
     enabled: bool,
-    pick: Option<(crate::Field, &'static str)>,
+    pick: Option<crate::FilePrompt>,
     shortcut: Option<String>,
     action: Option<crate::Act>,
 ) -> MenuEntry {

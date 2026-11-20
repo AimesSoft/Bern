@@ -199,6 +199,8 @@ struct TextProps {
     Len litSince;
     /// `animate`: a size that follows state springs to each new value.
     Motion const* animate = nullptr;
+    /// `selectable`: user may select and copy the text.
+    bool selectable = false;
 };
 
 /// `lit`: what stands after its whole characters in `text` faded.
@@ -874,6 +876,7 @@ inline void Text(Parent const& p, Ctx const& ctx, TextProps props) {
     if (props.markdown && content) content = [source = content] { return PlainMarkdown(source()); };
     auto block = TextOf(content);
     ApplyTextStyle(block, props.style);
+    if (props.selectable) block.IsTextSelectionEnabled(true);
     if (props.lines) {
         block.MaxLines(static_cast<int32_t>((std::max)(1.0, *props.lines)));
         block.TextTrimming(xaml::TextTrimming::CharacterEllipsis);
@@ -1088,15 +1091,48 @@ inline bool Accepts(std::string const& name, char const* kinds) {
 /// A `MediaSource` for `url`.
 inline Value SourceValue(std::string const& url) { return Value::Record({Value::Text(url)}); }
 
-/// Give a picked or dropped file to `field`: a `MediaSource`, or an
-/// optional one.
+/// Give a picked or dropped file to `field`: a `MediaSource`, optional one,
+/// list of them, or a `String`.
 inline void GiveFile(Ctx const& ctx, Field field, std::string const& url) {
     auto const& type = app->catalog.sessions[field.session].fields[field.field].second;
+    if (type.kind == BType::Kind::Text) {
+        ctx.Write(field, Value::Text(url));
+        return;
+    }
     auto value = SourceValue(url);
-    ctx.Write(field, type.kind == BType::Kind::Optional ? Value::Some(value) : value);
+    if (type.kind == BType::Kind::List) {
+        ctx.Write(field, Value::List({std::move(value)}));
+    } else if (type.kind == BType::Kind::Optional) {
+        ctx.Write(field, Value::Some(std::move(value)));
+    } else {
+        ctx.Write(field, std::move(value));
+    }
+}
+
+inline void GiveFiles(Ctx const& ctx, Field field, std::vector<std::string> const& urls) {
+    auto const& type = app->catalog.sessions[field.session].fields[field.field].second;
+    if (type.kind == BType::Kind::List) {
+        std::vector<Value> list;
+        list.reserve(urls.size());
+        for (auto const& url : urls) list.push_back(SourceValue(url));
+        ctx.Write(field, Value::List(std::move(list)));
+    } else if (!urls.empty()) {
+        GiveFile(ctx, field, urls.front());
+    }
+}
+
+inline void GiveSaveTarget(Ctx const& ctx, Field field, std::string const& url, std::string const& path) {
+    auto const& type = app->catalog.sessions[field.session].fields[field.field].second;
+    if (type.kind == BType::Kind::Text) {
+        ctx.Write(field, Value::Text(path.empty() ? url : path));
+        return;
+    }
+    GiveFile(ctx, field, url);
 }
 
 inline void PickFile(Ctx ctx, char const* kinds, std::function<void(std::string const&)> give);
+inline void PickFiles(Ctx ctx, char const* kinds, std::function<void(std::vector<std::string> const&)> give);
+inline void SaveFile(Ctx ctx, char const* kinds, std::wstring suggested, std::function<void(std::string const&, std::string const&)> give);
 inline winrt::fire_and_forget PasteText(Ctx ctx, Field field, std::function<void()> then);
 
 struct MenuItemDef {
@@ -1107,6 +1143,8 @@ struct MenuItemDef {
     Get enabled;
     Act action;
     std::optional<Field> pick;
+    std::optional<Field> save;
+    Str suggestedName;
     char const* files = nullptr;
     std::optional<Field> paste;
     /// Shown beside the item; the shortcut itself is registered on its own.
@@ -1377,6 +1415,8 @@ struct ButtonProps {
     /// `pick:`: the session field a chosen file goes into before the
     /// action runs.
     std::optional<Field> pick;
+    std::optional<Field> save;
+    Str suggestedName;
     char const* files = nullptr;
     /// `paste:`: the draft the clipboard's text goes into before the action
     /// runs.
@@ -1391,18 +1431,34 @@ struct ButtonProps {
 };
 
 /// What a button does: its action, after asking for a file with `pick` or
-/// reading the clipboard with `paste`. `give` is what external entries
-/// (`ui.set_file`) and the open panel use.
+/// `save`, or reading the clipboard with `paste`. `give` is what external
+/// entries (`ui.set_file`) and the open panel use.
 struct ButtonRun {
     std::function<void()> activate;
     std::function<void(std::string const&)> give;
 };
 
-inline ButtonRun RunOf(Ctx const& ctx, std::optional<Field> pick, char const* files, Act const& action, std::optional<Field> paste = std::nullopt) {
+inline ButtonRun RunOf(Ctx const& ctx, std::optional<Field> pick, char const* files, Act const& action, std::optional<Field> paste = std::nullopt, std::optional<Field> save = std::nullopt, Str const& suggestedName = nullptr) {
     ButtonRun run;
     auto act = Run(ctx, action);
     if (paste) {
         run.activate = [ctx, field = *paste, act] { PasteText(ctx, field, act); };
+        return run;
+    }
+    if (save) {
+        auto field = *save;
+        auto suggested = suggestedName ? Bound(ctx, suggestedName) : nullptr;
+        run.give = [ctx, field, act](std::string const& url) {
+            GiveSaveTarget(ctx, field, url, "");
+            if (act) act();
+        };
+        run.activate = [ctx, field, files, suggested, act] {
+            std::wstring name = suggested ? std::wstring(suggested()) : std::wstring();
+            SaveFile(ctx, files ? files : "any", std::move(name), [ctx, field, act](std::string const& url, std::string const& path) {
+                GiveSaveTarget(ctx, field, url, path);
+                if (act) act();
+            });
+        };
         return run;
     }
     if (!pick) {
@@ -1414,7 +1470,17 @@ inline ButtonRun RunOf(Ctx const& ctx, std::optional<Field> pick, char const* fi
         GiveFile(ctx, field, url);
         if (act) act();
     };
-    run.activate = [ctx, files, give = run.give] { PickFile(ctx, files, give); };
+    bool isList = app->catalog.sessions[field.session].fields[field.field].second.kind == BType::Kind::List;
+    if (isList) {
+        run.activate = [ctx, field, files, act] {
+            PickFiles(ctx, files ? files : "any", [ctx, field, act](std::vector<std::string> const& urls) {
+                GiveFiles(ctx, field, urls);
+                if (act) act();
+            });
+        };
+    } else {
+        run.activate = [ctx, files, give = run.give] { PickFile(ctx, files ? files : "any", give); };
+    }
     return run;
 }
 
@@ -1549,7 +1615,7 @@ inline void Button(Parent const& p, Ctx const& ctx, ButtonProps props) {
     BindName(button, text);
     auto isEnabled = Enabled(ctx, props.enabled);
     if (isEnabled) Reactive::Run([button, isEnabled] { button.IsEnabled(isEnabled()); });
-    auto run = RunOf(ctx, props.pick, props.files, props.action, props.paste);
+    auto run = RunOf(ctx, props.pick, props.files, props.action, props.paste, props.save, props.suggestedName);
     ButtonClicks(button, run.activate, Run(ctx, props.doubleTap));
     Controls::Register(ctx, props.id, "button", text, isEnabled, Actions{.activate = run.activate, .focus = FocusOf(button), .setFile = run.give, .files = props.files});
     if (!props.menu.empty()) ContextMenuOn(ctx, button, props.menu);
@@ -1614,7 +1680,7 @@ inline void ContentButton(Parent const& p, Ctx const& ctx, ButtonProps props, Bu
     BindName(button, text);
     auto isEnabled = Enabled(ctx, props.enabled);
     if (isEnabled) Reactive::Run([button, isEnabled] { button.IsEnabled(isEnabled()); });
-    auto run = RunOf(ctx, props.pick, props.files, props.action, props.paste);
+    auto run = RunOf(ctx, props.pick, props.files, props.action, props.paste, props.save, props.suggestedName);
     ButtonClicks(button, run.activate, Run(ctx, props.doubleTap));
     Controls::Register(ctx, props.id, "button", text, isEnabled, Actions{.activate = run.activate, .focus = FocusOf(button), .setFile = run.give, .files = props.files});
     if (!props.menu.empty()) ContextMenuOn(ctx, button, props.menu);
@@ -1680,6 +1746,8 @@ struct IconButtonProps {
     Act action;
     StyleDef const* style = nullptr;
     std::optional<Field> pick;
+    std::optional<Field> save;
+    Str suggestedName;
     char const* files = nullptr;
     std::optional<Field> paste;
     /// `height`: a button of that size, round when prominent.
@@ -1786,7 +1854,7 @@ inline void IconButton(Parent const& p, Ctx const& ctx, IconButtonProps props) {
         });
     auto isEnabled = Enabled(ctx, props.enabled);
     if (isEnabled) Reactive::Run([button, isEnabled] { button.IsEnabled(isEnabled()); });
-    auto run = RunOf(ctx, props.pick, props.files, props.action, props.paste);
+    auto run = RunOf(ctx, props.pick, props.files, props.action, props.paste, props.save, props.suggestedName);
     if (run.activate) button.Click([activate = run.activate](auto&&, auto&&) { activate(); });
     Controls::Register(ctx, props.id, "button", text, isEnabled, Actions{.activate = run.activate, .focus = FocusOf(button), .setFile = run.give, .files = props.files});
     xaml::UIElement shown = button;
@@ -5179,7 +5247,7 @@ inline std::vector<std::optional<MenuEntry>> MenuPlan(Ctx const& ctx, std::vecto
         }
         auto label = item->label ? Bound(ctx, item->label) : TextFn([] { return winrt::hstring(); });
         auto enabled = Enabled(ctx, item->enabled);
-        auto run = RunOf(ctx, item->pick, item->files, item->action, item->paste);
+        auto run = RunOf(ctx, item->pick, item->files, item->action, item->paste, item->save, item->suggestedName);
         Controls::Register(ctx, item->id, "button", label, enabled, Actions{.activate = run.activate, .setFile = run.give, .files = item->files});
         plan.emplace_back(MenuEntry{*item, ctx, std::move(label), std::move(enabled), std::move(run)});
     }
@@ -5291,6 +5359,470 @@ inline void Menu(Parent const& p, Ctx const& ctx, char const* id, Str const& lab
     KeepWidth(button);
     if (p.isList && !ctx.toolbar) p.Add(Card(button));
     else p.Add(button);
+}
+
+// ---------------------------------------------------------------------------
+// DatePicker, TimePicker, EmptyState, Badge, Avatar
+// ---------------------------------------------------------------------------
+
+struct BernYMD {
+    int64_t year = 2026;
+    int64_t month = 1;
+    int64_t day = 1;
+    bool operator==(BernYMD const& other) const {
+        return year == other.year && month == other.month && day == other.day;
+    }
+    bool operator<(BernYMD const& other) const {
+        if (year != other.year) return year < other.year;
+        if (month != other.month) return month < other.month;
+        return day < other.day;
+    }
+};
+
+inline BernYMD NormalizeYMD(BernYMD v) {
+    if (v.year < 1601 || v.year > 9999) v.year = 2026;
+    v.month = (std::clamp)(v.month, int64_t{1}, int64_t{12});
+    v.day = (std::clamp)(v.day, int64_t{1}, int64_t{31});
+    return v;
+}
+
+inline BernYMD YMDFromValue(Value const& v) {
+    if (v.kind == Value::Kind::Record && v.items && v.items->size() >= 3) {
+        return NormalizeYMD(BernYMD{(*v.items)[0].i, (*v.items)[1].i, (*v.items)[2].i});
+    }
+    return BernYMD{2026, 1, 1};
+}
+
+inline Value ValueFromYMD(BernYMD d) {
+    d = NormalizeYMD(d);
+    return Value::Record({Value::Int(d.year), Value::Int(d.month), Value::Int(d.day)});
+}
+
+inline winrt::Windows::Foundation::DateTime WinRTDateFromYMD(BernYMD d) {
+    d = NormalizeYMD(d);
+    SYSTEMTIME local{};
+    local.wYear = static_cast<WORD>(d.year);
+    local.wMonth = static_cast<WORD>(d.month);
+    local.wDay = static_cast<WORD>(d.day);
+    local.wHour = 12;
+    SYSTEMTIME utc{};
+    if (!TzSpecificLocalTimeToSystemTime(nullptr, &local, &utc)) utc = local;
+    FILETIME ft{};
+    SystemTimeToFileTime(&utc, &ft);
+    uint64_t ticks = (static_cast<uint64_t>(ft.dwHighDateTime) << 32) | static_cast<uint64_t>(ft.dwLowDateTime);
+    return winrt::clock::from_file_time(winrt::file_time{ticks});
+}
+
+inline BernYMD YMDFromWinRTDate(winrt::Windows::Foundation::DateTime dt) {
+    auto wft = winrt::clock::to_file_time(dt);
+    FILETIME ft{};
+    ft.dwLowDateTime = static_cast<DWORD>(wft.value & 0xFFFFFFFFu);
+    ft.dwHighDateTime = static_cast<DWORD>(wft.value >> 32);
+    SYSTEMTIME utc{}, local{};
+    FileTimeToSystemTime(&ft, &utc);
+    if (!SystemTimeToTzSpecificLocalTime(nullptr, &utc, &local)) local = utc;
+    return NormalizeYMD(BernYMD{local.wYear, local.wMonth, local.wDay});
+}
+
+inline std::string FormatISODate(BernYMD d) {
+    d = NormalizeYMD(d);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%04lld-%02lld-%02lld",
+        static_cast<long long>(d.year),
+        static_cast<long long>(d.month),
+        static_cast<long long>(d.day));
+    return std::string(buf);
+}
+
+inline std::optional<BernYMD> ParseISODate(std::string const& raw) {
+    long long y = 0, m = 0, d = 0;
+    if (sscanf_s(raw.c_str(), "%lld-%lld-%lld", &y, &m, &d) != 3) return std::nullopt;
+    if (y < 1601 || y > 9999 || m < 1 || m > 12 || d < 1 || d > 31) return std::nullopt;
+    return YMDFromWinRTDate(WinRTDateFromYMD(BernYMD{y, m, d}));
+}
+
+struct DatePickerProps {
+    char const* id = "";
+    Str label;
+    std::optional<Field> field;
+    Act then;
+    Get current;
+    std::function<void(Ctx const&, Value const&)> change;
+    Get min;
+    Get max;
+    Get enabled;
+    bool labelHidden = false;
+};
+
+inline void DatePicker(Parent const& p, Ctx const& ctx, DatePickerProps props) {
+    auto model = ModelOf(ctx, props.field, props.then, props.current, props.change);
+    if (!model.read) return;
+    auto text = Bound(ctx, props.label);
+    auto minGetter = props.min;
+    auto maxGetter = props.max;
+    auto enabledGetter = props.enabled;
+    auto clampDate = [ctx, minGetter, maxGetter](BernYMD d) {
+        d = NormalizeYMD(d);
+        if (minGetter) {
+            auto lo = YMDFromValue(minGetter(ctx));
+            if (d < lo) d = lo;
+        }
+        if (maxGetter) {
+            auto hi = YMDFromValue(maxGetter(ctx));
+            if (hi < d) d = hi;
+        }
+        return d;
+    };
+    auto commitDate = [model, clampDate](BernYMD next) {
+        next = clampDate(next);
+        auto cur = YMDFromValue(model.peek());
+        if (!(cur == next)) model.write(ValueFromYMD(next));
+    };
+    controls::CalendarDatePicker picker;
+    picker.MinWidth(160);
+    auto updating = std::make_shared<bool>(false);
+    Reactive::Run([picker, model, updating] {
+        auto d = YMDFromValue(model.read());
+        *updating = true;
+        picker.Date(WinRTDateFromYMD(d));
+        *updating = false;
+    });
+    if (minGetter) {
+        Reactive::Run([picker, ctx, minGetter] { picker.MinDate(WinRTDateFromYMD(YMDFromValue(minGetter(ctx)))); });
+    }
+    if (maxGetter) {
+        Reactive::Run([picker, ctx, maxGetter] { picker.MaxDate(WinRTDateFromYMD(YMDFromValue(maxGetter(ctx)))); });
+    }
+    if (enabledGetter) {
+        Reactive::Run([picker, ctx, enabledGetter] { picker.IsEnabled(R::Truthy(enabledGetter(ctx))); });
+    }
+    picker.DateChanged([updating, commitDate](controls::CalendarDatePicker const&, controls::CalendarDatePickerDateChangedEventArgs const& args) {
+        if (*updating) return;
+        if (auto dt = args.NewDate()) commitDate(YMDFromWinRTDate(dt.Value()));
+    });
+    BindName(picker, text);
+    KeepWidth(picker);
+    if (ctx.toolbar || props.labelHidden) p.isList && !ctx.toolbar ? p.Add(Card(picker)) : p.Add(picker);
+    else if (p.isList) p.Add(LabeledCard(text, picker));
+    else p.Add(Stacked(text, picker));
+    Controls::Register(ctx, props.id, "date_picker", text,
+        enabledGetter ? std::function<bool()>([ctx, enabledGetter] { return R::Truthy(enabledGetter(ctx)); }) : nullptr,
+        Actions{
+            .edit = [commitDate](std::string const& s) {
+                if (auto parsed = ParseISODate(s)) commitDate(*parsed);
+            },
+            .value = [model]() -> std::optional<std::string> { return FormatISODate(YMDFromValue(model.peek())); },
+        });
+}
+
+inline double ClampTimeMinutes(double raw, double minVal, double maxVal, double stepVal) {
+    if (!std::isfinite(raw)) return minVal;
+    double step = (std::max)(1.0, std::round(stepVal));
+    double clamped = (std::clamp)(raw, minVal, maxVal);
+    double snapped = minVal + std::round((clamped - minVal) / step) * step;
+    return (std::clamp)(std::round(snapped), minVal, maxVal);
+}
+
+inline std::string FormatTimeMinutes(double mins) {
+    int total = static_cast<int>((std::clamp)(std::isfinite(mins) ? std::round(mins) : 0.0, 0.0, 1439.0));
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%02d:%02d", total / 60, total % 60);
+    return std::string(buf);
+}
+
+inline std::optional<double> ParseTimeMinutes(std::string const& raw) {
+    int h = 0, m = 0;
+    if (sscanf_s(raw.c_str(), "%d:%d", &h, &m) == 2 && h >= 0 && h <= 23 && m >= 0 && m <= 59) {
+        return static_cast<double>(h * 60 + m);
+    }
+    try {
+        double v = std::stod(raw);
+        if (std::isfinite(v)) return v;
+    } catch (...) {}
+    return std::nullopt;
+}
+
+struct TimePickerProps {
+    char const* id = "";
+    Str label;
+    std::optional<Field> field;
+    Act then;
+    Get current;
+    std::function<void(Ctx const&, Value const&)> change;
+    double min = 0.0;
+    double max = 1439.0;
+    double step = 1.0;
+    Get enabled;
+    bool labelHidden = false;
+};
+
+inline void TimePicker(Parent const& p, Ctx const& ctx, TimePickerProps props) {
+    auto model = ModelOf(ctx, props.field, props.then, props.current, props.change);
+    if (!model.read) return;
+    auto text = Bound(ctx, props.label);
+    double minVal = (std::clamp)(props.min, 0.0, 1439.0);
+    double maxVal = (std::clamp)(props.max, minVal, 1439.0);
+    double stepVal = (std::clamp)(std::round(props.step), 1.0, 60.0);
+    auto enabledGetter = props.enabled;
+    auto commitMinutes = [model, minVal, maxVal, stepVal](double raw) {
+        if (!std::isfinite(raw)) return;
+        double next = ClampTimeMinutes(raw, minVal, maxVal, stepVal);
+        double cur = R::AsDouble(model.peek());
+        if (std::abs(cur - next) > 1e-6) model.write(Value::Float(next));
+    };
+    controls::TimePicker picker;
+    picker.MinuteIncrement(static_cast<int32_t>(stepVal));
+    auto updating = std::make_shared<bool>(false);
+    Reactive::Run([picker, model, updating, minVal, maxVal, stepVal] {
+        int mins = static_cast<int>(ClampTimeMinutes(R::AsDouble(model.read()), minVal, maxVal, stepVal));
+        *updating = true;
+        picker.Time(winrt::Windows::Foundation::TimeSpan{std::chrono::minutes(mins)});
+        *updating = false;
+    });
+    if (enabledGetter) {
+        Reactive::Run([picker, ctx, enabledGetter] { picker.IsEnabled(R::Truthy(enabledGetter(ctx))); });
+    }
+    picker.TimeChanged([updating, commitMinutes](IInspectable const&, controls::TimePickerValueChangedEventArgs const& args) {
+        if (*updating) return;
+        auto mins = std::chrono::duration_cast<std::chrono::minutes>(args.NewTime()).count();
+        commitMinutes(static_cast<double>(mins));
+    });
+    BindName(picker, text);
+    KeepWidth(picker);
+    if (ctx.toolbar || props.labelHidden) p.isList && !ctx.toolbar ? p.Add(Card(picker)) : p.Add(picker);
+    else if (p.isList) p.Add(LabeledCard(text, picker));
+    else p.Add(Stacked(text, picker));
+    Controls::Register(ctx, props.id, "time_picker", text,
+        enabledGetter ? std::function<bool()>([ctx, enabledGetter] { return R::Truthy(enabledGetter(ctx)); }) : nullptr,
+        Actions{
+            .edit = [commitMinutes](std::string const& s) {
+                if (auto parsed = ParseTimeMinutes(s)) commitMinutes(*parsed);
+            },
+            .setNumber = [commitMinutes](double v) { commitMinutes(v); },
+            .value = [model]() -> std::optional<std::string> { return FormatTimeMinutes(R::AsDouble(model.peek())); },
+        });
+}
+
+struct EmptyStateProps {
+    Str title;
+    Str message;
+    char const* icon = nullptr;
+};
+
+inline void EmptyState(Parent const& p, Ctx const& ctx, EmptyStateProps props, Build const& actions) {
+    controls::StackPanel box;
+    box.Spacing(10);
+    box.Padding(xaml::Thickness{24, 24, 24, 24});
+    box.HorizontalAlignment(xaml::HorizontalAlignment::Center);
+    box.VerticalAlignment(xaml::VerticalAlignment::Center);
+    if (props.icon && *props.icon) {
+        controls::Viewbox iconBox;
+        iconBox.Width(40);
+        iconBox.Height(40);
+        iconBox.HorizontalAlignment(xaml::HorizontalAlignment::Center);
+        auto icon = Icons::Icon(props.icon, 36);
+        icon.Opacity(0.55);
+        iconBox.Child(icon);
+        box.Children().Append(iconBox);
+    }
+    auto title = Bound(ctx, props.title);
+    if (title) {
+        auto tb = TextOf(title);
+        ApplyTextStyle(tb, "title3");
+        tb.FontWeight(WeightNamed("semibold"));
+        tb.TextAlignment(xaml::TextAlignment::Center);
+        tb.TextWrapping(xaml::TextWrapping::Wrap);
+        tb.HorizontalAlignment(xaml::HorizontalAlignment::Center);
+        box.Children().Append(tb);
+    }
+    if (props.message) {
+        auto message = Bound(ctx, props.message);
+        if (message) {
+            auto mb = TextOf(message);
+            ApplyTextStyle(mb, "body");
+            Secondary(mb);
+            mb.TextAlignment(xaml::TextAlignment::Center);
+            mb.TextWrapping(xaml::TextWrapping::Wrap);
+            mb.HorizontalAlignment(xaml::HorizontalAlignment::Center);
+            mb.MaxWidth(360);
+            box.Children().Append(mb);
+        }
+    }
+    if (actions) {
+        controls::StackPanel row;
+        row.Orientation(controls::Orientation::Horizontal);
+        row.Spacing(8);
+        row.Margin(xaml::Thickness{0, 6, 0, 0});
+        row.HorizontalAlignment(xaml::HorizontalAlignment::Center);
+        actions(Parent::Of(row), ctx);
+        if (row.Children().Size() > 0) box.Children().Append(row);
+    }
+    controls::Grid wrapper;
+    wrapper.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+    wrapper.Children().Append(box);
+    SetRole(wrapper, L"bern-fill-width");
+    p.Add(wrapper);
+}
+
+struct BadgeProps {
+    Str content;
+    char const* tone = "neutral";
+    char const* icon = nullptr;
+};
+
+inline void Badge(Parent const& p, Ctx const& ctx, BadgeProps props) {
+    std::string tone = props.tone ? props.tone : "neutral";
+    std::string role = tone == "accent" ? "accent"
+        : tone == "success" ? "status.success"
+        : tone == "warning" ? "status.warning"
+        : tone == "error" ? "status.error"
+        : "text.secondary";
+    controls::Border pill;
+    pill.CornerRadius(xaml::CornerRadius{999, 999, 999, 999});
+    pill.Padding(xaml::Thickness{8, 2, 8, 2});
+    pill.BorderThickness(xaml::Thickness{1, 1, 1, 1});
+    pill.HorizontalAlignment(xaml::HorizontalAlignment::Left);
+    pill.VerticalAlignment(xaml::VerticalAlignment::Center);
+    controls::StackPanel row;
+    row.Orientation(controls::Orientation::Horizontal);
+    row.Spacing(4);
+    row.VerticalAlignment(xaml::VerticalAlignment::Center);
+    controls::IconElement iconEl{nullptr};
+    if (props.icon && *props.icon) {
+        controls::Viewbox iconBox;
+        iconBox.Width(12);
+        iconBox.Height(12);
+        iconEl = Icons::Icon(props.icon, 11);
+        iconBox.Child(iconEl);
+        row.Children().Append(iconBox);
+    }
+    auto text = Bound(ctx, props.content);
+    auto tb = TextOf(text);
+    tb.FontSize(12);
+    tb.FontWeight(WeightNamed("semibold"));
+    tb.MaxLines(1);
+    row.Children().Append(tb);
+    pill.Child(row);
+    auto win = ctx.win;
+    bool neutral = tone == "neutral";
+    auto paintBadge = [pill, tb, iconEl, role, neutral, win] {
+        bool dark = IsDark(pill);
+        auto fg = ColorOf(win, dark, Paint(role.c_str()), 1.0);
+        auto bg = ColorOf(win, dark, Paint(neutral ? "text.primary" : role.c_str()), neutral ? 0.08 : 0.14);
+        auto br = ColorOf(win, dark, Paint(neutral ? "text.primary" : role.c_str()), neutral ? 0.14 : 0.28);
+        pill.Background(media::SolidColorBrush(bg));
+        pill.BorderBrush(media::SolidColorBrush(br));
+        tb.Foreground(media::SolidColorBrush(fg));
+        if (iconEl) iconEl.Foreground(media::SolidColorBrush(fg));
+    };
+    paintBadge();
+    pill.ActualThemeChanged([paintBadge](auto&&, auto&&) { paintBadge(); });
+    KeepWidth(pill);
+    p.Add(pill);
+}
+
+inline winrt::hstring AvatarInitials(std::wstring_view raw) {
+    while (!raw.empty() && iswspace(raw.front())) raw.remove_prefix(1);
+    while (!raw.empty() && iswspace(raw.back())) raw.remove_suffix(1);
+    if (raw.empty()) return L"?";
+    std::vector<std::wstring_view> words;
+    size_t i = 0;
+    while (i < raw.size()) {
+        while (i < raw.size() && iswspace(raw[i])) ++i;
+        size_t start = i;
+        while (i < raw.size() && !iswspace(raw[i])) ++i;
+        if (i > start) words.push_back(raw.substr(start, i - start));
+    }
+    std::wstring out;
+    if (words.size() >= 2) {
+        out.push_back(towupper(words[0][0]));
+        out.push_back(towupper(words[1][0]));
+    } else if (raw.size() >= 2 && raw[0] < 128 && raw[1] < 128) {
+        out.push_back(towupper(raw[0]));
+        out.push_back(towupper(raw[1]));
+    } else {
+        out.push_back(towupper(raw[0]));
+    }
+    return winrt::hstring(out);
+}
+
+struct AvatarProps {
+    Str label;
+    char const* source = nullptr;
+    Get url;
+    Len size;
+    char const* shape = "circle";
+};
+
+inline void Avatar(Parent const& p, Ctx const& ctx, AvatarProps props) {
+    bool rounded = props.shape && std::string_view(props.shape) == "rounded";
+    auto label = Bound(ctx, props.label);
+    controls::Grid root;
+    root.HorizontalAlignment(xaml::HorizontalAlignment::Left);
+    root.VerticalAlignment(xaml::VerticalAlignment::Center);
+    controls::Border bg;
+    bg.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+    bg.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+    controls::TextBlock initials;
+    initials.HorizontalAlignment(xaml::HorizontalAlignment::Center);
+    initials.VerticalAlignment(xaml::VerticalAlignment::Center);
+    initials.FontWeight(WeightNamed("semibold"));
+    bg.Child(initials);
+    root.Children().Append(bg);
+
+    static constexpr std::array<std::array<uint8_t, 3>, 6> kPalette = {{
+        {59, 130, 246},
+        {16, 185, 129},
+        {245, 158, 11},
+        {139, 92, 246},
+        {236, 72, 153},
+        {20, 184, 166},
+    }};
+    auto updateLabel = [label, bg, initials] {
+        auto text = label ? label() : winrt::hstring();
+        auto utf8 = Utf8(text);
+        uint64_t hash = 14695981039346656037ULL;
+        for (unsigned char b : utf8) {
+            hash ^= b;
+            hash *= 1099511628211ULL;
+        }
+        auto const& rgb = kPalette[hash % kPalette.size()];
+        bg.Background(media::SolidColorBrush(winrt::Windows::UI::ColorHelper::FromArgb(56, rgb[0], rgb[1], rgb[2])));
+        initials.Foreground(media::SolidColorBrush(winrt::Windows::UI::ColorHelper::FromArgb(255, rgb[0], rgb[1], rgb[2])));
+        initials.Text(AvatarInitials(text));
+    };
+    Reactive::Run(updateLabel);
+
+    Len sideLen = props.size.Given() ? props.size : Len(40.0);
+    if (props.source || props.url) {
+        controls::Grid imgLayer;
+        imgLayer.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+        imgLayer.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+        Image(Parent::Of(imgLayer), ctx, ImageProps{
+            .source = props.source,
+            .url = props.url,
+            .width = sideLen,
+            .height = sideLen,
+            .fit = "cover",
+        });
+        root.Children().Append(imgLayer);
+    }
+
+    auto clipRadius = std::make_shared<float>(20.0f);
+    auto geometry = RoundedClip(root, [clipRadius](float, float) { return *clipRadius; });
+    BindLen(ctx, sideLen, nullptr, [root, bg, initials, geometry, clipRadius, rounded](double d) {
+        double s = (std::max)(8.0, d);
+        root.Width(s);
+        root.Height(s);
+        double r = rounded ? (std::max)(4.0, s * 0.22) : s * 0.5;
+        *clipRadius = static_cast<float>(r);
+        geometry.CornerRadius(float2{*clipRadius, *clipRadius});
+        bg.CornerRadius(xaml::CornerRadius{r, r, r, r});
+        initials.FontSize((std::max)(10.0, s * 0.38));
+    });
+    BindName(root, label);
+    KeepWidth(root);
+    p.Add(root);
 }
 
 }

@@ -43,6 +43,10 @@ impl Generator<'_> {
                         .map(|bold| format!("() => ({})", self.expr(bold))),
                 ),
                 ("animate", self.animate(element)),
+                (
+                    "selectable",
+                    (element.keyword("selectable") == Some("true")).then(|| "true".to_string()),
+                ),
             ])
         ));
     }

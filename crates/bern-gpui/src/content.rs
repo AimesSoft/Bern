@@ -140,6 +140,8 @@ pub struct TextProps {
     pub bold: bool,
     /// JSON scalar-indexed [start, end, reading] ranges.
     pub ruby: Option<String>,
+    /// Whether the user may select and copy the text.
+    pub selectable: bool,
 }
 
 /// `Text`.
@@ -227,6 +229,11 @@ pub fn text(c: &Ctx, content: String, props: TextProps) -> El {
                 .child(mark(content.clone(), c.color(role), px(line), props.lines))
         }
         None => element,
+    };
+    let element = if props.selectable {
+        element.cursor_text()
+    } else {
+        element
     };
     if !props.markdown {
         return element.child(content).into_any_element();

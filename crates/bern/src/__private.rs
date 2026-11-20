@@ -46,6 +46,8 @@ pub trait Interpolated {}
 impl<D: Displayable + ?Sized> Interpolated for D {}
 impl Interpolated for crate::date::CalendarDateRef {}
 impl Interpolated for crate::date::CalendarDate {}
+impl Interpolated for Binding<crate::date::CalendarDate> {}
+impl Interpolated for SessionField<crate::date::CalendarDate> {}
 
 pub fn interpolate<D: Interpolated + ?Sized>(_: &D) {}
 
@@ -58,6 +60,12 @@ pub fn number_field(_: &SessionField<f64>) {}
 pub fn optional_number_field(_: &SessionField<Option<f64>>) {}
 
 pub fn file_field<T: FileValue>(_: &SessionField<T>) {}
+
+pub fn save_file_field<T: SaveFileValue>(_: &SessionField<T>) {}
+
+pub fn date_field(_: &SessionField<crate::date::CalendarDate>) {}
+
+pub fn date_value(_: &crate::date::CalendarDate) {}
 
 pub fn position_field<T: PositionValue>(_: &SessionField<T>) {}
 

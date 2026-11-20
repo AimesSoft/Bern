@@ -1253,9 +1253,13 @@ object BernFiles {
     private const val engineKinds = "/*bern:engine-opens*/"
     private var pick: ActivityResultLauncher<Array<String>>? = null
     private var pickFolder: ActivityResultLauncher<Uri?>? = null
+    private var pickManyLauncher: ActivityResultLauncher<Array<String>>? = null
+    private var saveLauncher: ActivityResultLauncher<String>? = null
     private var allFilesPage: ActivityResultLauncher<Intent>? = null
     private var storagePermissions: ActivityResultLauncher<Array<String>>? = null
     private var picked: ((String) -> Unit)? = null
+    private var pickedMany: ((List<String>) -> Unit)? = null
+    private var saved: ((String) -> Unit)? = null
     private var context: Context? = null
     private val openers = LinkedHashMap<Any, Pair<String, (String) -> Unit>>()
     private val waiting = ArrayList<String>()
@@ -1265,6 +1269,8 @@ object BernFiles {
         context = activity.applicationContext
         pick = activity.registerForActivityResult(ActivityResultContracts.OpenDocument()) { give(it) }
         pickFolder = activity.registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { give(it) }
+        pickManyLauncher = activity.registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { giveMany(it) }
+        saveLauncher = activity.registerForActivityResult(ActivityResultContracts.CreateDocument("*/*")) { giveSaved(it) }
         allFilesPage = activity.registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { BernNative.allFilesAnswered() }
         storagePermissions = activity.registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { BernNative.allFilesAnswered() }
         opened(activity.intent)
@@ -1323,6 +1329,33 @@ object BernFiles {
         then(uri.toString())
     }
 
+    private fun giveMany(uris: List<Uri>) {
+        val then = pickedMany
+        pickedMany = null
+        if (uris.isEmpty() || then == null) return
+        val out = ArrayList<String>(uris.size)
+        for (uri in uris) {
+            runCatching {
+                context?.contentResolver?.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            out.add(uri.toString())
+        }
+        then(out)
+    }
+
+    private fun giveSaved(uri: Uri?) {
+        val then = saved
+        saved = null
+        if (uri == null || then == null) return
+        runCatching {
+            context?.contentResolver?.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
+        }
+        then(uri.toString())
+    }
+
     private fun words(kinds: String) = kinds.split(' ').filter { it.isNotEmpty() }
 
     /// Asks for one file of `kinds` with the system's document picker.
@@ -1340,6 +1373,43 @@ object BernFiles {
         } catch (denied: SecurityException) {
             picked = null
             BernHost.failure = BernFailure(null, "permission_denied", denied.message ?: "The system refused document access")
+        }
+    }
+
+    /// Asks for one or more files of `kinds` with the system's document picker.
+    fun pickMany(kinds: String, then: (List<String>) -> Unit) {
+        if (pickManyLauncher == null) {
+            BernHost.failure = BernFailure(null, "platform_unavailable", "The app has no activity for selecting documents")
+            return
+        }
+        pickedMany = then
+        try {
+            pickManyLauncher!!.launch(mimeTypes(kinds))
+        } catch (missing: android.content.ActivityNotFoundException) {
+            pickedMany = null
+            BernHost.failure = BernFailure(null, "platform_unavailable", "This device has no system document picker")
+        } catch (denied: SecurityException) {
+            pickedMany = null
+            BernHost.failure = BernFailure(null, "permission_denied", denied.message ?: "The system refused document access")
+        }
+    }
+
+    /// Asks for a destination document URI via Android's Storage Access Framework.
+    fun save(kinds: String, suggestedName: String?, then: (String) -> Unit) {
+        if (saveLauncher == null) {
+            BernHost.failure = BernFailure(null, "platform_unavailable", "The app has no activity for saving documents")
+            return
+        }
+        saved = then
+        val name = if (!suggestedName.isNullOrEmpty()) suggestedName else "Untitled"
+        try {
+            saveLauncher!!.launch(name)
+        } catch (missing: android.content.ActivityNotFoundException) {
+            saved = null
+            BernHost.failure = BernFailure(null, "platform_unavailable", "This device has no system save picker")
+        } catch (denied: SecurityException) {
+            saved = null
+            BernHost.failure = BernFailure(null, "permission_denied", denied.message ?: "The system refused document save access")
         }
     }
 

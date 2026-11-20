@@ -118,6 +118,9 @@ impl Generator<'_> {
         if let Some(role) = element.keyword("mark") {
             out.line(format!(".bernMark(.role({}))", string(role)));
         }
+        if element.keyword("selectable") == Some("true") {
+            out.line(".bernSelectable()");
+        }
         if ruby.is_some() {
             out.close("}");
         }

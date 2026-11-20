@@ -8,7 +8,7 @@ impl Generator<'_> {
     /// A `Text`, with its `mark` as a role color.
     pub(super) fn text_element(&self, out: &mut Out, element: &Element) {
         out.line(format!(
-            "b::Text(p, c, b::TextProps {{ content: {}, ruby: {}, style: {}, emphasis: {}, color: {}, mark: {}, lines: {}, font_size: {}, line_height: {}, markdown: {}, bold: {}, lit: {}, lit_path: {}, lit_clock: {}, lit_since: {}, animate: {} }});",
+            "b::Text(p, c, b::TextProps {{ content: {}, ruby: {}, style: {}, emphasis: {}, color: {}, mark: {}, lines: {}, font_size: {}, line_height: {}, markdown: {}, bold: {}, lit: {}, lit_path: {}, lit_clock: {}, lit_since: {}, animate: {}, selectable: {} }});",
             some(self.text_prop(element, "content")),
             some(element.expr("ruby").map(|value| format!("b::str(|c| rt::plain(&{}))", self.expr(value)))),
             Self::keyword(element, "style"),
@@ -29,6 +29,7 @@ impl Generator<'_> {
             some(self.num(element, "lit_clock")),
             some(self.num(element, "lit_since")),
             self.animate(element),
+            element.keyword("selectable") == Some("true"),
         ));
     }
 

@@ -68,7 +68,7 @@ pub use content::{
     Emphasis, Fit, TextProps, TextStyle, image, image_url, label, progress, progress_ring, text,
 };
 pub use controls::{
-    ButtonProps, IconButtonProps, InputKind, InputProps, PickerStyle, Prominence, Role,
+    ButtonProps, FilePrompt, IconButtonProps, InputKind, InputProps, PickerStyle, Prominence, Role,
     SwitchProps, SwitchStyle, button, button_with, drop_area, icon_button, language_picker, picker,
     switch, text_input,
 };
@@ -76,7 +76,8 @@ pub use ctx::{
     Act, Ctx, Field, Model, act, session_pop, session_push_str, session_set, session_toggle,
 };
 pub use extra::{
-    AlertActionSpec, BannerProps, NumberInputProps, alert, banner, disclosure, number_input,
+    AlertActionSpec, AvatarProps, BannerProps, DatePickerProps, NumberInputProps, TimePickerProps,
+    alert, avatar, badge, banner, date_picker, disclosure, empty_state, number_input, time_picker,
     tooltip,
 };
 pub use filters::{blur_scope, glow};

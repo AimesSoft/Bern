@@ -141,6 +141,8 @@ enum FieldExpect {
     Number,
     OptionalNumber,
     File,
+    SaveFile,
+    Date,
     Position,
     Picker,
     Selection,

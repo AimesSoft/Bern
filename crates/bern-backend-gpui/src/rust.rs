@@ -153,6 +153,7 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "markdown",
             "mark",
             "bold",
+            "selectable",
         ],
     ),
     ("Label", &["title", "icon", "style", "font_size", "display"]),
@@ -202,6 +203,8 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "enabled",
             "width",
             "pick",
+            "save",
+            "suggested_name",
             "files",
             "shortcut",
             "shape",
@@ -219,6 +222,8 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "label",
             "enabled",
             "pick",
+            "save",
+            "suggested_name",
             "files",
             "prominence",
             "height",
@@ -501,7 +506,16 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
     (
         "MenuItem",
         &[
-            "id", "label", "icon", "role", "enabled", "shortcut", "pick", "files",
+            "id",
+            "label",
+            "icon",
+            "role",
+            "enabled",
+            "shortcut",
+            "pick",
+            "save",
+            "suggested_name",
+            "files",
         ],
     ),
     ("PickerOption", &["value", "label"]),
@@ -510,7 +524,15 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
     (
         "CommandItem",
         &[
-            "id", "label", "shortcut", "enabled", "checked", "pick", "files",
+            "id",
+            "label",
+            "shortcut",
+            "enabled",
+            "checked",
+            "pick",
+            "save",
+            "suggested_name",
+            "files",
         ],
     ),
     ("ControlGroup", &["label", "height"]),
@@ -597,6 +619,36 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
     ),
     ("Alert", &["title", "message"]),
     ("AlertAction", &["id", "label", "role", "enabled"]),
+    (
+        "DatePicker",
+        &[
+            "id",
+            "label",
+            "label_hidden",
+            "value",
+            "current",
+            "min",
+            "max",
+            "enabled",
+        ],
+    ),
+    (
+        "TimePicker",
+        &[
+            "id",
+            "label",
+            "label_hidden",
+            "value",
+            "current",
+            "min",
+            "max",
+            "step",
+            "enabled",
+        ],
+    ),
+    ("EmptyState", &["title", "message", "icon"]),
+    ("Badge", &["content", "tone", "icon"]),
+    ("Avatar", &["label", "source", "size", "shape"]),
 ];
 
 /// The names [`COMPONENTS`] lists, with the window catalog's.
@@ -698,10 +750,16 @@ pub const COMPONENT_NAMES: &[&str] = &[
     "NumberInput",
     "Alert",
     "AlertAction",
+    "DatePicker",
+    "TimePicker",
+    "EmptyState",
+    "Badge",
+    "Avatar",
 ];
 
 /// Icons the runtime draws itself, whatever the application declares.
 const RUNTIME_ICONS: &[&str] = &[
+    "calendar",
     "checkmark",
     "checkmark.circle",
     "chevron.down",
@@ -1712,11 +1770,13 @@ pub fn app() -> b::AppDef {{
                 width: parent == Axis::Column,
                 height: false,
             },
-            "TextInput" | "NumberInput" | "Banner" | "Disclosure" | "Progress" | "Slider"
-            | "Section" | "NavLink" | "SearchItem" => Greed {
-                width: true,
-                height: false,
-            },
+            "TextInput" | "NumberInput" | "DatePicker" | "TimePicker" | "EmptyState" | "Banner"
+            | "Disclosure" | "Progress" | "Slider" | "Section" | "NavLink" | "SearchItem" => {
+                Greed {
+                    width: true,
+                    height: false,
+                }
+            }
             "Tooltip" => self.children_greed(&element.children, parent),
             "Alert" | "AlertAction" => Greed {
                 width: false,
@@ -2892,7 +2952,7 @@ pub fn app() -> b::AppDef {{
                 }
             }
             "Text" => format!(
-                "b::text(c, {}, b::TextProps {{ style: b::TextStyle::{}, emphasis: b::Emphasis::{}, lines: {}, size: {}, color: {}, line_height: {}, markdown: {}, mark: {}, bold: {}, ruby: {} }})",
+                "b::text(c, {}, b::TextProps {{ style: b::TextStyle::{}, emphasis: b::Emphasis::{}, lines: {}, size: {}, color: {}, line_height: {}, markdown: {}, mark: {}, bold: {}, ruby: {}, selectable: {} }})",
                 text("content"),
                 pascal(element.keyword("style").unwrap_or("body")),
                 pascal(element.keyword("emphasis").unwrap_or("primary")),
@@ -2919,6 +2979,7 @@ pub fn app() -> b::AppDef {{
                     .expr("ruby")
                     .map(|expr| format!("Some(rt::plain(&{}))", self.expr(expr, at)))
                     .unwrap_or_else(|| "None".into()),
+                element.keyword("selectable") == Some("true"),
             ),
             "Label" => format!(
                 "b::label(c, {}, {}, b::TextStyle::{}, {}, {})",
@@ -3339,6 +3400,73 @@ pub fn app() -> b::AppDef {{
                     text("title"),
                     specs.join(", "),
                     self.action(element),
+                )
+            }
+            "DatePicker" => {
+                let model = self.model(element, "current")?;
+                let opt_date = |name: &str| {
+                    element
+                        .expr(name)
+                        .map(|e| format!("Some({})", self.expr(e, at)))
+                        .unwrap_or_else(|| "None".into())
+                };
+                format!(
+                    "b::date_picker(c, {}, b::DatePickerProps {{ label: {}, label_hidden: {}, min: {}, max: {}, enabled: {} }}, {model})",
+                    id(),
+                    text("label"),
+                    element.keyword("label_hidden") == Some("true"),
+                    opt_date("min"),
+                    opt_date("max"),
+                    self.enabled(element),
+                )
+            }
+            "TimePicker" => {
+                let model = self.model(element, "current")?;
+                format!(
+                    "b::time_picker(c, {}, b::TimePickerProps {{ label: {}, label_hidden: {}, min: {:?}_f64, max: {:?}_f64, step: {:?}_f64, enabled: {} }}, {model})",
+                    id(),
+                    text("label"),
+                    element.keyword("label_hidden") == Some("true"),
+                    element.number("min").unwrap_or(0.0),
+                    element.number("max").unwrap_or(1439.0),
+                    element.number("step").unwrap_or(1.0),
+                    self.enabled(element),
+                )
+            }
+            "EmptyState" => {
+                let msg = element
+                    .text("message")
+                    .map(|t| format!("Some({})", self.text(t, at)))
+                    .unwrap_or_else(|| "None".into());
+                let actions = self.children(&element.children, Axis::Row);
+                format!(
+                    "b::empty_state(c, {}, {msg}, {}, {actions})",
+                    text("title"),
+                    self.icon(element.icon("icon")),
+                )
+            }
+            "Badge" => format!(
+                "b::badge(c, {}, {}, {})",
+                text("content"),
+                string(element.keyword("tone").unwrap_or("neutral")),
+                self.icon(element.icon("icon")),
+            ),
+            "Avatar" => {
+                let resource = match element.resource("source") {
+                    Some(res) => format!("Some({})", string(res)),
+                    None => "None".into(),
+                };
+                let url = match element.expr("source") {
+                    Some(expr) => format!("Some(rt::url(&{}))", self.expr(expr, at)),
+                    None => "None".into(),
+                };
+                let size = self
+                    .length_value(element, "size")
+                    .unwrap_or_else(|| "36.0".into());
+                format!(
+                    "b::avatar(c, b::AvatarProps {{ label: {}, resource: {resource}, url: {url}, size: {size}, rounded: {} }})",
+                    text("label"),
+                    element.keyword("shape") == Some("rounded"),
                 )
             }
             "LanguagePicker" => format!(
@@ -4344,9 +4472,20 @@ pub fn app() -> b::AppDef {{
     }
 
     fn pick(&self, element: &Element) -> String {
+        if let Some(field) = element.field("save") {
+            let suggested_name = element
+                .text("suggested_name")
+                .map(|t| format!("Some({})", self.text(t, Some(&element.source))))
+                .unwrap_or_else(|| "None".into());
+            return format!(
+                "Some(b::FilePrompt {{ field: {}, kinds: {}, save: true, suggested_name: {suggested_name} }})",
+                field_ref(self.session_index(&field.session), field.field),
+                string(element.keyword("files").unwrap_or("any"))
+            );
+        }
         match element.field("pick") {
             Some(field) => format!(
-                "Some(({}, {}))",
+                "Some(b::FilePrompt {{ field: {}, kinds: {}, save: false, suggested_name: None }})",
                 field_ref(self.session_index(&field.session), field.field),
                 string(element.keyword("files").unwrap_or("any"))
             ),

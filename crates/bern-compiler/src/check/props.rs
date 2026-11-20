@@ -491,6 +491,7 @@ impl Checker<'_> {
             let positive = matches!(
                 (element, prop_name),
                 ("Image" | "Svg", "width" | "height")
+                    | ("Avatar", "size")
                     | ("Grid", "min_width" | "cell_ratio")
                     | ("Progress", "total")
             );
@@ -601,6 +602,30 @@ impl Checker<'_> {
                     self.error(
                         expr.span(),
                         "`precision` must be a whole number from 0 to 6",
+                    );
+                    return None;
+                }
+            }
+            if element == "TimePicker" {
+                if matches!(prop_name, "min" | "max")
+                    && (!value.is_finite()
+                        || value.fract() != 0.0
+                        || !(0.0..=1439.0).contains(&value))
+                {
+                    self.error(
+                        expr.span(),
+                        format!("`{prop_name}` must be a whole minute from 0 to 1439"),
+                    );
+                    return None;
+                }
+                if prop_name == "step"
+                    && (!value.is_finite()
+                        || value.fract() != 0.0
+                        || !(1.0..=60.0).contains(&value))
+                {
+                    self.error(
+                        expr.span(),
+                        "`step` must be a whole number of minutes from 1 to 60",
                     );
                     return None;
                 }

@@ -41,6 +41,10 @@ impl Generator<'_> {
                 ("litClock", self.len(element, "lit_clock")),
                 ("litSince", self.len(element, "lit_since")),
                 ("animate", Self::animate(element)),
+                (
+                    "selectable",
+                    (element.keyword("selectable") == Some("true")).then(|| "true".to_string()),
+                ),
             ])
         ));
     }

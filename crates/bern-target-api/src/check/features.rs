@@ -210,10 +210,38 @@ fn text_formats(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     if crate::uses_text_formats(app) {
-        diagnostics.push(Diagnostic::error(format!(
+        use bern_protocol::format::{Piece, parse};
+        let formatted_keys: std::collections::HashSet<&str> = app
+            .texts
+            .iter()
+            .filter(|text| {
+                text.translations.values().any(|translation| {
+                    parse(translation).is_ok_and(|pieces| {
+                        pieces
+                            .iter()
+                            .any(|piece| !matches!(piece, Piece::Text(_) | Piece::Value(_)))
+                    })
+                })
+            })
+            .map(|text| text.key.as_str())
+            .collect();
+        let mut diag = Diagnostic::error(format!(
             "target `{}` cannot yet write plural branches, dates or durations in texts, or show a variant's fields in its label",
             descriptor.id
-        )));
+        ));
+        if let Some(element) = first_element(app, |element| {
+            element.props.values().any(|prop| {
+                matches!(
+                    prop,
+                    bern_ir::Prop::Text {
+                        text: bern_ir::Text::Localized { text, .. }
+                    } if formatted_keys.contains(text.key.as_str())
+                )
+            })
+        }) {
+            diag = diag.at(element.source.clone());
+        }
+        diagnostics.push(diag);
     }
 }
 
@@ -578,8 +606,11 @@ fn controlled_values(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     if let Some(control) = first_element(app, |e| {
-        if e.kind == "Slider" || e.kind == "ColorPicker" || e.kind == "NumberInput" {
-            // Draft-backed sliders, color pickers and number inputs already support commit actions on every target.
+        if matches!(
+            e.kind.as_str(),
+            "Slider" | "ColorPicker" | "NumberInput" | "DatePicker" | "TimePicker"
+        ) {
+            // Draft-backed sliders, pickers and inputs already support commit actions on every target.
             e.prop("current").is_some()
         } else if e.kind == "PopoverButton" || e.kind == "Disclosure" {
             e.prop("open").is_some()
@@ -1208,7 +1239,7 @@ fn runtime_images(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     if let Some(image) = first_element(app, |element| {
-        element.kind == "Image"
+        matches!(element.kind.as_str(), "Image" | "Avatar")
             && matches!(element.prop("source"), Some(bern_ir::Prop::Expr { .. }))
     }) {
         diagnostics.push(
@@ -1222,10 +1253,12 @@ fn runtime_images(
 }
 
 fn file_pick(descriptor: &TargetDescriptor, app: &Application, diagnostics: &mut Vec<Diagnostic>) {
-    if let Some(button) = first_element(app, |element| element.props.contains_key("pick")) {
+    if let Some(button) = first_element(app, |element| {
+        element.props.contains_key("pick") || element.props.contains_key("save")
+    }) {
         diagnostics.push(
             Diagnostic::error(format!(
-                "target `{}` cannot ask for a file with `pick:`",
+                "target `{}` cannot ask for a file with `pick:` or `save:`",
                 descriptor.id
             ))
             .at(button.source.clone()),

@@ -150,6 +150,8 @@ pub struct TextProps {
     pub lit_since: Option<Num>,
     /// The spring a size that follows state changes with.
     pub animate: Option<Curve>,
+    /// Whether the user may select and copy the text.
+    pub selectable: bool,
 }
 
 /// The size and line height of a label's text, as Pango attributes.
@@ -257,6 +259,10 @@ pub fn Text(p: &Parent, ctx: &Ctx, props: TextProps) {
                 shown.remove_css_class("bern-bold");
             }
         });
+    }
+    if props.selectable {
+        label.set_selectable(true);
+        label.set_can_focus(true);
     }
     if let Some(content) = &props.content {
         if props.markdown {
@@ -822,7 +828,8 @@ pub fn Button(p: &Parent, ctx: &Ctx, props: ButtonProps, action: Option<Act>) {
         let shown = button.clone();
         effect(move || shown.set_sensitive(enabled()));
     }
-    let (run, set_file) = crate::features::picking(ctx, props.pick, bound_action(ctx, &action));
+    let (run, set_file) =
+        crate::features::picking(ctx, props.pick.clone(), bound_action(ctx, &action));
     let run = crate::features::pasting(ctx, props.paste, run);
     crate::gestures::button_clicks(&button, run.clone(), bound_action(ctx, &props.double_tap));
     register_button(
@@ -930,7 +937,8 @@ pub fn IconButton(p: &Parent, ctx: &Ctx, props: IconButtonProps, action: Option<
         let shown = button.clone();
         effect(move || shown.set_sensitive(enabled()));
     }
-    let (run, set_file) = crate::features::picking(ctx, props.pick, bound_action(ctx, &action));
+    let (run, set_file) =
+        crate::features::picking(ctx, props.pick.clone(), bound_action(ctx, &action));
     let run = crate::features::pasting(ctx, props.paste, run);
     if let Some(run) = run.clone() {
         button.connect_clicked(move |_| run());
@@ -2875,6 +2883,515 @@ pub fn NumberInput(p: &Parent, ctx: &Ctx, props: NumberInputProps) {
     );
 }
 
+fn date_ymd(value: &Value) -> (i64, i64, i64) {
+    if let Value::Record(fields) = value
+        && fields.len() >= 3
+        && let (Value::Int(y), Value::Int(m), Value::Int(d)) = (&fields[0], &fields[1], &fields[2])
+    {
+        let y = if (1..=9999).contains(y) { *y } else { 2026 };
+        let m = (*m).clamp(1, 12);
+        let d = (*d).clamp(1, 31);
+        return (y, m, d);
+    }
+    (2026, 1, 1)
+}
+
+fn date_value((y, m, d): (i64, i64, i64)) -> Value {
+    Value::Record(vec![Value::Int(y), Value::Int(m), Value::Int(d)])
+}
+
+fn format_iso_date((y, m, d): (i64, i64, i64)) -> String {
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+fn parse_iso_date(raw: &str) -> Option<(i64, i64, i64)> {
+    let mut parts = raw.trim().split('-');
+    let y: i64 = parts.next()?.parse().ok()?;
+    let m: i64 = parts.next()?.parse().ok()?;
+    let d: i64 = parts.next()?.parse().ok()?;
+    if parts.next().is_some()
+        || !(1..=9999).contains(&y)
+        || !(1..=12).contains(&m)
+        || !(1..=31).contains(&d)
+    {
+        return None;
+    }
+    let dt = glib::DateTime::from_local(y as i32, m as i32, d as i32, 12, 0, 0.0).ok()?;
+    Some((
+        i64::from(dt.year()),
+        i64::from(dt.month()),
+        i64::from(dt.day_of_month()),
+    ))
+}
+
+#[derive(Default)]
+pub struct DatePickerProps {
+    pub id: &'static str,
+    pub label: Option<Str>,
+    pub model: Option<Model>,
+    pub min: Option<Get>,
+    pub max: Option<Get>,
+    pub enabled: Option<Get>,
+    pub label_hidden: bool,
+}
+
+#[allow(non_snake_case)]
+pub fn DatePicker(p: &Parent, ctx: &Ctx, props: DatePickerProps) {
+    let Some(model) = props.model else { return };
+    let bound = Bound::model(ctx, model);
+    let label = props.label.as_ref().map(|l| bound_text(ctx, l));
+    let enabled = bound_enabled(ctx, &props.enabled);
+    let min_get = props.min.clone();
+    let max_get = props.max.clone();
+    let clamp_date = {
+        let at = ctx.clone();
+        move |mut ymd: (i64, i64, i64)| -> (i64, i64, i64) {
+            if let Some(lo_fn) = &min_get {
+                let lo = date_ymd(&lo_fn(&at));
+                if ymd < lo {
+                    ymd = lo;
+                }
+            }
+            if let Some(hi_fn) = &max_get {
+                let hi = date_ymd(&hi_fn(&at));
+                if ymd > hi {
+                    ymd = hi;
+                }
+            }
+            ymd
+        }
+    };
+    let commit: Rc<dyn Fn((i64, i64, i64))> = {
+        let bound = bound.clone();
+        let clamp = clamp_date.clone();
+        Rc::new(move |raw| {
+            let next = clamp(raw);
+            if date_ymd(&bound.peek()) != next {
+                bound.set(date_value(next));
+            }
+        })
+    };
+
+    let calendar = gtk::Calendar::new();
+    let popover = gtk::Popover::new();
+    popover.set_child(Some(&calendar));
+    let button = gtk::MenuButton::new();
+    button.set_popover(Some(&popover));
+    button.set_valign(gtk::Align::Center);
+    let btn_box = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    btn_box.append(&icons::image("calendar"));
+    let text_lbl = gtk::Label::new(None);
+    btn_box.append(&text_lbl);
+    button.set_child(Some(&btn_box));
+
+    let updating = Rc::new(Cell::new(false));
+    {
+        let cal = calendar.clone();
+        let lbl = text_lbl.clone();
+        let read = bound.clone();
+        let guard = Rc::clone(&updating);
+        effect(move || {
+            let ymd = date_ymd(&read.get());
+            lbl.set_text(&format_iso_date(ymd));
+            if let Ok(dt) =
+                glib::DateTime::from_local(ymd.0 as i32, ymd.1 as i32, ymd.2 as i32, 12, 0, 0.0)
+            {
+                guard.set(true);
+                cal.select_day(&dt);
+                guard.set(false);
+            }
+        });
+    }
+    if let Some(en) = enabled.clone() {
+        let b = button.clone();
+        effect(move || b.set_sensitive(en()));
+    }
+    {
+        let commit = Rc::clone(&commit);
+        let guard = Rc::clone(&updating);
+        let pop = popover.clone();
+        calendar.connect_day_selected(move |cal| {
+            if !guard.get() {
+                let dt = cal.date();
+                commit((
+                    i64::from(dt.year()),
+                    i64::from(dt.month()),
+                    i64::from(dt.day_of_month()),
+                ));
+                pop.popdown();
+            }
+        });
+    }
+    if props.label_hidden
+        && let Some(lbl) = label.clone()
+    {
+        let named = button.clone();
+        effect(move || named.update_property(&[gtk::accessible::Property::Label(&lbl())]));
+    }
+    if ctx.in_toolbar() || props.label_hidden {
+        if p.is_list() {
+            p.add(&plain_row(&button));
+        } else {
+            keeps_width(&button);
+            p.add(&button);
+        }
+    } else if p.is_list() {
+        let row = adw::ActionRow::new();
+        if let Some(lbl) = label.clone() {
+            let shown = row.clone();
+            effect(move || shown.set_title(&glib::markup_escape_text(&lbl())));
+        }
+        row.add_suffix(&button);
+        p.add(&row);
+    } else {
+        p.add(&beside(label.clone(), &button));
+    }
+    let commit_edit = Rc::clone(&commit);
+    let value = bound.clone();
+    controls::register(
+        ctx,
+        props.id,
+        "date_picker",
+        label,
+        enabled,
+        Actions {
+            edit: Some(Rc::new(move |s| {
+                if let Some(parsed) = parse_iso_date(&s) {
+                    commit_edit(parsed);
+                }
+            })),
+            value: Some(Rc::new(move || {
+                Some(format_iso_date(date_ymd(&value.peek())))
+            })),
+            ..Actions::default()
+        },
+    );
+}
+
+fn clamp_time_minutes(raw: f64, min: f64, max: f64, step: f64) -> f64 {
+    if !raw.is_finite() {
+        return min;
+    }
+    let s = step.round().max(1.0);
+    let clamped = raw.clamp(min, max);
+    let snapped = min + ((clamped - min) / s).round() * s;
+    snapped.round().clamp(min, max)
+}
+
+fn format_time_minutes(mins: f64) -> String {
+    let total = if mins.is_finite() {
+        mins.round().clamp(0.0, 1439.0) as i32
+    } else {
+        0
+    };
+    format!("{:02}:{:02}", total / 60, total % 60)
+}
+
+fn parse_time_minutes(raw: &str) -> Option<f64> {
+    let trimmed = raw.trim();
+    if let Some((h, m)) = trimmed.split_once(':') {
+        let hh: i32 = h.trim().parse().ok()?;
+        let mm: i32 = m.trim().parse().ok()?;
+        if (0..=23).contains(&hh) && (0..=59).contains(&mm) {
+            return Some(f64::from(hh * 60 + mm));
+        }
+    }
+    trimmed.parse::<f64>().ok().filter(|v| v.is_finite())
+}
+
+#[derive(Default)]
+pub struct TimePickerProps {
+    pub id: &'static str,
+    pub label: Option<Str>,
+    pub model: Option<Model>,
+    pub min: Option<f64>,
+    pub max: Option<f64>,
+    pub step: Option<f64>,
+    pub enabled: Option<Get>,
+    pub label_hidden: bool,
+}
+
+#[allow(non_snake_case)]
+pub fn TimePicker(p: &Parent, ctx: &Ctx, props: TimePickerProps) {
+    let Some(model) = props.model else { return };
+    let bound = Bound::model(ctx, model);
+    let label = props.label.as_ref().map(|l| bound_text(ctx, l));
+    let enabled = bound_enabled(ctx, &props.enabled);
+    let min = props.min.unwrap_or(0.0).clamp(0.0, 1439.0);
+    let max = props.max.unwrap_or(1439.0).clamp(min, 1439.0);
+    let step = props.step.unwrap_or(1.0).round().clamp(1.0, 60.0);
+    let commit: Rc<dyn Fn(f64)> = {
+        let bound = bound.clone();
+        Rc::new(move |raw| {
+            if !raw.is_finite() {
+                return;
+            }
+            let next = clamp_time_minutes(raw, min, max, step);
+            if (as_f64(&bound.peek()) - next).abs() > 1e-6 {
+                bound.set(Value::Float(next));
+            }
+        })
+    };
+    let initial = clamp_time_minutes(as_f64(&bound.peek()), min, max, step) as i32;
+    let h_adj = gtk::Adjustment::new(f64::from(initial / 60), 0.0, 23.0, 1.0, 4.0, 0.0);
+    let m_adj = gtk::Adjustment::new(f64::from(initial % 60), 0.0, 59.0, step, step * 5.0, 0.0);
+    let h_spin = gtk::SpinButton::new(Some(&h_adj), 1.0, 0);
+    let m_spin = gtk::SpinButton::new(Some(&m_adj), step, 0);
+    h_spin.set_wrap(true);
+    m_spin.set_wrap(true);
+    h_spin.set_numeric(true);
+    m_spin.set_numeric(true);
+    h_spin.set_width_chars(2);
+    m_spin.set_width_chars(2);
+    h_spin.connect_output(|s| {
+        s.set_text(&format!("{:02}", s.value_as_int()));
+        glib::Propagation::Stop
+    });
+    m_spin.connect_output(|s| {
+        s.set_text(&format!("{:02}", s.value_as_int()));
+        glib::Propagation::Stop
+    });
+    let sep = gtk::Label::new(Some(":"));
+    let row_box = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+    row_box.set_valign(gtk::Align::Center);
+    row_box.append(&h_spin);
+    row_box.append(&sep);
+    row_box.append(&m_spin);
+
+    let updating = Rc::new(Cell::new(false));
+    {
+        let h_r = h_spin.clone();
+        let m_r = m_spin.clone();
+        let read = bound.clone();
+        let guard = Rc::clone(&updating);
+        effect(move || {
+            let mins = clamp_time_minutes(as_f64(&read.get()), min, max, step) as i32;
+            let hh = f64::from(mins / 60);
+            let mm = f64::from(mins % 60);
+            guard.set(true);
+            if (h_r.value() - hh).abs() > 0.5 {
+                h_r.set_value(hh);
+            }
+            if (m_r.value() - mm).abs() > 0.5 {
+                m_r.set_value(mm);
+            }
+            guard.set(false);
+        });
+    }
+    if let Some(en) = enabled.clone() {
+        let bx = row_box.clone();
+        effect(move || bx.set_sensitive(en()));
+    }
+    {
+        let commit = Rc::clone(&commit);
+        let guard = Rc::clone(&updating);
+        let m_ref = m_spin.clone();
+        h_spin.connect_value_changed(move |h| {
+            if !guard.get() {
+                commit(f64::from(h.value_as_int() * 60 + m_ref.value_as_int()));
+            }
+        });
+    }
+    {
+        let commit = Rc::clone(&commit);
+        let guard = Rc::clone(&updating);
+        let h_ref = h_spin.clone();
+        m_spin.connect_value_changed(move |m| {
+            if !guard.get() {
+                commit(f64::from(h_ref.value_as_int() * 60 + m.value_as_int()));
+            }
+        });
+    }
+    if props.label_hidden
+        && let Some(lbl) = label.clone()
+    {
+        let named = row_box.clone();
+        effect(move || named.update_property(&[gtk::accessible::Property::Label(&lbl())]));
+    }
+    if ctx.in_toolbar() || props.label_hidden {
+        if p.is_list() {
+            p.add(&plain_row(&row_box));
+        } else {
+            keeps_width(&row_box);
+            p.add(&row_box);
+        }
+    } else if p.is_list() {
+        let row = adw::ActionRow::new();
+        if let Some(lbl) = label.clone() {
+            let shown = row.clone();
+            effect(move || shown.set_title(&glib::markup_escape_text(&lbl())));
+        }
+        row.add_suffix(&row_box);
+        p.add(&row);
+    } else {
+        p.add(&beside(label.clone(), &row_box));
+    }
+    let commit_edit = Rc::clone(&commit);
+    let commit_num = Rc::clone(&commit);
+    let value = bound.clone();
+    controls::register(
+        ctx,
+        props.id,
+        "time_picker",
+        label,
+        enabled,
+        Actions {
+            edit: Some(Rc::new(move |s| {
+                if let Some(mins) = parse_time_minutes(&s) {
+                    commit_edit(mins);
+                }
+            })),
+            set_number: Some(Rc::new(move |v| commit_num(v))),
+            value: Some(Rc::new(move || {
+                Some(format_time_minutes(as_f64(&value.peek())))
+            })),
+            ..Actions::default()
+        },
+    );
+}
+
+#[derive(Default)]
+pub struct EmptyStateProps {
+    pub title: Option<Str>,
+    pub message: Option<Str>,
+    pub icon: Option<&'static str>,
+}
+
+#[allow(non_snake_case)]
+pub fn EmptyState(p: &Parent, ctx: &Ctx, props: EmptyStateProps, actions: Option<Build>) {
+    let page = adw::StatusPage::new();
+    page.set_hexpand(true);
+    if let Some(icon) = props.icon {
+        page.set_icon_name(Some(icons::name(icon)));
+    }
+    if let Some(title) = props.title.as_ref().map(|t| bound_text(ctx, t)) {
+        let shown = page.clone();
+        effect(move || shown.set_title(&title()));
+    }
+    if let Some(msg) = props.message.as_ref().map(|m| bound_text(ctx, m)) {
+        let shown = page.clone();
+        effect(move || {
+            let text = msg();
+            shown.set_description((!text.is_empty()).then_some(text.as_str()));
+        });
+    }
+    if let Some(build) = actions {
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        row.set_halign(gtk::Align::Center);
+        build(&Parent::of_box(&row), ctx);
+        if row.first_child().is_some() {
+            page.set_child(Some(&row));
+        }
+    }
+    p.add(&page);
+}
+
+#[derive(Default)]
+pub struct BadgeProps {
+    pub content: Option<Str>,
+    pub tone: Option<&'static str>,
+    pub icon: Option<&'static str>,
+}
+
+#[allow(non_snake_case)]
+pub fn Badge(p: &Parent, ctx: &Ctx, props: BadgeProps) {
+    let tone = props.tone.unwrap_or("neutral");
+    let pill = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+    pill.add_css_class("bern-badge");
+    pill.add_css_class(&format!("bern-badge-{tone}"));
+    pill.set_halign(gtk::Align::Start);
+    pill.set_valign(gtk::Align::Center);
+    if let Some(icon) = props.icon {
+        let img = icons::image(icon);
+        img.set_pixel_size(12);
+        pill.append(&img);
+    }
+    let lbl = gtk::Label::new(None);
+    lbl.set_single_line_mode(true);
+    if let Some(content) = props.content.as_ref().map(|c| bound_text(ctx, c)) {
+        bind_label(&lbl, content);
+    }
+    pill.append(&lbl);
+    keeps_width(&pill);
+    p.add(&pill);
+}
+
+#[derive(Default)]
+pub struct AvatarProps {
+    pub label: Option<Str>,
+    pub source: Option<&'static str>,
+    pub url: Option<Get>,
+    pub size: Option<Num>,
+    pub shape: Option<&'static str>,
+}
+
+#[allow(non_snake_case)]
+pub fn Avatar(p: &Parent, ctx: &Ctx, props: AvatarProps) {
+    let initial_size = props
+        .size
+        .as_ref()
+        .map_or(40, |n| n.peek(ctx).round().max(8.0) as i32);
+    let avatar = adw::Avatar::new(initial_size, None, true);
+    avatar.set_halign(gtk::Align::Start);
+    avatar.set_valign(gtk::Align::Center);
+    if props.shape == Some("rounded") {
+        avatar.add_css_class("bern-avatar-rounded");
+    }
+    if let Some(label) = props.label.as_ref().map(|l| bound_text(ctx, l)) {
+        let shown = avatar.clone();
+        effect(move || {
+            let text = label();
+            shown.set_text(Some(&text));
+            shown
+                .upcast_ref::<gtk::Widget>()
+                .update_property(&[gtk::accessible::Property::Label(&text)]);
+        });
+    }
+    if let Some(size) = &props.size {
+        let shown = avatar.clone();
+        bind_number(ctx, size, None, &avatar, move |v| {
+            shown.set_size(v.round().max(8.0) as i32);
+        });
+    }
+    if let Some(source) = props.source {
+        let path = std::path::PathBuf::from(crate::host::resources_dir()).join(source);
+        if let Some(texture) = read_picture(&path, None) {
+            avatar.set_custom_image(Some(&texture));
+        }
+    } else if let Some(url_get) = props.url {
+        let at = ctx.clone();
+        let shown = avatar.clone();
+        let loading: Rc<std::cell::RefCell<Option<glib::JoinHandle<()>>>> = Rc::default();
+        let stop_on_drop = Rc::clone(&loading);
+        crate::reactive::on_cleanup(move || {
+            if let Some(handle) = stop_on_drop.take() {
+                handle.abort();
+            }
+        });
+        effect(move || {
+            if let Some(handle) = loading.take() {
+                handle.abort();
+            }
+            let raw = url_get(&at);
+            let Some(url) = crate::canvas::url(&raw).filter(|u| !u.is_empty()) else {
+                shown.set_custom_image(None::<&gtk::gdk::Paintable>);
+                return;
+            };
+            let target = shown.clone();
+            let size = f64::from(target.size().max(40));
+            let slot = Rc::clone(&loading);
+            let handle = glib::spawn_future_local(async move {
+                let texture = crate::features::load_avatar_texture(&url, size).await;
+                slot.take();
+                target.set_custom_image(texture.as_ref());
+            });
+            *loading.borrow_mut() = Some(handle);
+        });
+    }
+    keeps_width(&avatar);
+    p.add(&avatar);
+}
+
 #[derive(Default)]
 pub struct StackProps {
     /// `column` or `row`.
@@ -3987,7 +4504,7 @@ pub fn Menu(p: &Parent, ctx: &Ctx, props: MenuProps, items: Vec<Option<MenuItem>
         let name = format!("i{index}");
         let action = gio::SimpleAction::new(&name, None);
         let (run, set_file) =
-            crate::features::picking(ctx, item.pick, bound_action(ctx, &item.action));
+            crate::features::picking(ctx, item.pick.clone(), bound_action(ctx, &item.action));
         let run = crate::features::pasting(ctx, item.paste, run);
         if let Some(run) = run.clone() {
             action.connect_activate(move |_, _| run());

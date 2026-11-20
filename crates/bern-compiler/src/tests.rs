@@ -2988,7 +2988,7 @@ fn files_are_picked_and_dropped() {
         (format!(r#"{open}, pick: draft.file, files: "any video") => app.add(1)"#), "`any` already takes every file"),
         (format!(r#"{open}, pick: draft.file, files: "video .mp4 video") => app.add(1)"#), "written twice"),
         (format!(r#"{open}, files: "video") => app.add(1)"#), "add `pick: draft.file`"),
-        (format!(r#"{open}, pick: draft.name) => app.add(1)"#), "a `MediaSource` or `Option<MediaSource>` field"),
+        (format!(r#"{open}, pick: draft.name) => app.add(1)"#), "a `MediaSource`, `Option<MediaSource>` or `Vec<MediaSource>` field"),
         (
             r#"Drop(id: d, label: tr! { "en" => "D", "ja" => "D" }, value: draft.file) { Spacer }"#.to_string(),
             "UI action must bind",
@@ -5451,7 +5451,7 @@ fn paste_reads_the_clipboard_into_a_text_draft() {
     let both = table_errors(
         r#"Button(id: paste, label: tr! { "en" => "Paste", "ja" => "貼り付け" }, pick: draft.file, paste: draft.name) => app.rename(draft.name)"#,
     );
-    assert!(both.contains("not both"), "{both}");
+    assert!(both.contains("takes at most one of"), "{both}");
 }
 
 #[test]
@@ -5904,4 +5904,97 @@ fn m2_controls_and_dynamic_picker_validation() {
     let msg =
         errors(r#"Alert(title: tr! { "en" => "A", "ja" => "A" }) { Text(content: app.title) }"#);
     assert!(msg.contains("AlertAction"), "{msg}");
+}
+
+#[test]
+fn m3_controls_and_file_dialogs_validation() {
+    let m3_ui = |body: &str| {
+        format!(
+            r#"
+            use bern::prelude::*;
+            use demo_protocol::demo;
+
+            #[bern::session]
+            pub struct Draft {{
+                pub day: CalendarDate,
+                pub min_day: CalendarDate,
+                pub mins: f64,
+                pub files: Vec<MediaSource>,
+                pub dest: String,
+                pub dest_media: Option<MediaSource>,
+                pub single: MediaSource,
+                pub note: String,
+            }}
+
+            #[component]
+            pub fn app(app: demo::Client, windows: AppWindows) -> impl View {{
+                ui! {{
+                    WindowSet(handle: AppWindows, primary: main) {{
+                        Window(id: main, title: tr! {{ "en" => "Main", "ja" => "Main" }}, initial: open) {{
+                            page(app: app)
+                        }}
+                    }}
+                }}
+            }}
+
+            #[component]
+            pub fn page(app: demo::Client, #[session] draft: Draft) -> impl View {{
+                ui! {{ {body} }}
+            }}
+            "#
+        )
+    };
+    let valid = compile_ui(&m3_ui(
+        r#"
+        Column {
+            Text(content: tr! { "en" => "Copy me", "ja" => "Copy me" }, selectable: true)
+            DatePicker(id: d_draft, label: tr! { "en" => "Date", "ja" => "Date" }, value: draft.day, min: draft.min_day)
+            DatePicker(id: d_ctrl, label: tr! { "en" => "Ctrl", "ja" => "Ctrl" }, current: draft.min_day) => app.add(1)
+            TimePicker(id: t_draft, label: tr! { "en" => "Time", "ja" => "Time" }, value: draft.mins, min: 480, max: 1080, step: 15)
+            TimePicker(id: t_ctrl, label: tr! { "en" => "Ctrl Time", "ja" => "Ctrl Time" }, current: app.count, step: 5) => app.add(1)
+            Button(id: open_many, label: tr! { "en" => "Pick Many", "ja" => "Pick Many" }, pick: draft.files, files: "picture") => app.add(1)
+            Button(id: save_str, label: tr! { "en" => "Save", "ja" => "Save" }, save: draft.dest, suggested_name: tr! { "en" => "out.txt", "ja" => "out.txt" }) => app.add(1)
+            Button(id: save_opt, label: tr! { "en" => "Save Media", "ja" => "Save Media" }, save: draft.dest_media, files: ".txt") => app.add(1)
+            EmptyState(title: tr! { "en" => "Nothing here", "ja" => "Nothing here" }, message: tr! { "en" => "Add one", "ja" => "Add one" }, icon: "tray") {
+                Button(id: add_first, label: tr! { "en" => "Add", "ja" => "Add" }) => app.add(1)
+            }
+            Badge(content: tr! { "en" => "New", "ja" => "New" }, tone: accent, icon: "star")
+            Avatar(label: tr! { "en" => "Ada", "ja" => "Ada" }, size: 40, shape: rounded)
+            Avatar(source: draft.single, label: tr! { "en" => "Photo", "ja" => "Photo" })
+        }
+        "#,
+    ));
+    assert!(valid.is_ok(), "{:?}", valid.err());
+
+    let errs = |body: &str| match compile_ui(&m3_ui(body)) {
+        Ok(_) => panic!("expected compile error for:\n{body}"),
+        Err(errs) => errs
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    };
+
+    let msg = errs(
+        r#"Button(id: b, label: tr! { "en" => "B", "ja" => "B" }, pick: draft.single, save: draft.dest) => app.add(1)"#,
+    );
+    assert!(msg.contains("save:"), "{msg}");
+
+    let msg = errs(
+        r#"Button(id: b, label: tr! { "en" => "B", "ja" => "B" }, suggested_name: tr! { "en" => "a.txt", "ja" => "a.txt" }) => app.add(1)"#,
+    );
+    assert!(msg.contains("suggested_name:"), "{msg}");
+
+    let msg = errs(
+        r#"DatePicker(id: d, label: tr! { "en" => "D", "ja" => "D" }, current: draft.min_day)"#,
+    );
+    assert!(msg.contains("needs an action"), "{msg}");
+
+    let msg = errs(
+        r#"TimePicker(id: t, label: tr! { "en" => "T", "ja" => "T" }, value: draft.mins, min: 1500)"#,
+    );
+    assert!(msg.contains("1439"), "{msg}");
+
+    let msg = errs(r#"Avatar(label: tr! { "en" => "A", "ja" => "A" }, size: 0)"#);
+    assert!(msg.contains("above zero"), "{msg}");
 }

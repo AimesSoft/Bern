@@ -37,6 +37,15 @@ pub enum Role {
 }
 
 /// How a `Button` shows and what it picks.
+/// A file open or save prompt attached to a button or menu item.
+#[derive(Clone, Debug)]
+pub struct FilePrompt {
+    pub field: Field,
+    pub kinds: &'static str,
+    pub save: bool,
+    pub suggested_name: Option<String>,
+}
+
 #[derive(Clone, Default)]
 pub struct ButtonProps {
     /// Pointer-only double click; keyboard and accessibility always activate the main action.
@@ -51,9 +60,8 @@ pub struct ButtonProps {
     pub height: Option<f32>,
     /// The `style!` rules of its kind and variant.
     pub style: Option<&'static ControlStyle>,
-    /// A draft field the open panel fills before the action runs, and the
-    /// kinds of file it takes (`folder` for folders).
-    pub pick: Option<(Field, &'static str)>,
+    /// A draft field the open or save panel fills before the action runs.
+    pub pick: Option<FilePrompt>,
     /// A key combination that presses the button, as `cmd+o`.
     pub shortcut: Option<String>,
 }
@@ -66,24 +74,81 @@ fn media_source(path: &std::path::Path) -> Value {
     Value::Record(vec![Value::Text(url)])
 }
 
-/// Open the system's panel for a file or a folder of `kinds`; the chosen
-/// one goes into `field`, then `then` runs.
-fn pick(c: &Ctx, field: Field, kinds: &'static str, then: Option<Act>, cx: &mut App) {
-    let folder = kinds == "folder";
+fn field_type(field: Field) -> Option<crate::protocol::Type> {
+    crate::host::host()
+        .def
+        .sessions
+        .get(field.session)?
+        .fields
+        .get(field.field)
+        .map(|(_, ty, _)| ty.clone())
+}
+
+fn write_picked_paths(c: &Ctx, field: Field, paths: &[std::path::PathBuf], save: bool) -> bool {
+    let ty = field_type(field);
+    let value = match ty {
+        Some(crate::protocol::Type::Text) if save => {
+            let Some(first) = paths.first() else {
+                return false;
+            };
+            Value::Text(first.to_string_lossy().into_owned())
+        }
+        Some(crate::protocol::Type::List { .. }) => {
+            Value::List(paths.iter().map(|p| media_source(p)).collect())
+        }
+        Some(crate::protocol::Type::Optional { .. }) => {
+            let Some(first) = paths.first() else {
+                return false;
+            };
+            Value::some(media_source(first))
+        }
+        _ => {
+            let Some(first) = paths.first() else {
+                return false;
+            };
+            media_source(first)
+        }
+    };
+    c.write(field, value)
+}
+
+/// Open the system's open or save panel; the chosen path(s) go into `field`,
+/// then `then` runs.
+fn pick(c: &Ctx, prompt: FilePrompt, then: Option<Act>, cx: &mut App) {
+    let field = prompt.field;
+    if prompt.save {
+        let dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let chosen = cx.prompt_for_new_path(&dir, prompt.suggested_name.as_deref());
+        let c = c.clone();
+        cx.spawn(async move |cx| {
+            if let Ok(Ok(Some(path))) = chosen.await {
+                cx.update(|_| {
+                    if write_picked_paths(&c, field, &[path], true)
+                        && let Some(then) = &then
+                    {
+                        then(&c);
+                    }
+                });
+            }
+        })
+        .detach();
+        return;
+    }
+    let folder = prompt.kinds == "folder";
+    let multiple = matches!(field_type(field), Some(crate::protocol::Type::List { .. }));
     let chosen = cx.prompt_for_paths(PathPromptOptions {
         files: !folder,
         directories: folder,
-        multiple: false,
+        multiple,
         prompt: None,
     });
     let c = c.clone();
     cx.spawn(async move |cx| {
         if let Ok(Ok(Some(paths))) = chosen.await
-            && let Some(path) = paths.first()
+            && !paths.is_empty()
         {
-            let source = media_source(path);
             cx.update(|_| {
-                if c.write(field, source)
+                if write_picked_paths(&c, field, &paths, false)
                     && let Some(then) = &then
                 {
                     then(&c);
@@ -94,15 +159,15 @@ fn pick(c: &Ctx, field: Field, kinds: &'static str, then: Option<Act>, cx: &mut 
     .detach();
 }
 
-/// The action of a pressed button: the open panel first when it picks.
+/// The action of a pressed button: the open/save panel first when it picks.
 pub(crate) fn press(
     c: &Ctx,
-    pick_into: Option<(Field, &'static str)>,
+    pick_into: Option<FilePrompt>,
     action: Option<Act>,
 ) -> crate::ctx::Press {
     let c = c.clone();
-    Rc::new(move |cx: &mut App| match pick_into {
-        Some((field, kinds)) => pick(&c, field, kinds, action.clone(), cx),
+    Rc::new(move |cx: &mut App| match pick_into.clone() {
+        Some(prompt) => pick(&c, prompt, action.clone(), cx),
         None => {
             if let Some(action) = &action {
                 action(&c);
@@ -583,7 +648,7 @@ pub struct IconButtonProps {
     /// The icon's size in points.
     pub size: Option<f32>,
     pub style: Option<&'static ControlStyle>,
-    pub pick: Option<(Field, &'static str)>,
+    pub pick: Option<FilePrompt>,
     pub shortcut: Option<String>,
     pub icon_progress: Option<f32>,
     pub badge_icon: Option<&'static str>,

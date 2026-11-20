@@ -589,12 +589,12 @@ impl<'a> Generator<'a> {
             .map(|style| format!("&S_{}", style.name))
     }
 
-    /// The kinds of file `pick:` asks for, or a drop area takes.
+    /// The kinds of file `pick:` / `save:` asks for, or a drop area takes.
     fn files(element: &Element) -> Option<String> {
-        element
-            .keyword("files")
-            .map(string)
-            .or_else(|| element.field("pick").map(|_| string("any")))
+        element.keyword("files").map(string).or_else(|| {
+            (element.field("pick").is_some() || element.field("save").is_some())
+                .then(|| string("any"))
+        })
     }
 }
 

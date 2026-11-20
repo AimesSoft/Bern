@@ -390,6 +390,134 @@ impl Generator<'_> {
         out.line(format!("B.Alert(p, ctx, {props});"));
     }
 
+    pub(super) fn date_picker(&self, out: &mut Out, element: &Element) {
+        let controlled = element.expr("current").is_some();
+        let props = Self::props(vec![
+            ("id", Some(self.id(element))),
+            ("label", self.text_prop(element, "label")),
+            (
+                "field",
+                if controlled {
+                    self.control_field(element, "current")
+                } else {
+                    self.field(element, "value")
+                },
+            ),
+            (
+                "min",
+                element
+                    .expr("min")
+                    .map(|e| format!("() => {}", self.expr(e))),
+            ),
+            (
+                "max",
+                element
+                    .expr("max")
+                    .map(|e| format!("() => {}", self.expr(e))),
+            ),
+            (
+                "enabled",
+                element
+                    .expr("enabled")
+                    .map(|e| format!("() => {}", self.expr(e))),
+            ),
+            (
+                "labelHidden",
+                Some((element.keyword("label_hidden") == Some("true")).to_string()),
+            ),
+        ]);
+        let commit = if controlled {
+            "null".into()
+        } else {
+            self.action_fn(element)
+        };
+        out.line(format!("B.DatePicker(p, ctx, {props}, {commit});"));
+    }
+
+    pub(super) fn time_picker(&self, out: &mut Out, element: &Element) {
+        let controlled = element.expr("current").is_some();
+        let props = Self::props(vec![
+            ("id", Some(self.id(element))),
+            ("label", self.text_prop(element, "label")),
+            (
+                "field",
+                if controlled {
+                    self.control_field(element, "current")
+                } else {
+                    self.field(element, "value")
+                },
+            ),
+            ("min", element.number("min").map(number)),
+            ("max", element.number("max").map(number)),
+            ("step", element.number("step").map(number)),
+            (
+                "enabled",
+                element
+                    .expr("enabled")
+                    .map(|e| format!("() => {}", self.expr(e))),
+            ),
+            (
+                "labelHidden",
+                Some((element.keyword("label_hidden") == Some("true")).to_string()),
+            ),
+        ]);
+        let commit = if controlled {
+            "null".into()
+        } else {
+            self.action_fn(element)
+        };
+        out.line(format!("B.TimePicker(p, ctx, {props}, {commit});"));
+    }
+
+    pub(super) fn empty_state(&self, out: &mut Out, element: &Element) {
+        let props = Self::props(vec![
+            ("title", self.text_prop(element, "title")),
+            ("message", self.text_prop(element, "message")),
+            ("icon", element.icon("icon").map(string)),
+        ]);
+        if element.children.is_empty() {
+            out.line(format!("B.EmptyState(p, ctx, {props}, null);"));
+        } else {
+            self.children(
+                out,
+                &format!("B.EmptyState(p, ctx, {props}, "),
+                &element.children,
+                ");",
+            );
+        }
+    }
+
+    pub(super) fn badge(&self, out: &mut Out, element: &Element) {
+        out.line(format!(
+            "B.Badge(p, ctx, {});",
+            Self::props(vec![
+                ("content", self.text_prop(element, "content")),
+                ("tone", Self::keyword(element, "tone")),
+                ("icon", element.icon("icon").map(string)),
+            ])
+        ));
+    }
+
+    pub(super) fn avatar(&self, out: &mut Out, element: &Element) {
+        let url = element.expr("source").map(|expr| {
+            if matches!(expr.ty, Type::Optional { .. }) {
+                format!("() => ({})?.url ?? null", self.expr(expr))
+            } else {
+                format!("() => ({}).url", self.expr(expr))
+            }
+        });
+        out.line(format!(
+            "B.Avatar(p, ctx, {});",
+            Self::props(vec![
+                ("label", self.text_prop(element, "label")),
+                ("source", element.resource("source").map(string)),
+                ("url", url),
+                ("size", self.length(element, "size")),
+                ("shape", Self::keyword(element, "shape")),
+            ])
+        ));
+    }
+
     pub(super) fn picker(&self, out: &mut Out, element: &Element) {
         if let Some(items_expr) = element.expr("items") {
             let Type::List { inner } = &items_expr.ty else {

@@ -838,6 +838,17 @@ impl<'a> Gen<'a> {
                 PropKind::FileField => {
                     pre.push(self.writable(&prop.value, quote!(::bern::__private::file_field)))
                 }
+                PropKind::SaveFileField => pre.push(
+                    self.writable(&prop.value, quote!(::bern::__private::save_file_field)),
+                ),
+                PropKind::DateField => {
+                    pre.push(self.writable(&prop.value, quote!(::bern::__private::date_field)))
+                }
+                PropKind::DateValue => {
+                    let value = self.value(&prop.value);
+                    let span = prop.value.span();
+                    pre.push(quote_spanned!(span=> ::bern::__private::date_value(&#value);));
+                }
                 PropKind::PositionField => pre.push(
                     self.writable(&prop.value, quote!(::bern::__private::position_field)),
                 ),

@@ -2931,3 +2931,75 @@ test("M2 controls: Tooltip, Banner, Disclosure, NumberInput, Alert and dynamic c
   assert.equal(alertChoice, "delete");
   scope.dispose();
 });
+
+test("M3 controls: selectable Text, DatePicker, TimePicker, EmptyState, Badge, Avatar", () => {
+  const { B, Element } = runtime();
+  const root = new Element("div");
+  const scope = new B.Scope();
+  const ctx = { win: "main", comp: "demo" };
+  const date = B.cell({ year: 2026n, month: 5n, day: 14n });
+  const time = B.cell(570);
+  let emptyClicked = 0;
+
+  B.within(scope, () => {
+    B.Text(root, ctx, { content: () => "Selectable line", selectable: true });
+    B.DatePicker(root, ctx, {
+      id: "date",
+      label: () => "Date",
+      field: date,
+      min: () => ({ year: 2026n, month: 1n, day: 1n }),
+      max: () => ({ year: 2026n, month: 12n, day: 31n }),
+    });
+    B.TimePicker(root, ctx, {
+      id: "time",
+      label: () => "Reminder",
+      field: time,
+      min: 480,
+      max: 1080,
+      step: 15,
+    });
+    B.EmptyState(
+      root,
+      ctx,
+      { title: () => "Empty", message: () => "Nothing yet", icon: "tray" },
+      (p) => {
+        B.Button(p, ctx, { id: "add", label: () => "Add" }, () => { emptyClicked += 1; });
+      },
+    );
+    B.Badge(root, ctx, { content: () => "Synced", tone: "success", icon: "checkmark.circle" });
+    B.Avatar(root, ctx, { label: () => "Ada Lovelace", size: 40, shape: "rounded" });
+  });
+
+  // Selectable text carries bern-selectable class.
+  assert.equal(root.children[0].classList.contains("bern-selectable"), true);
+
+  // DatePicker formats ISO date and supports CLI edit with min/max clamping.
+  const dateCtrl = B.controlEntries().find((e) => e.target() === "demo.date");
+  assert.equal(dateCtrl.actions.value(), "2026-05-14");
+  dateCtrl.actions.edit("2026-11-20");
+  assert.deepEqual({ ...date.peek() }, { year: 2026n, month: 11n, day: 20n });
+  dateCtrl.actions.edit("2028-01-01");
+  assert.deepEqual({ ...date.peek() }, { year: 2026n, month: 12n, day: 31n });
+
+  // TimePicker formats HH:MM, clamps and snaps step via CLI edit & setNumber.
+  const timeCtrl = B.controlEntries().find((e) => e.target() === "demo.time");
+  assert.equal(timeCtrl.actions.value(), "09:30");
+  timeCtrl.actions.edit("10:08");
+  assert.equal(time.peek(), 615);
+  timeCtrl.actions.setNumber(1200);
+  assert.equal(time.peek(), 1080);
+
+  // EmptyState renders title, message, and action child.
+  const addCtrl = B.controlEntries().find((e) => e.target() === "demo.add");
+  addCtrl.actions.activate();
+  assert.equal(emptyClicked, 1);
+
+  // Badge carries tone class and Avatar computes initials + rounded shape.
+  const badge = root.children[4];
+  assert.equal(badge.classList.contains("bern-badge-success"), true);
+  const avatar = root.children[5];
+  assert.equal(avatar.classList.contains("bern-avatar-rounded"), true);
+  assert.equal(avatar.getAttribute("aria-label"), "Ada Lovelace");
+  assert.equal(avatar.children[0].textContent, "AL");
+  scope.dispose();
+});

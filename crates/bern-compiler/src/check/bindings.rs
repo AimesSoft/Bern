@@ -108,7 +108,20 @@ impl Checker<'_> {
                         let source = Type::Record {
                             name: bern_media::MEDIA_SOURCE.into(),
                         };
-                        ty == source || ty == Type::optional(source)
+                        ty == source
+                            || ty == Type::optional(source.clone())
+                            || ty == Type::list(source)
+                    }
+                    FieldExpect::SaveFile => {
+                        let source = Type::Record {
+                            name: bern_media::MEDIA_SOURCE.into(),
+                        };
+                        ty == source || ty == Type::optional(source) || ty == Type::Text
+                    }
+                    FieldExpect::Date => {
+                        ty == Type::Record {
+                            name: bern_protocol::format::CALENDAR_DATE.into(),
+                        }
                     }
                     FieldExpect::Position => matches!(ty, Type::Int | Type::Text),
                     FieldExpect::Keys => {
@@ -127,7 +140,13 @@ impl Checker<'_> {
                         FieldExpect::Bool => "a `bool` field",
                         FieldExpect::Number => "an `f64` field",
                         FieldExpect::OptionalNumber => "an `Option<f64>` field",
-                        FieldExpect::File => "a `MediaSource` or `Option<MediaSource>` field",
+                        FieldExpect::File => {
+                            "a `MediaSource`, `Option<MediaSource>` or `Vec<MediaSource>` field"
+                        }
+                        FieldExpect::SaveFile => {
+                            "a `MediaSource`, `Option<MediaSource>` or `String` field"
+                        }
+                        FieldExpect::Date => "a `CalendarDate` field",
                         FieldExpect::Position => {
                             "an `i64` or `String` field, like the keys of the items"
                         }

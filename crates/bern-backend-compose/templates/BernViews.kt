@@ -96,6 +96,12 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.PlainTooltip
@@ -3077,5 +3083,366 @@ fun BernAlert(
             }
         },
     )
+}
+
+@Composable
+fun BernSelectable(content: @Composable () -> Unit) {
+    androidx.compose.foundation.text.selection.SelectionContainer {
+        content()
+    }
+}
+
+private fun bernFormatIsoDate(year: Long, month: Long, day: Long): String {
+    val y = if (year in 1L..9999L) year else 2026L
+    val m = month.coerceIn(1L, 12L)
+    val d = day.coerceIn(1L, 31L)
+    return String.format(java.util.Locale.US, "%04d-%02d-%02d", y, m, d)
+}
+
+private fun bernDateToUtcMillis(year: Long, month: Long, day: Long): Long {
+    val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
+    cal.clear()
+    cal.set(
+        (if (year in 1L..9999L) year else 2026L).toInt(),
+        (month.coerceIn(1L, 12L) - 1L).toInt(),
+        day.coerceIn(1L, 31L).toInt(),
+    )
+    return cal.timeInMillis
+}
+
+private fun bernUtcMillisToYmd(millis: Long): Triple<Long, Long, Long> {
+    val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
+    cal.timeInMillis = millis
+    return Triple(
+        cal.get(java.util.Calendar.YEAR).toLong(),
+        (cal.get(java.util.Calendar.MONTH) + 1).toLong(),
+        cal.get(java.util.Calendar.DAY_OF_MONTH).toLong(),
+    )
+}
+
+private fun bernParseIsoDate(raw: String): Triple<Long, Long, Long>? {
+    val parts = raw.trim().split("-")
+    if (parts.size != 3) return null
+    val y = parts[0].toLongOrNull() ?: return null
+    val m = parts[1].toLongOrNull() ?: return null
+    val d = parts[2].toLongOrNull() ?: return null
+    if (y !in 1L..9999L || m !in 1L..12L || d !in 1L..31L) return null
+    return bernUtcMillisToYmd(bernDateToUtcMillis(y, m, d))
+}
+
+private fun bernClampDate(
+    value: Triple<Long, Long, Long>,
+    minDate: Triple<Long, Long, Long>?,
+    maxDate: Triple<Long, Long, Long>?,
+): Triple<Long, Long, Long> {
+    var cur = bernDateToUtcMillis(value.first, value.second, value.third)
+    if (minDate != null) {
+        val lo = bernDateToUtcMillis(minDate.first, minDate.second, minDate.third)
+        if (cur < lo) cur = lo
+    }
+    if (maxDate != null) {
+        val hi = bernDateToUtcMillis(maxDate.first, maxDate.second, maxDate.third)
+        if (cur > hi) cur = hi
+    }
+    return bernUtcMillisToYmd(cur)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun BernDatePicker(
+    target: String,
+    label: String,
+    year: Long,
+    month: Long,
+    day: Long,
+    onCommit: (Long, Long, Long) -> Unit,
+    minDate: Triple<Long, Long, Long>? = null,
+    maxDate: Triple<Long, Long, Long>? = null,
+    enabled: Boolean = true,
+    labelHidden: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
+    var open by remember { mutableStateOf(false) }
+    BernControl(
+        target,
+        "date_picker",
+        label,
+        enabled = enabled,
+        actions = BernControlActions(
+            edit = { text ->
+                val parsed = bernParseIsoDate(text)
+                if (parsed != null) {
+                    val clamped = bernClampDate(parsed, minDate, maxDate)
+                    onCommit(clamped.first, clamped.second, clamped.third)
+                }
+            },
+            value = { bernFormatIsoDate(year, month, day) },
+        ),
+    )
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        if (!labelHidden) {
+            Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        }
+        OutlinedButton(onClick = { open = true }, enabled = enabled) {
+            Icon(Icons.Filled.DateRange, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(bernFormatIsoDate(year, month, day))
+        }
+    }
+    if (open) {
+        val pickerState = rememberDatePickerState(
+            initialSelectedDateMillis = bernDateToUtcMillis(year, month, day),
+        )
+        DatePickerDialog(
+            onDismissRequest = { open = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    val ms = pickerState.selectedDateMillis
+                    if (ms != null) {
+                        val clamped = bernClampDate(bernUtcMillisToYmd(ms), minDate, maxDate)
+                        onCommit(clamped.first, clamped.second, clamped.third)
+                    }
+                    open = false
+                }) { Text("OK") }
+            },
+            dismissButton = {
+                TextButton(onClick = { open = false }) { Text("Cancel") }
+            },
+        ) {
+            DatePicker(state = pickerState)
+        }
+    }
+}
+
+private fun bernClampTime(raw: Double, min: Double, max: Double, step: Double): Double {
+    if (!raw.isFinite()) return min
+    val s = kotlin.math.max(1.0, kotlin.math.round(step))
+    val clamped = raw.coerceIn(min, max)
+    val snapped = min + kotlin.math.round((clamped - min) / s) * s
+    return kotlin.math.round(snapped).coerceIn(min, max)
+}
+
+private fun bernFormatTime(minutes: Double): String {
+    val total = (if (minutes.isFinite()) kotlin.math.round(minutes) else 0.0).coerceIn(0.0, 1439.0).toInt()
+    return String.format(java.util.Locale.US, "%02d:%02d", total / 60, total % 60)
+}
+
+private fun bernParseTime(raw: String): Double? {
+    val trimmed = raw.trim()
+    val colon = trimmed.indexOf(':')
+    if (colon > 0) {
+        val h = trimmed.substring(0, colon).trim().toIntOrNull()
+        val m = trimmed.substring(colon + 1).trim().toIntOrNull()
+        if (h != null && m != null && h in 0..23 && m in 0..59) {
+            return (h * 60 + m).toDouble()
+        }
+    }
+    return trimmed.toDoubleOrNull()?.takeIf { it.isFinite() }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun BernTimePicker(
+    target: String,
+    label: String,
+    minutes: Double,
+    onCommit: (Double) -> Unit,
+    minMinutes: Double = 0.0,
+    maxMinutes: Double = 1439.0,
+    step: Double = 1.0,
+    enabled: Boolean = true,
+    labelHidden: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
+    var open by remember { mutableStateOf(false) }
+    val lo = minMinutes.coerceIn(0.0, 1439.0)
+    val hi = maxMinutes.coerceIn(lo, 1439.0)
+    val st = kotlin.math.round(step).coerceIn(1.0, 60.0)
+    BernControl(
+        target,
+        "time_picker",
+        label,
+        enabled = enabled,
+        actions = BernControlActions(
+            edit = { text ->
+                val parsed = bernParseTime(text)
+                if (parsed != null) onCommit(bernClampTime(parsed, lo, hi, st))
+            },
+            setNumber = { v ->
+                if (v.isFinite()) onCommit(bernClampTime(v, lo, hi, st))
+            },
+            value = { bernFormatTime(minutes) },
+        ),
+    )
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        if (!labelHidden) {
+            Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        }
+        OutlinedButton(onClick = { open = true }, enabled = enabled) {
+            Text(bernFormatTime(minutes))
+        }
+    }
+    if (open) {
+        val current = bernClampTime(minutes, lo, hi, st).toInt()
+        val state = rememberTimePickerState(initialHour = current / 60, initialMinute = current % 60, is24Hour = true)
+        AlertDialog(
+            onDismissRequest = { open = false },
+            title = { Text(label) },
+            text = { TimePicker(state = state) },
+            confirmButton = {
+                TextButton(onClick = {
+                    val chosen = (state.hour * 60 + state.minute).toDouble()
+                    onCommit(bernClampTime(chosen, lo, hi, st))
+                    open = false
+                }) { Text("OK") }
+            },
+            dismissButton = {
+                TextButton(onClick = { open = false }) { Text("Cancel") }
+            },
+        )
+    }
+}
+
+@Composable
+fun BernEmptyState(
+    title: String,
+    message: String?,
+    icon: ImageVector?,
+    actions: @Composable RowScope.() -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        if (icon != null) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(44.dp),
+            )
+        }
+        Text(
+            title,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        if (!message.isNullOrEmpty()) {
+            Text(
+                message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            actions()
+        }
+    }
+}
+
+@Composable
+fun BernBadge(
+    content: String,
+    tone: String,
+    icon: ImageVector?,
+) {
+    val tint = when (tone) {
+        "accent" -> bernPalette().role("accent")
+        "success" -> bernPalette().role("status.success")
+        "warning" -> bernPalette().role("status.warning")
+        "error" -> bernPalette().role("status.error")
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val neutral = tone == "neutral"
+    val bg = if (neutral) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f) else tint.copy(alpha = 0.14f)
+    val border = if (neutral) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.14f) else tint.copy(alpha = 0.28f)
+    Surface(
+        shape = CircleShape,
+        color = bg,
+        border = BorderStroke(1.dp, border),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            if (icon != null) {
+                Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(12.dp))
+            }
+            Text(
+                content,
+                style = MaterialTheme.typography.labelSmall,
+                color = tint,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+private fun bernAvatarInitials(raw: String): String {
+    val trimmed = raw.trim()
+    if (trimmed.isEmpty()) return "?"
+    val words = trimmed.split(Regex("\\s+")).filter { it.isNotEmpty() }
+    if (words.size >= 2) {
+        return "${words[0].first()}${words[1].first()}".uppercase()
+    }
+    return if (trimmed.length >= 2 && trimmed[0].code < 128 && trimmed[1].code < 128) {
+        trimmed.substring(0, 2).uppercase()
+    } else {
+        trimmed.substring(0, 1).uppercase()
+    }
+}
+
+@Composable
+fun BernAvatar(
+    label: String,
+    name: String?,
+    url: String?,
+    size: Dp,
+    rounded: Boolean,
+) {
+    val shape = if (rounded) RoundedCornerShape((size.value * 0.22f).coerceAtLeast(4f).dp) else CircleShape
+    val palette = listOf(
+        Color(0xFF3B82F6),
+        Color(0xFF10B981),
+        Color(0xFFF59E0B),
+        Color(0xFF8B5CF6),
+        Color(0xFFEC4899),
+        Color(0xFF14B8A6),
+    )
+    var hash = 14695981039346656037UL
+    for (b in label.encodeToByteArray()) {
+        hash = (hash xor b.toUByte().toULong()) * 1099511628211UL
+    }
+    val tint = palette[(hash % palette.size.toULong()).toInt()]
+    Box(
+        modifier = Modifier
+            .size(size)
+            .clip(shape)
+            .background(tint.copy(alpha = 0.22f))
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            bernAvatarInitials(label),
+            color = tint,
+            fontSize = (size.value * 0.38f).coerceAtLeast(10f).sp,
+            maxLines = 1,
+        )
+        if (!name.isNullOrEmpty()) {
+            BernImage(name, null, size, size, ContentScale.Crop)
+        } else if (!url.isNullOrEmpty()) {
+            BernImageURL(url, null, size, size, ContentScale.Crop)
+        }
+    }
 }
 // @bern:wear-skip-end

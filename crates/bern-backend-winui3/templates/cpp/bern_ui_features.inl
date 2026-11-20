@@ -876,6 +876,108 @@ inline void PickFile(Ctx ctx, char const* kinds, std::function<void(std::string 
     });
 }
 
+inline std::vector<std::wstring> OpenDialogMany(HWND hwnd, bool folder, std::vector<std::wstring> const& types) {
+    auto dialog = winrt::create_instance<IFileOpenDialog>(CLSID_FileOpenDialog);
+    FILEOPENDIALOGOPTIONS options{};
+    winrt::check_hresult(dialog->GetOptions(&options));
+    options |= FOS_FORCEFILESYSTEM | FOS_ALLOWMULTISELECT;
+    if (folder) options |= FOS_PICKFOLDERS;
+    winrt::check_hresult(dialog->SetOptions(options));
+    std::wstring spec;
+    for (auto const& type : types) {
+        if (!spec.empty()) spec += L';';
+        spec += type == L"*" ? L"*.*" : L"*" + type;
+    }
+    if (!folder) {
+        COMDLG_FILTERSPEC filter{spec.c_str(), spec.c_str()};
+        winrt::check_hresult(dialog->SetFileTypes(1, &filter));
+    }
+    auto shown = dialog->Show(hwnd);
+    if (shown == HRESULT_FROM_WIN32(ERROR_CANCELLED)) return {};
+    winrt::check_hresult(shown);
+    winrt::com_ptr<IShellItemArray> items;
+    winrt::check_hresult(dialog->GetResults(items.put()));
+    DWORD count = 0;
+    winrt::check_hresult(items->GetCount(&count));
+    std::vector<std::wstring> out;
+    out.reserve(count);
+    for (DWORD i = 0; i < count; ++i) {
+        winrt::com_ptr<IShellItem> item;
+        winrt::check_hresult(items->GetItemAt(i, item.put()));
+        PWSTR path = nullptr;
+        winrt::check_hresult(item->GetDisplayName(SIGDN_FILESYSPATH, &path));
+        out.emplace_back(path);
+        CoTaskMemFree(path);
+    }
+    return out;
+}
+
+inline void PickFiles(Ctx ctx, char const* kinds, std::function<void(std::vector<std::string> const&)> give) {
+    bool folder = false;
+    for (auto const& word : FileWords(kinds)) folder = folder || word == "folder";
+    auto types = PanelTypes(kinds);
+    bool windowed = ctx.win != nullptr;
+    auto hwnd = windowed ? ctx.win->hwnd : nullptr;
+    auto alive = windowed ? std::weak_ptr<bool>(ctx.win->life) : std::weak_ptr<bool>();
+    Host::Post([=] {
+        try {
+            auto chosen = OpenDialogMany(hwnd, folder, types);
+            if (!chosen.empty() && (!windowed || !alive.expired())) {
+                std::vector<std::string> urls;
+                urls.reserve(chosen.size());
+                for (auto const& p : chosen) urls.push_back(Host::FileUrl(p));
+                give(urls);
+            }
+        } catch (winrt::hresult_error const& error) {
+            Report("open panel: " + Utf8(error.message()));
+        }
+    });
+}
+
+inline std::optional<std::wstring> SaveDialog(HWND hwnd, std::wstring const& suggested, std::vector<std::wstring> const& types) {
+    auto dialog = winrt::create_instance<IFileSaveDialog>(CLSID_FileSaveDialog);
+    FILEOPENDIALOGOPTIONS options{};
+    winrt::check_hresult(dialog->GetOptions(&options));
+    options |= FOS_FORCEFILESYSTEM | FOS_OVERWRITEPROMPT;
+    winrt::check_hresult(dialog->SetOptions(options));
+    if (!suggested.empty()) winrt::check_hresult(dialog->SetFileName(suggested.c_str()));
+    std::wstring spec;
+    std::wstring defaultExt;
+    for (auto const& type : types) {
+        if (!spec.empty()) spec += L';';
+        spec += type == L"*" ? L"*.*" : L"*" + type;
+        if (defaultExt.empty() && type.size() > 1 && type[0] == L'.') defaultExt = type.substr(1);
+    }
+    COMDLG_FILTERSPEC filter{spec.c_str(), spec.c_str()};
+    winrt::check_hresult(dialog->SetFileTypes(1, &filter));
+    if (!defaultExt.empty()) winrt::check_hresult(dialog->SetDefaultExtension(defaultExt.c_str()));
+    auto shown = dialog->Show(hwnd);
+    if (shown == HRESULT_FROM_WIN32(ERROR_CANCELLED)) return std::nullopt;
+    winrt::check_hresult(shown);
+    winrt::com_ptr<IShellItem> item;
+    winrt::check_hresult(dialog->GetResult(item.put()));
+    PWSTR path = nullptr;
+    winrt::check_hresult(item->GetDisplayName(SIGDN_FILESYSPATH, &path));
+    std::wstring chosen(path);
+    CoTaskMemFree(path);
+    return chosen;
+}
+
+inline void SaveFile(Ctx ctx, char const* kinds, std::wstring suggested, std::function<void(std::string const&, std::string const&)> give) {
+    auto types = PanelTypes(kinds);
+    bool windowed = ctx.win != nullptr;
+    auto hwnd = windowed ? ctx.win->hwnd : nullptr;
+    auto alive = windowed ? std::weak_ptr<bool>(ctx.win->life) : std::weak_ptr<bool>();
+    Host::Post([=] {
+        try {
+            auto chosen = SaveDialog(hwnd, suggested, types);
+            if (chosen && (!windowed || !alive.expired())) give(Host::FileUrl(*chosen), Utf8(winrt::hstring(*chosen)));
+        } catch (winrt::hresult_error const& error) {
+            Report("save panel: " + Utf8(error.message()));
+        }
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Keyboard shortcuts
 

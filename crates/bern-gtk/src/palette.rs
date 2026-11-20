@@ -464,7 +464,8 @@ pub fn SearchItem(
             (palette.close)();
         }
     };
-    let (run, set_file) = crate::features::picking(ctx, props.pick, bound_action(ctx, &action));
+    let (run, set_file) =
+        crate::features::picking(ctx, props.pick.clone(), bound_action(ctx, &action));
     let activate: Rc<dyn Fn()> = {
         let closes = closes.clone();
         Rc::new(move || {

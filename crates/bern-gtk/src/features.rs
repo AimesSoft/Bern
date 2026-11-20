@@ -104,6 +104,50 @@ fn filters(kinds: &str) -> Option<gio::ListStore> {
     Some(store)
 }
 
+/// The declared schema type of a session field.
+pub(crate) fn field_type(field: Field) -> Option<crate::protocol::Type> {
+    crate::host::host()
+        .def
+        .sessions
+        .get(field.session)?
+        .fields
+        .get(field.field)
+        .map(|(_, ty, _)| ty.clone())
+}
+
+/// Write a picked or dropped file URL into `field` matching its schema type
+/// (`MediaSource`, `Option<MediaSource>`, `Vec<MediaSource>`, or `String`).
+pub(crate) fn write_file(ctx: &Ctx, field: Field, url: String) {
+    let value = match field_type(field) {
+        Some(crate::protocol::Type::Text) => Value::Text(url),
+        Some(crate::protocol::Type::Optional { .. }) => Value::some(media_source(url)),
+        Some(crate::protocol::Type::List { .. }) => Value::List(vec![media_source(url)]),
+        _ => media_source(url),
+    };
+    ctx.write(field, value);
+}
+
+/// Write multiple picked file URLs into a `Vec<MediaSource>` (or fallback to first).
+pub(crate) fn write_files(ctx: &Ctx, field: Field, urls: Vec<String>) {
+    if matches!(field_type(field), Some(crate::protocol::Type::List { .. })) {
+        ctx.write(
+            field,
+            Value::List(urls.into_iter().map(media_source).collect()),
+        );
+    } else if let Some(first) = urls.into_iter().next() {
+        write_file(ctx, field, first);
+    }
+}
+
+/// Write a save destination (`gio::File`) into `field` (`String` path or `MediaSource`).
+pub(crate) fn write_save_target(ctx: &Ctx, field: Field, uri: String, path: Option<String>) {
+    if matches!(field_type(field), Some(crate::protocol::Type::Text)) {
+        ctx.write(field, Value::Text(path.unwrap_or(uri)));
+    } else {
+        write_file(ctx, field, uri);
+    }
+}
+
 /// The system's open panel for `kinds`; `give` runs with the chosen file's
 /// URL, nothing on cancel.
 pub(crate) fn pick(ctx: &Ctx, kinds: &'static str, give: Rc<dyn Fn(String)>) {
@@ -125,16 +169,80 @@ pub(crate) fn pick(ctx: &Ctx, kinds: &'static str, give: Rc<dyn Fn(String)>) {
     }
 }
 
-/// `pick:` of a button or menu item: the field the file goes into, and the
-/// kinds it takes.
-#[derive(Clone, Copy)]
+/// Multi-file open panel for `kinds`.
+pub(crate) fn pick_many(ctx: &Ctx, kinds: &'static str, give: Rc<dyn Fn(Vec<String>)>) {
+    let dialog = gtk::FileDialog::new();
+    dialog.set_modal(true);
+    if let Some(filters) = filters(kinds) {
+        dialog.set_filters(Some(&filters));
+    }
+    let window = ctx.win().window.clone();
+    let chosen = move |result: Result<gio::ListModel, glib::Error>| {
+        if let Ok(model) = result {
+            let mut urls = Vec::new();
+            for i in 0..model.n_items() {
+                if let Some(file) = model
+                    .item(i)
+                    .and_then(|obj| obj.downcast::<gio::File>().ok())
+                {
+                    urls.push(file.uri().to_string());
+                }
+            }
+            if !urls.is_empty() {
+                give(urls);
+            }
+        }
+    };
+    if kinds.split_whitespace().any(|word| word == "folder") {
+        dialog.select_multiple_folders(Some(&window), None::<&gio::Cancellable>, chosen);
+    } else {
+        dialog.open_multiple(Some(&window), None::<&gio::Cancellable>, chosen);
+    }
+}
+
+/// Native save file dialog with optional suggested filename.
+pub(crate) fn save_file(
+    ctx: &Ctx,
+    kinds: &'static str,
+    suggested: Option<String>,
+    give: Rc<dyn Fn(String, Option<String>)>,
+) {
+    let dialog = gtk::FileDialog::new();
+    dialog.set_modal(true);
+    if let Some(name) = suggested
+        && !name.is_empty()
+    {
+        dialog.set_initial_name(Some(&name));
+    }
+    if let Some(filters) = filters(kinds) {
+        dialog.set_filters(Some(&filters));
+    }
+    let window = ctx.win().window.clone();
+    dialog.save(
+        Some(&window),
+        None::<&gio::Cancellable>,
+        move |result: Result<gio::File, glib::Error>| {
+            if let Ok(file) = result {
+                let uri = file.uri().to_string();
+                let path = file.path().map(|p| p.to_string_lossy().into_owned());
+                give(uri, path);
+            }
+        },
+    );
+}
+
+/// `pick:` or `save:` of a button or menu item: the field the file goes into,
+/// the kinds it takes, whether it is a save dialog, and optional suggested name.
+#[derive(Clone)]
 pub struct Pick {
     pub field: Field,
     pub kinds: &'static str,
+    pub save: bool,
+    pub suggested_name: Option<Str>,
 }
 
-/// For a control with `pick`: what pressing it does (ask for a file, then
-/// act) and what `ui.set_file` does (take the file, then act).
+/// For a control with `pick` or `save`: what pressing it does (ask for file(s)
+/// or save destination, then act) and what `ui.set_file` does (take the file, then act).
 pub(crate) fn picking(
     ctx: &Ctx,
     pick: Option<Pick>,
@@ -143,19 +251,59 @@ pub(crate) fn picking(
     let Some(pick) = pick else {
         return (action, None);
     };
+    let field = pick.field;
+    let kinds = pick.kinds;
     let give: Rc<dyn Fn(String)> = {
         let at = ctx.clone();
+        let act = action.clone();
         Rc::new(move |url| {
-            at.write(pick.field, media_source(url));
-            if let Some(action) = &action {
+            write_file(&at, field, url);
+            if let Some(action) = &act {
                 action();
             }
         })
     };
-    let press: Rc<dyn Fn()> = {
+    let press: Rc<dyn Fn()> = if pick.save {
+        let at = ctx.clone();
+        let act = action.clone();
+        let suggested = pick.suggested_name.as_ref().map(|s| bound_text(ctx, s));
+        Rc::new(move || {
+            let at_cb = at.clone();
+            let act_cb = act.clone();
+            let name = suggested.as_ref().map(|s| s());
+            save_file(
+                &at,
+                kinds,
+                name,
+                Rc::new(move |uri, path| {
+                    write_save_target(&at_cb, field, uri, path);
+                    if let Some(action) = &act_cb {
+                        action();
+                    }
+                }),
+            );
+        })
+    } else if matches!(field_type(field), Some(crate::protocol::Type::List { .. })) {
+        let at = ctx.clone();
+        let act = action.clone();
+        Rc::new(move || {
+            let at_cb = at.clone();
+            let act_cb = act.clone();
+            pick_many(
+                &at,
+                kinds,
+                Rc::new(move |urls| {
+                    write_files(&at_cb, field, urls);
+                    if let Some(action) = &act_cb {
+                        action();
+                    }
+                }),
+            );
+        })
+    } else {
         let at = ctx.clone();
         let give = Rc::clone(&give);
-        Rc::new(move || pick_file(&at, pick.kinds, Rc::clone(&give)))
+        Rc::new(move || pick_file(&at, kinds, Rc::clone(&give)))
     };
     (Some(press), Some(give))
 }
@@ -458,7 +606,7 @@ pub fn ContentButton(
         let shown = button.clone();
         effect(move || shown.set_sensitive(enabled()));
     }
-    let (run, set_file) = picking(ctx, props.pick, bound_action(ctx, &action));
+    let (run, set_file) = picking(ctx, props.pick.clone(), bound_action(ctx, &action));
     let run = pasting(ctx, props.paste, run);
     crate::gestures::button_clicks(&button, run.clone(), bound_action(ctx, &props.double_tap));
     controls::register(
@@ -1057,7 +1205,7 @@ pub fn Drop(p: &Parent, ctx: &Ctx, props: DropProps, action: Option<Act>, conten
         let at = ctx.clone();
         let field = props.field;
         Rc::new(move |url| {
-            at.write(field, media_source(url));
+            write_file(&at, field, url);
             if let Some(action) = &action {
                 action();
             }
@@ -2217,6 +2365,18 @@ pub(crate) fn premultiplied_texture(pixbuf: &gtk::gdk_pixbuf::Pixbuf) -> Option<
 
 /// A texture read from a `file://` or http(s) URL and decoded in the
 /// background at the size `wanted` asks for, once it comes.
+pub(crate) async fn load_avatar_texture(url: &str, size: f64) -> Option<gtk::gdk::Texture> {
+    load_texture(
+        url,
+        DecodeBox {
+            width: Some(size),
+            height: Some(size),
+            cover: true,
+        },
+    )
+    .await
+}
+
 async fn load_texture(url: &str, wanted: DecodeBox) -> Option<gtk::gdk::Texture> {
     let texture = crate::pictures::picture(url, async |bytes| {
         gio::spawn_blocking(move || decode_texture(&bytes, wanted))
