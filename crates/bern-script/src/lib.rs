@@ -218,6 +218,7 @@ struct CliReplyPayload {
 #[derive(Serialize)]
 #[serde(untagged)]
 enum Outbound {
+    #[cfg(not(feature = "boa"))]
     Eval {
         id: String,
         context: String,
