@@ -452,7 +452,14 @@ impl<'a> Generator<'a> {
                     effects.push_str(&format!(".bernBlur({radius}, {corner})"));
                 }
                 if !effects.is_empty() {
-                    out.open(format!("Box(Modifier{effects}) {{"));
+                    let flex = self.element_flex(element, &own);
+                    if flex.is_empty() {
+                        out.open(format!("Box(Modifier{effects}) {{"));
+                    } else {
+                        out.open(format!(
+                            "Box(Modifier{flex}{effects}, propagateMinConstraints = true) {{"
+                        ));
+                    }
                 }
                 // A part fixed to one appearance, with what opens from it.
                 let appearance = element.keyword("appearance");
@@ -475,7 +482,15 @@ impl<'a> Generator<'a> {
                     && effects.is_empty()
                     && appearance.is_none()
                     && element.keyword("hero").is_none();
+                // Inside the effects Box, the receiver is `BoxScope` rather
+                // than the outer `RowScope` or `ColumnScope`, so any flex
+                // weight was lifted onto the Box above.
                 let own = Ctx {
+                    scope: if !effects.is_empty() {
+                        Scope::Other
+                    } else {
+                        own.scope
+                    },
                     layer: if repeats {
                         own.layer
                     } else {
