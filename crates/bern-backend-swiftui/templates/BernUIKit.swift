@@ -1161,11 +1161,20 @@ extension BernFiles {
     /// tvOS has no document picker and no files to pick from; the target
     /// does not list `file_pick`, so generated code never asks.
     static func pick(_ kinds: String, then give: @escaping @MainActor (URL) -> Void) {}
+    static func pickMany(_ kinds: String, then give: @escaping @MainActor ([URL]) -> Void) {}
+    static func save(_ kinds: String, suggestedName: String?, then give: @escaping @MainActor (URL) -> Void) {}
 }
 #else
 extension BernFiles {
     /// The picker on screen keeps its delegate here.
     private static var delegate: BernPickDelegate?
+
+    private static func topViewController() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        var top = scenes.flatMap(\.windows).first(where: \.isKeyWindow)?.rootViewController
+        while let presented = top?.presentedViewController { top = presented }
+        return top
+    }
 
     /// Asks for one file of `kinds` with the system's document picker;
     /// `give` runs once one is chosen. The file is opened where it is and
@@ -1174,25 +1183,62 @@ extension BernFiles {
         let types = words(kinds).contains("any") ? [UTType.item] : types(kinds)
         let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: false)
         picker.allowsMultipleSelection = false
-        let delegate = BernPickDelegate(give: give)
+        let delegate = BernPickDelegate(giveMany: { urls in
+            if let first = urls.first { give(first) }
+        })
         Self.delegate = delegate
         picker.delegate = delegate
-        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-        var top = scenes.flatMap(\.windows).first(where: \.isKeyWindow)?.rootViewController
-        while let presented = top?.presentedViewController { top = presented }
-        top?.present(picker, animated: true)
+        topViewController()?.present(picker, animated: true)
+    }
+
+    /// Asks for one or more files of `kinds` with the system's document picker.
+    static func pickMany(_ kinds: String, then give: @escaping @MainActor ([URL]) -> Void) {
+        let types = words(kinds).contains("any") ? [UTType.item] : types(kinds)
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: false)
+        picker.allowsMultipleSelection = true
+        let delegate = BernPickDelegate(giveMany: give)
+        Self.delegate = delegate
+        picker.delegate = delegate
+        topViewController()?.present(picker, animated: true)
+    }
+
+    /// Presents the system export sheet to choose a save destination.
+    static func save(_ kinds: String, suggestedName: String?, then give: @escaping @MainActor (URL) -> Void) {
+        let fileName = (suggestedName?.isEmpty == false ? suggestedName! : "Untitled")
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            .appendingPathComponent(fileName)
+        do {
+            try FileManager.default.createDirectory(
+                at: tempURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            FileManager.default.createFile(atPath: tempURL.path, contents: Data())
+        } catch {
+            return
+        }
+        let picker = UIDocumentPickerViewController(forExporting: [tempURL], asCopy: true)
+        let delegate = BernPickDelegate(giveMany: { urls in
+            try? FileManager.default.removeItem(at: tempURL.deletingLastPathComponent())
+            if let first = urls.first { give(first) }
+        })
+        Self.delegate = delegate
+        picker.delegate = delegate
+        topViewController()?.present(picker, animated: true)
     }
 }
 
 private final class BernPickDelegate: NSObject, UIDocumentPickerDelegate {
-    let give: @MainActor (URL) -> Void
+    let giveMany: @MainActor ([URL]) -> Void
 
-    init(give: @escaping @MainActor (URL) -> Void) { self.give = give }
+    init(giveMany: @escaping @MainActor ([URL]) -> Void) { self.giveMany = giveMany }
 
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-        guard let url = urls.first else { return }
-        _ = url.startAccessingSecurityScopedResource()
-        MainActor.assumeIsolated { give(url) }
+        guard !urls.isEmpty else { return }
+        for url in urls {
+            _ = url.startAccessingSecurityScopedResource()
+        }
+        MainActor.assumeIsolated { giveMany(urls) }
     }
 }
 #endif

@@ -337,9 +337,8 @@ impl Generator<'_> {
         })
     }
 
-    /// The file a control takes (`pick:`, or a `Drop`'s `value:`): the
-    /// lambda that stores it and runs `action`, and the control actions
-    /// that read it and take one from an external entry.
+    /// The file(s) a control takes (`pick:`, or a `Drop`'s `value:`): the
+    /// lambda that stores a single URL (for drop/CLI) and the control actions.
     pub(super) fn file_target(
         &self,
         element: &Element,
@@ -347,18 +346,28 @@ impl Generator<'_> {
         action: &str,
     ) -> Option<(String, String)> {
         let field = self.field(element, name)?;
-        let optional = matches!(element.field(name)?.ty, Type::Optional { .. });
+        let ty = &element.field(name)?.ty;
+        let optional = matches!(ty, Type::Optional { .. });
+        let is_list = matches!(ty, Type::List { .. });
         let kinds = string(element.keyword("files").unwrap_or("any"));
         let source = value_type(bern_media::MEDIA_SOURCE);
-        let give = format!("{{ url: String -> {field} = {source}(url); {action} }}");
-        let actions = format!(
-            "value = {{ {field}{}.url }}, setFile = {give}, fileKinds = {kinds}",
-            if optional { "?" } else { "" }
-        );
-        Some((give, actions))
+        if is_list {
+            let give = format!("{{ url: String -> {field} = listOf({source}(url)); {action} }}");
+            let actions = format!(
+                "value = {{ ({field}).joinToString(\"\\n\") {{ it.url }} }}, setFile = {give}, fileKinds = {kinds}"
+            );
+            Some((give, actions))
+        } else {
+            let give = format!("{{ url: String -> {field} = {source}(url); {action} }}");
+            let actions = format!(
+                "value = {{ {field}{}.url }}, setFile = {give}, fileKinds = {kinds}",
+                if optional { "?" } else { "" }
+            );
+            Some((give, actions))
+        }
     }
 
-    /// A control's action, and with `pick:` first the document picker or
+    /// A control's action, and with `pick:`/`save:` first the document picker or
     /// with `paste:` the clipboard: what pressing runs, and the extra
     /// control actions.
     pub(super) fn pressed(&self, element: &Element) -> (String, String) {
@@ -378,14 +387,57 @@ impl Generator<'_> {
                 String::new(),
             );
         }
-        match self.file_target(element, "pick", &action) {
-            Some((give, actions)) => (
-                format!(
-                    "BernFiles.pick({}, {give})",
-                    string(element.keyword("files").unwrap_or("any"))
+        if let Some(save_ref) = element.field("save") {
+            let field = self.field(element, "save").expect("save field");
+            let kinds = string(element.keyword("files").unwrap_or("any"));
+            let suggested = self
+                .text_prop(element, "suggested_name")
+                .unwrap_or_else(|| "null".into());
+            let source = value_type(bern_media::MEDIA_SOURCE);
+            let (give, value_expr) = match &save_ref.ty {
+                Type::Text => (
+                    format!("{{ url: String -> {field} = url; {action} }}"),
+                    field,
                 ),
-                format!(", {actions}"),
-            ),
+                Type::Optional { .. } => (
+                    format!("{{ url: String -> {field} = {source}(url); {action} }}"),
+                    format!("{field}?.url"),
+                ),
+                _ => (
+                    format!("{{ url: String -> {field} = {source}(url); {action} }}"),
+                    format!("{field}.url"),
+                ),
+            };
+            let actions =
+                format!(", value = {{ {value_expr} }}, setFile = {give}, fileKinds = {kinds}");
+            return (
+                format!("BernFiles.save({kinds}, {suggested}, {give})"),
+                actions,
+            );
+        }
+        match self.file_target(element, "pick", &action) {
+            Some((give, actions)) => {
+                let kinds = string(element.keyword("files").unwrap_or("any"));
+                if matches!(
+                    element.field("pick").map(|f| &f.ty),
+                    Some(Type::List { .. })
+                ) {
+                    let field = self.field(element, "pick").expect("pick field");
+                    let source = value_type(bern_media::MEDIA_SOURCE);
+                    let give_many = format!(
+                        "{{ urls: List<String> -> {field} = urls.map {{ {source}(it) }}; {action} }}"
+                    );
+                    (
+                        format!("BernFiles.pickMany({kinds}, {give_many})"),
+                        format!(", {actions}"),
+                    )
+                } else {
+                    (
+                        format!("BernFiles.pick({kinds}, {give})"),
+                        format!(", {actions}"),
+                    )
+                }
+            }
             None => (action, String::new()),
         }
     }

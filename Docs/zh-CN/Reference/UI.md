@@ -494,3 +494,13 @@ Grid(min_width: 160, gap: 16, skeleton: app.loading, skeleton_count: 6) {
 - **`NumberInput(id:, label:, value:/current:, min:, max:, step:, precision:, enabled:)`**：带步进器与范围约束的数字输入控件（WinUI 3 `NumberBox`、GTK `SpinButton`、SwiftUI `TextField` + `Stepper`、Web `<input type="number">`）。
 - **`Alert(title:, message:) { AlertAction(id:, label:, role:) => … }`**：挂载即弹出原生确认对话框（SwiftUI `.alert`、WinUI 3 `ContentDialog`、GTK `AdwAlertDialog`、Compose Material 3 `AlertDialog`、Web `<dialog>`），通常放在 `if` 条件分支中控制显示。
 - **动态 `Picker` 与 `style: combobox`**：`Picker(items: app.items, key: id, item_label: name, value: draft.selected, style: combobox, prompt: …)` 支持直接绑定动态记录列表（`i64`、`String` 或带标签枚举键），并在 `combobox` 样式下提供可实时过滤的下拉选择。
+
+## 日期时间、文件对话框、可选文本与标识组件
+
+- **`DatePicker(id:, label:, value:/current:, min:, max:, enabled:)`**：编辑 `CalendarDate` 的原生日期选择器（SwiftUI `DatePicker`、WinUI 3 `CalendarDatePicker`、GTK `gtk::Calendar` 弹出层、Compose Material 3 `DatePickerDialog`、Web `<input type="date">`）。
+- **`TimePicker(id:, label:, value:/current:, min:, max:, step:, enabled:)`**：以自午夜起的分钟数（`0..=1439`）编辑一天中的时间（SwiftUI `DatePicker(.hourAndMinute)`、WinUI 3 `TimePicker`、GTK 时/分双 `SpinButton`、Compose Material 3 `TimePicker`、Web `<input type="time">`）。
+- **保存文件对话框（`save:` + `suggested_name:`）与多选 `pick:`**：将 `Button`、`IconButton`、`MenuItem` 或 `CommandItem` 的 `pick:` 绑定到 `Vec<MediaSource>` 草稿即自动开启多文件选择；绑定 `save:` 到 `MediaSource`、`Option<MediaSource>` 或 `String` 草稿会在动作执行前打开原生保存对话框（可用 `suggested_name:` 预填默认文件名）。
+- **`Text(selectable: true)`**：为只读文本开启原生选择与复制能力（SwiftUI `textSelection(.enabled)`、WinUI 3 `IsTextSelectionEnabled`、GTK `Label::set_selectable`、Compose `SelectionContainer`、Web `user-select: text`）。
+- **`EmptyState(title:, message:, icon:) { … }`**：居中空状态占位组件（Apple 平台使用 `ContentUnavailableView`，GTK 使用 `adw::StatusPage`，其余平台呈现图标、标题、说明与操作按钮）。
+- **`Badge(content:, tone:, icon:)`**：紧凑的行内语义状态胶囊（`neutral`、`accent`、`success`、`warning`、`error`）。
+- **`Avatar(source:, label:, size:, shape:)`**：圆形（`circle`）或圆角（`rounded`）头像，支持随包或运行时图片并自动回退为首字母占位（GTK 使用 `adw::Avatar`，其余平台在原生裁切图片下叠放首字母回退）。

@@ -758,7 +758,7 @@ fn check_status_item(item: &ir::Element, diagnostics: &mut Vec<Diagnostic>) {
     node.walk(&mut |node| {
         let exprs: Vec<&ir::Expr> = match node {
             ir::Node::Element(element) => {
-                for prop in ["pick", "shortcut"] {
+                for prop in ["pick", "save", "shortcut"] {
                     if element.prop(prop).is_some() {
                         diagnostics.push(
                             Diagnostic::error(format!(

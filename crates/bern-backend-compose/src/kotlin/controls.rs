@@ -674,6 +674,102 @@ impl Generator<'_> {
         ));
     }
 
+    pub(super) fn date_picker(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let label = self.text_prop(element, "label").unwrap_or_default();
+        let target = self.target(element, ctx);
+        let label_hidden = element.keyword("label_hidden") == Some("true");
+        let enabled = element
+            .expr("enabled")
+            .map(|e| self.expr(e))
+            .unwrap_or_else(|| "true".into());
+        let date_type = crate::names::value_type(bern_protocol::format::CALENDAR_DATE);
+        let min_arg = element
+            .expr("min")
+            .map(|e| {
+                let v = self.expr(e);
+                format!("Triple(({v}).year, ({v}).month, ({v}).day)")
+            })
+            .unwrap_or_else(|| "null".into());
+        let max_arg = element
+            .expr("max")
+            .map(|e| {
+                let v = self.expr(e);
+                format!("Triple(({v}).year, ({v}).month, ({v}).day)")
+            })
+            .unwrap_or_else(|| "null".into());
+        let Some((value, change)) = self.model(element, "current", &|_| "it".into()) else {
+            return;
+        };
+        out.line(format!(
+            "BernDatePicker({target}, {label}, ({value}).year, ({value}).month, ({value}).day, {{ y, m, d -> val it = {date_type}(y, m, d); {change} }}, {min_arg}, {max_arg}, {enabled}, {label_hidden}, Modifier.testTag({target}))"
+        ));
+    }
+
+    pub(super) fn time_picker(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let label = self.text_prop(element, "label").unwrap_or_default();
+        let target = self.target(element, ctx);
+        let label_hidden = element.keyword("label_hidden") == Some("true");
+        let min = double(element.number("min").unwrap_or(0.0));
+        let max = double(element.number("max").unwrap_or(1439.0));
+        let step = double(element.number("step").unwrap_or(1.0));
+        let enabled = element
+            .expr("enabled")
+            .map(|e| self.expr(e))
+            .unwrap_or_else(|| "true".into());
+        let convert = |ty: &Type| match ty {
+            Type::Int => "Math.round(it)".to_string(),
+            _ => "it".to_string(),
+        };
+        let Some((value, change)) = self.model(element, "current", &convert) else {
+            return;
+        };
+        out.line(format!(
+            "BernTimePicker({target}, {label}, ({value}).toDouble(), {{ it: Double -> {change} }}, {min}, {max}, {step}, {enabled}, {label_hidden}, Modifier.testTag({target}))"
+        ));
+    }
+
+    pub(super) fn empty_state(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let title = self.text_prop(element, "title").unwrap_or_default();
+        let message = self
+            .text_prop(element, "message")
+            .unwrap_or_else(|| "null".into());
+        let icon = Self::icon(element.icon("icon"));
+        out.open(format!("BernEmptyState({title}, {message}, {icon}) {{"));
+        self.nodes(out, &element.children, &ctx.within(Scope::Row));
+        out.close("}");
+    }
+
+    pub(super) fn badge(&self, out: &mut Out, element: &Element) {
+        let content = self.text_prop(element, "content").unwrap_or_default();
+        let tone = element.keyword("tone").unwrap_or("neutral");
+        let icon = Self::icon(element.icon("icon"));
+        out.line(format!("BernBadge({content}, {}, {icon})", string(tone)));
+    }
+
+    pub(super) fn avatar(&self, out: &mut Out, element: &Element) {
+        let label = self.text_prop(element, "label").unwrap_or_default();
+        let size = self
+            .length(element, "size")
+            .unwrap_or_else(|| "40.dp".into());
+        let rounded = element.keyword("shape") == Some("rounded");
+        let (name_arg, url_arg) = match element.expr("source") {
+            Some(expr) if matches!(expr.ty, Type::Optional { .. }) => {
+                ("null".into(), format!("({})?.url", self.expr(expr)))
+            }
+            Some(expr) => ("null".into(), format!("({}).url", self.expr(expr))),
+            None => (
+                element
+                    .resource("source")
+                    .map(string)
+                    .unwrap_or_else(|| "null".into()),
+                "null".into(),
+            ),
+        };
+        out.line(format!(
+            "BernAvatar({label}, {name_arg}, {url_arg}, {size}, {rounded})"
+        ));
+    }
+
     /// A picker; in a top bar (`toolbar`) the chosen option opening a menu.
     pub(super) fn picker_in(&self, out: &mut Out, element: &Element, ctx: &Ctx, toolbar: bool) {
         let prompt_arg = self

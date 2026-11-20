@@ -548,7 +548,7 @@ pub struct SearchItemProps {
     pub hint: Option<String>,
     /// Reached with the arrow keys.
     pub navigation: bool,
-    pub pick: Option<(Field, &'static str)>,
+    pub pick: Option<crate::FilePrompt>,
 }
 
 /// `SearchItem`: a result of the palette; choosing it closes the palette,

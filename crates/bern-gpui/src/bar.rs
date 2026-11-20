@@ -58,7 +58,7 @@ pub fn bar_item(
     shortcut: Option<String>,
     enabled: bool,
     checked: bool,
-    pick: Option<(crate::Field, &'static str)>,
+    pick: Option<crate::FilePrompt>,
     action: Option<crate::Act>,
 ) -> BarEntry {
     BarEntry::Item {

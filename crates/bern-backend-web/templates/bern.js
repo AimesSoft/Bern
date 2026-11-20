@@ -1725,8 +1725,8 @@ export function bindRubyText(node, content, ruby, markdown = false) {
   });
 }
 
-export function Text(p, ctx, { content, ruby, style, emphasis, color, fontSize, lines, lineHeight, markdown, bold, animate }) {
-  const node = el("p", { class: `bern-text bern-${STYLE_CLASS[style] ?? "body"} bern-emphasis-${emphasis ?? "primary"}` });
+export function Text(p, ctx, { content, ruby, style, emphasis, color, fontSize, lines, lineHeight, markdown, bold, animate, selectable }) {
+  const node = el("p", { class: `bern-text bern-${STYLE_CLASS[style] ?? "body"} bern-emphasis-${emphasis ?? "primary"}${selectable ? " bern-selectable" : ""}` });
   textColor(node, color);
   bindRubyText(node, content, ruby, markdown);
   // With `animate`, a bound size springs and the weight eases to bold.
@@ -6802,4 +6802,255 @@ export function Alert(p, ctx, { title, message, actions = [], onDismiss }) {
     if (typeof dialog.close === "function") dialog.close();
     if (returnFocus?.isConnected) returnFocus.focus();
   });
+}
+
+function normalizeYmd(rec) {
+  const rawY = Number(rec?.year ?? 2026);
+  const rawM = Number(rec?.month ?? 1);
+  const rawD = Number(rec?.day ?? 1);
+  const y = Number.isFinite(rawY) && rawY >= 1 && rawY <= 9999 ? Math.trunc(rawY) : 2026;
+  const m = Number.isFinite(rawM) ? Math.min(12, Math.max(1, Math.trunc(rawM))) : 1;
+  const d = Number.isFinite(rawD) ? Math.min(31, Math.max(1, Math.trunc(rawD))) : 1;
+  return { y, m, d };
+}
+
+function formatIsoDate(rec) {
+  const { y, m, d } = normalizeYmd(rec);
+  return `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+function parseIsoDate(raw) {
+  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(String(raw ?? "").trim());
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  if (y < 1 || y > 9999 || mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  if (Number.isNaN(dt.getTime())) return null;
+  return { y: dt.getUTCFullYear(), m: dt.getUTCMonth() + 1, d: dt.getUTCDate() };
+}
+
+function cmpYmd(a, b) {
+  if (a.y !== b.y) return a.y - b.y;
+  if (a.m !== b.m) return a.m - b.m;
+  return a.d - b.d;
+}
+
+export function DatePicker(p, ctx, { id, label, field, min, max, enabled, labelHidden }, commit) {
+  const input = el("input", { class: "bern-input bern-date-input", type: "date" });
+  const clamp = (ymd) => {
+    let cur = ymd;
+    if (min) {
+      const lo = normalizeYmd(min());
+      if (cmpYmd(cur, lo) < 0) cur = lo;
+    }
+    if (max) {
+      const hi = normalizeYmd(max());
+      if (cmpYmd(cur, hi) > 0) cur = hi;
+    }
+    return cur;
+  };
+  const applyIso = (raw) => {
+    const parsed = parseIsoDate(raw);
+    if (!parsed) return;
+    const clamped = clamp(parsed);
+    const rec = { year: BigInt(clamped.y), month: BigInt(clamped.m), day: BigInt(clamped.d) };
+    if (formatIsoDate(field.peek()) !== formatIsoDate(rec)) {
+      field.set(rec);
+      if (commit) commit();
+    }
+    input.value = formatIsoDate(rec);
+  };
+  effect(() => {
+    input.value = formatIsoDate(field.get());
+  });
+  if (min) effect(() => { input.min = formatIsoDate(min()); });
+  if (max) effect(() => { input.max = formatIsoDate(max()); });
+  if (enabled) effect(() => { input.disabled = !enabled(); });
+  input.addEventListener("change", () => applyIso(input.value));
+  mark(input, ctx, id);
+  control(ctx, {
+    target: () => target(ctx, id),
+    role: "date_picker",
+    label,
+    enabled: enabled ? () => !!enabled() : undefined,
+    actions: {
+      edit: (text) => applyIso(text),
+      value: () => formatIsoDate(field.peek()),
+    },
+  });
+  if (labelHidden) {
+    bindAttr(input, "aria-label", label);
+    p.append(input);
+  } else {
+    p.append(labelled(input, label, false, input));
+  }
+}
+
+function clampTimeMinutes(raw, lo, hi, st) {
+  if (!Number.isFinite(raw)) return lo;
+  const step = Math.max(1, Math.round(st));
+  const clamped = Math.min(hi, Math.max(lo, raw));
+  const snapped = lo + Math.round((clamped - lo) / step) * step;
+  return Math.min(hi, Math.max(lo, Math.round(snapped)));
+}
+
+function formatTimeMinutes(mins) {
+  const total = Number.isFinite(Number(mins)) ? Math.min(1439, Math.max(0, Math.round(Number(mins)))) : 0;
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
+function parseTimeMinutes(raw) {
+  const trimmed = String(raw ?? "").trim();
+  const match = /^(\d{1,2}):(\d{2})$/.exec(trimmed);
+  if (match) {
+    const h = Number(match[1]);
+    const m = Number(match[2]);
+    if (h >= 0 && h <= 23 && m >= 0 && m <= 59) return h * 60 + m;
+  }
+  const n = Number(trimmed);
+  return trimmed !== "" && Number.isFinite(n) ? n : null;
+}
+
+export function TimePicker(p, ctx, { id, label, field, min = 0, max = 1439, step = 1, enabled, labelHidden }, commit) {
+  const lo = Math.min(1439, Math.max(0, Number(min)));
+  const hi = Math.min(1439, Math.max(lo, Number(max)));
+  const st = Math.min(60, Math.max(1, Math.round(Number(step))));
+  const input = el("input", {
+    class: "bern-input bern-time-input",
+    type: "time",
+    min: formatTimeMinutes(lo),
+    max: formatTimeMinutes(hi),
+    step: String(st * 60),
+  });
+  const applyMinutes = (raw) => {
+    const parsed = typeof raw === "number" ? raw : parseTimeMinutes(raw);
+    if (parsed === null || !Number.isFinite(parsed)) return;
+    const next = clampTimeMinutes(parsed, lo, hi, st);
+    if (Math.abs(Number(field.peek()) - next) > 1e-6) {
+      field.set(next);
+      if (commit) commit();
+    }
+    input.value = formatTimeMinutes(next);
+  };
+  effect(() => {
+    input.value = formatTimeMinutes(clampTimeMinutes(Number(field.get()), lo, hi, st));
+  });
+  if (enabled) effect(() => { input.disabled = !enabled(); });
+  input.addEventListener("change", () => applyMinutes(input.value));
+  mark(input, ctx, id);
+  control(ctx, {
+    target: () => target(ctx, id),
+    role: "time_picker",
+    label,
+    enabled: enabled ? () => !!enabled() : undefined,
+    actions: {
+      edit: (text) => applyMinutes(text),
+      setNumber: (v) => applyMinutes(Number(v)),
+      value: () => formatTimeMinutes(Number(field.peek())),
+    },
+  });
+  if (labelHidden) {
+    bindAttr(input, "aria-label", label);
+    p.append(input);
+  } else {
+    p.append(labelled(input, label, false, input));
+  }
+}
+
+export function EmptyState(p, ctx, { title, message, icon: iconName }, actions) {
+  const section = el("section", { class: "bern-empty-state", role: "status" });
+  if (iconName) {
+    const holder = el("span", { class: "bern-empty-state-icon", "aria-hidden": "true" }, icon(iconName));
+    section.append(holder);
+  }
+  const heading = el("h3", { class: "bern-empty-state-title" });
+  bindText(heading, title);
+  section.append(heading);
+  if (message) {
+    const msg = el("p", { class: "bern-empty-state-message" });
+    bindText(msg, message);
+    section.append(msg);
+  }
+  if (actions) {
+    const row = el("div", { class: "bern-empty-state-actions" });
+    actions(row, ctx);
+    if (row.childNodes.length) section.append(row);
+  }
+  p.append(section);
+}
+
+export function Badge(p, ctx, { content, tone = "neutral", icon: iconName }) {
+  const pill = el("span", { class: `bern-badge bern-badge-${tone}` });
+  if (iconName) pill.append(icon(iconName));
+  const text = el("span");
+  bindText(text, content);
+  pill.append(text);
+  p.append(pill);
+}
+
+function avatarInitials(raw) {
+  const trimmed = String(raw ?? "").trim();
+  if (!trimmed) return "?";
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  if (words.length >= 2) return `${[...words[0]][0]}${[...words[1]][0]}`.toUpperCase();
+  const chars = [...trimmed];
+  if (chars.length >= 2 && chars[0].charCodeAt(0) < 128 && chars[1].charCodeAt(0) < 128) {
+    return `${chars[0]}${chars[1]}`.toUpperCase();
+  }
+  return chars[0].toUpperCase();
+}
+
+export function Avatar(p, ctx, { label, source, url, size = 40, shape = "circle" }) {
+  const palette = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899", "#14b8a6"];
+  const root = el("span", {
+    class: `bern-avatar${shape === "rounded" ? " bern-avatar-rounded" : ""}`,
+    role: "img",
+  });
+  const text = el("span", { "aria-hidden": "true" });
+  root.append(text);
+  let img = null;
+  if (source || url) {
+    img = el("img", { class: "bern-avatar-img", alt: "" });
+    img.addEventListener("error", () => { img.hidden = true; });
+    img.addEventListener("load", () => { img.hidden = false; });
+    root.append(img);
+  }
+  effect(() => {
+    const s = Math.max(8, Number(readValue(size) ?? 40));
+    root.style.width = `${s}px`;
+    root.style.height = `${s}px`;
+    root.style.fontSize = `${Math.max(10, Math.round(s * 0.38))}px`;
+  });
+  effect(() => {
+    const lbl = String(readValue(label) ?? "");
+    root.setAttribute("aria-label", lbl);
+    text.textContent = avatarInitials(lbl);
+    let h = 2166136261;
+    for (let i = 0; i < lbl.length; i += 1) {
+      h ^= lbl.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    const color = palette[Math.abs(h) % palette.length];
+    root.style.background = `color-mix(in srgb, ${color} 22%, transparent)`;
+    root.style.color = color;
+  });
+  if (img) {
+    if (source) {
+      img.src = `resources/${source.split("/").map(encodeURIComponent).join("/")}`;
+    } else if (url) {
+      effect(() => {
+        const src = url();
+        if (src) {
+          img.hidden = false;
+          img.src = src;
+        } else {
+          img.hidden = true;
+          img.removeAttribute("src");
+        }
+      });
+    }
+  }
+  p.append(root);
 }

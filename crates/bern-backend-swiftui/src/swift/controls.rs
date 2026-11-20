@@ -1051,6 +1051,149 @@ impl Generator<'_> {
         ));
     }
 
+    pub(super) fn date_picker(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let label = self.text_prop(element, "label").unwrap_or_default();
+        let label_hidden = element.keyword("label_hidden") == Some("true");
+        let enabled = element
+            .expr("enabled")
+            .map(|e| self.expr(e))
+            .unwrap_or_else(|| "true".into());
+        let date_type = crate::names::value_type(bern_protocol::format::CALENDAR_DATE);
+        let min_arg = element
+            .expr("min")
+            .map(|e| {
+                let v = self.expr(e);
+                format!("({v}.year, {v}.month, {v}.day)")
+            })
+            .unwrap_or_else(|| "nil".into());
+        let max_arg = element
+            .expr("max")
+            .map(|e| {
+                let v = self.expr(e);
+                format!("({v}.year, {v}.month, {v}.day)")
+            })
+            .unwrap_or_else(|| "nil".into());
+        let (val_expr, commit_date) = if element.expr("current").is_some() {
+            let (raw_val, _, commit) = self.control_value(element, "current");
+            (
+                raw_val,
+                format!("{{ y, m, d in ({commit})({date_type}(year: y, month: m, day: d)) }}"),
+            )
+        } else {
+            let field = self.field(element, "value").expect("date field");
+            let action = element
+                .action
+                .as_ref()
+                .map(|a| format!("; {}", self.action(a)))
+                .unwrap_or_default();
+            (
+                field.clone(),
+                format!(
+                    "{{ y, m, d in {field} = {date_type}(year: y, month: m, day: d){action} }}"
+                ),
+            )
+        };
+        out.line(format!(
+            "BernDatePicker(year: ({val_expr}).year, month: ({val_expr}).month, day: ({val_expr}).day, minDate: {min_arg}, maxDate: {max_arg}, label: {label}, labelHidden: {label_hidden}, enabled: {enabled}, commit: {commit_date})"
+        ));
+        out.line(format!(
+            ".bernControl({}, role: \"date_picker\", label: {label}, enabled: {enabled}, actions: BernControlActions(edit: {{ text in if let parsed = BernDateCodec.parseISO(text) {{ let c = BernDateCodec.clamp(parsed, min: {min_arg}, max: {max_arg}); ({commit_date})(c.0, c.1, c.2) }} }}, value: {{ BernDateCodec.formatISO(({val_expr}).year, ({val_expr}).month, ({val_expr}).day) }}))",
+            self.target(element, ctx)
+        ));
+    }
+
+    pub(super) fn time_picker(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let label = self.text_prop(element, "label").unwrap_or_default();
+        let label_hidden = element.keyword("label_hidden") == Some("true");
+        let min_val = double(element.number("min").unwrap_or(0.0));
+        let max_val = double(element.number("max").unwrap_or(1439.0));
+        let step_val = double(element.number("step").unwrap_or(1.0));
+        let enabled = element
+            .expr("enabled")
+            .map(|e| self.expr(e))
+            .unwrap_or_else(|| "true".into());
+        let (val_expr, commit) = if let Some(current) = element.expr("current") {
+            let (raw_val, _, commit) = self.control_value(element, "current");
+            let value = if current.ty == Type::Int {
+                format!("Double({raw_val})")
+            } else {
+                raw_val
+            };
+            (value, commit)
+        } else {
+            let field = self.field(element, "value").expect("time field");
+            let action = element
+                .action
+                .as_ref()
+                .map(|a| format!("; {}", self.action(a)))
+                .unwrap_or_default();
+            (
+                field.clone(),
+                format!("{{ next in {field} = next{action} }}"),
+            )
+        };
+        out.line(format!(
+            "BernTimePicker(minutes: {val_expr}, minMinutes: {min_val}, maxMinutes: {max_val}, step: {step_val}, label: {label}, labelHidden: {label_hidden}, enabled: {enabled}, commit: {commit})"
+        ));
+        out.line(format!(
+            ".bernControl({}, role: \"time_picker\", label: {label}, enabled: {enabled}, actions: BernControlActions(edit: {{ text in if let parsed = BernTimeCodec.parse(text) {{ ({commit})(BernTimeCodec.clamp(parsed, min: {min_val}, max: {max_val}, step: {step_val})) }} }}, setNumber: {{ v in guard v.isFinite else {{ return }}; ({commit})(BernTimeCodec.clamp(v, min: {min_val}, max: {max_val}, step: {step_val})) }}, value: {{ BernTimeCodec.format({val_expr}) }}))",
+            self.target(element, ctx)
+        ));
+    }
+
+    pub(super) fn empty_state(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let title = self.text_prop(element, "title").unwrap_or_default();
+        let message = self
+            .text_prop(element, "message")
+            .unwrap_or_else(|| "nil".into());
+        let icon = element
+            .icon("icon")
+            .map(string)
+            .unwrap_or_else(|| "nil".into());
+        out.open(format!(
+            "BernEmptyState(title: {title}, message: {message}, systemImage: {icon}) {{"
+        ));
+        self.nodes(out, &element.children, ctx);
+        out.close("}");
+    }
+
+    pub(super) fn badge(&self, out: &mut Out, element: &Element) {
+        let content = self.text_prop(element, "content").unwrap_or_default();
+        let tone = element.keyword("tone").unwrap_or("neutral");
+        let icon = element
+            .icon("icon")
+            .map(string)
+            .unwrap_or_else(|| "nil".into());
+        out.line(format!(
+            "BernBadge(content: {content}, tone: {}, systemImage: {icon})",
+            string(tone)
+        ));
+    }
+
+    pub(super) fn avatar(&self, out: &mut Out, element: &Element) {
+        let label = self.text_prop(element, "label").unwrap_or_default();
+        let size = self
+            .length(element, "size")
+            .unwrap_or_else(|| "40.0".into());
+        let rounded = element.keyword("shape") == Some("rounded");
+        let (name_arg, url_arg) = match element.expr("source") {
+            Some(expr) if matches!(expr.ty, Type::Optional { .. }) => {
+                ("nil".into(), format!("({})?.url", self.expr(expr)))
+            }
+            Some(expr) => ("nil".into(), format!("({}).url", self.expr(expr))),
+            None => (
+                element
+                    .resource("source")
+                    .map(string)
+                    .unwrap_or_else(|| "nil".into()),
+                "nil".into(),
+            ),
+        };
+        out.line(format!(
+            "BernAvatar(label: {label}, name: {name_arg}, url: {url_arg}, size: CGFloat({size}), rounded: {rounded})"
+        ));
+    }
+
     pub(super) fn alert(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         let title = self.text_prop(element, "title").unwrap_or_default();
         let message = self

@@ -78,6 +78,8 @@ impl Generator<'_> {
             ("action", self.action(element)),
             ("style", self.style(kind, element.keyword("variant"))),
             ("pick", self.field(element, "pick")),
+            ("save", self.field(element, "save")),
+            ("suggestedName", self.text_prop(element, "suggested_name")),
             ("files", Self::files(element)),
             ("paste", self.field(element, "paste")),
             ("shape", self.shape(element)),
@@ -565,6 +567,84 @@ impl Generator<'_> {
         ));
     }
 
+    pub(super) fn date_picker(&self, out: &mut Out, element: &Element) {
+        let mut fields = vec![
+            ("id", Some(self.id(element))),
+            ("label", self.text_prop(element, "label")),
+        ];
+        fields.extend(self.model(element, "current"));
+        fields.extend([
+            ("min", element.expr("min").map(|e| self.getter(e))),
+            ("max", element.expr("max").map(|e| self.getter(e))),
+            ("enabled", self.enabled(element)),
+            (
+                "labelHidden",
+                (element.keyword("label_hidden") == Some("true")).then(|| "true".to_string()),
+            ),
+        ]);
+        out.line(format!("B::DatePicker(p, c, {});", designated(&fields)));
+    }
+
+    pub(super) fn time_picker(&self, out: &mut Out, element: &Element) {
+        let mut fields = vec![
+            ("id", Some(self.id(element))),
+            ("label", self.text_prop(element, "label")),
+        ];
+        fields.extend(self.model(element, "current"));
+        fields.extend([
+            ("min", Self::number(element, "min")),
+            ("max", Self::number(element, "max")),
+            ("step", Self::number(element, "step")),
+            ("enabled", self.enabled(element)),
+            (
+                "labelHidden",
+                (element.keyword("label_hidden") == Some("true")).then(|| "true".to_string()),
+            ),
+        ]);
+        out.line(format!("B::TimePicker(p, c, {});", designated(&fields)));
+    }
+
+    pub(super) fn empty_state(&self, out: &mut Out, element: &Element) {
+        let props = designated(&[
+            ("title", self.text_prop(element, "title")),
+            ("message", self.text_prop(element, "message")),
+            ("icon", Self::icon(element, "icon")),
+        ]);
+        if element.children.is_empty() {
+            out.line(format!("B::EmptyState(p, c, {props}, nullptr);"));
+        } else {
+            self.call(
+                out,
+                &format!("B::EmptyState(p, c, {props}, "),
+                &element.children,
+            );
+        }
+    }
+
+    pub(super) fn badge(&self, out: &mut Out, element: &Element) {
+        out.line(format!(
+            "B::Badge(p, c, {});",
+            designated(&[
+                ("content", self.text_prop(element, "content")),
+                ("tone", Self::keyword(element, "tone")),
+                ("icon", Self::icon(element, "icon")),
+            ])
+        ));
+    }
+
+    pub(super) fn avatar(&self, out: &mut Out, element: &Element) {
+        out.line(format!(
+            "B::Avatar(p, c, {});",
+            designated(&[
+                ("label", self.text_prop(element, "label")),
+                ("source", element.resource("source").map(string)),
+                ("url", element.expr("source").map(|e| self.getter(e))),
+                ("size", self.len(element, "size")),
+                ("shape", Self::keyword(element, "shape")),
+            ])
+        ));
+    }
+
     pub(super) fn popover_button(&self, out: &mut Out, element: &Element) {
         let mut fields = vec![
             ("id", Some(self.id(element))),
@@ -728,6 +808,8 @@ impl Generator<'_> {
             ("enabled", self.enabled(item)),
             ("action", self.action(item)),
             ("pick", self.field(item, "pick")),
+            ("save", self.field(item, "save")),
+            ("suggestedName", self.text_prop(item, "suggested_name")),
             ("files", Self::files(item)),
             ("paste", self.field(item, "paste")),
             ("shortcut", Self::keyword(item, "shortcut")),

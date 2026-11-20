@@ -63,6 +63,10 @@ impl Generator<'_> {
                 });
             format!(", lit = {{ {lit} }}{route}")
         });
+        let selectable = element.keyword("selectable") == Some("true");
+        if selectable {
+            out.open("BernSelectable {");
+        }
         if let Some(ruby) = element.expr("ruby").map(|value| self.expr(value)) {
             let mark = element.keyword("mark").map_or_else(String::new, |role| {
                 format!(", mark = BernColor.Role({})", string(role))
@@ -75,6 +79,9 @@ impl Generator<'_> {
             out.line(format!(
                 "BernRubyText({content}, {style}, {color}, ruby = {ruby}{lines}{lit}{mark}{markdown})"
             ));
+            if selectable {
+                out.close("}");
+            }
             return;
         }
         match element.keyword("mark") {
@@ -86,6 +93,9 @@ impl Generator<'_> {
                 string(role)
             )),
             None => out.line(format!("BernText({content}, {style}, {color}{lines}{lit})")),
+        }
+        if selectable {
+            out.close("}");
         }
     }
 

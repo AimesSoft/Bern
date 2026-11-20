@@ -623,6 +623,8 @@ final class BernIdleTimer {
 
 extension BernFiles {
     static func pick(_ kinds: String, then give: @escaping @MainActor (URL) -> Void) {}
+    static func pickMany(_ kinds: String, then give: @escaping @MainActor ([URL]) -> Void) {}
+    static func save(_ kinds: String, suggestedName: String?, then give: @escaping @MainActor (URL) -> Void) {}
 }
 
 @MainActor

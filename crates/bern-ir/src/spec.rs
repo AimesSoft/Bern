@@ -37,9 +37,16 @@ pub enum PropKind {
     /// The kinds of file a control accepts, a literal such as
     /// `"video .ass .srt"`; see [`parse_file_kinds`].
     FileKinds,
-    /// Writable session field holding a `MediaSource` (or an optional
-    /// one): the file the user chose or dropped.
+    /// Writable session field holding a `MediaSource`, `Option<MediaSource>`,
+    /// or `Vec<MediaSource>`: the file(s) the user chose or dropped.
     FileField,
+    /// Writable session field holding a `MediaSource`, `Option<MediaSource>`,
+    /// or `String`: the destination chosen in a save dialog.
+    SaveFileField,
+    /// Writable session `CalendarDate` field.
+    DateField,
+    /// Read-only `CalendarDate` expression.
+    DateValue,
     /// Writable session `i64` or `String` field holding the key of the
     /// item a scroll view stands at.
     PositionField,
@@ -590,11 +597,13 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("enabled", PropKind::Bool),
                 opt("checked", PropKind::Bool),
                 opt("pick", PropKind::FileField),
+                opt("save", PropKind::SaveFileField),
+                opt("suggested_name", PropKind::DisplayText),
                 opt("files", PropKind::FileKinds),
                 opt("paste", PropKind::TextField),
             ],
             Children::None,
-            "A command of a `CommandMenu` or `StatusItem`: the menu shows its `shortcut`, greys it out while `enabled` is false and checks it while `checked` holds; `pick` asks for a file and `paste` reads the clipboard as `Button` does",
+            "A command of a `CommandMenu` or `StatusItem`: the menu shows its `shortcut`, greys it out while `enabled` is false and checks it while `checked` holds; `pick` asks for file(s), `save` asks for a save destination, and `paste` reads the clipboard as `Button` does",
         )
     },
     ComponentSpec {
@@ -1237,11 +1246,13 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 FEATURE,
                 opt("shortcut", PropKind::Shortcut),
                 opt("pick", PropKind::FileField),
+                opt("save", PropKind::SaveFileField),
+                opt("suggested_name", PropKind::DisplayText),
                 opt("files", PropKind::FileKinds),
                 opt("paste", PropKind::TextField),
             ],
             Children::None,
-            "Menu command bound to a registered command; `pick` asks for a file as `Button` does; `paste` reads the clipboard as `Button` does",
+            "Menu command bound to a registered command; `pick` asks for file(s), `save` asks for a save destination, and `paste` reads the clipboard as `Button` does",
         )
     },
     ComponentSpec {
@@ -1404,9 +1415,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             opt("ruby", PropKind::TextValue),
             opt("lit_clock", PropKind::Length),
             opt("lit_since", PropKind::Length),
+            opt("selectable", PropKind::Flag),
         ],
         Children::None,
-        "Text with a semantic style; `ruby` is a JSON array of [start, end, reading] ranges above the unchanged content, using half-open Unicode scalar positions; empty or [] has no annotations; `lit` keeps that much of it in its color and fades the rest, or none of it when below zero, and `lit_path` with `lit_clock` and `lit_since` has the front end move that place by itself; for words sung one by one; `color` draws it in the accent or a status color (`status.success`, `status.warning`, `status.error`); `bold` sets it bold while it holds, changing with `animate`; `mark` draws a band of the color under each line; `lines` shows at most that many lines, ending the last with an ellipsis; `line_height` sets the height of each line, the extra split above and below it as in CSS; with `markdown` the content's inline Markdown — `**strong**`, `*emphasis*`, `` `code` ``, `~~struck~~` and `[links](address)`, a backslash taking the next mark literally — shows as the platform styles it",
+        "Text with a semantic style; `selectable: true` lets the user select and copy the text; `ruby` is a JSON array of [start, end, reading] ranges above the unchanged content, using half-open Unicode scalar positions; empty or [] has no annotations; `lit` keeps that much of it in its color and fades the rest, or none of it when below zero, and `lit_path` with `lit_clock` and `lit_since` has the front end move that place by itself; for words sung one by one; `color` draws it in the accent or a status color (`status.success`, `status.warning`, `status.error`); `bold` sets it bold while it holds, changing with `animate`; `mark` draws a band of the color under each line; `lines` shows at most that many lines, ending the last with an ellipsis; `line_height` sets the height of each line, the extra split above and below it as in CSS; with `markdown` the content's inline Markdown — `**strong**`, `*emphasis*`, `` `code` ``, `~~struck~~` and `[links](address)`, a backslash taking the next mark literally — shows as the platform styles it",
     ),
     spec(
         "Canvas",
@@ -1579,13 +1591,15 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 FEATURE,
                 opt("shortcut", PropKind::Shortcut),
                 opt("pick", PropKind::FileField),
+                opt("save", PropKind::SaveFileField),
+                opt("suggested_name", PropKind::DisplayText),
                 opt("files", PropKind::FileKinds),
                 opt("paste", PropKind::TextField),
                 opt("default_focus", PropKind::Flag),
                 opt("clears", PropKind::TextField),
             ],
             Children::Any,
-            "Button bound to a registered command; with one child, the child is what it shows and `label` its accessible name; `width: fill` stretches the system button across its container; with `pick`, it first asks for a file of `files` and runs the action once one is chosen; with `paste: draft.text`, it first puts the text on the clipboard into that draft and runs the action when there was some; `default_focus: true` starts the focus on it when it appears (a television's remote, or a keyboard); `clears: draft.text` empties that draft after the action and gives the keyboard back to the window, as a composer's send button does",
+            "Button bound to a registered command; with one child, the child is what it shows and `label` its accessible name; `width: fill` stretches the system button across its container; with `pick`, it first asks for file(s) of `files` (multiple when bound to `Vec<MediaSource>`) and runs the action once chosen; with `save`, it asks for a save destination (optionally prefilled with `suggested_name:`) and runs the action once chosen; with `paste: draft.text`, it first puts the text on the clipboard into that draft and runs the action when there was some; `default_focus: true` starts the focus on it when it appears (a television's remote, or a keyboard); `clears: draft.text` empties that draft after the action and gives the keyboard back to the window, as a composer's send button does",
         )
     },
     ComponentSpec {
@@ -1611,12 +1625,14 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 FEATURE,
                 opt("shortcut", PropKind::Shortcut),
                 opt("pick", PropKind::FileField),
+                opt("save", PropKind::SaveFileField),
+                opt("suggested_name", PropKind::DisplayText),
                 opt("files", PropKind::FileKinds),
                 opt("paste", PropKind::TextField),
                 opt("default_focus", PropKind::Flag),
             ],
             Children::None,
-            "Icon-only button with an accessible name; `icon_progress` colors the actual icon in the theme accent from top to bottom (0–1, non-finite values treated as zero); `badge_icon` overlays a small icon at its bottom-right, shown unless `badge_visible` is false; these decorations never change layout or hit testing; `prominence: plain` draws no background, as the icons at the foot of a sidebar; `height` makes it a round system button of that diameter; `pick` asks for a file and `paste` reads the clipboard as `Button` does; `default_focus: true` starts the focus on it as `Button` does",
+            "Icon-only button with an accessible name; `icon_progress` colors the actual icon in the theme accent from top to bottom (0–1, non-finite values treated as zero); `badge_icon` overlays a small icon at its bottom-right, shown unless `badge_visible` is false; these decorations never change layout or hit testing; `prominence: plain` draws no background, as the icons at the foot of a sidebar; `height` makes it a round system button of that diameter; `pick` asks for file(s), `save` asks for a save destination, and `paste` reads the clipboard as `Button` does; `default_focus: true` starts the focus on it as `Button` does",
         )
     },
     ComponentSpec {
@@ -2113,6 +2129,81 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             "Action button inside an `Alert`, with `default`, `cancel` or `destructive` semantic role",
         )
     },
+    ComponentSpec {
+        action: ActionRule::Optional,
+        interactive: true,
+        ..spec(
+            "DatePicker",
+            &[
+                req("id", PropKind::Id),
+                req("label", PropKind::DisplayText),
+                opt("label_hidden", PropKind::Flag),
+                opt("value", PropKind::DateField),
+                opt("current", PropKind::DateValue),
+                opt("min", PropKind::DateValue),
+                opt("max", PropKind::DateValue),
+                opt("enabled", PropKind::Bool),
+                FEATURE,
+            ],
+            Children::None,
+            "Native calendar date picker bound to a `CalendarDate` session field (`value`) or engine state (`current` with an action), optionally bounded by `min` and `max` dates",
+        )
+    },
+    ComponentSpec {
+        action: ActionRule::Optional,
+        interactive: true,
+        ..spec(
+            "TimePicker",
+            &[
+                req("id", PropKind::Id),
+                req("label", PropKind::DisplayText),
+                opt("label_hidden", PropKind::Flag),
+                opt("value", PropKind::NumberField),
+                opt("current", PropKind::NumberValue),
+                opt("min", PropKind::Number),
+                opt("max", PropKind::Number),
+                opt("step", PropKind::Number),
+                opt("enabled", PropKind::Bool),
+                FEATURE,
+            ],
+            Children::None,
+            "Native time-of-day picker storing minutes since midnight (0–1439) in a session field (`value`) or engine state (`current` with an action), optionally clamped to `min`..`max` with a `step` in minutes (1–60)",
+        )
+    },
+    spec(
+        "EmptyState",
+        &[
+            req("title", PropKind::DisplayText),
+            opt("message", PropKind::DisplayText),
+            opt("icon", PropKind::Icon),
+        ],
+        Children::Any,
+        "Centered placeholder view with an optional icon, `title`, optional `message`, and optional action children",
+    ),
+    spec(
+        "Badge",
+        &[
+            req("content", PropKind::DisplayText),
+            opt(
+                "tone",
+                PropKind::Keyword(&["neutral", "accent", "success", "warning", "error"]),
+            ),
+            opt("icon", PropKind::Icon),
+        ],
+        Children::None,
+        "Compact semantic status or count capsule (`neutral`, `accent`, `success`, `warning` or `error`) with optional leading `icon`",
+    ),
+    spec(
+        "Avatar",
+        &[
+            req("label", PropKind::DisplayText),
+            opt("source", PropKind::ImageResource),
+            opt("size", PropKind::Length),
+            opt("shape", PropKind::Keyword(&["circle", "rounded"])),
+        ],
+        Children::None,
+        "User or entity avatar showing an optional image (`source`, declared resource or `MediaSource`) with automatic initials fallback from `label`, sized by `size` (40 unless given) in a `circle` or `rounded` frame",
+    ),
 ];
 
 pub fn component(name: &str) -> Option<&'static ComponentSpec> {
@@ -2252,6 +2343,7 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
     }
     if shape.props.contains(&"files")
         && !shape.props.contains(&"pick")
+        && !shape.props.contains(&"save")
         && [
             "Button",
             "IconButton",
@@ -2264,16 +2356,37 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
         errors.push(ShapeError {
             prop: Some("files".into()),
             message: format!(
-                "`files:` says which files `pick:` asks for; add `pick: draft.file` to the `{}`",
+                "`files:` says which files `pick:` or `save:` asks for; add `pick: draft.file` or `save: draft.dest` to the `{}`",
                 spec.name
             ),
         });
     }
-    if shape.props.contains(&"paste") && shape.props.contains(&"pick") {
+    if shape.props.contains(&"suggested_name") && !shape.props.contains(&"save") {
         errors.push(ShapeError {
-            prop: Some("paste".into()),
+            prop: Some("suggested_name".into()),
+            message:
+                "`suggested_name:` sets the default filename for `save:`; add `save: draft.dest`"
+                    .into(),
+        });
+    }
+    let file_or_paste = [
+        shape.props.contains(&"pick"),
+        shape.props.contains(&"save"),
+        shape.props.contains(&"paste"),
+    ]
+    .into_iter()
+    .filter(|flag| *flag)
+    .count();
+    if file_or_paste > 1 {
+        let prop = if shape.props.contains(&"paste") {
+            "paste"
+        } else {
+            "save"
+        };
+        errors.push(ShapeError {
+            prop: Some(prop.into()),
             message: format!(
-                "a `{}` either asks for a file (`pick:`) or reads the clipboard (`paste:`), not both",
+                "a `{}` takes at most one of `pick:`, `save:` or `paste:`",
                 spec.name
             ),
         });
@@ -2553,12 +2666,22 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
     }
     if matches!(
         spec.name,
-        "Switch" | "SplitButton" | "Picker" | "Slider" | "ColorPicker" | "NumberInput"
+        "Switch"
+            | "SplitButton"
+            | "Picker"
+            | "Slider"
+            | "ColorPicker"
+            | "NumberInput"
+            | "DatePicker"
+            | "TimePicker"
     ) && !login_item
     {
         let controlled = if matches!(spec.name, "Switch" | "SplitButton") {
             "checked"
-        } else if matches!(spec.name, "Slider" | "ColorPicker" | "NumberInput") {
+        } else if matches!(
+            spec.name,
+            "Slider" | "ColorPicker" | "NumberInput" | "DatePicker" | "TimePicker"
+        ) {
             "current"
         } else {
             "selected"

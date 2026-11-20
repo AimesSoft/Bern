@@ -588,7 +588,7 @@ fn row_menu(ctx: &Ctx, view: &gtk::Widget, items: Vec<Option<MenuItem>>) -> gtk:
         let name = format!("i{index}");
         let action = gio::SimpleAction::new(&name, None);
         let (run, set_file) =
-            crate::features::picking(ctx, item.pick, bound_action(ctx, &item.action));
+            crate::features::picking(ctx, item.pick.clone(), bound_action(ctx, &item.action));
         let run = crate::features::pasting(ctx, item.paste, run);
         if let Some(run) = run.clone() {
             action.connect_activate(move |_, _| run());

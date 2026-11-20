@@ -191,9 +191,16 @@ impl Generator<'_> {
     }
 
     pub(super) fn pick(&self, element: &Element) -> String {
+        if let Some(field) = self.field(element, "save") {
+            return format!(
+                "Some(b::Pick {{ field: {field}, kinds: {}, save: true, suggested_name: {} }})",
+                string(element.keyword("files").unwrap_or("any")),
+                some(self.text_prop(element, "suggested_name")),
+            );
+        }
         some(self.field(element, "pick").map(|field| {
             format!(
-                "b::Pick {{ field: {field}, kinds: {} }}",
+                "b::Pick {{ field: {field}, kinds: {}, save: false, suggested_name: None }}",
                 string(element.keyword("files").unwrap_or("any"))
             )
         }))

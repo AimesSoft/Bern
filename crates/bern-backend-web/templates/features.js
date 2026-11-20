@@ -2061,6 +2061,49 @@ export function pick(kinds, give) {
   input.click();
 }
 
+/// Multi-file open panel for `kinds`; `give(urls)` runs with all chosen files.
+export function pickMany(kinds, give) {
+  const input = el("input", { type: "file", accept: acceptOf(kinds), multiple: true, hidden: true });
+  const folder = words(kinds).includes("folder");
+  if (folder) input.webkitdirectory = true;
+  input.addEventListener("change", () => {
+    const files = [...(input.files ?? [])];
+    input.remove();
+    if (!files.length) return;
+    const urls = [];
+    let pending = files.length;
+    for (const file of files) {
+      giveFile(file, (url) => {
+        urls.push(url);
+        pending -= 1;
+        if (pending === 0 && urls.length) give(urls);
+      });
+    }
+  });
+  input.addEventListener("cancel", () => input.remove());
+  document.body.append(input);
+  input.click();
+}
+
+/// Save destination picker (uses File System Access API when available,
+/// falling back to a suggested filename).
+export function saveFile(kinds, suggestedName, give) {
+  const name = typeof suggestedName === "function" ? suggestedName() : (suggestedName ?? "");
+  if (typeof window !== "undefined" && typeof window.showSaveFilePicker === "function") {
+    const opts = {};
+    if (name) opts.suggestedName = name;
+    window.showSaveFilePicker(opts).then(
+      (handle) => {
+        if (handle?.name) give(`file:///${encodeURIComponent(handle.name)}`, handle.name);
+      },
+      () => {},
+    );
+    return;
+  }
+  const chosen = name || "Untitled";
+  give(`file:///${encodeURIComponent(chosen)}`, chosen);
+}
+
 /// Files the browser hands the page as an installed app's file handler
 /// (`launchQueue`), for drop areas with `opens: true`.
 const openers = [];

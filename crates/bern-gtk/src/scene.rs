@@ -47,7 +47,14 @@ list.bern-plain-list > row > box.header { padding: 0; min-height: 0; }\n\
 .bern-banner-info { border-color: alpha(@accent_bg_color, 0.30); background-color: alpha(@accent_bg_color, 0.11); }\n\
 .bern-banner-success { border-color: alpha(@success_bg_color, 0.32); background-color: alpha(@success_bg_color, 0.12); }\n\
 .bern-banner-warning { border-color: alpha(@warning_bg_color, 0.35); background-color: alpha(@warning_bg_color, 0.13); }\n\
-.bern-banner-error { border-color: alpha(@error_bg_color, 0.35); background-color: alpha(@error_bg_color, 0.12); }\n";
+.bern-banner-error { border-color: alpha(@error_bg_color, 0.35); background-color: alpha(@error_bg_color, 0.12); }\n\
+.bern-badge { border-radius: 9999px; padding: 2px 8px; border: 1px solid alpha(currentColor, 0.14); background-color: alpha(currentColor, 0.08); font-size: 12px; font-weight: 600; }\n\
+.bern-badge-neutral { color: alpha(@window_fg_color, 0.72); border-color: alpha(currentColor, 0.16); background-color: alpha(currentColor, 0.08); }\n\
+.bern-badge-accent { color: @accent_color; border-color: alpha(@accent_bg_color, 0.32); background-color: alpha(@accent_bg_color, 0.14); }\n\
+.bern-badge-success { color: @success_color; border-color: alpha(@success_bg_color, 0.32); background-color: alpha(@success_bg_color, 0.14); }\n\
+.bern-badge-warning { color: @warning_color; border-color: alpha(@warning_bg_color, 0.35); background-color: alpha(@warning_bg_color, 0.14); }\n\
+.bern-badge-error { color: @error_color; border-color: alpha(@error_bg_color, 0.35); background-color: alpha(@error_bg_color, 0.14); }\n\
+.bern-avatar-rounded { border-radius: 22%; }\n";
 
 fn children(widget: &gtk::Widget) -> Vec<gtk::Widget> {
     let mut children = Vec::new();

@@ -24,6 +24,25 @@ pub fn text_page(app: showcase::Client) -> impl View {
                 Label(title: tr! { "zh-Hans" => "照片", "en" => "Photos" }, icon: "photo")
                 Label(title: tr! { "zh-Hans" => "下载", "en" => "Downloads" }, icon: "arrow.down.circle")
             }
+            Section(title: tr! { "zh-Hans" => "可选文字、徽章与头像", "en" => "Selectable Text, Badges & Avatars" }) {
+                Text(
+                    content: tr! { "zh-Hans" => "这段文字开启了 selectable，可以直接选中并复制。", "en" => "This paragraph sets selectable: true so you can highlight and copy it." },
+                    selectable: true
+                )
+                Flow(gap: 8) {
+                    Badge(content: tr! { "zh-Hans" => "默认", "en" => "Neutral" })
+                    Badge(content: tr! { "zh-Hans" => "新版本", "en" => "Release" }, tone: accent, icon: "star")
+                    Badge(content: tr! { "zh-Hans" => "已同步", "en" => "Synced" }, tone: success, icon: "checkmark.circle")
+                    Badge(content: tr! { "zh-Hans" => "待检查", "en" => "Review" }, tone: warning, icon: "exclamationmark.triangle")
+                    Badge(content: tr! { "zh-Hans" => "离线", "en" => "Offline" }, tone: error)
+                }
+                Row(gap: 12, align: center) {
+                    Avatar(source: "images/bern.png", label: tr! { "zh-Hans" => "Bern 徽标", "en" => "Bern Mark" }, size: 40)
+                    Avatar(label: tr! { "zh-Hans" => "Ada Lovelace", "en" => "Ada Lovelace" }, size: 40)
+                    Avatar(label: tr! { "zh-Hans" => "林微音", "en" => "Lin Weiyin" }, size: 40, shape: rounded)
+                    Avatar(label: tr! { "zh-Hans" => "Grace Hopper", "en" => "Grace Hopper" }, size: 32)
+                }
+            }
             Section(
                 title: tr! { "zh-Hans" => "来自引擎的文字", "en" => "Text from the Engine" },
                 footer: tr! { "zh-Hans" => "这些文字绑定 Rust 引擎的状态，状态变化后自动更新。", "en" => "These lines are bound to the Rust engine state and update automatically." }
@@ -105,6 +124,15 @@ pub fn buttons_page(
             Section(title: tr! { "zh-Hans" => "状态与窗口", "en" => "States and Windows" }) {
                 Button(id: unavailable, label: tr! { "zh-Hans" => "不可用的按钮", "en" => "Unavailable Button" }, enabled: false) => app.record(Action::Standard)
                 Button(id: open_settings, label: tr! { "zh-Hans" => "打开设置…", "en" => "Open Settings…" }, icon: "gearshape") => windows.settings.open()
+                if !window.tv && !window.watch {
+                    Button(
+                        id: export_report,
+                        label: tr! { "zh-Hans" => "导出报告…", "en" => "Export Report…" },
+                        icon: "square.and.arrow.up",
+                        save: draft.save_path,
+                        suggested_name: tr! { "zh-Hans" => "report.txt", "en" => "report.txt" }
+                    ) => app.record(Action::Standard)
+                }
             }
             Section(title: tr! { "zh-Hans" => "最近操作", "en" => "Last Action" }) {
                 if let Some(action) = app.last_action {
@@ -195,6 +223,15 @@ pub fn inputs_page(app: showcase::Client, #[session] draft: MainDraft) -> impl V
                 NumberInput(id: ratio, label: tr! { "zh-Hans" => "缩放倍率", "en" => "Scale Factor" }, value: draft.ratio, min: 0.25, max: 4.0, step: 0.25, precision: 2)
                 Text(content: tr! { "zh-Hans" => "当前端口：{port}，倍率：{ratio}", "en" => "Port: {port}, scale: {ratio}"; port: draft.port, ratio: draft.ratio }, style: footnote, emphasis: secondary)
             }
+            Section(title: tr! { "zh-Hans" => "日期与时间", "en" => "Date & Time" }) {
+                DatePicker(id: schedule_date, label: tr! { "zh-Hans" => "计划日期", "en" => "Scheduled Date" }, value: draft.scheduled_date)
+                TimePicker(id: meeting_time, label: tr! { "zh-Hans" => "提醒时间", "en" => "Reminder Time" }, value: draft.meeting_time, min: 480, max: 1080, step: 15)
+                Text(
+                    content: tr! { "zh-Hans" => "已选日期：{date, date, y-MM-dd}，分钟数：{mins}", "en" => "Selected date: {date, date, y-MM-dd}, minutes: {mins}"; date: draft.scheduled_date, mins: draft.meeting_time },
+                    style: footnote,
+                    emphasis: secondary
+                )
+            }
             Section(title: tr! { "zh-Hans" => "预览", "en" => "Preview" }) {
                 if draft.name == "" {
                     Text(content: tr! { "zh-Hans" => "还没有输入名字", "en" => "No name entered yet" }, emphasis: secondary)
@@ -244,6 +281,15 @@ pub fn layout_page(app: showcase::Client, #[session] draft: MainDraft) -> impl V
                     }
                     Spacer
                     Skeleton(width: 56, height: 22, shape: capsule, tone: secondary)
+                }
+            }
+            Section(title: tr! { "zh-Hans" => "空状态", "en" => "Empty State" }) {
+                EmptyState(
+                    title: tr! { "zh-Hans" => "还没有收藏项目", "en" => "No Saved Items Yet" },
+                    message: tr! { "zh-Hans" => "点击下方按钮记录一条新内容，或稍后再回来查看。", "en" => "Record a new item below or check back later." },
+                    icon: "tray"
+                ) {
+                    Button(id: empty_record, label: tr! { "zh-Hans" => "新建记录", "en" => "New Entry" }, prominence: prominent) => app.record(Action::Primary)
                 }
             }
             Section(

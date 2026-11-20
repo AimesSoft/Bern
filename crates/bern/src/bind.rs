@@ -353,11 +353,19 @@ pub trait PositionValue {}
 impl PositionValue for i64 {}
 impl PositionValue for String {}
 
-/// A session value that can hold the file a user chose or dropped.
+/// A session value that can hold the file(s) a user chose or dropped.
 pub trait FileValue {}
 
 impl FileValue for crate::media::MediaSource {}
 impl FileValue for Option<crate::media::MediaSource> {}
+impl FileValue for Vec<crate::media::MediaSource> {}
+
+/// A session value that can hold the destination chosen in a save dialog.
+pub trait SaveFileValue {}
+
+impl SaveFileValue for crate::media::MediaSource {}
+impl SaveFileValue for Option<crate::media::MediaSource> {}
+impl SaveFileValue for String {}
 
 macro_rules! scalar {
     ($ty:ty, $variant:ident, $name:literal) => {

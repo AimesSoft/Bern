@@ -851,8 +851,9 @@ fn project_element(element: &Element, ctx: &mut ProjectCtx<'_>) -> Vec<Node> {
                 "media",
             )]
         }
-        "TextInput" | "Search" | "NumberInput" | "Picker" | "LanguagePicker" | "ColorPicker"
-        | "ShortcutInput" | "Menu" | "SplitButton" | "PopoverButton" => {
+        "TextInput" | "Search" | "NumberInput" | "DatePicker" | "TimePicker" | "Picker"
+        | "LanguagePicker" | "ColorPicker" | "ShortcutInput" | "Menu" | "SplitButton"
+        | "PopoverButton" => {
             let height = element
                 .prop("height")
                 .and_then(|p| substitute_prop(p, ctx))
@@ -880,6 +881,103 @@ fn project_element(element: &Element, ctx: &mut ProjectCtx<'_>) -> Vec<Node> {
                 shape,
                 "media",
             )]
+        }
+        "Badge" => vec![make_skeleton_node(
+            ctx,
+            &element.path,
+            &element.source,
+            Some(Prop::Number { value: 56.0 }),
+            Some(Prop::Number { value: 20.0 }),
+            None,
+            None,
+            None,
+            None,
+            "capsule",
+            "secondary",
+        )],
+        "Avatar" => {
+            let size = element
+                .prop("size")
+                .and_then(|p| substitute_prop(p, ctx))
+                .unwrap_or(Prop::Number { value: 40.0 });
+            let rounded = element.keyword("shape") == Some("rounded");
+            let corner = rounded.then(|| {
+                let r = estimated_length(&size).unwrap_or(40.0) * 0.22;
+                Prop::Number { value: r }
+            });
+            vec![make_skeleton_node(
+                ctx,
+                &element.path,
+                &element.source,
+                Some(size.clone()),
+                Some(size),
+                None,
+                None,
+                None,
+                corner,
+                if rounded { "rect" } else { "circle" },
+                "media",
+            )]
+        }
+        "EmptyState" => {
+            let mut props = BTreeMap::new();
+            props.insert("gap".into(), Prop::Number { value: 10.0 });
+            props.insert(
+                "align".into(),
+                Prop::Keyword {
+                    value: "center".into(),
+                },
+            );
+            let icon = make_skeleton_node(
+                ctx,
+                &element.path,
+                &element.source,
+                Some(Prop::Number { value: 40.0 }),
+                Some(Prop::Number { value: 40.0 }),
+                None,
+                None,
+                None,
+                None,
+                "circle",
+                "media",
+            );
+            let title = make_skeleton_node(
+                ctx,
+                &element.path,
+                &element.source,
+                Some(Prop::Number { value: 160.0 }),
+                Some(Prop::Number { value: 16.0 }),
+                None,
+                None,
+                None,
+                None,
+                "capsule",
+                "primary",
+            );
+            let message = make_skeleton_node(
+                ctx,
+                &element.path,
+                &element.source,
+                Some(Prop::Number { value: 220.0 }),
+                Some(Prop::Number { value: 12.0 }),
+                None,
+                None,
+                None,
+                None,
+                "capsule",
+                "secondary",
+            );
+            vec![Node::Element(Element {
+                kind: "Column".into(),
+                id: None,
+                path: ctx.fresh_path(&element.path, "empty"),
+                props,
+                template: None,
+                children: vec![icon, title, message],
+                action: None,
+                source: element.source.clone(),
+                skeleton: None,
+            })]
         }
 
         // Nested Query or other composite container: project its visual children.

@@ -3348,3 +3348,120 @@ dialog.bern-alert::backdrop { background: rgba(0, 0, 0, 0.35); }
   background: var(--bern-selection-background);
   font-weight: 500;
 }
+
+/* Text(selectable: true) */
+.bern-selectable {
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+
+/* DatePicker & TimePicker */
+.bern-date-input,
+.bern-time-input {
+  font-variant-numeric: tabular-nums;
+  min-width: 132px;
+}
+
+/* EmptyState */
+.bern-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 10px;
+  padding: 28px 24px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.bern-empty-state-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  color: var(--bern-text-secondary);
+  opacity: 0.75;
+}
+.bern-empty-state-icon svg { width: 38px; height: 38px; }
+.bern-empty-state-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--bern-text-primary);
+}
+.bern-empty-state-message {
+  margin: 0;
+  max-width: 380px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--bern-text-secondary);
+}
+.bern-empty-state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* Badge */
+.bern-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--bern-control-border);
+  background: var(--bern-fill-subtle);
+  color: var(--bern-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+.bern-badge svg { width: 12px; height: 12px; flex: none; }
+.bern-badge-accent {
+  color: var(--bern-accent);
+  background: color-mix(in srgb, var(--bern-accent) 14%, transparent);
+  border-color: color-mix(in srgb, var(--bern-accent) 28%, transparent);
+}
+.bern-badge-success {
+  color: var(--bern-status-success);
+  background: color-mix(in srgb, var(--bern-status-success) 14%, transparent);
+  border-color: color-mix(in srgb, var(--bern-status-success) 28%, transparent);
+}
+.bern-badge-warning {
+  color: var(--bern-status-warning);
+  background: color-mix(in srgb, var(--bern-status-warning) 14%, transparent);
+  border-color: color-mix(in srgb, var(--bern-status-warning) 30%, transparent);
+}
+.bern-badge-error {
+  color: var(--bern-status-error);
+  background: color-mix(in srgb, var(--bern-status-error) 14%, transparent);
+  border-color: color-mix(in srgb, var(--bern-status-error) 30%, transparent);
+}
+
+/* Avatar */
+.bern-avatar {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  overflow: hidden;
+  border-radius: 50%;
+  font-weight: 600;
+  user-select: none;
+  box-shadow: inset 0 0 0 1px rgba(127, 127, 127, 0.16);
+}
+.bern-avatar-rounded { border-radius: 22%; }
+.bern-avatar-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}

@@ -382,7 +382,7 @@ fn the_menu_bar_is_generated_for_macos() {
     let crimson = &ui[ui.find("b::bar_item(c, \"menu_crimson\"").unwrap()..];
     assert!(!crimson[..crimson.find("));").unwrap()].contains(", false, None,"));
     let open = &ui[ui.find("b::bar_item(c, \"menu_open\"").unwrap()..];
-    assert!(open[..open.find("));").unwrap()].contains("Some(("));
+    assert!(open[..open.find("));").unwrap()].contains("Some(b::FilePrompt {"));
 }
 
 #[test]

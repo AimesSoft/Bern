@@ -8215,53 +8215,6 @@ private struct BernBrightnessScreenProbe: UIViewRepresentable {
 }
 #endif
 
-/// A screen can be shared by several scenes. Removing an older override
-/// must not restore through a newer one; the last release restores the host.
-@MainActor
-final class BernBrightnessOverrides {
-    static let shared = BernBrightnessOverrides()
-    private struct Entry {
-        let original: Double
-        let write: (Double) -> Void
-        var owners: [(id: UUID, value: Double)]
-    }
-    private var screens: [ObjectIdentifier: Entry] = [:]
-
-    func acquire(screen: ObjectIdentifier, owner: UUID,
-                 read: () -> Double, write: @escaping (Double) -> Void) -> Double {
-        if let previous = screens[screen]?.owners.first(where: { $0.id == owner }) {
-            return previous.value
-        }
-        let initial = read()
-        var entry = screens[screen] ?? Entry(original: initial, write: write, owners: [])
-        entry.owners.append((owner, initial))
-        screens[screen] = entry
-        return initial
-    }
-
-    func update(screen: ObjectIdentifier, owner: UUID, value: Double) {
-        guard value.isFinite, var entry = screens[screen],
-              let index = entry.owners.firstIndex(where: { $0.id == owner }) else { return }
-        let next = min(max(value, 0), 1)
-        entry.owners[index].value = next
-        screens[screen] = entry
-        if index == entry.owners.count - 1 { entry.write(next) }
-    }
-
-    func release(screen: ObjectIdentifier, owner: UUID) {
-        guard var entry = screens[screen],
-              let index = entry.owners.firstIndex(where: { $0.id == owner }) else { return }
-        let controlled = index == entry.owners.count - 1
-        entry.owners.remove(at: index)
-        if entry.owners.isEmpty {
-            screens.removeValue(forKey: screen)
-        } else {
-            screens[screen] = entry
-        }
-        if controlled { entry.write(entry.owners.last?.value ?? entry.original) }
-    }
-}
-
 // MARK: - Tooltip, Banner, Disclosure, NumberInput, Alert, ComboBox
 
 extension View {
@@ -8757,5 +8710,513 @@ private struct BernComboTriggerStyle: ViewModifier {
         } else {
             content.bernButtonLook(.secondary)
         }
+    }
+}
+
+extension View {
+    @ViewBuilder
+    func bernSelectable() -> some View {
+        #if os(macOS) || os(iOS)
+        self.textSelection(.enabled)
+        #else
+        self
+        #endif
+    }
+}
+
+enum BernDateCodec {
+    private static var calendar: Calendar {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone.current
+        return cal
+    }
+
+    static func normalized(_ year: Int64, _ month: Int64, _ day: Int64) -> (Int64, Int64, Int64) {
+        let y = year >= 1 && year <= 9999 ? year : 2026
+        let m = min(max(month, 1), 12)
+        let d = min(max(day, 1), 31)
+        return (y, m, d)
+    }
+
+    static func date(year: Int64, month: Int64, day: Int64) -> Date {
+        let (y, m, d) = normalized(year, month, day)
+        var comps = DateComponents()
+        comps.calendar = calendar
+        comps.timeZone = calendar.timeZone
+        comps.year = Int(y)
+        comps.month = Int(m)
+        comps.day = Int(d)
+        comps.hour = 12
+        return calendar.date(from: comps) ?? Date()
+    }
+
+    static func ymd(_ date: Date) -> (Int64, Int64, Int64) {
+        let comps = calendar.dateComponents([.year, .month, .day], from: date)
+        return (
+            Int64(comps.year ?? 2026),
+            Int64(comps.month ?? 1),
+            Int64(comps.day ?? 1)
+        )
+    }
+
+    static func formatISO(_ year: Int64, _ month: Int64, _ day: Int64) -> String {
+        let (y, m, d) = normalized(year, month, day)
+        return String(format: "%04lld-%02lld-%02lld", y, m, d)
+    }
+
+    static func parseISO(_ raw: String) -> (Int64, Int64, Int64)? {
+        let parts = raw.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "-")
+        guard parts.count == 3,
+              let y = Int64(parts[0]),
+              let m = Int64(parts[1]),
+              let d = Int64(parts[2]),
+              y >= 1, y <= 9999, m >= 1, m <= 12, d >= 1, d <= 31
+        else { return nil }
+        return ymd(date(year: y, month: m, day: d))
+    }
+
+    static func clamp(
+        _ value: (Int64, Int64, Int64),
+        min lower: (Int64, Int64, Int64)?,
+        max upper: (Int64, Int64, Int64)?
+    ) -> (Int64, Int64, Int64) {
+        var result = value
+        if let lower, result < lower { result = lower }
+        if let upper, result > upper { result = upper }
+        return result
+    }
+
+    static func addDays(_ value: (Int64, Int64, Int64), delta: Int) -> (Int64, Int64, Int64) {
+        let base = date(year: value.0, month: value.1, day: value.2)
+        let moved = calendar.date(byAdding: .day, value: delta, to: base) ?? base
+        return ymd(moved)
+    }
+}
+
+struct BernDatePicker: View {
+    let year: Int64
+    let month: Int64
+    let day: Int64
+    let minDate: (Int64, Int64, Int64)?
+    let maxDate: (Int64, Int64, Int64)?
+    let label: String
+    let labelHidden: Bool
+    let enabled: Bool
+    let commit: @MainActor @Sendable (Int64, Int64, Int64) -> Void
+
+    private var dateBinding: Binding<Date> {
+        Binding(
+            get: { BernDateCodec.date(year: year, month: month, day: day) },
+            set: { next in
+                let clamped = BernDateCodec.clamp(
+                    BernDateCodec.ymd(next),
+                    min: minDate,
+                    max: maxDate
+                )
+                commit(clamped.0, clamped.1, clamped.2)
+            }
+        )
+    }
+
+    @ViewBuilder
+    private var control: some View {
+        #if os(macOS) || os(iOS)
+        Group {
+            if let lo = minDate, let hi = maxDate {
+                let loDate = BernDateCodec.date(year: lo.0, month: lo.1, day: lo.2)
+                let hiDate = BernDateCodec.date(year: hi.0, month: hi.1, day: hi.2)
+                DatePicker(
+                    selection: dateBinding,
+                    in: min(loDate, hiDate)...max(loDate, hiDate),
+                    displayedComponents: [.date]
+                ) {
+                    Text(verbatim: label)
+                }
+            } else if let lo = minDate {
+                let loDate = BernDateCodec.date(year: lo.0, month: lo.1, day: lo.2)
+                DatePicker(selection: dateBinding, in: loDate..., displayedComponents: [.date]) {
+                    Text(verbatim: label)
+                }
+            } else if let hi = maxDate {
+                let hiDate = BernDateCodec.date(year: hi.0, month: hi.1, day: hi.2)
+                DatePicker(selection: dateBinding, in: ...hiDate, displayedComponents: [.date]) {
+                    Text(verbatim: label)
+                }
+            } else {
+                DatePicker(selection: dateBinding, displayedComponents: [.date]) {
+                    Text(verbatim: label)
+                }
+            }
+        }
+        .modifier(BernHiddenLabelModifier(hidden: labelHidden, label: label))
+        .bernAccentTint()
+        #else
+        HStack(spacing: 8) {
+            if !labelHidden {
+                Text(verbatim: label)
+                Spacer(minLength: 8)
+            }
+            Button {
+                let next = BernDateCodec.clamp(
+                    BernDateCodec.addDays((year, month, day), delta: -1),
+                    min: minDate,
+                    max: maxDate
+                )
+                commit(next.0, next.1, next.2)
+            } label: {
+                Image(systemName: "chevron.left")
+            }
+            Text(verbatim: BernDateCodec.formatISO(year, month, day))
+                .monospacedDigit()
+            Button {
+                let next = BernDateCodec.clamp(
+                    BernDateCodec.addDays((year, month, day), delta: 1),
+                    min: minDate,
+                    max: maxDate
+                )
+                commit(next.0, next.1, next.2)
+            } label: {
+                Image(systemName: "chevron.right")
+            }
+        }
+        .accessibilityLabel(Text(verbatim: label))
+        #endif
+    }
+
+    var body: some View {
+        control.disabled(!enabled)
+    }
+}
+
+private struct BernHiddenLabelModifier: ViewModifier {
+    let hidden: Bool
+    let label: String
+
+    func body(content: Content) -> some View {
+        if hidden {
+            content
+                .labelsHidden()
+                .accessibilityLabel(Text(verbatim: label))
+        } else {
+            content
+        }
+    }
+}
+
+enum BernTimeCodec {
+    static func clamp(_ raw: Double, min lower: Double, max upper: Double, step: Double) -> Double {
+        guard raw.isFinite else { return lower }
+        let s = max(1.0, step.rounded())
+        let clamped = Swift.min(Swift.max(raw, lower), upper)
+        let snapped = lower + ((clamped - lower) / s).rounded() * s
+        return Swift.min(Swift.max(snapped.rounded(), lower), upper)
+    }
+
+    static func format(_ minutes: Double) -> String {
+        let total = Int(Swift.min(Swift.max(minutes.isFinite ? minutes.rounded() : 0.0, 0.0), 1439.0))
+        return String(format: "%02d:%02d", total / 60, total % 60)
+    }
+
+    static func parse(_ raw: String) -> Double? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let direct = Double(trimmed), direct.isFinite {
+            return direct
+        }
+        let parts = trimmed.split(separator: ":")
+        guard parts.count == 2,
+              let h = Int(parts[0]),
+              let m = Int(parts[1]),
+              h >= 0, h <= 23, m >= 0, m <= 59
+        else { return nil }
+        return Double(h * 60 + m)
+    }
+
+    static func date(minutes: Double) -> Date {
+        let total = Int(Swift.min(Swift.max(minutes.isFinite ? minutes.rounded() : 0.0, 0.0), 1439.0))
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone.current
+        var comps = cal.dateComponents([.year, .month, .day], from: Date())
+        comps.hour = total / 60
+        comps.minute = total % 60
+        comps.second = 0
+        return cal.date(from: comps) ?? Date()
+    }
+
+    static func minutes(from date: Date) -> Double {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone.current
+        let comps = cal.dateComponents([.hour, .minute], from: date)
+        return Double((comps.hour ?? 0) * 60 + (comps.minute ?? 0))
+    }
+}
+
+struct BernTimePicker: View {
+    let minutes: Double
+    let minMinutes: Double
+    let maxMinutes: Double
+    let step: Double
+    let label: String
+    let labelHidden: Bool
+    let enabled: Bool
+    let commit: @MainActor @Sendable (Double) -> Void
+
+    private var timeBinding: Binding<Date> {
+        Binding(
+            get: { BernTimeCodec.date(minutes: minutes) },
+            set: { next in
+                let clamped = BernTimeCodec.clamp(
+                    BernTimeCodec.minutes(from: next),
+                    min: minMinutes,
+                    max: maxMinutes,
+                    step: step
+                )
+                commit(clamped)
+            }
+        )
+    }
+
+    @ViewBuilder
+    private var control: some View {
+        #if os(macOS) || os(iOS)
+        let loDate = BernTimeCodec.date(minutes: minMinutes)
+        let hiDate = BernTimeCodec.date(minutes: maxMinutes)
+        DatePicker(
+            selection: timeBinding,
+            in: min(loDate, hiDate)...max(loDate, hiDate),
+            displayedComponents: [.hourAndMinute]
+        ) {
+            Text(verbatim: label)
+        }
+        .modifier(BernHiddenLabelModifier(hidden: labelHidden, label: label))
+        .bernAccentTint()
+        #else
+        HStack(spacing: 8) {
+            if !labelHidden {
+                Text(verbatim: label)
+                Spacer(minLength: 8)
+            }
+            Button {
+                let next = BernTimeCodec.clamp(minutes - step, min: minMinutes, max: maxMinutes, step: step)
+                commit(next)
+            } label: {
+                Image(systemName: "minus")
+            }
+            Text(verbatim: BernTimeCodec.format(minutes))
+                .monospacedDigit()
+            Button {
+                let next = BernTimeCodec.clamp(minutes + step, min: minMinutes, max: maxMinutes, step: step)
+                commit(next)
+            } label: {
+                Image(systemName: "plus")
+            }
+        }
+        .accessibilityLabel(Text(verbatim: label))
+        #endif
+    }
+
+    var body: some View {
+        control.disabled(!enabled)
+    }
+}
+
+struct BernEmptyState<Actions: View>: View {
+    let title: String
+    let message: String?
+    let systemImage: String?
+    @ViewBuilder var actions: () -> Actions
+
+    @ViewBuilder
+    var body: some View {
+        if #available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *) {
+            ContentUnavailableView {
+                if let systemImage, !systemImage.isEmpty {
+                    Label(title, systemImage: systemImage)
+                } else {
+                    Text(verbatim: title)
+                }
+            } description: {
+                if let message, !message.isEmpty {
+                    Text(verbatim: message)
+                }
+            } actions: {
+                actions()
+            }
+        } else {
+            VStack(spacing: 10) {
+                if let systemImage, !systemImage.isEmpty {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 36, weight: .regular))
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                }
+                Text(verbatim: title)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.center)
+                if let message, !message.isEmpty {
+                    Text(verbatim: message)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                HStack(spacing: 8) {
+                    actions()
+                }
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity)
+        }
+    }
+}
+
+struct BernBadge: View {
+    let content: String
+    let tone: String
+    let systemImage: String?
+
+    private var tint: Color? {
+        switch tone {
+        case "accent": return BernColor.role("accent").color
+        case "success": return BernColor.role("status.success").color
+        case "warning": return BernColor.role("status.warning").color
+        case "error": return BernColor.role("status.error").color
+        default: return nil
+        }
+    }
+
+    var body: some View {
+        let fg: Color = tint ?? Color.secondary
+        let bg: Color = tint?.opacity(0.14) ?? Color.primary.opacity(0.08)
+        let border: Color = tint?.opacity(0.28) ?? Color.primary.opacity(0.14)
+        HStack(spacing: 4) {
+            if let systemImage, !systemImage.isEmpty {
+                Image(systemName: systemImage)
+                    .font(.caption2.weight(.semibold))
+                    .accessibilityHidden(true)
+            }
+            Text(verbatim: content)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+        }
+        .foregroundStyle(fg)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(Capsule(style: .continuous).fill(bg))
+        .overlay(Capsule(style: .continuous).strokeBorder(border, lineWidth: 1))
+    }
+}
+
+struct BernAvatar: View {
+    let label: String
+    let name: String?
+    let url: String?
+    let size: CGFloat
+    let rounded: Bool
+
+    private static func initials(for raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "?" }
+        let words = trimmed.split(whereSeparator: { $0.isWhitespace })
+        if words.count >= 2,
+           let first = words[0].first,
+           let second = words[1].first
+        {
+            return String([first, second]).uppercased()
+        }
+        let chars = Array(trimmed.prefix(2))
+        if chars.count == 2 && chars[0].isASCII && chars[1].isASCII {
+            return String(chars).uppercased()
+        }
+        return String(chars[0]).uppercased()
+    }
+
+    private var cornerRadius: CGFloat {
+        rounded ? max(4, size * 0.22) : size * 0.5
+    }
+
+    private var fallbackTint: Color {
+        var hash: UInt64 = 14695981039346656037
+        for byte in label.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 1099511628211
+        }
+        let hues: [Double] = [0.58, 0.44, 0.08, 0.78, 0.94, 0.34]
+        let hue = hues[Int(hash % UInt64(hues.count))]
+        return Color(hue: hue, saturation: 0.48, brightness: 0.76)
+    }
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        let hasImage = (name?.isEmpty == false) || (url?.isEmpty == false)
+        ZStack {
+            shape.fill(fallbackTint.opacity(0.22))
+            Text(verbatim: Self.initials(for: label))
+                .font(.system(size: max(10, size * 0.38), weight: .semibold, design: .rounded))
+                .foregroundStyle(fallbackTint)
+                .minimumScaleFactor(0.6)
+                .lineLimit(1)
+            if hasImage {
+                BernImage(
+                    name: name,
+                    url: url,
+                    label: nil,
+                    width: size,
+                    height: size,
+                    fit: .cover
+                )
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(shape)
+        .overlay(shape.strokeBorder(Color.primary.opacity(0.10), lineWidth: 1))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(verbatim: label))
+    }
+}
+
+/// A screen can be shared by several scenes. Removing an older override
+/// must not restore through a newer one; the last release restores the host.
+@MainActor
+final class BernBrightnessOverrides {
+    static let shared = BernBrightnessOverrides()
+    private struct Entry {
+        let original: Double
+        let write: (Double) -> Void
+        var owners: [(id: UUID, value: Double)]
+    }
+    private var screens: [ObjectIdentifier: Entry] = [:]
+
+    func acquire(screen: ObjectIdentifier, owner: UUID,
+                 read: () -> Double, write: @escaping (Double) -> Void) -> Double {
+        if let previous = screens[screen]?.owners.first(where: { $0.id == owner }) {
+            return previous.value
+        }
+        let initial = read()
+        var entry = screens[screen] ?? Entry(original: initial, write: write, owners: [])
+        entry.owners.append((owner, initial))
+        screens[screen] = entry
+        return initial
+    }
+
+    func update(screen: ObjectIdentifier, owner: UUID, value: Double) {
+        guard value.isFinite, var entry = screens[screen],
+              let index = entry.owners.firstIndex(where: { $0.id == owner }) else { return }
+        let next = min(max(value, 0), 1)
+        entry.owners[index].value = next
+        screens[screen] = entry
+        if index == entry.owners.count - 1 { entry.write(next) }
+    }
+
+    func release(screen: ObjectIdentifier, owner: UUID) {
+        guard var entry = screens[screen],
+              let index = entry.owners.firstIndex(where: { $0.id == owner }) else { return }
+        let controlled = index == entry.owners.count - 1
+        entry.owners.remove(at: index)
+        if entry.owners.isEmpty {
+            screens.removeValue(forKey: screen)
+        } else {
+            screens[screen] = entry
+        }
+        if controlled { entry.write(entry.owners.last?.value ?? entry.original) }
     }
 }

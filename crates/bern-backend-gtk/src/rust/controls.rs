@@ -256,6 +256,72 @@ impl Generator<'_> {
         ));
     }
 
+    pub(super) fn date_picker(&self, out: &mut Out, element: &Element) {
+        out.line(format!(
+            "b::DatePicker(p, c, b::DatePickerProps {{ id: {}, label: {}, model: {}, min: {}, max: {}, enabled: {}, label_hidden: {} }});",
+            self.id(element),
+            some(self.text_prop(element, "label")),
+            some(self.model(element, "current", true)),
+            some(element.expr("min").map(|e| self.getter(e))),
+            some(element.expr("max").map(|e| self.getter(e))),
+            some(element.expr("enabled").map(|e| self.getter(e))),
+            element.keyword("label_hidden") == Some("true"),
+        ));
+    }
+
+    pub(super) fn time_picker(&self, out: &mut Out, element: &Element) {
+        out.line(format!(
+            "b::TimePicker(p, c, b::TimePickerProps {{ id: {}, label: {}, model: {}, min: {}, max: {}, step: {}, enabled: {}, label_hidden: {} }});",
+            self.id(element),
+            some(self.text_prop(element, "label")),
+            some(self.model(element, "current", true)),
+            Self::number(element, "min"),
+            Self::number(element, "max"),
+            Self::number(element, "step"),
+            some(element.expr("enabled").map(|e| self.getter(e))),
+            element.keyword("label_hidden") == Some("true"),
+        ));
+    }
+
+    pub(super) fn empty_state(&self, out: &mut Out, element: &Element) {
+        let props = format!(
+            "b::EmptyStateProps {{ title: {}, message: {}, icon: {} }}",
+            some(self.text_prop(element, "title")),
+            some(self.text_prop(element, "message")),
+            Self::icon(element, "icon"),
+        );
+        if element.children.is_empty() {
+            out.line(format!("b::EmptyState(p, c, {props}, None);"));
+        } else {
+            self.children(
+                out,
+                &format!("b::EmptyState(p, c, {props}, Some("),
+                &element.children,
+                "));",
+            );
+        }
+    }
+
+    pub(super) fn badge(&self, out: &mut Out, element: &Element) {
+        out.line(format!(
+            "b::Badge(p, c, b::BadgeProps {{ content: {}, tone: {}, icon: {} }});",
+            some(self.text_prop(element, "content")),
+            Self::keyword(element, "tone"),
+            Self::icon(element, "icon"),
+        ));
+    }
+
+    pub(super) fn avatar(&self, out: &mut Out, element: &Element) {
+        out.line(format!(
+            "b::Avatar(p, c, b::AvatarProps {{ label: {}, source: {}, url: {}, size: {}, shape: {} }});",
+            some(self.text_prop(element, "label")),
+            some(element.resource("source").map(string)),
+            some(element.expr("source").map(|e| self.getter(e))),
+            some(self.num(element, "size")),
+            Self::keyword(element, "shape"),
+        ));
+    }
+
     pub(super) fn alert(&self, out: &mut Out, element: &Element) {
         let mut actions = Vec::new();
         for node in &element.children {

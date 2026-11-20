@@ -147,6 +147,13 @@ impl Value {
                 let def = types
                     .record_def(name)
                     .ok_or_else(|| SchemaError::new(format!("unknown record `{name}`")))?;
+                if name == crate::format::CALENDAR_DATE && def.fields.len() == 3 {
+                    return Ok(Value::Record(vec![
+                        Value::Int(2026),
+                        Value::Int(1),
+                        Value::Int(1),
+                    ]));
+                }
                 Value::Record(
                     def.fields
                         .iter()

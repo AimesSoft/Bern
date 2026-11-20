@@ -112,6 +112,10 @@ pub struct MainDraft {
     pub ratio: f64,
     #[initial(1)]
     pub selected_item: i64,
+    pub scheduled_date: CalendarDate,
+    #[initial(570.0)]
+    pub meeting_time: f64,
+    pub save_path: String,
 }
 
 /// The application: a main window and a settings window. Each window's
