@@ -1915,6 +1915,25 @@ fn content_in_a_window_starts_at_its_top_leading_corner() {
     assert!(disable_title_bar < enter_fullscreen);
     assert!(restore_after_leave > 0);
     assert!(windows.contains("inline void RestoreTitleBar(Win& win)"));
+    let restore = windows
+        .split_once("inline void RestoreTitleBar(Win& win)")
+        .expect("RestoreTitleBar in bern_ui_windows.inl")
+        .1;
+    let reveal_title_bar = restore
+        .find("win.titleBar.UpdateLayout();")
+        .expect("reveal and lay out a collapsed title bar before SetTitleBar");
+    let reset_title_bar = restore
+        .find("win.window.SetTitleBar(nullptr);")
+        .expect("detach previous title bar before re-attaching");
+    let reattach_title_bar = restore
+        .find("win.window.SetTitleBar(win.titleBar);")
+        .expect("re-attach title bar to restore caption drag region");
+    let reapply_immersive = restore
+        .find("ShowChrome(win, true);")
+        .expect("re-apply immersive chrome after restoring title bar");
+    assert!(reveal_title_bar < reset_title_bar);
+    assert!(reset_title_bar < reattach_title_bar);
+    assert!(reattach_title_bar < reapply_immersive);
     assert!(windows.contains("bar.ButtonBackgroundColor(transparent);"));
     assert!(windows.contains("bar.ButtonInactiveBackgroundColor(transparent);"));
     assert!(text("bern_base.cpp").contains("DCompositionBoostCompositorClock"));

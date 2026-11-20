@@ -1911,6 +1911,20 @@ pub fn app(app: stage::Client, windows: AppWindows) -> impl View {
     // Sibling texts inside the inner `BernRow` mark themselves as yielding, while
     // `IconButton` stays firm and the trailing text component is marked yielding.
     assert!(kotlin.contains("BernRow("), "{kotlin}");
+    let scene = include_str!("../templates/BernScene.kt");
+    let row_body = scene
+        .split_once("fun BernRow(")
+        .expect("BernRow in BernScene.kt")
+        .1;
+    assert!(
+        row_body
+            .contains("val offered = if (unweightedIdeal > room.toLong()) bernOfferUnweighted("),
+        "BernRow must not cap unweighted children to their intrinsic width when they fit:\n{row_body}"
+    );
+    assert!(
+        row_body.contains("(left - reservedAfter).coerceIn(0, left)"),
+        "BernRow must reserve later unweighted children's natural widths when measuring:\n{row_body}"
+    );
     assert!(
         kotlin
             .contains("Box(Modifier.bernRowYields(ellipsizes = true)) { AppView_trailing_time() }"),

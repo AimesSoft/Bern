@@ -1245,10 +1245,20 @@ inline void RestoreTitleBar(Win& win) {
         } catch (winrt::hresult_error const&) {
         }
     }
+    // `Window::SetTitleBar` registers a drag region (`NonClientRegionKind::Caption`)
+    // only while the title bar element is `Visible` and laid out; if `immersive`
+    // collapsed it before leaving `FullScreen`, briefly reveal and lay it out so
+    // WinUI re-attaches its caption drag region before `ShowChrome(win, true)`
+    // hides it again.
+    if (win.titleBar && win.titleBar.Visibility() != xaml::Visibility::Visible) {
+        win.titleBar.Visibility(xaml::Visibility::Visible);
+        win.titleBar.UpdateLayout();
+    }
     if (!win.window.ExtendsContentIntoTitleBar()) {
         win.window.ExtendsContentIntoTitleBar(true);
     }
     if (win.titleBar) {
+        win.window.SetTitleBar(nullptr);
         win.window.SetTitleBar(win.titleBar);
     }
     try {

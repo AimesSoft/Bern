@@ -859,13 +859,30 @@ fun BernRow(
                     val ideal = IntArray(n) { i ->
                         if ((data[i]?.weight ?: 0f) <= 0f) measurables[i].bernIntrinsicWidth(max = true, intrinsicH) else 0
                     }
-                    val offered = bernOfferUnweighted(n, data, ideal, room)
+                    var unweightedIdeal = 0L
+                    for (i in 0 until n) if ((data[i]?.weight ?: 0f) <= 0f) unweightedIdeal += ideal[i]
+                    val offered = if (unweightedIdeal > room.toLong()) bernOfferUnweighted(n, data, ideal, room) else null
+                    var remainingIdeal = unweightedIdeal
                     var fixedUsed = 0
                     val weighted = ArrayList<Int>(n)
                     for (i in 0 until n) {
                         if ((data[i]?.weight ?: 0f) <= 0f) {
+                            val maxW = if (offered != null) {
+                                offered[i]
+                            } else {
+                                // When the unweighted children's intrinsics fit, do not cap a
+                                // child to its intrinsic hint: aspect-ratio images and
+                                // subcomposed views may report a tiny or zero intrinsic width
+                                // under `Constraints.Infinity` while legitimately sizing to
+                                // the available row room. Reserve only later unweighted
+                                // children's natural widths so they keep their room.
+                                remainingIdeal -= ideal[i]
+                                val reservedAfter = remainingIdeal.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+                                val left = (room - fixedUsed).coerceAtLeast(0)
+                                (left - reservedAfter).coerceIn(0, left)
+                            }
                             val p = measurables[i].measure(
-                                Constraints(minWidth = 0, maxWidth = offered[i], minHeight = 0, maxHeight = childMaxH),
+                                Constraints(minWidth = 0, maxWidth = maxW, minHeight = 0, maxHeight = childMaxH),
                             )
                             placeables[i] = p
                             fixedUsed += p.width
@@ -974,19 +991,28 @@ fun BernRow(
                 val ideal = IntArray(n) { i ->
                     if ((data[i]?.weight ?: 0f) <= 0f) measurables[i].bernIntrinsicWidth(max = true, Constraints.Infinity) else 0
                 }
-                val offered = bernOfferUnweighted(n, data, ideal, room)
+                var unweightedIdeal = 0L
+                for (i in 0 until n) if ((data[i]?.weight ?: 0f) <= 0f) unweightedIdeal += ideal[i]
+                val offered = if (unweightedIdeal > room.toLong()) bernOfferUnweighted(n, data, ideal, room) else null
                 var fixedUsed = 0
                 val weighted = ArrayList<Int>(n)
+                val childWidths = IntArray(n)
                 for (i in 0 until n) {
                     if ((data[i]?.weight ?: 0f) <= 0f) {
-                        fixedUsed += offered[i]
+                        if (offered != null) {
+                            childWidths[i] = offered[i]
+                            fixedUsed += offered[i]
+                        } else {
+                            val otherIdeal = (unweightedIdeal - ideal[i]).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+                            childWidths[i] = (room - otherIdeal).coerceIn(ideal[i], room)
+                            fixedUsed += ideal[i]
+                        }
                     } else {
                         weighted.add(i)
                     }
                 }
                 var free = (room - fixedUsed).coerceAtLeast(0)
                 var remainingWeight = weighted.sumOf { data[it]!!.weight.toDouble() }
-                val childWidths = offered.copyOf()
                 for (i in weighted) {
                     val w = data[i]!!.weight.toDouble()
                     val share = if (remainingWeight > 0.0 && free > 0) {
