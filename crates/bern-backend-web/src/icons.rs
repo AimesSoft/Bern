@@ -374,6 +374,7 @@ pub const RUNTIME_ICONS: &[&str] = &[
     "pause.fill",
     "speaker.wave.3.fill",
     "speaker.slash.fill",
+    "arrow.clockwise",
     "circle",
 ];
 

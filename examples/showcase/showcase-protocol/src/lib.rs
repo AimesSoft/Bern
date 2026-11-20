@@ -52,6 +52,23 @@ pub mod showcase {
         pub clip: MediaSource,
     }
 
+    /// A hierarchical tree node on the library page.
+    #[value]
+    pub struct TreeNode {
+        pub id: i64,
+        pub parent_id: Option<i64>,
+        #[content]
+        pub title: String,
+    }
+
+    /// A reorderable queue item on the library page.
+    #[value]
+    pub struct QueueItem {
+        pub id: i64,
+        #[content]
+        pub title: String,
+    }
+
     /// A sample clip of the media page.
     #[value]
     pub enum Clip {
@@ -80,6 +97,12 @@ pub mod showcase {
         /// Saved display name, edited in the settings window.
         #[content]
         pub display_name: String,
+        /// Sample hierarchy for the tree view.
+        pub tree: Vec<TreeNode>,
+        /// Reorderable queue items.
+        pub queue: Vec<QueueItem>,
+        /// Whether the library feed is currently refreshing.
+        pub refreshing: bool,
     }
 
     #[commands]
@@ -107,6 +130,12 @@ pub mod showcase {
         #[idempotent]
         #[errors("invalid_name")]
         fn set_display_name(&mut self, name: String) -> Result<(), CommandError>;
+
+        /// Reorder an item in the queue from one index to another.
+        fn move_queue(&mut self, from: i64, to: i64) -> Result<(), CommandError>;
+
+        /// Trigger a library refresh.
+        fn refresh_library(&mut self) -> Result<(), CommandError>;
     }
 
     #[queries]

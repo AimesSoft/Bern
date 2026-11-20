@@ -67,7 +67,7 @@ impl Generator<'_> {
         }
     }
 
-    fn node(&self, out: &mut Out, node: &Node) {
+    pub(super) fn node(&self, out: &mut Out, node: &Node) {
         match node {
             // The query owns its subscription outside both the condition and
             // any layout/appearance wrappers of the presentation.
@@ -307,6 +307,11 @@ impl Generator<'_> {
             "EmptyState" => self.empty_state(out, element),
             "Badge" => self.badge(out, element),
             "Avatar" => self.avatar(out, element),
+            "TreeView" => self.tree_view(out, element),
+            "SplitPane" => self.split_pane(out, element),
+            "Reorderable" => self.reorderable(out, element),
+            "BottomSheet" => self.bottom_sheet(out, element),
+            "Refreshable" => self.refreshable(out, element),
             "LanguagePicker" => self.language_picker(out, element),
             "Video" => self.video(out, element),
             "NativeView" => self.native_view(out, element),

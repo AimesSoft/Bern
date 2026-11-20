@@ -3392,6 +3392,724 @@ pub fn Avatar(p: &Parent, ctx: &Ctx, props: AvatarProps) {
     p.add(&avatar);
 }
 
+pub struct TreeViewProps {
+    pub id: &'static str,
+    pub label: Option<Str>,
+    pub items: Get,
+    pub key: usize,
+    pub parent: usize,
+    pub var: &'static str,
+    pub selection: Option<Field>,
+    pub expanded: Option<Field>,
+    pub action: Option<Act>,
+}
+
+#[allow(non_snake_case)]
+pub fn TreeView(p: &Parent, ctx: &Ctx, props: TreeViewProps, row: Build) {
+    let label = props.label.as_ref().map(|l| bound_text(ctx, l));
+    let activate = bound_action(ctx, &props.action);
+    let local_expanded: Rc<crate::reactive::Cell<Vec<String>>> =
+        Rc::new(crate::reactive::Cell::new(Vec::new()));
+    let last_items: Rc<std::cell::RefCell<Vec<Value>>> = Rc::default();
+
+    let read_expanded: Rc<dyn Fn() -> Vec<String>> = {
+        let ctx = ctx.clone();
+        let ext = props.expanded;
+        let local = Rc::clone(&local_expanded);
+        Rc::new(move || {
+            if let Some(field) = ext {
+                crate::value::as_list(ctx.session(field.session, field.field))
+                    .into_iter()
+                    .map(|v| crate::value::key_text(&v))
+                    .collect()
+            } else {
+                local.get()
+            }
+        })
+    };
+    let set_expanded: Rc<dyn Fn(&str, bool)> = {
+        let win = Rc::clone(ctx.win());
+        let ext = props.expanded;
+        let local = Rc::clone(&local_expanded);
+        let last = Rc::clone(&last_items);
+        let key_idx = props.key;
+        Rc::new(move |wanted: &str, open: bool| {
+            if let Some(field) = ext {
+                let current = crate::value::as_list(win.cell(field).peek());
+                let mut next = Vec::new();
+                let mut present = false;
+                for v in current {
+                    if crate::value::key_text(&v) == wanted {
+                        present = true;
+                        if open {
+                            next.push(v);
+                        }
+                    } else {
+                        next.push(v);
+                    }
+                }
+                if open
+                    && !present
+                    && let Some(found) = last.borrow().iter().find_map(|item| {
+                        let kv = crate::value::at(item.clone(), &[key_idx]);
+                        (crate::value::key_text(&kv) == wanted).then_some(kv)
+                    })
+                {
+                    next.push(found);
+                }
+                win.write(field, Value::List(next));
+            } else {
+                let mut cur = local.peek();
+                if open {
+                    if !cur.iter().any(|k| k == wanted) {
+                        cur.push(wanted.to_string());
+                    }
+                } else {
+                    cur.retain(|k| k != wanted);
+                }
+                local.set(cur);
+            }
+        })
+    };
+    let select_key: Rc<dyn Fn(&str) -> bool> = {
+        let win = Rc::clone(ctx.win());
+        let sel = props.selection;
+        let last = Rc::clone(&last_items);
+        let key_idx = props.key;
+        Rc::new(move |wanted: &str| {
+            let found = last.borrow().iter().find_map(|item| {
+                let kv = crate::value::at(item.clone(), &[key_idx]);
+                (crate::value::key_text(&kv) == wanted).then_some(kv)
+            });
+            let Some(kv) = found else {
+                return false;
+            };
+            if let Some(field) = sel {
+                win.write(field, kv);
+            }
+            true
+        })
+    };
+
+    let host = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    host.set_hexpand(true);
+    let scopes: Rc<std::cell::RefCell<Vec<crate::reactive::Scope>>> = Rc::default();
+    let drop_scopes = Rc::clone(&scopes);
+    crate::reactive::on_cleanup(move || {
+        for scope in drop_scopes.borrow_mut().drain(..) {
+            scope.dispose();
+        }
+    });
+
+    {
+        let host = host.clone();
+        let scopes = Rc::clone(&scopes);
+        let ctx = ctx.clone();
+        let items = props.items;
+        let key_idx = props.key;
+        let parent_idx = props.parent;
+        let var = props.var;
+        let sel = props.selection;
+        let read_expanded = Rc::clone(&read_expanded);
+        let set_expanded = Rc::clone(&set_expanded);
+        let activate = activate.clone();
+        let last_items = Rc::clone(&last_items);
+        effect(move || {
+            let list = crate::value::as_list(items(&ctx));
+            let expanded = read_expanded();
+            let selected_key =
+                sel.map(|f| crate::value::key_text(&ctx.session(f.session, f.field)));
+            crate::reactive::untrack(|| {
+                *last_items.borrow_mut() = list.clone();
+                for scope in scopes.borrow_mut().drain(..) {
+                    scope.dispose();
+                }
+                while let Some(child) = host.first_child() {
+                    host.remove(&child);
+                }
+                let mut known = std::collections::HashSet::new();
+                let mut keys = Vec::with_capacity(list.len());
+                for item in &list {
+                    let k = crate::value::key_text(&crate::value::at(item.clone(), &[key_idx]));
+                    known.insert(k.clone());
+                    keys.push(k);
+                }
+                let mut children_map: std::collections::HashMap<String, Vec<usize>> =
+                    std::collections::HashMap::new();
+                let mut roots = Vec::new();
+                for (i, item) in list.iter().enumerate() {
+                    if let Value::Optional(Some(inner)) =
+                        crate::value::at(item.clone(), &[parent_idx])
+                    {
+                        let pk = crate::value::key_text(&inner);
+                        if known.contains(&pk) && pk != keys[i] {
+                            children_map.entry(pk).or_default().push(i);
+                            continue;
+                        }
+                    }
+                    roots.push(i);
+                }
+                let exp_set: std::collections::HashSet<&str> =
+                    expanded.iter().map(String::as_str).collect();
+                let mut visited = std::collections::HashSet::new();
+                let mut stack: Vec<(usize, i32)> =
+                    roots.into_iter().rev().map(|idx| (idx, 0)).collect();
+                while let Some((idx, depth)) = stack.pop() {
+                    let k = keys[idx].clone();
+                    if !visited.insert(k.clone()) {
+                        continue;
+                    }
+                    let kids = children_map.get(&k);
+                    let has_kids = kids.is_some_and(|v| !v.is_empty());
+                    let is_open = exp_set.contains(k.as_str());
+                    let is_sel = selected_key.as_deref() == Some(k.as_str());
+
+                    let line = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+                    line.set_hexpand(true);
+                    line.set_margin_start(8 + depth * 18);
+                    line.set_margin_end(8);
+                    line.set_margin_top(2);
+                    line.set_margin_bottom(2);
+                    line.add_css_class("bern-tree-row");
+                    if is_sel {
+                        line.add_css_class("bern-tree-selected");
+                    }
+                    if has_kids {
+                        let chev = gtk::Button::new();
+                        chev.add_css_class("flat");
+                        chev.set_valign(gtk::Align::Center);
+                        chev.set_child(Some(&icons::image(if is_open {
+                            "chevron.down"
+                        } else {
+                            "chevron.right"
+                        })));
+                        let set_exp = Rc::clone(&set_expanded);
+                        let key_click = k.clone();
+                        chev.connect_clicked(move |_| set_exp(&key_click, !is_open));
+                        line.append(&chev);
+                    } else {
+                        let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+                        spacer.set_size_request(24, 1);
+                        line.append(&spacer);
+                    }
+                    let content = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+                    content.set_hexpand(true);
+                    content.set_valign(gtk::Align::Center);
+                    let scope = crate::reactive::Scope::detached();
+                    let item_val = list[idx].clone();
+                    let k_for_ctx = k.clone();
+                    let row_ctx = ctx
+                        .with_key(Rc::new(move || k_for_ctx.clone()))
+                        .with_local(var, Rc::new(move || item_val.clone()));
+                    let build = Rc::clone(&row);
+                    let parent_box = Parent::of_box(&content);
+                    scope.run(|| build(&parent_box, &row_ctx));
+                    scopes.borrow_mut().push(scope);
+                    line.append(&content);
+
+                    let click = gtk::GestureClick::new();
+                    let key_val = crate::value::at(list[idx].clone(), &[key_idx]);
+                    let win = Rc::clone(ctx.win());
+                    let act = activate.clone();
+                    click.connect_released(move |_, n_press, _, _| {
+                        if let Some(field) = sel {
+                            win.write(field, key_val.clone());
+                        }
+                        if n_press >= 2
+                            && let Some(run) = &act
+                        {
+                            run();
+                        }
+                    });
+                    line.add_controller(click);
+                    host.append(&line);
+
+                    if has_kids
+                        && is_open
+                        && let Some(child_indices) = kids
+                    {
+                        for &cidx in child_indices.iter().rev() {
+                            stack.push((cidx, depth + 1));
+                        }
+                    }
+                }
+            });
+        });
+    }
+
+    if let Some(lbl) = label.clone() {
+        let named = host.clone();
+        effect(move || named.update_property(&[gtk::accessible::Property::Label(&lbl())]));
+    }
+    p.add(&host);
+
+    let set_exp_cli = Rc::clone(&set_expanded);
+    let read_exp_cli = Rc::clone(&read_expanded);
+    let win_val = Rc::clone(ctx.win());
+    let sel_val = props.selection;
+    controls::register(
+        ctx,
+        props.id,
+        "tree_view",
+        label,
+        None,
+        Actions {
+            activate,
+            edit: Some(Rc::new(move |cmd| {
+                if let Some((op, k)) = cmd.trim().split_once(':') {
+                    match op {
+                        "expand" => set_exp_cli(k, true),
+                        "collapse" => set_exp_cli(k, false),
+                        "toggle" => {
+                            let open = read_exp_cli().iter().any(|x| x == k);
+                            set_exp_cli(k, !open);
+                        }
+                        _ => {}
+                    }
+                }
+            })),
+            select: Some(select_key),
+            value: Some(Rc::new(move || {
+                sel_val.map(|f| crate::value::key_text(&win_val.cell(f).peek()))
+            })),
+            ..Actions::default()
+        },
+    );
+}
+
+pub struct SplitPaneProps {
+    pub id: Option<&'static str>,
+    pub vertical: bool,
+    pub ratio: Option<Field>,
+    pub min_first: Option<Num>,
+    pub min_second: Option<Num>,
+}
+
+#[allow(non_snake_case)]
+pub fn SplitPane(p: &Parent, ctx: &Ctx, props: SplitPaneProps, first: Build, second: Build) {
+    let orientation = if props.vertical {
+        gtk::Orientation::Vertical
+    } else {
+        gtk::Orientation::Horizontal
+    };
+    let paned = gtk::Paned::new(orientation);
+    paned.set_hexpand(true);
+    paned.set_vexpand(true);
+    paned.set_resize_start_child(true);
+    paned.set_resize_end_child(true);
+    paned.set_shrink_start_child(false);
+    paned.set_shrink_end_child(false);
+
+    let box1 = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    let box2 = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    box1.set_hexpand(true);
+    box1.set_vexpand(true);
+    box2.set_hexpand(true);
+    box2.set_vexpand(true);
+    first(&Parent::of_box(&box1), ctx);
+    second(&Parent::of_box(&box2), ctx);
+    paned.set_start_child(Some(&box1));
+    paned.set_end_child(Some(&box2));
+
+    let min_first = Rc::new(Cell::new(120.0_f64));
+    let min_second = Rc::new(Cell::new(120.0_f64));
+    if let Some(m1) = &props.min_first {
+        let b = box1.clone();
+        let slot = Rc::clone(&min_first);
+        let vert = props.vertical;
+        bind_number(ctx, m1, None, &box1, move |v| {
+            let px = v.max(24.0);
+            slot.set(px);
+            if vert {
+                b.set_size_request(-1, px.round() as i32);
+            } else {
+                b.set_size_request(px.round() as i32, -1);
+            }
+        });
+    }
+    if let Some(m2) = &props.min_second {
+        let b = box2.clone();
+        let slot = Rc::clone(&min_second);
+        let vert = props.vertical;
+        bind_number(ctx, m2, None, &box2, move |v| {
+            let px = v.max(24.0);
+            slot.set(px);
+            if vert {
+                b.set_size_request(-1, px.round() as i32);
+            } else {
+                b.set_size_request(px.round() as i32, -1);
+            }
+        });
+    }
+
+    let local_ratio = Rc::new(crate::reactive::Cell::new(0.5_f64));
+    let syncing = Rc::new(Cell::new(false));
+    let read_ratio: Rc<dyn Fn() -> f64> = {
+        let ctx = ctx.clone();
+        let ext = props.ratio;
+        let local = Rc::clone(&local_ratio);
+        Rc::new(move || {
+            let v = match ext {
+                Some(f) => crate::value::as_f64(&ctx.session(f.session, f.field)),
+                None => local.get(),
+            };
+            if v.is_finite() {
+                v.clamp(0.05, 0.95)
+            } else {
+                0.5
+            }
+        })
+    };
+    let write_ratio: Rc<dyn Fn(f64)> = {
+        let win = Rc::clone(ctx.win());
+        let ext = props.ratio;
+        let local = Rc::clone(&local_ratio);
+        Rc::new(move |raw: f64| {
+            let v = if raw.is_finite() {
+                raw.clamp(0.05, 0.95)
+            } else {
+                0.5
+            };
+            if let Some(f) = ext {
+                win.write(f, Value::Float(v));
+            } else {
+                local.set(v);
+            }
+        })
+    };
+    {
+        let paned_eff = paned.clone();
+        let read = Rc::clone(&read_ratio);
+        let syncing = Rc::clone(&syncing);
+        let vert = props.vertical;
+        effect(move || {
+            let r = read();
+            let total = if vert {
+                paned_eff.height()
+            } else {
+                paned_eff.width()
+            };
+            if total > 10 {
+                syncing.set(true);
+                paned_eff.set_position((f64::from(total) * r).round() as i32);
+                syncing.set(false);
+            }
+        });
+    }
+    {
+        let write = Rc::clone(&write_ratio);
+        let syncing = Rc::clone(&syncing);
+        let vert = props.vertical;
+        paned.connect_position_notify(move |pw| {
+            if syncing.get() {
+                return;
+            }
+            let total = if vert { pw.height() } else { pw.width() };
+            if total > 10 {
+                write(f64::from(pw.position()) / f64::from(total));
+            }
+        });
+    }
+    p.add(&paned);
+    if let Some(id) = props.id {
+        let write_cli = Rc::clone(&write_ratio);
+        let win_val = Rc::clone(ctx.win());
+        let ext = props.ratio;
+        let local = Rc::clone(&local_ratio);
+        controls::register(
+            ctx,
+            id,
+            "split_pane",
+            Some(Rc::new(move || id.to_string())),
+            None,
+            Actions {
+                set_number: Some(Rc::new(move |v| write_cli(v))),
+                value: Some(Rc::new(move || {
+                    let v = match ext {
+                        Some(f) => crate::value::as_f64(&win_val.cell(f).peek()),
+                        None => local.peek(),
+                    };
+                    Some(format!("{:.3}", v.clamp(0.05, 0.95)))
+                })),
+                ..Actions::default()
+            },
+        );
+    }
+}
+
+pub struct ReorderableProps {
+    pub id: &'static str,
+    pub label: Option<Str>,
+    pub items: Get,
+    pub key: usize,
+    pub var: &'static str,
+    pub from: Field,
+    pub to: Field,
+    pub action: Option<Act>,
+}
+
+#[allow(non_snake_case)]
+pub fn Reorderable(p: &Parent, ctx: &Ctx, props: ReorderableProps, row: Build) {
+    let label = props.label.as_ref().map(|l| bound_text(ctx, l));
+    let run_action = bound_action(ctx, &props.action);
+    let count_cell = Rc::new(Cell::new(0usize));
+    let commit_move: Rc<dyn Fn(i64, i64)> = {
+        let win = Rc::clone(ctx.win());
+        let from = props.from;
+        let to = props.to;
+        let run_action = run_action.clone();
+        let count_cell = Rc::clone(&count_cell);
+        Rc::new(move |src: i64, dst: i64| {
+            let n = count_cell.get() as i64;
+            if src < 0 || src >= n || dst < 0 || dst >= n || src == dst {
+                return;
+            }
+            win.write(from, Value::Int(src));
+            win.write(to, Value::Int(dst));
+            if let Some(act) = &run_action {
+                act();
+            }
+        })
+    };
+
+    let host = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    host.set_hexpand(true);
+    let scopes: Rc<std::cell::RefCell<Vec<crate::reactive::Scope>>> = Rc::default();
+    let drop_scopes = Rc::clone(&scopes);
+    crate::reactive::on_cleanup(move || {
+        for scope in drop_scopes.borrow_mut().drain(..) {
+            scope.dispose();
+        }
+    });
+
+    {
+        let host = host.clone();
+        let scopes = Rc::clone(&scopes);
+        let ctx = ctx.clone();
+        let items = props.items;
+        let key_idx = props.key;
+        let var = props.var;
+        let commit_move = Rc::clone(&commit_move);
+        let count_cell = Rc::clone(&count_cell);
+        effect(move || {
+            let list = crate::value::as_list(items(&ctx));
+            crate::reactive::untrack(|| {
+                count_cell.set(list.len());
+                for scope in scopes.borrow_mut().drain(..) {
+                    scope.dispose();
+                }
+                while let Some(child) = host.first_child() {
+                    host.remove(&child);
+                }
+                let total = list.len();
+                for (i, item) in list.iter().enumerate() {
+                    let k = crate::value::key_text(&crate::value::at(item.clone(), &[key_idx]));
+                    let card = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+                    card.set_hexpand(true);
+                    card.add_css_class("card");
+                    card.set_margin_top(2);
+                    card.set_margin_bottom(2);
+
+                    let grip = icons::image("line.3.horizontal");
+                    grip.set_margin_start(8);
+                    grip.set_valign(gtk::Align::Center);
+                    card.append(&grip);
+
+                    let content = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+                    content.set_hexpand(true);
+                    content.set_valign(gtk::Align::Center);
+                    let scope = crate::reactive::Scope::detached();
+                    let item_val = item.clone();
+                    let row_ctx = ctx
+                        .with_key(Rc::new(move || k.clone()))
+                        .with_local(var, Rc::new(move || item_val.clone()));
+                    let build = Rc::clone(&row);
+                    let parent_box = Parent::of_box(&content);
+                    scope.run(|| build(&parent_box, &row_ctx));
+                    scopes.borrow_mut().push(scope);
+                    card.append(&content);
+
+                    let up = gtk::Button::new();
+                    up.add_css_class("flat");
+                    up.set_child(Some(&icons::image("chevron.up")));
+                    up.set_sensitive(i > 0);
+                    let cm_up = Rc::clone(&commit_move);
+                    up.connect_clicked(move |_| cm_up(i as i64, i as i64 - 1));
+                    card.append(&up);
+
+                    let down = gtk::Button::new();
+                    down.add_css_class("flat");
+                    down.set_child(Some(&icons::image("chevron.down")));
+                    down.set_sensitive(i + 1 < total);
+                    let cm_down = Rc::clone(&commit_move);
+                    down.connect_clicked(move |_| cm_down(i as i64, i as i64 + 1));
+                    card.append(&down);
+
+                    // Native GTK4 drag-and-drop reordering on each row.
+                    let drag = gtk::DragSource::new();
+                    drag.set_actions(gtk::gdk::DragAction::MOVE);
+                    let idx_payload = i.to_string();
+                    drag.connect_prepare(move |_, _, _| {
+                        Some(gtk::gdk::ContentProvider::for_value(
+                            &idx_payload.to_value(),
+                        ))
+                    });
+                    card.add_controller(drag);
+
+                    let drop =
+                        gtk::DropTarget::new(String::static_type(), gtk::gdk::DragAction::MOVE);
+                    let cm_drop = Rc::clone(&commit_move);
+                    let dst = i as i64;
+                    drop.connect_drop(move |_, value, _, _| {
+                        if let Ok(raw) = value.get::<String>()
+                            && let Ok(src) = raw.parse::<i64>()
+                        {
+                            cm_drop(src, dst);
+                            return true;
+                        }
+                        false
+                    });
+                    card.add_controller(drop);
+
+                    host.append(&card);
+                }
+            });
+        });
+    }
+
+    if let Some(lbl) = label.clone() {
+        let named = host.clone();
+        effect(move || named.update_property(&[gtk::accessible::Property::Label(&lbl())]));
+    }
+    p.add(&host);
+    let cm_cli = Rc::clone(&commit_move);
+    let count_cli = Rc::clone(&count_cell);
+    controls::register(
+        ctx,
+        props.id,
+        "reorderable",
+        label,
+        None,
+        Actions {
+            edit: Some(Rc::new(move |s| {
+                let normalized = s.trim().replace("->", ":");
+                if let Some((a, b)) = normalized.split_once(':')
+                    && let (Ok(from), Ok(to)) = (a.trim().parse::<i64>(), b.trim().parse::<i64>())
+                {
+                    cm_cli(from, to);
+                }
+            })),
+            value: Some(Rc::new(move || Some(count_cli.get().to_string()))),
+            ..Actions::default()
+        },
+    );
+}
+
+pub struct BottomSheetProps {
+    pub detents: Option<&'static str>,
+    pub drag_indicator: bool,
+    pub dismiss: Option<Act>,
+}
+
+#[allow(non_snake_case)]
+pub fn BottomSheet(_p: &Parent, ctx: &Ctx, props: BottomSheetProps, children: Build) {
+    let win = Rc::clone(ctx.win());
+    let dialog = adw::Dialog::new();
+    dialog.set_presentation_mode(adw::DialogPresentationMode::BottomSheet);
+    let height = match props.detents {
+        Some("large") => 640,
+        _ => 420,
+    };
+    dialog.set_content_height(height);
+    let body = gtk::Box::new(gtk::Orientation::Vertical, 10);
+    body.set_margin_top(12);
+    body.set_margin_bottom(16);
+    body.set_margin_start(16);
+    body.set_margin_end(16);
+    children(&Parent::of_box(&body), ctx);
+    let scroller = gtk::ScrolledWindow::new();
+    scroller.set_child(Some(&body));
+    scroller.set_vexpand(true);
+    dialog.set_child(Some(&scroller));
+
+    let closed_from_cleanup = Rc::new(Cell::new(false));
+    let dismiss = bound_action(ctx, &props.dismiss);
+    {
+        let cleanup_flag = Rc::clone(&closed_from_cleanup);
+        dialog.connect_closed(move |_| {
+            if !cleanup_flag.get()
+                && let Some(act) = &dismiss
+            {
+                act();
+            }
+        });
+    }
+    dialog.present(Some(&win.window));
+    let d_clean = dialog.clone();
+    crate::reactive::on_cleanup(move || {
+        closed_from_cleanup.set(true);
+        d_clean.force_close();
+    });
+}
+
+pub struct RefreshableProps {
+    pub id: &'static str,
+    pub refreshing: Option<Get>,
+    pub action: Option<Act>,
+}
+
+#[allow(non_snake_case)]
+pub fn Refreshable(p: &Parent, ctx: &Ctx, props: RefreshableProps, children: Build) {
+    let on_refresh = bound_action(ctx, &props.action);
+    let outer = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    outer.set_hexpand(true);
+    outer.set_vexpand(true);
+
+    let revealer = gtk::Revealer::new();
+    let bar = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    bar.set_halign(gtk::Align::Center);
+    bar.set_margin_top(4);
+    bar.set_margin_bottom(4);
+    let spinner = gtk::Spinner::new();
+    bar.append(&spinner);
+    revealer.set_child(Some(&bar));
+    revealer.set_reveal_child(false);
+    if let Some(ref_get) = props.refreshing.clone() {
+        let rev = revealer.clone();
+        let spin = spinner.clone();
+        let at = ctx.clone();
+        effect(move || {
+            let active = crate::value::truthy(&ref_get(&at));
+            spin.set_spinning(active);
+            rev.set_reveal_child(active);
+        });
+    }
+    outer.append(&revealer);
+    children(&Parent::of_box(&outer), ctx);
+    p.add(&outer);
+
+    let ref_val = props.refreshing;
+    let at_val = ctx.clone();
+    let id = props.id;
+    controls::register(
+        ctx,
+        id,
+        "refreshable",
+        Some(Rc::new(move || id.to_string())),
+        None,
+        Actions {
+            activate: on_refresh,
+            value: Some(Rc::new(move || {
+                let active = ref_val
+                    .as_ref()
+                    .is_some_and(|g| crate::value::truthy(&g(&at_val)));
+                Some(if active { "refreshing" } else { "idle" }.into())
+            })),
+            ..Actions::default()
+        },
+    );
+}
+
 #[derive(Default)]
 pub struct StackProps {
     /// `column` or `row`.

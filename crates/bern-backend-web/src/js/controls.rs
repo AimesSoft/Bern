@@ -1,6 +1,6 @@
 //! Controls: buttons, inputs, pickers, drop areas, gestures and timers.
 
-use super::{Generator, Out, number, string};
+use super::{Generator, Out, local, number, string};
 use bern_ir::{Element, Node, Prop};
 use bern_protocol::Type;
 
@@ -516,6 +516,117 @@ impl Generator<'_> {
                 ("shape", Self::keyword(element, "shape")),
             ])
         ));
+    }
+
+    pub(super) fn tree_view(&self, out: &mut Out, element: &Element) {
+        let (
+            Some(items),
+            Some(template),
+            Some(Prop::Key { name: key_name, .. }),
+            Some(Prop::Key {
+                name: parent_name, ..
+            }),
+        ) = (
+            element.expr("items"),
+            &element.template,
+            element.prop("key"),
+            element.prop("parent"),
+        )
+        else {
+            return;
+        };
+        let props = Self::props(vec![
+            ("id", Some(self.id(element))),
+            ("label", self.text_prop(element, "label")),
+            ("items", Some(format!("() => {}", self.expr(items)))),
+            ("key", Some(format!("(v) => v.{key_name}"))),
+            ("parent", Some(format!("(v) => v.{parent_name}"))),
+            ("selection", self.field(element, "selection")),
+            ("expanded", self.field(element, "expanded")),
+        ]);
+        out.open(format!(
+            "B.TreeView(p, ctx, {props}, (p, ctx, {}) => {{",
+            local(&template.var)
+        ));
+        self.nodes(out, &element.children);
+        out.close(format!("}}, {});", self.action_fn(element)));
+    }
+
+    pub(super) fn split_pane(&self, out: &mut Out, element: &Element) {
+        if element.children.len() != 2 {
+            return;
+        }
+        let props = Self::props(vec![
+            ("id", element.id.as_deref().map(string)),
+            ("axis", Self::keyword(element, "axis")),
+            ("ratio", self.field(element, "ratio")),
+            ("minFirst", self.length(element, "min_first")),
+            ("minSecond", self.length(element, "min_second")),
+        ]);
+        out.open(format!("B.SplitPane(p, ctx, {props},"));
+        self.children(out, "", &element.children[0..1], ",");
+        self.children(out, "", &element.children[1..2], ");");
+        out.indent -= 1;
+    }
+
+    pub(super) fn reorderable(&self, out: &mut Out, element: &Element) {
+        let (Some(items), Some(template), Some(Prop::Key { name: key_name, .. })) = (
+            element.expr("items"),
+            &element.template,
+            element.prop("key"),
+        ) else {
+            return;
+        };
+        let props = Self::props(vec![
+            ("id", Some(self.id(element))),
+            ("label", self.text_prop(element, "label")),
+            ("items", Some(format!("() => {}", self.expr(items)))),
+            ("key", Some(format!("(v) => v.{key_name}"))),
+            ("from", self.field(element, "move_from")),
+            ("to", self.field(element, "move_to")),
+        ]);
+        out.open(format!(
+            "B.Reorderable(p, ctx, {props}, (p, ctx, {}) => {{",
+            local(&template.var)
+        ));
+        self.nodes(out, &element.children);
+        out.close(format!("}}, {});", self.action_fn(element)));
+    }
+
+    pub(super) fn bottom_sheet(&self, out: &mut Out, element: &Element) {
+        let props = Self::props(vec![
+            ("detents", Self::keyword(element, "detents")),
+            (
+                "dragIndicator",
+                element
+                    .keyword("drag_indicator")
+                    .map(|v| (v == "true").to_string()),
+            ),
+        ]);
+        self.children(
+            out,
+            &format!("B.BottomSheet(p, ctx, {props}, "),
+            &element.children,
+            &format!(", {});", self.action_fn(element)),
+        );
+    }
+
+    pub(super) fn refreshable(&self, out: &mut Out, element: &Element) {
+        let props = Self::props(vec![
+            ("id", Some(self.id(element))),
+            (
+                "refreshing",
+                element
+                    .expr("refreshing")
+                    .map(|e| format!("() => Boolean({})", self.expr(e))),
+            ),
+        ]);
+        self.children(
+            out,
+            &format!("B.Refreshable(p, ctx, {props}, "),
+            &element.children,
+            &format!(", {});", self.action_fn(element)),
+        );
     }
 
     pub(super) fn picker(&self, out: &mut Out, element: &Element) {

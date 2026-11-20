@@ -710,11 +710,11 @@ fn project_element(element: &Element, ctx: &mut ProjectCtx<'_>) -> Vec<Node> {
         // Non-visual, event, gesture, overlay, or side-effect elements vanish.
         "ContextMenu" | "TableMenu" | "DoubleTap" | "WheelUp" | "WheelDown" | "Pinch" | "Swipe"
         | "OnCommit" | "Drop" | "Shortcut" | "Watch" | "Timer" | "ScreenBrightness" | "Toast"
-        | "Modal" | "Alert" | "AlertAction" | "MenuItem" | "PickerOption" | "SearchItem"
-        | "CommandMenu" | "CommandItem" | "QueryStatusHeader" => Vec::new(),
+        | "Modal" | "BottomSheet" | "Alert" | "AlertAction" | "MenuItem" | "PickerOption"
+        | "SearchItem" | "CommandMenu" | "CommandItem" | "QueryStatusHeader" => Vec::new(),
 
-        // Tooltip is a transparent wrapper: project its child directly.
-        "Tooltip" => project_nodes(&element.children, ctx),
+        // Tooltip and Refreshable are transparent wrappers: project their child directly.
+        "Tooltip" | "Refreshable" => project_nodes(&element.children, ctx),
 
         // Inline banner and collapsible disclosure header project as soft horizontal bars.
         "Banner" => vec![make_skeleton_node(
@@ -785,16 +785,15 @@ fn project_element(element: &Element, ctx: &mut ProjectCtx<'_>) -> Vec<Node> {
 
         // Repetition containers: expand into N staggered sample rows/cards.
         "ForEach" => project_for_each(element, ctx),
-        "List" => project_list(element, ctx, DEFAULT_LIST_COUNT),
+        "List" | "TreeView" | "Reorderable" => project_list(element, ctx, DEFAULT_LIST_COUNT),
         "PreviewList" => project_list(element, ctx, DEFAULT_PREVIEW_COUNT),
         "Table" => project_table(element, ctx),
 
         // Layout containers: keep geometry/spacing/variants, strip interactivity,
         // and add a gentle stagger when directly wrapping a `ForEach`.
         "Column" | "Row" | "Stack" | "Grid" | "Flow" | "ScrollView" | "Section" | "Form"
-        | "ScaleBox" | "Positioned" | "Rail" | "Adaptive" | "Layout" | "Accordion" | "Marquee" => {
-            project_container(element, ctx)
-        }
+        | "ScaleBox" | "Positioned" | "Rail" | "Adaptive" | "Layout" | "Accordion" | "Marquee"
+        | "SplitPane" => project_container(element, ctx),
 
         // Leaf content controls.
         "Text" => vec![project_text(element, ctx)],

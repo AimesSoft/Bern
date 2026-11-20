@@ -5825,4 +5825,596 @@ inline void Avatar(Parent const& p, Ctx const& ctx, AvatarProps props) {
     p.Add(root);
 }
 
+// ---------------------------------------------------------------------------
+// TreeView, SplitPane, Reorderable, BottomSheet, Refreshable
+// ---------------------------------------------------------------------------
+
+struct TreeViewProps {
+    char const* id = "";
+    Str label;
+    Get items;
+    int key = 0;
+    int parent = 0;
+    char const* variable = "";
+    std::optional<Field> selection;
+    std::optional<Field> expanded;
+    Act action;
+};
+
+inline void TreeView(Parent const& p, Ctx const& ctx, TreeViewProps props, Build row) {
+    auto label = Bound(ctx, props.label);
+    auto activate = Run(ctx, props.action);
+    auto localExpanded = std::make_shared<Cell<std::vector<std::string>>>(std::vector<std::string>{});
+    auto lastItems = std::make_shared<std::vector<Value>>();
+    auto readExpanded = [ctx, ext = props.expanded, localExpanded]() -> std::vector<std::string> {
+        if (ext) {
+            std::vector<std::string> out;
+            auto list = R::AsList(ctx.Session(ext->session, ext->field));
+            out.reserve(list.size());
+            for (auto const& v : list) out.push_back(R::KeyText(v));
+            return out;
+        }
+        return localExpanded->Get();
+    };
+    auto setExpanded = [ctx, ext = props.expanded, localExpanded, lastItems, keyIdx = props.key](std::string const& targetKey, bool open) {
+        if (ext && ctx.win) {
+            auto current = R::AsList(ctx.win->CellOf(*ext).Peek());
+            Values next;
+            bool present = false;
+            for (auto const& v : current) {
+                if (R::KeyText(v) == targetKey) {
+                    present = true;
+                    if (open) next.push_back(v);
+                } else {
+                    next.push_back(v);
+                }
+            }
+            if (open && !present) {
+                for (auto const& item : *lastItems) {
+                    auto kv = R::At(item, {keyIdx});
+                    if (R::KeyText(kv) == targetKey) {
+                        next.push_back(kv);
+                        break;
+                    }
+                }
+            }
+            ctx.win->Write(*ext, Value::List(std::move(next)));
+        } else {
+            auto cur = localExpanded->Peek();
+            auto it = std::find(cur.begin(), cur.end(), targetKey);
+            if (open && it == cur.end()) cur.push_back(targetKey);
+            else if (!open && it != cur.end()) cur.erase(it);
+            localExpanded->Set(std::move(cur));
+        }
+    };
+    auto selectKey = [ctx, sel = props.selection, lastItems, keyIdx = props.key](std::string const& wanted) -> bool {
+        for (auto const& item : *lastItems) {
+            auto kv = R::At(item, {keyIdx});
+            if (R::KeyText(kv) == wanted) {
+                if (sel && ctx.win) ctx.win->Write(*sel, kv);
+                return true;
+            }
+        }
+        return false;
+    };
+
+    controls::StackPanel host;
+    host.Orientation(controls::Orientation::Vertical);
+    host.Spacing(2);
+    host.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+    auto rowScopes = std::make_shared<std::vector<std::unique_ptr<Scope>>>();
+    Reactive::OnCleanup([rowScopes] {
+        for (auto& s : *rowScopes) s->Dispose();
+        rowScopes->clear();
+    });
+    std::string varName = props.variable ? props.variable : "";
+    auto win = ctx.win;
+    Reactive::Run([host, rowScopes, ctx, itemsFn = props.items, keyIdx = props.key, parentIdx = props.parent, varName, sel = props.selection, readExpanded, setExpanded, activate, row, lastItems, win] {
+        auto list = R::AsList(itemsFn(ctx));
+        auto expanded = readExpanded();
+        std::string selectedKey = sel ? R::KeyText(ctx.Session(sel->session, sel->field)) : "";
+        Reactive::Untrack([&] {
+            *lastItems = list;
+            for (auto& s : *rowScopes) s->Dispose();
+            rowScopes->clear();
+            host.Children().Clear();
+
+            std::unordered_set<std::string> known;
+            std::vector<std::string> keys;
+            keys.reserve(list.size());
+            for (auto const& item : list) {
+                auto k = R::KeyText(R::At(item, {keyIdx}));
+                known.insert(k);
+                keys.push_back(std::move(k));
+            }
+            std::unordered_map<std::string, std::vector<size_t>> childrenMap;
+            std::vector<size_t> roots;
+            for (size_t i = 0; i < list.size(); ++i) {
+                auto pv = R::At(list[i], {parentIdx});
+                if (pv.IsSome()) {
+                    auto pk = R::KeyText(pv.Items()[0]);
+                    if (known.count(pk) && pk != keys[i]) {
+                        childrenMap[pk].push_back(i);
+                        continue;
+                    }
+                }
+                roots.push_back(i);
+            }
+            std::unordered_set<std::string> expSet(expanded.begin(), expanded.end());
+            std::unordered_set<std::string> visited;
+            std::function<void(std::vector<size_t> const&, int)> visit = [&](std::vector<size_t> const& indices, int depth) {
+                for (size_t idx : indices) {
+                    auto const& k = keys[idx];
+                    if (!visited.insert(k).second) continue;
+                    auto itKids = childrenMap.find(k);
+                    bool hasKids = itKids != childrenMap.end() && !itKids->second.empty();
+                    bool isOpen = expSet.count(k) > 0;
+                    bool isSel = sel && selectedKey == k;
+
+                    controls::Border line;
+                    line.CornerRadius(xaml::CornerRadius{6, 6, 6, 6});
+                    line.Padding(xaml::Thickness{static_cast<double>(8 + depth * 18), 4, 8, 4});
+                    line.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+                    if (isSel) {
+                        line.Background(media::SolidColorBrush(ColorOf(win, IsDark(host), Paint("accent"), 0.16)));
+                    } else {
+                        line.Background(media::SolidColorBrush(winrt::Windows::UI::Colors::Transparent()));
+                    }
+                    controls::Grid grid;
+                    controls::ColumnDefinition c0, c1;
+                    c0.Width(xaml::GridLength{24, xaml::GridUnitType::Pixel});
+                    c1.Width(xaml::GridLength{1, xaml::GridUnitType::Star});
+                    grid.ColumnDefinitions().Append(c0);
+                    grid.ColumnDefinitions().Append(c1);
+
+                    if (hasKids) {
+                        controls::Button chev;
+                        Styles::MakeSubtle(chev);
+                        chev.Width(22);
+                        chev.Height(22);
+                        chev.Padding(xaml::Thickness{0, 0, 0, 0});
+                        chev.Content(Icons::Icon(isOpen ? "chevron.down" : "chevron.right", 11));
+                        chev.Click([setExpanded, k, isOpen](auto&&, auto&&) { setExpanded(k, !isOpen); });
+                        controls::Grid::SetColumn(chev, 0);
+                        grid.Children().Append(chev);
+                    }
+                    controls::StackPanel contentBox;
+                    contentBox.Orientation(controls::Orientation::Horizontal);
+                    contentBox.VerticalAlignment(xaml::VerticalAlignment::Center);
+                    contentBox.Spacing(6);
+                    controls::Grid::SetColumn(contentBox, 1);
+                    auto scope = std::make_unique<Scope>();
+                    Value itemVal = list[idx];
+                    auto rowCtx = ctx.WithKey([k] { return k; }).WithLocal(varName, [itemVal] { return itemVal; });
+                    scope->Run([&] { row(Parent::Of(contentBox), rowCtx); });
+                    rowScopes->push_back(std::move(scope));
+                    grid.Children().Append(contentBox);
+                    line.Child(grid);
+
+                    Value keyVal = R::At(list[idx], {keyIdx});
+                    line.Tapped([ctx, sel, keyVal](auto&&, auto&&) {
+                        if (sel && ctx.win) ctx.win->Write(*sel, keyVal);
+                    });
+                    if (activate) {
+                        line.DoubleTapped([ctx, sel, keyVal, activate](auto&&, auto&&) {
+                            if (sel && ctx.win) ctx.win->Write(*sel, keyVal);
+                            activate();
+                        });
+                    }
+                    host.Children().Append(line);
+                    if (hasKids && isOpen) visit(itKids->second, depth + 1);
+                }
+            };
+            visit(roots, 0);
+            return 0;
+        });
+    });
+
+    BindName(host, label);
+    SetRole(host, L"bern-fill-width");
+    p.Add(host);
+    Controls::Register(ctx, props.id, "tree_view", label, nullptr,
+        Actions{
+            .activate = activate,
+            .edit = [setExpanded, readExpanded](std::string const& cmd) {
+                auto colon = cmd.find(':');
+                if (colon == std::string::npos) {
+                    auto cur = readExpanded();
+                    bool open = std::find(cur.begin(), cur.end(), cmd) != cur.end();
+                    setExpanded(cmd, !open);
+                    return;
+                }
+                std::string op = cmd.substr(0, colon);
+                std::string k = cmd.substr(colon + 1);
+                if (op == "expand") setExpanded(k, true);
+                else if (op == "collapse") setExpanded(k, false);
+                else if (op == "toggle") {
+                    auto cur = readExpanded();
+                    bool open = std::find(cur.begin(), cur.end(), k) != cur.end();
+                    setExpanded(k, !open);
+                }
+            },
+            .select = selectKey,
+            .value = [ctx, sel = props.selection]() -> std::optional<std::string> {
+                if (!sel || !ctx.win) return std::nullopt;
+                return R::KeyText(ctx.win->CellOf(*sel).Peek());
+            },
+        });
+}
+
+struct SplitPaneProps {
+    char const* id = nullptr;
+    bool vertical = false;
+    std::optional<Field> ratio;
+    Len minFirst;
+    Len minSecond;
+};
+
+inline void SplitPane(Parent const& p, Ctx const& ctx, SplitPaneProps props, Build first, Build second) {
+    bool vertical = props.vertical;
+    auto localRatio = std::make_shared<Cell<double>>(0.5);
+    auto minFirstCell = std::make_shared<double>(120.0);
+    auto minSecondCell = std::make_shared<double>(120.0);
+    auto readRatio = [ctx, ext = props.ratio, localRatio]() -> double {
+        double v = ext ? R::AsDouble(ctx.Session(ext->session, ext->field)) : localRatio->Get();
+        return std::isfinite(v) ? (std::clamp)(v, 0.05, 0.95) : 0.5;
+    };
+    auto peekRatio = [ctx, ext = props.ratio, localRatio]() -> double {
+        double v = (ext && ctx.win) ? R::AsDouble(ctx.win->CellOf(*ext).Peek()) : localRatio->Peek();
+        return std::isfinite(v) ? (std::clamp)(v, 0.05, 0.95) : 0.5;
+    };
+    auto writeRatio = [ctx, ext = props.ratio, localRatio](double next) {
+        double v = std::isfinite(next) ? (std::clamp)(next, 0.05, 0.95) : 0.5;
+        if (ext && ctx.win) ctx.win->Write(*ext, Value::Float(v));
+        else localRatio->Set(v);
+    };
+
+    controls::Grid grid;
+    grid.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+    grid.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+    grid.MinHeight(vertical ? 248.0 : 120.0);
+
+    controls::Grid pane1, pane2;
+    pane1.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+    pane1.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+    pane2.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+    pane2.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+    first(Parent::Of(pane1), ctx);
+    second(Parent::Of(pane2), ctx);
+
+    controls::Border splitter;
+    splitter.Background(media::SolidColorBrush(winrt::Windows::UI::Colors::Transparent()));
+    controls::Border bar;
+    bar.Background(media::SolidColorBrush(ColorOf(ctx.win, IsDark(grid), Paint("text.primary"), 0.14)));
+    if (vertical) {
+        splitter.Height(8);
+        splitter.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+        bar.Height(1);
+        bar.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+        bar.VerticalAlignment(xaml::VerticalAlignment::Center);
+    } else {
+        splitter.Width(8);
+        splitter.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+        bar.Width(1);
+        bar.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+        bar.HorizontalAlignment(xaml::HorizontalAlignment::Center);
+    }
+    splitter.Child(bar);
+
+    if (vertical) {
+        controls::RowDefinition r0, r1, r2;
+        r0.Height(xaml::GridLength{0.5, xaml::GridUnitType::Star});
+        r1.Height(xaml::GridLength{8, xaml::GridUnitType::Pixel});
+        r2.Height(xaml::GridLength{0.5, xaml::GridUnitType::Star});
+        grid.RowDefinitions().Append(r0);
+        grid.RowDefinitions().Append(r1);
+        grid.RowDefinitions().Append(r2);
+        controls::Grid::SetRow(pane1, 0);
+        controls::Grid::SetRow(splitter, 1);
+        controls::Grid::SetRow(pane2, 2);
+    } else {
+        controls::ColumnDefinition c0, c1, c2;
+        c0.Width(xaml::GridLength{0.5, xaml::GridUnitType::Star});
+        c1.Width(xaml::GridLength{8, xaml::GridUnitType::Pixel});
+        c2.Width(xaml::GridLength{0.5, xaml::GridUnitType::Star});
+        grid.ColumnDefinitions().Append(c0);
+        grid.ColumnDefinitions().Append(c1);
+        grid.ColumnDefinitions().Append(c2);
+        controls::Grid::SetColumn(pane1, 0);
+        controls::Grid::SetColumn(splitter, 1);
+        controls::Grid::SetColumn(pane2, 2);
+    }
+    grid.Children().Append(pane1);
+    grid.Children().Append(splitter);
+    grid.Children().Append(pane2);
+
+    auto applySplit = [grid, vertical, minFirstCell, minSecondCell](double r) {
+        double clamped = (std::clamp)(r, 0.05, 0.95);
+        if (vertical) {
+            grid.RowDefinitions().GetAt(0).MinHeight(*minFirstCell);
+            grid.RowDefinitions().GetAt(2).MinHeight(*minSecondCell);
+            grid.RowDefinitions().GetAt(0).Height(xaml::GridLength{clamped, xaml::GridUnitType::Star});
+            grid.RowDefinitions().GetAt(2).Height(xaml::GridLength{1.0 - clamped, xaml::GridUnitType::Star});
+        } else {
+            grid.ColumnDefinitions().GetAt(0).MinWidth(*minFirstCell);
+            grid.ColumnDefinitions().GetAt(2).MinWidth(*minSecondCell);
+            grid.ColumnDefinitions().GetAt(0).Width(xaml::GridLength{clamped, xaml::GridUnitType::Star});
+            grid.ColumnDefinitions().GetAt(2).Width(xaml::GridLength{1.0 - clamped, xaml::GridUnitType::Star});
+        }
+    };
+    if (props.minFirst.Given()) {
+        BindLen(ctx, props.minFirst, nullptr, [minFirstCell, applySplit, peekRatio](double d) {
+            *minFirstCell = (std::max)(24.0, d);
+            applySplit(peekRatio());
+        });
+    }
+    if (props.minSecond.Given()) {
+        BindLen(ctx, props.minSecond, nullptr, [minSecondCell, applySplit, peekRatio](double d) {
+            *minSecondCell = (std::max)(24.0, d);
+            applySplit(peekRatio());
+        });
+    }
+    Reactive::Run([readRatio, applySplit] { applySplit(readRatio()); });
+
+    auto dragging = std::make_shared<bool>(false);
+    splitter.PointerPressed([dragging, splitter](IInspectable const&, xaml::Input::PointerRoutedEventArgs const& args) {
+        *dragging = true;
+        splitter.CapturePointer(args.Pointer());
+        args.Handled(true);
+    });
+    splitter.PointerMoved([dragging, grid, vertical, minFirstCell, minSecondCell, writeRatio](IInspectable const&, xaml::Input::PointerRoutedEventArgs const& args) {
+        if (!*dragging) return;
+        auto pt = args.GetCurrentPoint(grid).Position();
+        double total = vertical ? grid.ActualHeight() : grid.ActualWidth();
+        double usable = (std::max)(1.0, total - 8.0);
+        double pos = vertical ? pt.Y : pt.X;
+        double lo = (std::min)(0.9, (std::max)(0.05, *minFirstCell / usable));
+        double hi = (std::max)(lo, (std::min)(0.95, 1.0 - (*minSecondCell / usable)));
+        writeRatio((std::clamp)(pos / usable, lo, hi));
+        args.Handled(true);
+    });
+    splitter.PointerReleased([dragging, splitter](IInspectable const&, xaml::Input::PointerRoutedEventArgs const& args) {
+        *dragging = false;
+        splitter.ReleasePointerCapture(args.Pointer());
+    });
+
+    SetRole(grid, L"bern-fill-width");
+    p.Add(grid);
+    if (props.id && *props.id) {
+        std::string idName = props.id;
+        Controls::Register(ctx, props.id, "split_pane", [idName] { return Wide(idName); }, nullptr,
+            Actions{
+                .setNumber = [writeRatio](double v) { writeRatio(v); },
+                .value = [peekRatio]() -> std::optional<std::string> {
+                    char buf[32];
+                    snprintf(buf, sizeof(buf), "%.3f", peekRatio());
+                    return std::string(buf);
+                },
+            });
+    }
+}
+
+struct ReorderableProps {
+    char const* id = "";
+    Str label;
+    Get items;
+    int key = 0;
+    char const* variable = "";
+    Field from;
+    Field to;
+    Act action;
+};
+
+inline void Reorderable(Parent const& p, Ctx const& ctx, ReorderableProps props, Build row) {
+    auto label = Bound(ctx, props.label);
+    auto runAction = Run(ctx, props.action);
+    auto countCell = std::make_shared<size_t>(0);
+    auto commitMove = [ctx, from = props.from, to = props.to, runAction, countCell](int64_t src, int64_t dst) {
+        int64_t n = static_cast<int64_t>(*countCell);
+        if (src < 0 || src >= n || dst < 0 || dst >= n || src == dst) return;
+        if (ctx.win) {
+            ctx.win->Write(from, Value::Int(src));
+            ctx.win->Write(to, Value::Int(dst));
+        }
+        if (runAction) runAction();
+    };
+
+    controls::StackPanel host;
+    host.Orientation(controls::Orientation::Vertical);
+    host.Spacing(4);
+    host.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+    auto rowScopes = std::make_shared<std::vector<std::unique_ptr<Scope>>>();
+    Reactive::OnCleanup([rowScopes] {
+        for (auto& s : *rowScopes) s->Dispose();
+        rowScopes->clear();
+    });
+    std::string varName = props.variable ? props.variable : "";
+    auto win = ctx.win;
+    Reactive::Run([host, rowScopes, ctx, itemsFn = props.items, keyIdx = props.key, varName, row, commitMove, countCell, win] {
+        auto list = R::AsList(itemsFn(ctx));
+        Reactive::Untrack([&] {
+            *countCell = list.size();
+            for (auto& s : *rowScopes) s->Dispose();
+            rowScopes->clear();
+            host.Children().Clear();
+            size_t total = list.size();
+            for (size_t i = 0; i < total; ++i) {
+                auto k = R::KeyText(R::At(list[i], {keyIdx}));
+                controls::Border card;
+                card.CornerRadius(xaml::CornerRadius{8, 8, 8, 8});
+                card.Padding(xaml::Thickness{8, 6, 8, 6});
+                card.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+                card.Background(media::SolidColorBrush(ColorOf(win, IsDark(host), Paint("text.primary"), 0.04)));
+
+                controls::Grid grid;
+                controls::ColumnDefinition c0, c1, c2;
+                c0.Width(xaml::GridLength{26, xaml::GridUnitType::Pixel});
+                c1.Width(xaml::GridLength{1, xaml::GridUnitType::Star});
+                c2.Width(xaml::GridLength{1, xaml::GridUnitType::Auto});
+                grid.ColumnDefinitions().Append(c0);
+                grid.ColumnDefinitions().Append(c1);
+                grid.ColumnDefinitions().Append(c2);
+
+                auto grip = Icons::Icon("line.3.horizontal", 13);
+                grip.HorizontalAlignment(xaml::HorizontalAlignment::Center);
+                grip.VerticalAlignment(xaml::VerticalAlignment::Center);
+                controls::Grid::SetColumn(grip, 0);
+                grid.Children().Append(grip);
+
+                controls::StackPanel contentBox;
+                contentBox.Orientation(controls::Orientation::Horizontal);
+                contentBox.VerticalAlignment(xaml::VerticalAlignment::Center);
+                contentBox.Spacing(6);
+                controls::Grid::SetColumn(contentBox, 1);
+                auto scope = std::make_unique<Scope>();
+                Value itemVal = list[i];
+                auto rowCtx = ctx.WithKey([k] { return k; }).WithLocal(varName, [itemVal] { return itemVal; });
+                scope->Run([&] { row(Parent::Of(contentBox), rowCtx); });
+                rowScopes->push_back(std::move(scope));
+                grid.Children().Append(contentBox);
+
+                controls::StackPanel btns;
+                btns.Orientation(controls::Orientation::Horizontal);
+                btns.Spacing(2);
+                controls::Button upBtn, downBtn;
+                Styles::MakeSubtle(upBtn);
+                Styles::MakeSubtle(downBtn);
+                upBtn.Width(26); upBtn.Height(26); upBtn.Padding(xaml::Thickness{0, 0, 0, 0});
+                downBtn.Width(26); downBtn.Height(26); downBtn.Padding(xaml::Thickness{0, 0, 0, 0});
+                upBtn.Content(Icons::Icon("chevron.up", 11));
+                downBtn.Content(Icons::Icon("chevron.down", 11));
+                upBtn.IsEnabled(i > 0);
+                downBtn.IsEnabled(i + 1 < total);
+                int64_t idx = static_cast<int64_t>(i);
+                upBtn.Click([commitMove, idx](auto&&, auto&&) { commitMove(idx, idx - 1); });
+                downBtn.Click([commitMove, idx](auto&&, auto&&) { commitMove(idx, idx + 1); });
+                btns.Children().Append(upBtn);
+                btns.Children().Append(downBtn);
+                controls::Grid::SetColumn(btns, 2);
+                grid.Children().Append(btns);
+
+                card.Child(grid);
+                host.Children().Append(card);
+            }
+            return 0;
+        });
+    });
+
+    BindName(host, label);
+    SetRole(host, L"bern-fill-width");
+    p.Add(host);
+    Controls::Register(ctx, props.id, "reorderable", label, nullptr,
+        Actions{
+            .edit = [commitMove](std::string const& s) {
+                long long a = -1, b = -1;
+                if (sscanf_s(s.c_str(), "%lld:%lld", &a, &b) == 2 || sscanf_s(s.c_str(), "%lld->%lld", &a, &b) == 2) {
+                    commitMove(static_cast<int64_t>(a), static_cast<int64_t>(b));
+                }
+            },
+            .value = [countCell]() -> std::optional<std::string> { return std::to_string(*countCell); },
+        });
+}
+
+struct BottomSheetProps {
+    char const* detents = "medium";
+    bool dragIndicator = true;
+    Act dismiss;
+};
+
+inline void BottomSheet(Parent const&, Ctx const& ctx, BottomSheetProps props, Build children) {
+    if (!ctx.win || !ctx.win->root) return;
+    auto root = ctx.win->root;
+    auto dismiss = Run(ctx, props.dismiss);
+    std::string detents = props.detents ? props.detents : "medium";
+    double heightFrac = detents == "large" ? 0.84 : 0.52;
+
+    controls::Grid overlay;
+    overlay.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+    overlay.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+    overlay.Background(media::SolidColorBrush(winrt::Windows::UI::ColorHelper::FromArgb(110, 0, 0, 0)));
+
+    controls::Border sheet;
+    sheet.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+    sheet.VerticalAlignment(xaml::VerticalAlignment::Bottom);
+    sheet.CornerRadius(xaml::CornerRadius{14, 14, 0, 0});
+    sheet.Padding(xaml::Thickness{20, 12, 20, 20});
+    sheet.Background(media::SolidColorBrush(ColorOf(ctx.win, IsDark(root), Paint("surface.raised"), 1.0)));
+    sheet.BorderBrush(media::SolidColorBrush(ColorOf(ctx.win, IsDark(root), Paint("control.border"), 1.0)));
+    sheet.BorderThickness(xaml::Thickness{1, 1, 1, 0});
+
+    controls::StackPanel body;
+    body.Orientation(controls::Orientation::Vertical);
+    body.Spacing(10);
+    if (props.dragIndicator) {
+        controls::Border pill;
+        pill.Width(36);
+        pill.Height(4);
+        pill.CornerRadius(xaml::CornerRadius{2, 2, 2, 2});
+        pill.HorizontalAlignment(xaml::HorizontalAlignment::Center);
+        pill.Margin(xaml::Thickness{0, 0, 0, 6});
+        pill.Background(media::SolidColorBrush(ColorOf(ctx.win, IsDark(root), Paint("text.primary"), 0.25)));
+        body.Children().Append(pill);
+    }
+    children(Parent::Of(body), ctx);
+    controls::ScrollViewer scroller;
+    scroller.Content(body);
+    sheet.Child(scroller);
+    auto updateHeight = [sheet, root, heightFrac] {
+        double h = root.ActualHeight();
+        if (h > 0) sheet.MaxHeight((std::max)(220.0, h * heightFrac));
+    };
+    updateHeight();
+    auto sizeToken = root.SizeChanged([updateHeight](auto&&, auto&&) { updateHeight(); });
+
+    overlay.Children().Append(sheet);
+    overlay.Tapped([overlay, dismiss](IInspectable const&, xaml::Input::TappedRoutedEventArgs const& args) {
+        if (args.OriginalSource() == overlay && dismiss) dismiss();
+    });
+    root.Children().Append(overlay);
+    Reactive::OnCleanup([root, overlay, sizeToken] {
+        root.SizeChanged(sizeToken);
+        uint32_t idx = 0;
+        if (root.Children().IndexOf(overlay, idx)) root.Children().RemoveAt(idx);
+    });
+}
+
+struct RefreshableProps {
+    char const* id = "";
+    Get refreshing;
+    Act action;
+};
+
+inline void Refreshable(Parent const& p, Ctx const& ctx, RefreshableProps props, Build children) {
+    auto onRefresh = Run(ctx, props.action);
+    controls::StackPanel box;
+    box.Orientation(controls::Orientation::Vertical);
+    box.Spacing(4);
+    box.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+
+    controls::ProgressBar bar;
+    bar.IsIndeterminate(true);
+    bar.Height(3);
+    bar.Visibility(xaml::Visibility::Collapsed);
+    if (props.refreshing) {
+        Reactive::Run([bar, ctx, refreshing = props.refreshing] {
+            bool active = R::Truthy(refreshing(ctx));
+            bar.Visibility(active ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
+        });
+    }
+    box.Children().Append(bar);
+    children(Parent::Of(box), ctx);
+    SetRole(box, L"bern-fill-width");
+    p.Add(box);
+
+    std::string idName = props.id ? props.id : "";
+    Controls::Register(ctx, props.id, "refreshable", [idName] { return Wide(idName); }, nullptr,
+        Actions{
+            .activate = onRefresh,
+            .value = [ctx, refreshing = props.refreshing]() -> std::optional<std::string> {
+                if (!refreshing) return std::string("idle");
+                return R::Truthy(refreshing(ctx)) ? std::string("refreshing") : std::string("idle");
+            },
+        });
+}
+
 }

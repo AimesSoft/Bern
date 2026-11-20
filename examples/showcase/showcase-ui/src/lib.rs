@@ -116,6 +116,14 @@ pub struct MainDraft {
     #[initial(570.0)]
     pub meeting_time: f64,
     pub save_path: String,
+    #[initial(1)]
+    pub selected_tree_node: i64,
+    pub expanded_tree_nodes: Vec<i64>,
+    #[initial(0.42)]
+    pub split_ratio: f64,
+    pub queue_from: i64,
+    pub queue_to: i64,
+    pub sheet_open: bool,
 }
 
 /// The application: a main window and a settings window. Each window's

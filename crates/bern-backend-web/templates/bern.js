@@ -7054,3 +7054,446 @@ export function Avatar(p, ctx, { label, source, url, size = 40, shape = "circle"
   }
   p.append(root);
 }
+
+export function TreeView(p, ctx, { id, label, items, key, parent, selection, expanded }, row, action) {
+  const root = el("div", { class: "bern-tree bern-fill-width", role: "tree", tabindex: "0" });
+  bindAttr(root, "aria-label", label);
+  const localSelection = cell(null);
+  const selectedField = selection ?? localSelection;
+  const expandedField = expanded ?? cell([]);
+  const keyText = (value) => String(value);
+  const isExpanded = (k) => expandedField.get().some((other) => keyText(other) === keyText(k));
+  const toggleExpanded = (k) => {
+    const cur = expandedField.peek();
+    const kt = keyText(k);
+    if (cur.some((other) => keyText(other) === kt)) {
+      expandedField.set(cur.filter((other) => keyText(other) !== kt));
+    } else {
+      expandedField.set([...cur, k]);
+    }
+  };
+  let allItems = [];
+  let visible = [];
+  let rows = new Map();
+  effect(() => {
+    const list = items() ?? [];
+    allItems = list;
+    const byKey = new Map();
+    for (const item of list) byKey.set(keyText(key(item)), item);
+    const childrenOf = new Map();
+    const roots = [];
+    for (const item of list) {
+      const pid = parent(item);
+      if (pid === null || pid === undefined || !byKey.has(keyText(pid))) {
+        roots.push(item);
+      } else {
+        const pk = keyText(pid);
+        let bucket = childrenOf.get(pk);
+        if (!bucket) { bucket = []; childrenOf.set(pk, bucket); }
+        bucket.push(item);
+      }
+    }
+    const expandedSet = new Set((expandedField.get() ?? []).map(keyText));
+    const flat = [];
+    const visited = new Set();
+    const walk = (item, depth) => {
+      const k = key(item);
+      const kt = keyText(k);
+      if (visited.has(kt)) return;
+      visited.add(kt);
+      const kids = childrenOf.get(kt) ?? [];
+      const hasChildren = kids.length > 0;
+      const open = hasChildren && expandedSet.has(kt);
+      flat.push({ item, k, kt, depth, hasChildren, open });
+      if (open) {
+        for (const kid of kids) walk(kid, depth + 1);
+      }
+    };
+    for (const r of roots) walk(r, 0);
+    visible = flat;
+
+    untrack(() => {
+      const next = new Map();
+      const frag = document.createDocumentFragment();
+      for (const entry of flat) {
+        let state = rows.get(entry.kt);
+        if (state) {
+          state.value.set(entry.item);
+          rows.delete(entry.kt);
+        } else {
+          const value = cell(entry.item);
+          const owner = new Scope(null);
+          const rowEl = el("div", { class: "bern-tree-row", role: "treeitem", "aria-selected": "false" });
+          const toggle = el("button", { class: "bern-tree-toggle", type: "button", tabindex: "-1" }, icon("chevron.right", 14));
+          const spacer = el("span", { class: "bern-tree-spacer", "aria-hidden": "true" });
+          const content = el("div", { class: "bern-tree-content" });
+          const rowKey = () => keyText(key(value.peek()));
+          const rowCtx = { ...ctx, key: rowKey, keys: [...(ctx.keys ?? []), rowKey] };
+          within(owner, () => {
+            row(content, rowCtx, () => value.get());
+            effect(() => {
+              const sel = selectedField.get();
+              rowEl.setAttribute("aria-selected", sel !== null && sel !== undefined && keyText(sel) === keyText(key(value.get())) ? "true" : "false");
+            });
+          });
+          toggle.addEventListener("click", (event) => {
+            event.stopPropagation();
+            toggleExpanded(key(value.peek()));
+          });
+          rowEl.addEventListener("click", () => {
+            selectedField.set(key(value.peek()));
+          });
+          rowEl.addEventListener("dblclick", () => {
+            selectedField.set(key(value.peek()));
+            action?.();
+          });
+          rowEl.append(toggle, spacer, content);
+          state = { value, owner, rowEl, toggle, spacer };
+        }
+        state.rowEl.setAttribute("aria-level", String(entry.depth + 1));
+        state.rowEl.style.paddingInlineStart = `${8 + entry.depth * 18}px`;
+        state.toggle.hidden = !entry.hasChildren;
+        state.spacer.hidden = entry.hasChildren;
+        if (entry.hasChildren) state.rowEl.setAttribute("aria-expanded", entry.open ? "true" : "false");
+        else state.rowEl.removeAttribute("aria-expanded");
+        next.set(entry.kt, state);
+        frag.append(state.rowEl);
+      }
+      for (const stale of rows.values()) {
+        stale.owner.dispose();
+        stale.rowEl.remove();
+      }
+      root.replaceChildren(frag);
+      rows = next;
+    });
+  });
+  root.addEventListener("keydown", (event) => {
+    if (!visible.length) return;
+    const cur = selectedField.peek();
+    const idx = cur == null ? -1 : visible.findIndex((e) => e.kt === keyText(cur));
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const next = Math.max(0, Math.min(visible.length - 1, idx + (event.key === "ArrowDown" ? 1 : -1)));
+      selectedField.set(visible[next].k);
+    } else if (event.key === "ArrowRight" && idx >= 0 && visible[idx].hasChildren && !isExpanded(visible[idx].k)) {
+      event.preventDefault();
+      toggleExpanded(visible[idx].k);
+    } else if (event.key === "ArrowLeft" && idx >= 0 && visible[idx].hasChildren && isExpanded(visible[idx].k)) {
+      event.preventDefault();
+      toggleExpanded(visible[idx].k);
+    } else if (event.key === "Enter" && idx >= 0) {
+      event.preventDefault();
+      action?.();
+    }
+  });
+  onCleanup(() => {
+    for (const state of rows.values()) state.owner.dispose();
+  });
+  mark(root, ctx, id);
+  control(ctx, {
+    target: () => target(ctx, id),
+    role: "tree_view",
+    label,
+    actions: {
+      activate: action,
+      select: (text) => {
+        const wanted = String(text).trim();
+        const found = allItems.find((item) => keyText(key(item)) === wanted);
+        if (!found) return false;
+        selectedField.set(key(found));
+        return true;
+      },
+      edit: (text) => {
+        const wanted = String(text).trim();
+        const found = allItems.find((item) => keyText(key(item)) === wanted);
+        if (found) toggleExpanded(key(found));
+      },
+      value: () => {
+        const cur = selectedField.peek();
+        return cur === null || cur === undefined ? "" : keyText(cur);
+      },
+    },
+  });
+  p.append(root);
+}
+
+export function SplitPane(p, ctx, { id, axis = "horizontal", ratio, minFirst = 120, minSecond = 120 }, first, second) {
+  const vertical = axis === "vertical";
+  const ratioField = ratio ?? cell(0.5);
+  const clampRatio = (raw, total) => {
+    let r = Number(raw);
+    if (!Number.isFinite(r)) r = 0.5;
+    let lo = 0.05;
+    let hi = 0.95;
+    const minA = Math.max(0, Number(readValue(minFirst) ?? 120));
+    const minB = Math.max(0, Number(readValue(minSecond) ?? 120));
+    if (total > minA + minB && total > 0) {
+      lo = Math.max(lo, minA / total);
+      hi = Math.min(hi, 1 - minB / total);
+    }
+    return Math.min(hi, Math.max(lo, r));
+  };
+  const root = el("div", { class: `bern-split-pane bern-split-pane-${vertical ? "vertical" : "horizontal"} bern-fill-width` });
+  const paneA = el("div", { class: "bern-split-first" });
+  const handle = el("div", {
+    class: "bern-split-handle",
+    role: "separator",
+    tabindex: "0",
+    "aria-orientation": vertical ? "horizontal" : "vertical",
+    "aria-valuemin": "0",
+    "aria-valuemax": "100",
+  });
+  const paneB = el("div", { class: "bern-split-second" });
+  first(paneA, ctx);
+  second(paneB, ctx);
+  root.append(paneA, handle, paneB);
+
+  effect(() => {
+    const r = clampRatio(ratioField.get(), 0);
+    paneA.style.flex = `0 0 ${(r * 100).toFixed(2)}%`;
+    paneB.style.flex = "1 1 0%";
+    const minA = Math.max(0, Number(readValue(minFirst) ?? 120));
+    const minB = Math.max(0, Number(readValue(minSecond) ?? 120));
+    if (vertical) {
+      paneA.style.minHeight = `${minA}px`;
+      paneB.style.minHeight = `${minB}px`;
+    } else {
+      paneA.style.minWidth = `${minA}px`;
+      paneB.style.minWidth = `${minB}px`;
+    }
+    handle.setAttribute("aria-valuenow", String(Math.round(r * 100)));
+  });
+
+  let dragging = false;
+  const updateFromEvent = (event) => {
+    const rect = root.getBoundingClientRect();
+    const total = vertical ? rect.height : rect.width;
+    if (total <= 0) return;
+    const pos = vertical ? event.clientY - rect.top : event.clientX - rect.left;
+    ratioField.set(clampRatio(pos / total, total));
+  };
+  handle.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    dragging = true;
+    handle.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+  });
+  handle.addEventListener("pointermove", (event) => {
+    if (!dragging) return;
+    updateFromEvent(event);
+  });
+  const stopDrag = (event) => {
+    if (!dragging) return;
+    dragging = false;
+    if (event?.pointerId != null) handle.releasePointerCapture?.(event.pointerId);
+  };
+  handle.addEventListener("pointerup", stopDrag);
+  handle.addEventListener("pointercancel", stopDrag);
+  handle.addEventListener("keydown", (event) => {
+    const cur = clampRatio(ratioField.peek(), 0);
+    if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      event.preventDefault();
+      ratioField.set(clampRatio(cur - 0.05, 0));
+    } else if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      event.preventDefault();
+      ratioField.set(clampRatio(cur + 0.05, 0));
+    }
+  });
+
+  if (id) {
+    mark(handle, ctx, id);
+    control(ctx, {
+      target: () => target(ctx, id),
+      role: "split_pane",
+      label: () => id,
+      actions: {
+        setNumber: (v) => ratioField.set(clampRatio(Number(v), 0)),
+        value: () => String(clampRatio(ratioField.peek(), 0)),
+      },
+    });
+  }
+  p.append(root);
+}
+
+export function Reorderable(p, ctx, { id, label, items, key, from, to }, row, onMove) {
+  const root = el("div", { class: "bern-reorderable bern-fill-width", role: "list" });
+  bindAttr(root, "aria-label", label);
+  const keyText = (value) => String(value);
+  let rows = new Map();
+  let order = [];
+  let dragFrom = null;
+
+  const commitMove = (src, dst) => {
+    if (!Number.isInteger(src) || !Number.isInteger(dst)) return;
+    if (src < 0 || dst < 0 || src >= order.length || dst >= order.length || src === dst) return;
+    batch(() => {
+      from.set(BigInt(src));
+      to.set(BigInt(dst));
+    });
+    onMove?.();
+  };
+
+  effect(() => {
+    const list = items() ?? [];
+    untrack(() => {
+      const next = new Map();
+      const frag = document.createDocumentFragment();
+      order = [];
+      for (let idx = 0; idx < list.length; idx += 1) {
+        const item = list[idx];
+        const kt = keyText(key(item));
+        let state = rows.get(kt);
+        if (state) {
+          state.value.set(item);
+          rows.delete(kt);
+        } else {
+          const value = cell(item);
+          const owner = new Scope(null);
+          const rowEl = el("div", { class: "bern-reorder-row", role: "listitem", draggable: "true" });
+          const grip = el("span", { class: "bern-reorder-grip", "aria-hidden": "true" }, icon("chevron.up.chevron.down", 14));
+          const content = el("div", { class: "bern-reorder-content" });
+          const upBtn = el("button", { class: "bern-reorder-btn", type: "button", "aria-label": "Move up" }, icon("chevron.up", 14));
+          const downBtn = el("button", { class: "bern-reorder-btn", type: "button", "aria-label": "Move down" }, icon("chevron.down", 14));
+          const actions = el("div", { class: "bern-reorder-actions" }, upBtn, downBtn);
+          const rowKey = () => keyText(key(value.peek()));
+          const rowCtx = { ...ctx, key: rowKey, keys: [...(ctx.keys ?? []), rowKey] };
+          within(owner, () => row(content, rowCtx, () => value.get()));
+          state = { value, owner, rowEl, upBtn, downBtn, index: idx };
+          upBtn.addEventListener("click", () => commitMove(state.index, state.index - 1));
+          downBtn.addEventListener("click", () => commitMove(state.index, state.index + 1));
+          rowEl.addEventListener("dragstart", (event) => {
+            dragFrom = state.index;
+            event.dataTransfer?.setData("text/plain", String(state.index));
+          });
+          rowEl.addEventListener("dragover", (event) => {
+            event.preventDefault();
+            rowEl.classList.add("bern-reorder-over");
+          });
+          rowEl.addEventListener("dragleave", () => rowEl.classList.remove("bern-reorder-over"));
+          rowEl.addEventListener("drop", (event) => {
+            event.preventDefault();
+            rowEl.classList.remove("bern-reorder-over");
+            if (dragFrom !== null) {
+              const src = dragFrom;
+              dragFrom = null;
+              commitMove(src, state.index);
+            }
+          });
+          rowEl.addEventListener("dragend", () => { dragFrom = null; });
+          rowEl.append(grip, content, actions);
+        }
+        state.index = idx;
+        state.upBtn.disabled = idx === 0;
+        state.downBtn.disabled = idx === list.length - 1;
+        next.set(kt, state);
+        order.push(state);
+        frag.append(state.rowEl);
+      }
+      for (const stale of rows.values()) {
+        stale.owner.dispose();
+        stale.rowEl.remove();
+      }
+      root.replaceChildren(frag);
+      rows = next;
+    });
+  });
+
+  onCleanup(() => {
+    for (const state of rows.values()) state.owner.dispose();
+  });
+  mark(root, ctx, id);
+  control(ctx, {
+    target: () => target(ctx, id),
+    role: "reorderable",
+    label,
+    actions: {
+      edit: (text) => {
+        const m = /^(\d+)\s*[:,\->]+\s*(\d+)$/.exec(String(text).trim());
+        if (!m) return;
+        commitMove(Number(m[1]), Number(m[2]));
+      },
+      value: () => String(order.length),
+    },
+  });
+  p.append(root);
+}
+
+export function BottomSheet(p, ctx, { detents = "both", dragIndicator = true }, children, onDismiss) {
+  const dialog = el("dialog", { class: `bern-bottom-sheet bern-bottom-sheet-${detents}`, tabindex: "-1" });
+  if (dragIndicator !== false) {
+    dialog.append(el("div", { class: "bern-bottom-sheet-handle", "aria-hidden": "true" }));
+  }
+  const content = el("div", { class: "bern-bottom-sheet-content" });
+  children(content, ctx);
+  dialog.append(content);
+  let dismissed = false;
+  const dismiss = () => {
+    if (dismissed) return;
+    dismissed = true;
+    if (typeof dialog.close === "function") dialog.close();
+    onDismiss?.();
+  };
+  dialog.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    dismiss();
+  });
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog) dismiss();
+  });
+  p.append(dialog);
+  let disposed = false;
+  const returnFocus = document.activeElement;
+  const frame = requestAnimationFrame(() => {
+    if (disposed || !dialog.isConnected) return;
+    if (typeof dialog.showModal === "function") dialog.showModal();
+    (focusables(dialog)[0] ?? dialog).focus();
+  });
+  onCleanup(() => {
+    disposed = true;
+    cancelAnimationFrame(frame);
+    if (typeof dialog.close === "function") dialog.close();
+    if (returnFocus?.isConnected) returnFocus.focus();
+  });
+}
+
+export function Refreshable(p, ctx, { id, refreshing }, children, onRefresh) {
+  const root = el("div", { class: "bern-refreshable bern-fill-width" });
+  const bar = el("div", { class: "bern-refreshable-bar", role: "status", "aria-live": "polite" });
+  const spin = el("span", { class: "bern-refreshable-spin", "aria-hidden": "true" }, icon("arrow.clockwise", 14));
+  bar.append(spin);
+  const body = el("div", { class: "bern-refreshable-body" });
+  children(body, ctx);
+  root.append(bar, body);
+
+  effect(() => {
+    bar.hidden = !(refreshing ? !!refreshing() : false);
+  });
+
+  let startY = null;
+  body.addEventListener("touchstart", (event) => {
+    if (body.scrollTop <= 0 && event.touches?.length === 1) {
+      startY = event.touches[0].clientY;
+    }
+  }, { passive: true });
+  body.addEventListener("touchend", (event) => {
+    if (startY === null) return;
+    const endY = event.changedTouches?.[0]?.clientY ?? startY;
+    const delta = endY - startY;
+    startY = null;
+    if (delta >= 56 && !(refreshing ? !!refreshing() : false)) {
+      onRefresh?.();
+    }
+  }, { passive: true });
+
+  mark(root, ctx, id);
+  control(ctx, {
+    target: () => target(ctx, id),
+    role: "refreshable",
+    label: () => id,
+    actions: {
+      activate: () => onRefresh?.(),
+      value: () => (refreshing && refreshing() ? "true" : "false"),
+    },
+  });
+  p.append(root);
+}

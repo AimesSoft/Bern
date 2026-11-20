@@ -64,6 +64,8 @@ pub enum PropKind {
     BoolField,
     /// Writable session float field.
     NumberField,
+    /// Writable session integer (`i64`) field, such as reorder indices.
+    IntField,
     /// Writable session `Option<f64>` field, written by the element and
     /// cleared to `None` when what it reports ends.
     OptionalNumberField,
@@ -2204,6 +2206,83 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         Children::None,
         "User or entity avatar showing an optional image (`source`, declared resource or `MediaSource`) with automatic initials fallback from `label`, sized by `size` (40 unless given) in a `circle` or `rounded` frame",
     ),
+    ComponentSpec {
+        template: true,
+        action: ActionRule::Optional,
+        interactive: true,
+        ..spec(
+            "TreeView",
+            &[
+                req("id", PropKind::Id),
+                req("label", PropKind::DisplayText),
+                req("items", PropKind::Items),
+                req("key", PropKind::KeyField),
+                req("parent", PropKind::KeyField),
+                opt("selection", PropKind::PositionField),
+                opt("expanded", PropKind::KeysField),
+                FEATURE,
+            ],
+            Children::Any,
+            "Hierarchical collapsible tree built from flat records linked by `key` and optional `parent`; optional `selection` tracks the selected key, optional `expanded` stores expanded node keys (local state when omitted), and an optional action runs when a row is activated",
+        )
+    },
+    spec(
+        "SplitPane",
+        &[
+            opt("id", PropKind::Id),
+            opt("axis", PropKind::Keyword(&["horizontal", "vertical"])),
+            opt("ratio", PropKind::NumberField),
+            opt("min_first", PropKind::Length),
+            opt("min_second", PropKind::Length),
+        ],
+        Children::Any,
+        "Resizable two-pane container split `horizontal` (left/right, default) or `vertical` (top/bottom) with a draggable divider; optional `ratio` binds the first pane's fraction (0.05–0.95) and `min_first` / `min_second` set minimum pane sizes in points",
+    ),
+    ComponentSpec {
+        template: true,
+        action: ActionRule::Required,
+        interactive: true,
+        ..spec(
+            "Reorderable",
+            &[
+                req("id", PropKind::Id),
+                req("label", PropKind::DisplayText),
+                req("items", PropKind::Items),
+                req("key", PropKind::KeyField),
+                req("move_from", PropKind::IntField),
+                req("move_to", PropKind::IntField),
+                FEATURE,
+            ],
+            Children::Any,
+            "Drag-to-reorder list whose rows can be moved by dragging or accessible controls; writes the source and destination zero-based indices into `move_from` and `move_to` before running the required action",
+        )
+    },
+    ComponentSpec {
+        action: ActionRule::Optional,
+        ..spec(
+            "BottomSheet",
+            &[
+                opt("detents", PropKind::Keyword(&["medium", "large", "both"])),
+                opt("drag_indicator", PropKind::Flag),
+            ],
+            Children::Any,
+            "Bottom-anchored modal sheet shown while mounted, with configurable `detents` (`medium`, `large` or `both`), optional `drag_indicator` (true unless false), and an optional dismiss action",
+        )
+    },
+    ComponentSpec {
+        action: ActionRule::Required,
+        interactive: true,
+        ..spec(
+            "Refreshable",
+            &[
+                req("id", PropKind::Id),
+                opt("refreshing", PropKind::Bool),
+                FEATURE,
+            ],
+            Children::One,
+            "Pull-to-refresh wrapper around a single scrollable or content child; runs the required action on pull-to-refresh or CLI activation and shows a native refresh indicator while `refreshing` is true",
+        )
+    },
 ];
 
 pub fn component(name: &str) -> Option<&'static ComponentSpec> {
@@ -2589,6 +2668,17 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
             errors.push(ShapeError {
                 prop: None,
                 message: "a `PopoverButton` action needs `open`".into(),
+            });
+        }
+    }
+    if spec.name == "SplitPane" {
+        let count = shape.children.as_ref().map_or(0, Vec::len);
+        if count != 2 {
+            errors.push(ShapeError {
+                prop: None,
+                message: format!(
+                    "`SplitPane` takes exactly two children (first and second pane), found {count}"
+                ),
             });
         }
     }

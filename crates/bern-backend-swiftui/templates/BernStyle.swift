@@ -9174,6 +9174,507 @@ struct BernAvatar: View {
     }
 }
 
+// MARK: - TreeView, SplitPane, Reorderable, BottomSheet, Refreshable
+
+struct BernTreeEntry<Item, Key: Hashable> {
+    let item: Item
+    let key: Key
+    let parent: Key?
+}
+
+struct BernTreeView<Item, Key: Hashable, Row: View>: View {
+    let target: String
+    let label: String
+    let entries: [BernTreeEntry<Item, Key>]
+    let selection: Binding<Key>?
+    let externalExpanded: Binding<[Key]>?
+    let onActivate: (@MainActor @Sendable () -> Void)?
+    let keyToString: (Key) -> String
+    @ViewBuilder var row: (Item) -> Row
+
+    @State private var localExpanded: Set<Key> = []
+
+    private var expandedSet: Set<Key> {
+        if let externalExpanded {
+            return Set(externalExpanded.wrappedValue)
+        }
+        return localExpanded
+    }
+
+    private func setExpanded(_ key: Key, open: Bool) {
+        if let externalExpanded {
+            var list = externalExpanded.wrappedValue
+            if open {
+                if !list.contains(key) { list.append(key) }
+            } else {
+                list.removeAll { $0 == key }
+            }
+            externalExpanded.wrappedValue = list
+        } else {
+            if open {
+                localExpanded.insert(key)
+            } else {
+                localExpanded.remove(key)
+            }
+        }
+    }
+
+    private struct FlatRow: Identifiable {
+        let id: Key
+        let item: Item
+        let depth: Int
+        let hasChildren: Bool
+        let isExpanded: Bool
+    }
+
+    private var visibleRows: [FlatRow] {
+        var known = Set<Key>()
+        known.reserveCapacity(entries.count)
+        for e in entries { known.insert(e.key) }
+        var childrenMap: [Key: [BernTreeEntry<Item, Key>]] = [:]
+        var roots: [BernTreeEntry<Item, Key>] = []
+        for e in entries {
+            if let p = e.parent, known.contains(p), p != e.key {
+                childrenMap[p, default: []].append(e)
+            } else {
+                roots.append(e)
+            }
+        }
+        let expanded = expandedSet
+        var out: [FlatRow] = []
+        var visited = Set<Key>()
+        func visit(_ list: [BernTreeEntry<Item, Key>], depth: Int) {
+            for entry in list {
+                guard visited.insert(entry.key).inserted else { continue }
+                let kids = childrenMap[entry.key] ?? []
+                let isOpen = expanded.contains(entry.key)
+                out.append(FlatRow(id: entry.key, item: entry.item, depth: depth, hasChildren: !kids.isEmpty, isExpanded: isOpen))
+                if !kids.isEmpty && isOpen {
+                    visit(kids, depth: depth + 1)
+                }
+            }
+        }
+        visit(roots, depth: 0)
+        return out
+    }
+
+    var body: some View {
+        let rows = visibleRows
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(rows) { entry in
+                let selected = selection?.wrappedValue == entry.id
+                HStack(spacing: 6) {
+                    if entry.depth > 0 {
+                        Color.clear.frame(width: CGFloat(entry.depth) * 18, height: 1)
+                    }
+                    if entry.hasChildren {
+                        Button {
+                            setExpanded(entry.id, open: !entry.isExpanded)
+                        } label: {
+                            Image(systemName: entry.isExpanded ? "chevron.down" : "chevron.right")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 20, height: 20)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Color.clear.frame(width: 20, height: 20)
+                    }
+                    row(entry.item)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(selected ? BernColor.role("accent").color.opacity(0.16) : Color.clear)
+                )
+                .contentShape(Rectangle())
+                #if os(tvOS) || os(watchOS)
+                .onTapGesture {
+                    selection?.wrappedValue = entry.id
+                    onActivate?()
+                }
+                #else
+                .onTapGesture(count: 2) {
+                    selection?.wrappedValue = entry.id
+                    onActivate?()
+                }
+                .onTapGesture(count: 1) {
+                    selection?.wrappedValue = entry.id
+                }
+                #endif
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityLabel(Text(verbatim: label))
+        .bernControl(
+            target,
+            role: "tree_view",
+            label: label,
+            actions: BernControlActions(
+                activate: onActivate,
+                edit: { cmd in
+                    let trimmed = cmd.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let parts = trimmed.split(separator: ":", maxSplits: 1).map(String.init)
+                    if parts.count == 2 {
+                        let op = parts[0].lowercased()
+                        let wanted = parts[1]
+                        guard let hit = entries.first(where: { keyToString($0.key) == wanted }) else { return }
+                        switch op {
+                        case "expand": setExpanded(hit.key, open: true)
+                        case "collapse": setExpanded(hit.key, open: false)
+                        case "toggle": setExpanded(hit.key, open: !expandedSet.contains(hit.key))
+                        default: break
+                        }
+                    } else if let hit = entries.first(where: { keyToString($0.key) == trimmed }) {
+                        setExpanded(hit.key, open: !expandedSet.contains(hit.key))
+                    }
+                },
+                select: { wanted in
+                    guard let hit = entries.first(where: { keyToString($0.key) == wanted }) else { return false }
+                    selection?.wrappedValue = hit.key
+                    return true
+                },
+                value: {
+                    selection.map { keyToString($0.wrappedValue) }
+                }
+            )
+        )
+    }
+}
+
+struct BernSplitPane<First: View, Second: View>: View {
+    let target: String?
+    let vertical: Bool
+    let externalRatio: Binding<Double>?
+    let minFirst: CGFloat
+    let minSecond: CGFloat
+    @ViewBuilder var first: () -> First
+    @ViewBuilder var second: () -> Second
+
+    @State private var localRatio: Double = 0.5
+    @State private var dragStartRatio: Double? = nil
+
+    private var currentRatio: Double {
+        let raw = externalRatio?.wrappedValue ?? localRatio
+        return min(max(raw.isFinite ? raw : 0.5, 0.05), 0.95)
+    }
+
+    private func writeRatio(_ next: Double) {
+        let clamped = min(max(next.isFinite ? next : 0.5, 0.05), 0.95)
+        if let externalRatio {
+            externalRatio.wrappedValue = clamped
+        } else {
+            localRatio = clamped
+        }
+    }
+
+    private func effectiveRatio(total: CGFloat) -> CGFloat {
+        let usable = max(1, total - 8)
+        let lo = min(0.9, max(0.05, minFirst / usable))
+        let hi = max(lo, min(0.95, 1.0 - (minSecond / usable)))
+        return min(max(CGFloat(currentRatio), lo), hi)
+    }
+
+    @ViewBuilder
+    private var splitContent: some View {
+        GeometryReader { geo in
+            let total = vertical ? geo.size.height : geo.size.width
+            let usable = max(1, total - 8)
+            let frac = effectiveRatio(total: total)
+            let firstSize = usable * frac
+            let secondSize = max(0, usable - firstSize)
+            if vertical {
+                VStack(spacing: 0) {
+                    first()
+                        .frame(maxWidth: .infinity)
+                        .frame(height: firstSize)
+                        .clipped()
+                    dividerHandle(total: usable)
+                    second()
+                        .frame(maxWidth: .infinity)
+                        .frame(height: secondSize)
+                        .clipped()
+                }
+            } else {
+                HStack(spacing: 0) {
+                    first()
+                        .frame(width: firstSize)
+                        .frame(maxHeight: .infinity)
+                        .clipped()
+                    dividerHandle(total: usable)
+                    second()
+                        .frame(width: secondSize)
+                        .frame(maxHeight: .infinity)
+                        .clipped()
+                }
+            }
+        }
+        .frame(minHeight: vertical ? (minFirst + minSecond + 8) : 120)
+    }
+
+    @ViewBuilder
+    private func dividerHandle(total: CGFloat) -> some View {
+        let handle = ZStack {
+            Color.clear
+            Rectangle()
+                .fill(Color.primary.opacity(0.14))
+                .frame(width: vertical ? nil : 1, height: vertical ? 1 : nil)
+        }
+        .frame(width: vertical ? nil : 8, height: vertical ? 8 : nil)
+        .contentShape(Rectangle())
+        #if os(macOS)
+        .onHover { inside in
+            if inside {
+                (vertical ? NSCursor.resizeUpDown : NSCursor.resizeLeftRight).push()
+            } else {
+                NSCursor.pop()
+            }
+        }
+        #endif
+        #if !os(tvOS)
+        handle.gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    if dragStartRatio == nil {
+                        dragStartRatio = currentRatio
+                    }
+                    let base = dragStartRatio ?? currentRatio
+                    let delta = vertical ? value.translation.height : value.translation.width
+                    let raw = base + Double(delta / max(1, total))
+                    let lo = Double(min(0.9, max(0.05, minFirst / max(1, total))))
+                    let hi = Double(max(CGFloat(lo), min(0.95, 1.0 - (minSecond / max(1, total)))))
+                    writeRatio(min(max(raw, lo), hi))
+                }
+                .onEnded { _ in
+                    dragStartRatio = nil
+                }
+        )
+        #else
+        handle
+        #endif
+    }
+
+    @ViewBuilder
+    var body: some View {
+        if let target {
+            splitContent.bernControl(
+                target,
+                role: "split_pane",
+                label: target,
+                actions: BernControlActions(
+                    setNumber: { v in writeRatio(v) },
+                    value: { String(format: "%.3f", currentRatio) }
+                )
+            )
+        } else {
+            splitContent
+        }
+    }
+}
+
+struct BernReorderable<Item, Key: Hashable, Row: View>: View {
+    let target: String
+    let label: String
+    let items: [Item]
+    let keyOf: (Item) -> Key
+    let onMove: @MainActor @Sendable (Int64, Int64) -> Void
+    @ViewBuilder var row: (Item) -> Row
+
+    @State private var draggingIndex: Int? = nil
+    @State private var dragOffset: CGFloat = 0
+
+    private func triggerMove(_ from: Int, _ to: Int) {
+        guard from >= 0, from < items.count, to >= 0, to < items.count, from != to else { return }
+        onMove(Int64(from), Int64(to))
+    }
+
+    private func parseMove(_ raw: String) -> (Int, Int)? {
+        let cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "->", with: ":")
+        let parts = cleaned.split(separator: ":").map { $0.trimmingCharacters(in: .whitespaces) }
+        guard parts.count == 2, let from = Int(parts[0]), let to = Int(parts[1]) else { return nil }
+        return (from, to)
+    }
+
+    private struct IndexedItem: Identifiable {
+        let id: Key
+        let index: Int
+        let item: Item
+    }
+
+    var body: some View {
+        let indexed = items.enumerated().map { IndexedItem(id: keyOf($0.element), index: $0.offset, item: $0.element) }
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(indexed) { entry in
+                let index = entry.index
+                let item = entry.item
+                let isDragging = draggingIndex == index
+                HStack(spacing: 8) {
+                    Image(systemName: "line.3.horizontal")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                        #if !os(tvOS)
+                        .gesture(
+                            DragGesture(minimumDistance: 2)
+                                .onChanged { value in
+                                    draggingIndex = index
+                                    dragOffset = value.translation.height
+                                }
+                                .onEnded { value in
+                                    let steps = Int((value.translation.height / 40.0).rounded())
+                                    let dest = min(max(0, index + steps), max(0, items.count - 1))
+                                    draggingIndex = nil
+                                    dragOffset = 0
+                                    triggerMove(index, dest)
+                                }
+                        )
+                        #endif
+                    row(item)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    HStack(spacing: 2) {
+                        Button {
+                            triggerMove(index, index - 1)
+                        } label: {
+                            Image(systemName: "chevron.up")
+                                .font(.system(size: 11, weight: .semibold))
+                                .frame(width: 22, height: 22)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(index == 0)
+                        Button {
+                            triggerMove(index, index + 1)
+                        } label: {
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 11, weight: .semibold))
+                                .frame(width: 22, height: 22)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(index + 1 >= items.count)
+                    }
+                    .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(isDragging ? Color.primary.opacity(0.08) : Color.primary.opacity(0.03))
+                )
+                .offset(y: isDragging ? dragOffset : 0)
+                .zIndex(isDragging ? 1 : 0)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityLabel(Text(verbatim: label))
+        .bernControl(
+            target,
+            role: "reorderable",
+            label: label,
+            actions: BernControlActions(
+                edit: { text in
+                    if let (from, to) = parseMove(text) {
+                        triggerMove(from, to)
+                    }
+                },
+                value: { String(items.count) }
+            )
+        )
+    }
+}
+
+struct BernBottomSheet<Content: View>: View {
+    let detents: String
+    let dragIndicator: Bool
+    let onDismiss: (@MainActor @Sendable () -> Void)?
+    @ViewBuilder var content: () -> Content
+
+    @State private var presented = false
+
+    @ViewBuilder
+    private var sheetBody: some View {
+        let base = VStack(alignment: .leading, spacing: 12) {
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .padding(16)
+        #if os(iOS) || os(macOS) || os(watchOS)
+        if #available(macOS 13.0, iOS 16.0, watchOS 9.0, *) {
+            let detentSet: Set<PresentationDetent> = switch detents {
+            case "large": [.large]
+            case "both": [.medium, .large]
+            default: [.medium]
+            }
+            base
+                .presentationDetents(detentSet)
+                .presentationDragIndicator(dragIndicator ? .visible : .hidden)
+        } else {
+            base
+        }
+        #else
+        base
+        #endif
+    }
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+            .onAppear {
+                Task { @MainActor in
+                    presented = true
+                }
+            }
+            .sheet(
+                isPresented: Binding(
+                    get: { presented },
+                    set: { next in
+                        presented = next
+                        if !next { onDismiss?() }
+                    }
+                )
+            ) {
+                sheetBody
+            }
+    }
+}
+
+struct BernRefreshable<Content: View>: View {
+    let target: String
+    let refreshing: Bool
+    let onRefresh: @MainActor @Sendable () -> Void
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if refreshing {
+                HStack {
+                    Spacer(minLength: 0)
+                    ProgressView()
+                        .controlSize(.small)
+                    Spacer(minLength: 0)
+                }
+                .padding(.vertical, 4)
+            }
+            content()
+                .refreshable {
+                    onRefresh()
+                }
+        }
+        .bernControl(
+            target,
+            role: "refreshable",
+            label: target,
+            actions: BernControlActions(
+                activate: onRefresh,
+                value: { refreshing ? "refreshing" : "idle" }
+            )
+        )
+    }
+}
+
 /// A screen can be shared by several scenes. Removing an older override
 /// must not restore through a newer one; the last release restores the host.
 @MainActor

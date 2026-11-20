@@ -249,6 +249,38 @@ pub fn inputs_page(app: showcase::Client, #[session] draft: MainDraft) -> impl V
 pub fn layout_page(app: showcase::Client, #[session] draft: MainDraft) -> impl View {
     ui! {
         Form {
+            Section(title: tr! { "zh-Hans" => "分栏与底部抽屉", "en" => "Split Pane & Bottom Sheet" }) {
+                Column(height: 120) {
+                    SplitPane(
+                        id: demo_split,
+                        axis: horizontal,
+                        ratio: draft.split_ratio,
+                        min_first: 90,
+                        min_second: 90
+                    ) {
+                        Column(padding: 10, gap: 4) {
+                            Text(content: tr! { "zh-Hans" => "左侧面板", "en" => "Leading Pane" }, style: headline)
+                            Text(content: tr! { "zh-Hans" => "拖动中间分隔线可调整比例。", "en" => "Drag the divider to resize." }, style: caption, emphasis: secondary)
+                        }
+                        Column(padding: 10, gap: 4) {
+                            Text(content: tr! { "zh-Hans" => "右侧面板", "en" => "Trailing Pane" }, style: headline)
+                            Text(content: tr! { "zh-Hans" => "当前比例 {r}", "en" => "Current ratio {r}"; r: draft.split_ratio }, style: caption, emphasis: secondary)
+                        }
+                    }
+                }
+                Row(gap: 12) {
+                    Button(id: open_sheet, label: tr! { "zh-Hans" => "打开底部抽屉…", "en" => "Open Bottom Sheet…" }) => draft.sheet_open.set(true)
+                }
+                if draft.sheet_open {
+                    BottomSheet(detents: medium, drag_indicator: true) {
+                        Column(gap: 10, padding: 16) {
+                            Text(content: tr! { "zh-Hans" => "底部抽屉", "en" => "Bottom Sheet" }, style: title3)
+                            Text(content: tr! { "zh-Hans" => "适合承载辅助操作或快速筛选。", "en" => "Ideal for secondary actions or quick filters." }, emphasis: secondary)
+                            Button(id: close_sheet, label: tr! { "zh-Hans" => "关闭", "en" => "Close" }, prominence: prominent) => draft.sheet_open.set(false)
+                        }
+                    } => draft.sheet_open.set(false)
+                }
+            }
             Section(
                 title: tr! { "zh-Hans" => "骨架图", "en" => "Skeleton" },
                 footer: tr! { "zh-Hans" => "开启后在 120 ms 防闪烁延迟后切换为由真实布局树在编译期自动投影出的骨架图，关闭后真实内容淡入。", "en" => "When enabled, switches after a 120 ms anti-flicker delay to a skeleton projected at compile time from the real layout tree, and fades real content back in once cleared." }
@@ -383,37 +415,64 @@ pub fn library_page(
 ) -> impl View {
     ui! {
         Navigation(id: library, path: draft.path) {
-            Form {
-                Section(
-                    title: tr! { "zh-Hans" => "资料库", "en" => "Library" },
-                    footer: tr! { "zh-Hans" => "列表来自引擎查询：侧边栏搜索按类别名称筛选，中英文均可；每次输入都是新的请求，只显示最新一次的结果。行按项目编号保持身份。", "en" => "Rows come from an engine query: the sidebar search filters them by category name in either language. Every edit is a new request and only the newest answer is shown. Rows keep their identity by item number." }
-                ) {
-                    Query(
-                        id: library_results,
-                        query: app.search_library(draft.query),
-                        loading: tr! { "zh-Hans" => "正在搜索…", "en" => "Searching…" },
-                        empty: tr! { "zh-Hans" => "没有与“{query}”匹配的项目", "en" => "No Items Match “{query}”"; query: draft.query },
-                        failed: tr! { "zh-Hans" => "无法搜索", "en" => "Search Failed" },
-                        icon: "magnifyingglass"
-                    ) |items| {
-                        ForEach(items: items, key: id) |item| {
-                            NavLink(id: item_link, route: Route::Item { id: item.id, clip: item.clip }) {
-                                Row(gap: 8) {
-                                    match item.kind {
-                                        ItemKind::Documents => { Label(title: item.kind, icon: "doc") }
-                                        ItemKind::Photos => { Label(title: item.kind, icon: "photo") }
-                                        ItemKind::Music => { Label(title: item.kind, icon: "music.note") }
-                                        ItemKind::Movies => { Label(title: item.kind, icon: "film") }
-                                        ItemKind::Downloads => { Label(title: item.kind, icon: "arrow.down.circle") }
+            Refreshable(id: library_refresh, refreshing: app.refreshing) {
+                Form {
+                    Section(title: tr! { "zh-Hans" => "树形目录", "en" => "Tree View" }) {
+                        TreeView(
+                            id: demo_tree,
+                            label: tr! { "zh-Hans" => "项目目录", "en" => "Project Tree" },
+                            items: app.tree,
+                            key: id,
+                            parent: parent_id,
+                            selection: draft.selected_tree_node,
+                            expanded: draft.expanded_tree_nodes
+                        ) |node| {
+                            Text(content: node.title)
+                        } => app.record(Action::Standard)
+                    }
+                    Section(title: tr! { "zh-Hans" => "可拖拽排序队列", "en" => "Reorderable Queue" }) {
+                        Reorderable(
+                            id: demo_queue,
+                            label: tr! { "zh-Hans" => "发布队列", "en" => "Release Queue" },
+                            items: app.queue,
+                            key: id,
+                            move_from: draft.queue_from,
+                            move_to: draft.queue_to
+                        ) |entry| {
+                            Text(content: entry.title)
+                        } => app.move_queue(draft.queue_from, draft.queue_to)
+                    }
+                    Section(
+                        title: tr! { "zh-Hans" => "资料库", "en" => "Library" },
+                        footer: tr! { "zh-Hans" => "列表来自引擎查询：侧边栏搜索按类别名称筛选，中英文均可；每次输入都是新的请求，只显示最新一次的结果。行按项目编号保持身份。", "en" => "Rows come from an engine query: the sidebar search filters them by category name in either language. Every edit is a new request and only the newest answer is shown. Rows keep their identity by item number." }
+                    ) {
+                        Query(
+                            id: library_results,
+                            query: app.search_library(draft.query),
+                            loading: tr! { "zh-Hans" => "正在搜索…", "en" => "Searching…" },
+                            empty: tr! { "zh-Hans" => "没有与“{query}”匹配的项目", "en" => "No Items Match “{query}”"; query: draft.query },
+                            failed: tr! { "zh-Hans" => "无法搜索", "en" => "Search Failed" },
+                            icon: "magnifyingglass"
+                        ) |items| {
+                            ForEach(items: items, key: id) |item| {
+                                NavLink(id: item_link, route: Route::Item { id: item.id, clip: item.clip }) {
+                                    Row(gap: 8) {
+                                        match item.kind {
+                                            ItemKind::Documents => { Label(title: item.kind, icon: "doc") }
+                                            ItemKind::Photos => { Label(title: item.kind, icon: "photo") }
+                                            ItemKind::Music => { Label(title: item.kind, icon: "music.note") }
+                                            ItemKind::Movies => { Label(title: item.kind, icon: "film") }
+                                            ItemKind::Downloads => { Label(title: item.kind, icon: "arrow.down.circle") }
+                                        }
+                                        Spacer
+                                        showcase_widgets::item_count(count: item.count)
                                     }
-                                    Spacer
-                                    showcase_widgets::item_count(count: item.count)
                                 }
                             }
                         }
                     }
                 }
-            }
+            } => app.refresh_library()
             Toolbar {
                 Button(id: add_item, label: tr! { "zh-Hans" => "添加项目", "en" => "Add Item" }, icon: "plus") => app.add_item(ItemKind::Downloads)
             }

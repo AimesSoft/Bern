@@ -847,7 +847,14 @@ mod independent_target {
                 .iter()
                 .any(|d| d.message.contains("has no media backend"))
         );
-        assert!(problems.iter().all(|d| d.location.is_some()));
+        assert!(
+            problems.iter().all(|d| d.location.is_some()),
+            "diagnostics without location: {:#?}",
+            problems
+                .iter()
+                .filter(|d| d.location.is_none())
+                .collect::<Vec<_>>()
+        );
         // A floating window needs a target that can draw one.
         let mut floating = app.clone();
         floating.windows.windows[1].presentation = ir::Presentation::Floating;
@@ -5997,4 +6004,160 @@ fn m3_controls_and_file_dialogs_validation() {
 
     let msg = errs(r#"Avatar(label: tr! { "en" => "A", "ja" => "A" }, size: 0)"#);
     assert!(msg.contains("above zero"), "{msg}");
+}
+
+#[test]
+fn m4_controls_validation() {
+    let m4_protocol = r#"
+#[bern::protocol(namespace = "demo", version = 1)]
+pub mod demo {
+    use bern::prelude::*;
+
+    #[value]
+    pub struct TreeRow {
+        pub id: i64,
+        pub parent_id: Option<i64>,
+        pub bad_parent: Option<String>,
+        #[content]
+        pub label: String,
+    }
+
+    #[state]
+    pub struct State {
+        pub rows: Vec<TreeRow>,
+        pub busy: bool,
+    }
+
+    #[commands]
+    pub trait Commands {
+        fn move_item(&mut self, from: i64, to: i64) -> Result<(), CommandError>;
+        fn refresh(&mut self) -> Result<(), CommandError>;
+    }
+}
+"#;
+    let m4_ui = |body: &str| {
+        format!(
+            r#"
+            use bern::prelude::*;
+            use demo_protocol::demo;
+
+            #[bern::session]
+            pub struct Draft {{
+                pub selected: i64,
+                pub wrong_selected: String,
+                pub expanded: Vec<i64>,
+                pub wrong_expanded: Vec<String>,
+                pub ratio: f64,
+                pub from: i64,
+                pub to: i64,
+                pub open: bool,
+            }}
+
+            #[component]
+            pub fn app(app: demo::Client, windows: AppWindows) -> impl View {{
+                ui! {{
+                    WindowSet(handle: AppWindows, primary: main) {{
+                        Window(id: main, title: tr! {{ "en" => "Main", "ja" => "Main" }}, initial: open) {{
+                            page(app: app)
+                        }}
+                    }}
+                }}
+            }}
+
+            #[component]
+            pub fn page(app: demo::Client, #[session] draft: Draft) -> impl View {{
+                ui! {{ {body} }}
+            }}
+            "#
+        )
+    };
+
+    let valid = compile_project(
+        m4_protocol,
+        &m4_ui(
+            r#"
+            Refreshable(id: feed, refreshing: app.busy) {
+                Column {
+                    TreeView(
+                        id: tree,
+                        label: tr! { "en" => "Tree", "ja" => "Tree" },
+                        items: app.rows,
+                        key: id,
+                        parent: parent_id,
+                        selection: draft.selected,
+                        expanded: draft.expanded
+                    ) |row| {
+                        Text(content: row.label)
+                    } => app.refresh()
+                    SplitPane(id: panes, axis: horizontal, ratio: draft.ratio, min_first: 100, min_second: 100) {
+                        Text(content: tr! { "en" => "A", "ja" => "A" })
+                        Text(content: tr! { "en" => "B", "ja" => "B" })
+                    }
+                    Reorderable(
+                        id: list,
+                        label: tr! { "en" => "List", "ja" => "List" },
+                        items: app.rows,
+                        key: id,
+                        move_from: draft.from,
+                        move_to: draft.to
+                    ) |row| {
+                        Text(content: row.label)
+                    } => app.move_item(draft.from, draft.to)
+                    if draft.open {
+                        BottomSheet(detents: medium, drag_indicator: true) {
+                            Text(content: tr! { "en" => "Sheet", "ja" => "Sheet" })
+                        } => draft.open.set(false)
+                    }
+                }
+            } => app.refresh()
+            "#,
+        ),
+    );
+    assert!(valid.is_ok(), "{:?}", valid.err());
+
+    let errs = |body: &str| match compile_project(m4_protocol, &m4_ui(body)) {
+        Ok(_) => panic!("expected compile error for:\n{body}"),
+        Err(errs) => errs
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    };
+
+    let msg =
+        errs(r#"SplitPane { Text(content: tr! { "en" => "Only one", "ja" => "Only one" }) }"#);
+    assert!(msg.contains("two children"), "{msg}");
+
+    let msg = errs(
+        r#"SplitPane(min_first: 0) { Text(content: tr! { "en" => "A", "ja" => "A" }) Text(content: tr! { "en" => "B", "ja" => "B" }) }"#,
+    );
+    assert!(msg.contains("above zero"), "{msg}");
+
+    let msg = errs(
+        r#"TreeView(id: t, label: tr! { "en" => "T", "ja" => "T" }, items: app.rows, key: id, parent: bad_parent) |row| { Text(content: row.label) }"#,
+    );
+    assert!(msg.contains("parent"), "{msg}");
+
+    let msg = errs(
+        r#"TreeView(id: t, label: tr! { "en" => "T", "ja" => "T" }, items: app.rows, key: id, parent: parent_id, selection: draft.wrong_selected) |row| { Text(content: row.label) }"#,
+    );
+    assert!(msg.contains("selection"), "{msg}");
+
+    let msg = errs(
+        r#"TreeView(id: t, label: tr! { "en" => "T", "ja" => "T" }, items: app.rows, key: id, parent: parent_id, expanded: draft.wrong_expanded) |row| { Text(content: row.label) }"#,
+    );
+    assert!(msg.contains("expanded"), "{msg}");
+
+    let msg = errs(
+        r#"Reorderable(id: r, label: tr! { "en" => "R", "ja" => "R" }, items: app.rows, key: id, move_from: draft.from, move_to: draft.to) |row| { Text(content: row.label) }"#,
+    );
+    assert!(msg.contains("action"), "{msg}");
+
+    let msg = errs(r#"Refreshable(id: f) { Text(content: tr! { "en" => "A", "ja" => "A" }) }"#);
+    assert!(msg.contains("action"), "{msg}");
+
+    let msg = errs(
+        r#"Refreshable(id: f) { Text(content: tr! { "en" => "A", "ja" => "A" }) Text(content: tr! { "en" => "B", "ja" => "B" }) } => app.refresh()"#,
+    );
+    assert!(msg.contains("one child"), "{msg}");
 }

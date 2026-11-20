@@ -2,7 +2,7 @@
 
 # Built-in component property table
 
-Updated: 2026-11-20. This table is exported from the current public definitions in [bern-ir::spec](../../crates/bern-ir/src/spec.rs) and covers 83 built-in components. **Bold properties are required**, the rest are optional; these are declaration rules. For what each target implements see the [platform capability table](Platforms.md), and for concrete usage see [component usage](UI.md).
+Updated: 2026-11-20. This table is exported from the current public definitions in [bern-ir::spec](../../crates/bern-ir/src/spec.rs) and covers 88 built-in components. **Bold properties are required**, the rest are optional; these are declaration rules. For what each target implements see the [platform capability table](Platforms.md), and for concrete usage see [component usage](UI.md).
 
 ## Property types
 
@@ -30,6 +30,7 @@ Updated: 2026-11-20. This table is exported from the current public definitions 
 | `TextField` | Writable text session field |
 | `KeysField` | Writable `Vec<String>` or `Vec<i64>` session field that stores row keys |
 | `BoolField` | Writable boolean session field |
+| `IntField` | Writable integer (`i64`) session field |
 | `NumberField` | Writable floating-point session field |
 | `OptionalNumberField` | Writable `Option<f64>` session field the element writes, cleared to `None` when what it reports ends |
 | `PickerField` | Writable enum session field whose variants carry labels |
@@ -169,6 +170,11 @@ Fixed enums list the allowed keywords directly. The table does not repeat every 
 | `EmptyState` | **`title: DisplayText`**<br>`message: DisplayText`<br>`icon: Icon` | May contain action children (such as `Button`); no action; centered placeholder for empty views and search results |
 | `Badge` | **`content: DisplayText`**<br>`tone: neutral / accent / success / warning / error`<br>`icon: Icon` | No children; no action; compact inline semantic status capsule |
 | `Avatar` | `source: ImageResource`<br>**`label: DisplayText`**<br>`size: Length`<br>`shape: circle / rounded` | No children; no action; circular or rounded avatar displaying an image with automatic initials fallback |
+| `TreeView` | **`id: Id`**<br>**`label: DisplayText`**<br>**`items: Items`**<br>**`key: KeyField`**<br>**`parent: KeyField`**<br>`selection: PositionField`<br>`expanded: KeysField`<br>`feature: Feature` | Uses the `\|item\|` row template; action optional (runs on double-click / Enter); `parent` names an `Option<Key>` field referencing the parent row's `key`; `selection` stores the selected key and `expanded` stores the expanded node keys |
+| `SplitPane` | `id: Id`<br>`axis: horizontal / vertical`<br>`ratio: NumberField`<br>`min_first: Length`<br>`min_second: Length` | Exactly two children; no action; resizable split container with a draggable divider storing the leading pane's ratio (`0..1`) |
+| `Reorderable` | **`id: Id`**<br>**`label: DisplayText`**<br>**`items: Items`**<br>**`key: KeyField`**<br>**`move_from: IntField`**<br>**`move_to: IntField`**<br>`feature: Feature` | Uses the `\|item\|` row template; must bind an action; writes the source and destination zero-based indices into `move_from` and `move_to` before running the action |
+| `BottomSheet` | `detents: medium / large / both`<br>`drag_indicator: Flag` | May contain children; action optional (runs on dismiss); mounts a native bottom-anchored modal sheet (typically guarded by `if`) |
+| `Refreshable` | **`id: Id`**<br>`refreshing: Bool`<br>`feature: Feature` | Exactly one child; must bind an action; triggers pull-to-refresh (and CLI `activate`) and displays a native refresh indicator while `refreshing` is true |
 | `NativeView` | **`id: Id`**<br>**`label: DisplayText`**<br>`swiftui: NativeFile`<br>`winui3: NativeFile`<br>`compose: NativeFile`<br>`gtk: NativeFile`<br>`gpui: NativeFile`<br>`web: NativeFile` | Contains only ["NativeValue", "NativeText", "NativeDraft", "NativeAction", "NativeNumber", "NativeBool", "NativeInput", "Fallback", "DoubleTap", "ContextMenu", "WheelUp", "WheelDown"]; must specify at least one backend file and at least one CLI control entry (`NativeAction` / `NativeNumber` / `NativeBool` / `NativeInput`), at most one `Fallback`; targets without a matching backend file render `Fallback` (or fail the build if absent) |
 | `NativeValue` | **`name: NativeName`**<br>**`value: NativeScalar`** | No children; no action; directly inside ["NativeView"]; generates a typed read-only field in `Props` |
 | `NativeText` | **`name: NativeName`**<br>**`content: DisplayText`** | No children; no action; directly inside ["NativeView"]; passes localized `tr!` text into `Props` |

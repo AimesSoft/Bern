@@ -3003,3 +3003,142 @@ test("M3 controls: selectable Text, DatePicker, TimePicker, EmptyState, Badge, A
   assert.equal(avatar.children[0].textContent, "AL");
   scope.dispose();
 });
+
+test("M4 controls: TreeView, SplitPane, Reorderable, BottomSheet, Refreshable", () => {
+  const { B, Element, frames } = runtime();
+  const root = new Element("div");
+  const scope = new B.Scope();
+  const ctx = { win: "main", comp: "demo" };
+
+  const treeItems = B.cell([
+    { id: 1n, parentId: null, name: "Root" },
+    { id: 2n, parentId: 1n, name: "Child A" },
+    { id: 3n, parentId: 1n, name: "Child B" },
+  ]);
+  const treeSelection = B.cell(1n);
+  const treeExpanded = B.cell([]);
+  let treeActivated = 0;
+
+  const splitRatio = B.cell(0.4);
+
+  const queueItems = B.cell([
+    { id: 10n, title: "First" },
+    { id: 20n, title: "Second" },
+    { id: 30n, title: "Third" },
+  ]);
+  const moveFrom = B.cell(0n);
+  const moveTo = B.cell(0n);
+  const moves = [];
+
+  let sheetDismissed = 0;
+  const refreshing = B.cell(false);
+  let refreshed = 0;
+
+  B.within(scope, () => {
+    B.TreeView(
+      root,
+      ctx,
+      {
+        id: "files",
+        label: () => "Files",
+        items: () => treeItems.get(),
+        key: (v) => v.id,
+        parent: (v) => v.parentId,
+        selection: treeSelection,
+        expanded: treeExpanded,
+      },
+      (p, _ctx, item) => {
+        const span = new Element("span");
+        B.bindText(span, () => item().name);
+        p.append(span);
+      },
+      () => { treeActivated += 1; },
+    );
+
+    B.SplitPane(
+      root,
+      ctx,
+      { id: "panes", axis: "horizontal", ratio: splitRatio, minFirst: 100, minSecond: 100 },
+      (p) => { p.append(new Element("div")); },
+      (p) => { p.append(new Element("div")); },
+    );
+
+    B.Reorderable(
+      root,
+      ctx,
+      {
+        id: "queue",
+        label: () => "Queue",
+        items: () => queueItems.get(),
+        key: (v) => v.id,
+        from: moveFrom,
+        to: moveTo,
+      },
+      (p, _ctx, item) => {
+        const span = new Element("span");
+        B.bindText(span, () => item().title);
+        p.append(span);
+      },
+      () => { moves.push([Number(moveFrom.peek()), Number(moveTo.peek())]); },
+    );
+
+    B.BottomSheet(
+      root,
+      ctx,
+      { detents: "medium", dragIndicator: true },
+      (p) => { p.append(new Element("p")); },
+      () => { sheetDismissed += 1; },
+    );
+
+    B.Refreshable(
+      root,
+      ctx,
+      { id: "feed", refreshing: () => refreshing.get() },
+      (p) => { p.append(new Element("div")); },
+      () => { refreshed += 1; },
+    );
+  });
+
+  // TreeView starts collapsed (only 1 root visible), expands via CLI edit, selects child, activates.
+  const treeEl = root.children[0];
+  assert.equal(treeEl.children.length, 1);
+  const treeCtrl = B.controlEntries().find((e) => e.target() === "demo.files");
+  treeCtrl.actions.edit("1");
+  assert.equal(treeEl.children.length, 3);
+  assert.equal(treeCtrl.actions.select("2"), true);
+  assert.equal(treeSelection.peek(), 2n);
+  treeCtrl.actions.activate();
+  assert.equal(treeActivated, 1);
+
+  // SplitPane clamps and updates ratio via CLI setNumber.
+  const splitCtrl = B.controlEntries().find((e) => e.target() === "demo.panes");
+  splitCtrl.actions.setNumber(0.7);
+  assert.equal(splitRatio.peek(), 0.7);
+  splitCtrl.actions.setNumber(5.0);
+  assert.equal(splitRatio.peek(), 0.95);
+
+  // Reorderable emits from/to BigInt indices via CLI edit("from:to").
+  const reorderCtrl = B.controlEntries().find((e) => e.target() === "demo.queue");
+  reorderCtrl.actions.edit("2:0");
+  assert.deepEqual(moves, [[2, 0]]);
+  assert.equal(moveFrom.peek(), 2n);
+  assert.equal(moveTo.peek(), 0n);
+
+  // BottomSheet opens on frame, exposes drag indicator, and triggers dismiss on cancel.
+  while (frames.length) frames.shift()();
+  const sheet = root.children[3];
+  assert.equal(sheet.classList.contains("bern-bottom-sheet-medium"), true);
+  sheet.dispatch("cancel");
+  assert.equal(sheetDismissed, 1);
+
+  // Refreshable toggles busy bar with refreshing state and fires action on CLI activate.
+  const refreshEl = root.children[4];
+  assert.equal(refreshEl.children[0].hidden, true);
+  refreshing.set(true);
+  assert.equal(refreshEl.children[0].hidden, false);
+  const refreshCtrl = B.controlEntries().find((e) => e.target() === "demo.feed");
+  refreshCtrl.actions.activate();
+  assert.equal(refreshed, 1);
+
+  scope.dispose();
+});

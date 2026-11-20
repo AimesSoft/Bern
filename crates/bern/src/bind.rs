@@ -156,6 +156,12 @@ pub trait ListKey {}
 impl ListKey for Binding<i64> {}
 impl ListKey for Binding<String> {}
 
+/// Types usable as an optional parent key on a `TreeView` record.
+pub trait ParentKey {}
+
+impl ParentKey for Binding<Option<i64>> {}
+impl ParentKey for Binding<Option<String>> {}
+
 /// Implemented by `#[bern::session]` structs.
 pub trait SessionState {
     type Handle: Copy;

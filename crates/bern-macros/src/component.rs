@@ -832,6 +832,9 @@ impl<'a> Gen<'a> {
                 PropKind::NumberField => {
                     pre.push(self.writable(&prop.value, quote!(::bern::__private::number_field)))
                 }
+                PropKind::IntField => {
+                    pre.push(self.writable(&prop.value, quote!(::bern::__private::int_field)))
+                }
                 PropKind::OptionalNumberField => pre.push(
                     self.writable(&prop.value, quote!(::bern::__private::optional_number_field)),
                 ),
@@ -925,6 +928,8 @@ impl<'a> Gen<'a> {
                             let field = path.single().unwrap();
                             if prop_name == "item_label" {
                                 pre.push(quote_spanned!(field.span()=> ::bern::__private::display(&#row.#field);));
+                            } else if prop_name == "parent" {
+                                pre.push(quote_spanned!(field.span()=> ::bern::__private::parent_key(&#row.#field);));
                             } else {
                                 pre.push(quote_spanned!(field.span()=> ::bern::__private::key(&#row.#field);));
                             }

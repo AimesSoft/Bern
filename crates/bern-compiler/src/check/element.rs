@@ -153,6 +153,64 @@ impl Checker<'_> {
                 "`current` is the shortcut the state holds, such as `app.keys.open`; the action keeps the one chosen",
             );
         }
+        if parts.kind == "TreeView"
+            && let Some(Type::Record { name: rec_name }) = parts.item_ty.as_ref()
+            && let Some(def) = self.types.record_def(rec_name)
+            && let Some(ir::Prop::Key { field: key_idx, .. }) = parts.props.get("key")
+            && let Some(key_field) = def.fields.get(*key_idx)
+        {
+            let key_ty = &key_field.ty;
+            if let Some(ir::Prop::Key {
+                field: parent_idx, ..
+            }) = parts.props.get("parent")
+                && let Some(parent_field) = def.fields.get(*parent_idx)
+                && let Type::Optional { inner } = &parent_field.ty
+                && inner.as_ref() != key_ty
+            {
+                let span = element
+                    .prop("parent")
+                    .map_or(element.span, |p| p.value.span());
+                self.error(
+                    span,
+                    format!(
+                        "`parent` must be `Option<{}>` to match `key`, found {}",
+                        key_ty.display(),
+                        parent_field.ty.display()
+                    ),
+                );
+            }
+            if let Some(ir::Prop::Field { field }) = parts.props.get("selection")
+                && &field.ty != key_ty
+            {
+                let span = element
+                    .prop("selection")
+                    .map_or(element.span, |p| p.value.span());
+                self.error(
+                    span,
+                    format!(
+                        "`selection` must match the `key` field's type ({}), found {}",
+                        key_ty.display(),
+                        field.ty.display()
+                    ),
+                );
+            }
+            if let Some(ir::Prop::Field { field }) = parts.props.get("expanded")
+                && let Type::List { inner } = &field.ty
+                && inner.as_ref() != key_ty
+            {
+                let span = element
+                    .prop("expanded")
+                    .map_or(element.span, |p| p.value.span());
+                self.error(
+                    span,
+                    format!(
+                        "`expanded` must be `Vec<{}>` to match `key`, found {}",
+                        key_ty.display(),
+                        field.ty.display()
+                    ),
+                );
+            }
+        }
         if parts.kind == "Tab"
             && matches!(parts.props.get("display"), Some(ir::Prop::Keyword { value }) if value == "icon")
             && !parts.props.contains_key("icon")
@@ -637,6 +695,7 @@ impl Checker<'_> {
             PropKind::TextField => self.field_prop(value, scope, FieldExpect::Text),
             PropKind::BoolField => self.field_prop(value, scope, FieldExpect::Bool),
             PropKind::NumberField => self.field_prop(value, scope, FieldExpect::Number),
+            PropKind::IntField => self.field_prop(value, scope, FieldExpect::Int),
             PropKind::OptionalNumberField => {
                 self.field_prop(value, scope, FieldExpect::OptionalNumber)
             }
@@ -681,6 +740,8 @@ impl Checker<'_> {
                     .or_else(|| parts.template.as_ref().map(|t| &t.ty));
                 if prop_name == "item_label" {
                     self.label_field(value, item_ty)
+                } else if prop_name == "parent" {
+                    self.parent_key(value, item_ty)
                 } else {
                     self.key(value, item_ty)
                 }
