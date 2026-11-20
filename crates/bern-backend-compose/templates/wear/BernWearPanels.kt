@@ -5,6 +5,7 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -742,15 +743,7 @@ fun BernBottomSheet(
     onDismiss: (() -> Unit)?,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Dialog(onDismissRequest = { onDismiss?.invoke() }) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            content = content,
-        )
-    }
+    BernWearDialog(onDismiss = { onDismiss?.invoke() }, content = content)
 }
 
 @Composable

@@ -3412,7 +3412,10 @@ pub fn TreeView(p: &Parent, ctx: &Ctx, props: TreeViewProps, row: Build) {
         Rc::new(crate::reactive::Cell::new(Vec::new()));
     let last_items: Rc<std::cell::RefCell<Vec<Value>>> = Rc::default();
 
-    let read_expanded: Rc<dyn Fn() -> Vec<String>> = {
+    type ReadExpanded = Rc<dyn Fn() -> Vec<String>>;
+    type SetExpanded = Rc<dyn Fn(&str, bool)>;
+
+    let read_expanded: ReadExpanded = {
         let ctx = ctx.clone();
         let ext = props.expanded;
         let local = Rc::clone(&local_expanded);
@@ -3427,7 +3430,7 @@ pub fn TreeView(p: &Parent, ctx: &Ctx, props: TreeViewProps, row: Build) {
             }
         })
     };
-    let set_expanded: Rc<dyn Fn(&str, bool)> = {
+    let set_expanded: SetExpanded = {
         let win = Rc::clone(ctx.win());
         let ext = props.expanded;
         let local = Rc::clone(&local_expanded);

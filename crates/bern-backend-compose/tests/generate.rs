@@ -2120,3 +2120,75 @@ fn pointer_runtime_takes_no_room_and_lets_taps_through() {
         assert!(fields.contains(field), "{field}");
     }
 }
+
+#[test]
+fn effects_box_lifts_row_weight_out_of_box_scope() {
+    let dir = workspace().join("target/bern-test/compose-effects-flex");
+    let ui = r#"
+use bern::prelude::*;
+
+#[bern::session]
+pub struct Draft {
+    pub query: String,
+    pub level: f64,
+}
+
+#[component]
+pub fn app(app: stage::Client, windows: AppWindows, #[session] draft: Draft) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, initial: open, title: tr! { "en" => "Effects" }) {
+                Column(gap: 8) {
+                    Row(gap: 8) {
+                        Button(id: wide_row, label: tr! { "en" => "Open" }, glow: 1.0, glow_opacity: 0.3) {
+                            Row {
+                                Text(content: tr! { "en" => "Item" })
+                                Spacer()
+                            }
+                        } => app.add()
+                        Button(id: action, label: tr! { "en" => "Mark" }) => app.add()
+                    }
+                    Row(gap: 8) {
+                        TextInput(id: field, label: tr! { "en" => "Name" }, value: draft.query, glow: 1.0)
+                        Button(id: submit, label: tr! { "en" => "Go" }) => app.add()
+                    }
+                    Row(gap: 8) {
+                        Slider(id: vol, label: tr! { "en" => "Volume" }, value: draft.level, min: 0, max: 1, glow: 1.0)
+                        Button(id: mute, label: tr! { "en" => "Mute" }) => app.add()
+                    }
+                }
+            }
+        }
+    }
+}
+"#;
+    let (config, compiled) = stage_project(&dir, ui);
+    let problems = ComposeAndroid.check(&compiled.app, &android(&config));
+    assert!(problems.is_empty(), "{problems:?}");
+    let kotlin = bern_backend_compose::Generator::new(&compiled.app).generate("dev.bern.stage", 0);
+    // The effects Box takes the row's `.weight(1f)` and propagates tight width
+    // constraints down so the inner control never calls `RowScope.weight` inside `BoxScope`.
+    assert!(
+        kotlin.contains(
+            "Box(Modifier.weight(1f).bernGlow(1f, 0.3f, 0f), propagateMinConstraints = true) {"
+        ),
+        "{kotlin}"
+    );
+    assert!(
+        kotlin.contains(
+            "Box(Modifier.weight(1f).bernGlow(1f, 0.4f, 0f), propagateMinConstraints = true) {"
+        ),
+        "{kotlin}"
+    );
+    for control in ["BernContentButton(", "BernTextInput(", "BernSlider("] {
+        let line = kotlin
+            .lines()
+            .find(|line| line.contains(control))
+            .unwrap_or_else(|| panic!("missing {control}:\n{kotlin}"));
+        assert!(
+            !line.contains(".weight(1f)"),
+            "{control} must not emit `.weight(1f)` inside an effects Box: {line}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

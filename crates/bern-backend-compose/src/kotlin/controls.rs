@@ -1124,7 +1124,7 @@ impl Generator<'_> {
 /// Whether content stretches across the width it is given: a row with a
 /// spacer, something that fills the width, or a column or stack holding
 /// such content, also through conditions.
-fn widens(nodes: &[Node]) -> bool {
+pub(super) fn widens(nodes: &[Node]) -> bool {
     nodes.iter().any(|node| match node {
         Node::Element(element) => {
             element.keyword("width") == Some("fill")

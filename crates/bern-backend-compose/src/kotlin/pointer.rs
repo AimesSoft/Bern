@@ -24,17 +24,6 @@ impl Generator<'_> {
         format!(".bernWheel({}, {})", lambda(up), lambda(down))
     }
 
-    /// The share of the row or column it stands in that an element takes
-    /// there, which a box around it takes in its place.
-    fn flex(&self, element: &Element, ctx: &Ctx) -> &'static str {
-        match element.kind.as_str() {
-            "Column" | "Row" => self.line_flex(element, ctx),
-            "Stack" if self.stack_weighted(element, ctx) => ".weight(1f)",
-            "Slider" => Self::slider_flex(ctx),
-            _ => "",
-        }
-    }
-
     /// An element other than a button with pointer events, inside
     /// `BernPointerEvents`, which adds no layout: it takes the element's
     /// share of the row or column, and the element its constraints. The
@@ -44,7 +33,7 @@ impl Generator<'_> {
             children: element.content().cloned().collect(),
             ..element.clone()
         };
-        let mut args = vec![format!("Modifier{}", self.flex(&content, ctx))];
+        let mut args = vec![format!("Modifier{}", self.element_flex(&content, ctx))];
         if let Some(action) = self.event_action(element, "DoubleTap") {
             args.push(format!("onDoubleTap = {{ {action} }}"));
         }

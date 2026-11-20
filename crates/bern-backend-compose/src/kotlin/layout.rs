@@ -405,6 +405,66 @@ impl Generator<'_> {
                 && self.fills_height(&element.children, &mut HashSet::new()))
     }
 
+    /// The share of the row or column it stands in that an element takes
+    /// there, which a box around it takes in its place.
+    pub(super) fn element_flex(&self, element: &Element, ctx: &Ctx) -> &'static str {
+        match element.kind.as_str() {
+            "Column" | "Row" => self.line_flex(element, ctx),
+            "Stack" if self.stack_weighted(element, ctx) => ".weight(1f)",
+            "Button" => {
+                let fills = element.keyword("width") == Some("fill");
+                let content: Vec<Node> = element.content().cloned().collect();
+                if (fills || super::controls::widens(&content)) && ctx.scope == Scope::Row {
+                    ".weight(1f)"
+                } else {
+                    ""
+                }
+            }
+            "TextInput" | "Slider" | "Search" if ctx.scope == Scope::Row => ".weight(1f)",
+            "Scroll" => {
+                let horizontal = element.keyword("axis") == Some("horizontal");
+                match (ctx.scope, horizontal) {
+                    (Scope::Row, _) | (Scope::Column, false) => ".weight(1f)",
+                    (Scope::Other | Scope::Flow, true) => ".bernFlexible(column = false)",
+                    (Scope::Other | Scope::Flow, false) => ".bernFlexible().fillMaxHeight()",
+                    _ => "",
+                }
+            }
+            "Table" => match ctx.scope {
+                Scope::Column | Scope::Row => ".weight(1f)",
+                Scope::Other | Scope::Flow => ".bernFlexible().fillMaxHeight()",
+            },
+            "PreviewList" if ctx.scope == Scope::Column && !ctx.scroll_content => ".weight(1f)",
+            "Accordion"
+                if element.prop("height").is_none()
+                    && ctx.scope == Scope::Column
+                    && !ctx.scroll_content =>
+            {
+                ".weight(1f)"
+            }
+            "Rail" => {
+                let vertical = element.keyword("axis") == Some("vertical");
+                let fills = Self::rail_fills(element);
+                let aligned = ctx.layer && !fills && ctx.sized_layers;
+                if !(ctx.layer && fills)
+                    && !aligned
+                    && matches!(
+                        (ctx.scope, vertical),
+                        (Scope::Row, false) | (Scope::Column, true)
+                    )
+                {
+                    ".weight(1f)"
+                } else {
+                    ""
+                }
+            }
+            "Spacer" if matches!(ctx.scope, Scope::Row | Scope::Column | Scope::Flow) => {
+                ".weight(1f)"
+            }
+            _ => "",
+        }
+    }
+
     pub(super) fn stack(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         let alignment = stack_alignment(element.keyword("align"));
         // A styled stack draws its surface; a disabled one takes no
