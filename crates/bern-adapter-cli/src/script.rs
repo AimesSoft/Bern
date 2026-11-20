@@ -573,8 +573,8 @@ mod tests {
     use super::*;
     use bern_command::{EngineProtocol, QueryAnswer, current_entry};
     use bern_protocol::{
-        CommandError, CommandPolicy, DESCRIPTOR_VERSION, ExternalNames, FieldDef, OperationKind,
-        ParamSpec, Scope, TypeTable, Value,
+        CommandError, CommandPolicy, DESCRIPTOR_VERSION, ExternalNames, OperationKind, ParamSpec,
+        Scope, StateField, TypeTable, Value,
     };
     use bern_runtime::SessionHandler;
     use std::sync::OnceLock;
@@ -596,23 +596,29 @@ mod tests {
             version: 1,
             types: TypeTable::default(),
             state: vec![
-                FieldDef {
+                StateField {
                     name: "count".into(),
                     ty: Type::Int,
                     doc: String::new(),
                     content: false,
+                    stream: false,
+                    keyed: None,
                 },
-                FieldDef {
+                StateField {
                     name: "secret".into(),
                     ty: Type::Text,
                     doc: String::new(),
                     content: false,
+                    stream: false,
+                    keyed: None,
                 },
-                FieldDef {
+                StateField {
                     name: "last_entry".into(),
                     ty: Type::Text,
                     doc: String::new(),
                     content: false,
+                    stream: false,
+                    keyed: None,
                 },
             ],
             commands: vec![
