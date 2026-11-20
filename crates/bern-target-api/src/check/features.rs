@@ -846,6 +846,29 @@ fn popover_button(
     }
 }
 
+fn node_source(node: &bern_ir::Node) -> Option<bern_ir::SourceLocation> {
+    match node {
+        bern_ir::Node::Element(element) => Some(element.source.clone()),
+        bern_ir::Node::Component(call) => Some(call.source.clone()),
+        bern_ir::Node::If(node) => node
+            .branches
+            .iter()
+            .flat_map(|(_, body)| body)
+            .chain(&node.otherwise)
+            .find_map(node_source),
+        bern_ir::Node::IfLet(node) => node
+            .then
+            .iter()
+            .chain(&node.otherwise)
+            .find_map(node_source),
+        bern_ir::Node::Match(node) => node
+            .arms
+            .iter()
+            .flat_map(|arm| &arm.body)
+            .find_map(node_source),
+    }
+}
+
 fn size_classes(
     descriptor: &TargetDescriptor,
     app: &Application,
@@ -865,12 +888,24 @@ fn size_classes(
         );
     }
     let mut reading = false;
-    app.walk(&mut |node, _| reading |= reads_window_size(node));
+    let mut reading_source = None;
+    app.walk(&mut |node, _| {
+        if reads_window_size(node) {
+            reading = true;
+            if reading_source.is_none() {
+                reading_source = node_source(node);
+            }
+        }
+    });
     if reading {
-        diagnostics.push(Diagnostic::error(format!(
+        let mut diag = Diagnostic::error(format!(
             "target `{}` cannot read the window's size with `window.compact`, `window.medium`, `window.expanded` or `window.large`",
             descriptor.id
-        )));
+        ));
+        if let Some(source) = reading_source {
+            diag = diag.at(source);
+        }
+        diagnostics.push(diag);
     }
 }
 

@@ -76,9 +76,10 @@ pub use ctx::{
     Act, Ctx, Field, Model, act, session_pop, session_push_str, session_set, session_toggle,
 };
 pub use extra::{
-    AlertActionSpec, AvatarProps, BannerProps, DatePickerProps, NumberInputProps, TimePickerProps,
-    alert, avatar, badge, banner, date_picker, disclosure, empty_state, number_input, time_picker,
-    tooltip,
+    AlertActionSpec, AvatarProps, BannerProps, BottomSheetProps, DatePickerProps, NumberInputProps,
+    ReorderableProps, SplitPaneProps, TimePickerProps, TreeViewProps, alert, avatar, badge, banner,
+    bottom_sheet, date_picker, disclosure, empty_state, number_input, refreshable, reorderable,
+    split_pane, time_picker, tooltip, tree_view,
 };
 pub use filters::{blur_scope, glow};
 pub use form::{FormProps, SectionProps, form, section};

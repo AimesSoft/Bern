@@ -649,6 +649,28 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
     ("EmptyState", &["title", "message", "icon"]),
     ("Badge", &["content", "tone", "icon"]),
     ("Avatar", &["label", "source", "size", "shape"]),
+    (
+        "TreeView",
+        &[
+            "id",
+            "label",
+            "items",
+            "key",
+            "parent",
+            "selection",
+            "expanded",
+        ],
+    ),
+    (
+        "SplitPane",
+        &["id", "axis", "ratio", "min_first", "min_second"],
+    ),
+    (
+        "Reorderable",
+        &["id", "label", "items", "key", "move_from", "move_to"],
+    ),
+    ("BottomSheet", &["detents", "drag_indicator"]),
+    ("Refreshable", &["id", "refreshing"]),
 ];
 
 /// The names [`COMPONENTS`] lists, with the window catalog's.
@@ -755,16 +777,24 @@ pub const COMPONENT_NAMES: &[&str] = &[
     "EmptyState",
     "Badge",
     "Avatar",
+    "TreeView",
+    "SplitPane",
+    "Reorderable",
+    "BottomSheet",
+    "Refreshable",
 ];
 
 /// Icons the runtime draws itself, whatever the application declares.
 const RUNTIME_ICONS: &[&str] = &[
+    "arrow.clockwise",
     "calendar",
     "checkmark",
     "checkmark.circle",
     "chevron.down",
     "chevron.left",
     "chevron.right",
+    "chevron.up",
+    "chevron.up.chevron.down",
     "exclamationmark.triangle",
     "info.circle",
     "magnifyingglass",
@@ -1758,7 +1788,8 @@ pub fn app() -> b::AppDef {{
                 width: true,
                 height: false,
             },
-            "ScrollView" | "Form" | "Tabs" | "ScaleBox" | "SplitView" | "Navigation" => Greed {
+            "ScrollView" | "Form" | "Tabs" | "ScaleBox" | "SplitView" | "SplitPane"
+            | "Navigation" => Greed {
                 width: true,
                 height: true,
             },
@@ -1771,14 +1802,13 @@ pub fn app() -> b::AppDef {{
                 height: false,
             },
             "TextInput" | "NumberInput" | "DatePicker" | "TimePicker" | "EmptyState" | "Banner"
-            | "Disclosure" | "Progress" | "Slider" | "Section" | "NavLink" | "SearchItem" => {
-                Greed {
-                    width: true,
-                    height: false,
-                }
-            }
+            | "Disclosure" | "TreeView" | "Reorderable" | "Refreshable" | "Progress" | "Slider"
+            | "Section" | "NavLink" | "SearchItem" => Greed {
+                width: true,
+                height: false,
+            },
             "Tooltip" => self.children_greed(&element.children, parent),
-            "Alert" | "AlertAction" => Greed {
+            "Alert" | "AlertAction" | "BottomSheet" => Greed {
                 width: false,
                 height: false,
             },
@@ -3467,6 +3497,143 @@ pub fn app() -> b::AppDef {{
                     "b::avatar(c, b::AvatarProps {{ label: {}, resource: {resource}, url: {url}, size: {size}, rounded: {} }})",
                     text("label"),
                     element.keyword("shape") == Some("rounded"),
+                )
+            }
+            "TreeView" => {
+                let (
+                    Some(items),
+                    Some(template),
+                    Some(Prop::Key {
+                        field: key_field, ..
+                    }),
+                    Some(Prop::Key {
+                        field: parent_field,
+                        ..
+                    }),
+                ) = (
+                    element.expr("items"),
+                    &element.template,
+                    element.prop("key"),
+                    element.prop("parent"),
+                )
+                else {
+                    self.unsupported("this `TreeView`".into(), at);
+                    return None;
+                };
+                let selection = match element.field("selection") {
+                    Some(f) => format!(
+                        "Some({})",
+                        field_ref(self.session_index(&f.session), f.field)
+                    ),
+                    None => "None".into(),
+                };
+                let expanded = match element.field("expanded") {
+                    Some(f) => format!(
+                        "Some({})",
+                        field_ref(self.session_index(&f.session), f.field)
+                    ),
+                    None => "None".into(),
+                };
+                format!(
+                    "b::tree_view(c, {}, b::TreeViewProps {{ label: {}, key_field: {key_field}, parent_field: {parent_field}, selection: {selection}, expanded: {expanded} }}, rt::as_list({}), &|c: &b::Ctx, item: V| {{ let c = &c.with_local({}, item); {} }}, {})",
+                    id(),
+                    text("label"),
+                    self.expr(items, at),
+                    string(&template.var),
+                    column(&element.children),
+                    self.action(element),
+                )
+            }
+            "SplitPane" => {
+                if element.children.len() != 2 {
+                    self.unsupported("`SplitPane` requires two children".into(), at);
+                    return None;
+                }
+                let ratio = match element.field("ratio") {
+                    Some(f) => format!(
+                        "Some({})",
+                        field_ref(self.session_index(&f.session), f.field)
+                    ),
+                    None => "None".into(),
+                };
+                let min_first = self
+                    .length_value(element, "min_first")
+                    .unwrap_or_else(|| "120.0".into());
+                let min_second = self
+                    .length_value(element, "min_second")
+                    .unwrap_or_else(|| "120.0".into());
+                let split_id = match element.id.as_deref() {
+                    Some(name) => format!("Some({})", string(name)),
+                    None => "None".into(),
+                };
+                let first_children = self.children(&element.children[0..1], Axis::Column);
+                let second_children = self.children(&element.children[1..2], Axis::Column);
+                let first = format!(
+                    "({first_children}).into_iter().next().unwrap_or_else(|| b::column(c, b::Flex::default(), vec![]))"
+                );
+                let second = format!(
+                    "({second_children}).into_iter().next().unwrap_or_else(|| b::column(c, b::Flex::default(), vec![]))"
+                );
+                format!(
+                    "b::split_pane(c, {}, b::SplitPaneProps {{ id: {split_id}, vertical: {}, ratio: {ratio}, min_first: {min_first}, min_second: {min_second} }}, {first}, {second})",
+                    string(&element.path),
+                    element.keyword("axis") == Some("vertical"),
+                )
+            }
+            "Reorderable" => {
+                let (
+                    Some(items),
+                    Some(template),
+                    Some(Prop::Key {
+                        field: key_field, ..
+                    }),
+                    Some(from_field),
+                    Some(to_field),
+                ) = (
+                    element.expr("items"),
+                    &element.template,
+                    element.prop("key"),
+                    element.field("move_from"),
+                    element.field("move_to"),
+                )
+                else {
+                    self.unsupported("this `Reorderable`".into(), at);
+                    return None;
+                };
+                format!(
+                    "b::reorderable(c, {}, b::ReorderableProps {{ label: {}, key_field: {key_field}, from: {}, to: {} }}, rt::as_list({}), &|c: &b::Ctx, item: V| {{ let c = &c.with_local({}, item); {} }}, {})",
+                    id(),
+                    text("label"),
+                    field_ref(self.session_index(&from_field.session), from_field.field),
+                    field_ref(self.session_index(&to_field.session), to_field.field),
+                    self.expr(items, at),
+                    string(&template.var),
+                    column(&element.children),
+                    self.action(element),
+                )
+            }
+            "BottomSheet" => {
+                let detents = string(element.keyword("detents").unwrap_or("both"));
+                let drag_indicator = element.keyword("drag_indicator") != Some("false");
+                format!(
+                    "b::bottom_sheet(c, b::BottomSheetProps {{ detents: {detents}, drag_indicator: {drag_indicator} }}, {}, {})",
+                    self.children(&element.children, Axis::Column),
+                    self.action(element),
+                )
+            }
+            "Refreshable" => {
+                let refreshing = match element.expr("refreshing") {
+                    Some(e) => format!("rt::truthy(&{})", self.expr(e, at)),
+                    None => "false".into(),
+                };
+                let children = self.children(&element.children, Axis::Column);
+                let child = format!(
+                    "({children}).into_iter().next().unwrap_or_else(|| b::column(c, b::Flex::default(), vec![]))"
+                );
+                format!(
+                    "b::refreshable(c, {}, {refreshing}, {child}, {})",
+                    id(),
+                    self.action(element),
                 )
             }
             "LanguagePicker" => format!(

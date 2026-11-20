@@ -504,3 +504,11 @@ Grid(min_width: 160, gap: 16, skeleton: app.loading, skeleton_count: 6) {
 - **`EmptyState(title:, message:, icon:) { … }`**：居中空状态占位组件（Apple 平台使用 `ContentUnavailableView`，GTK 使用 `adw::StatusPage`，其余平台呈现图标、标题、说明与操作按钮）。
 - **`Badge(content:, tone:, icon:)`**：紧凑的行内语义状态胶囊（`neutral`、`accent`、`success`、`warning`、`error`）。
 - **`Avatar(source:, label:, size:, shape:)`**：圆形（`circle`）或圆角（`rounded`）头像，支持随包或运行时图片并自动回退为首字母占位（GTK 使用 `adw::Avatar`，其余平台在原生裁切图片下叠放首字母回退）。
+
+## 树形视图、可调分栏、拖拽排序、底部抽屉与下拉刷新
+
+- **`TreeView(id:, label:, items:, key:, parent:, selection:, expanded:) |item| { … } => action`**：以平铺的 `parent` 外键记录列表构建可折叠层级树，支持原生展开箭头、键盘导航，以及与会话草稿同步的选中项与展开状态。
+- **`SplitPane(id:, axis:, ratio:, min_first:, min_second:) { first second }`**：水平（`horizontal`）或垂直（`vertical`）双栏容器，带可拖动分隔条（GTK 使用 `gtk::Paned`，SwiftUI、WinUI 3、Compose、Web 与 GPUI 使用原生拖动分隔条）并双向绑定 `0..1` 比例草稿。
+- **`Reorderable(id:, label:, items:, key:, move_from:, move_to:) |item| { … } => action`**：支持拖拽排序及无障碍上下移动按钮的列表，重排时把零基 `move_from` 与 `move_to` 索引写入会话字段并触发引擎命令。
+- **`BottomSheet(detents:, drag_indicator:) { … } => dismiss`**：挂载即弹出原生底部抽屉（SwiftUI `.sheet` + `.presentationDetents`、GTK `adw::Dialog` 底部抽屉、Compose Material 3 `ModalBottomSheet`、WinUI 3 底部 Fluent 浮层、Web `<dialog>`、GPUI 底部浮层），通常放在 `if` 条件分支中控制显示。
+- **`Refreshable(id:, refreshing:) { child } => refresh`**：为可滚动内容包裹原生下拉刷新与加载状态提示（SwiftUI `.refreshable`、Compose Material 3 `PullToRefreshBox`、Web 触控下拉与指示器，以及桌面端顶部刷新指示器与 CLI `activate`）。

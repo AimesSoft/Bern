@@ -103,6 +103,7 @@ impl Checker<'_> {
                     FieldExpect::Text => ty == Type::Text,
                     FieldExpect::Bool => ty == Type::Bool,
                     FieldExpect::Number => ty == Type::Float,
+                    FieldExpect::Int => ty == Type::Int,
                     FieldExpect::OptionalNumber => ty == Type::optional(Type::Float),
                     FieldExpect::File => {
                         let source = Type::Record {
@@ -139,6 +140,7 @@ impl Checker<'_> {
                         FieldExpect::Text => "a `String` field",
                         FieldExpect::Bool => "a `bool` field",
                         FieldExpect::Number => "an `f64` field",
+                        FieldExpect::Int => "an `i64` field",
                         FieldExpect::OptionalNumber => "an `Option<f64>` field",
                         FieldExpect::File => {
                             "a `MediaSource`, `Option<MediaSource>` or `Vec<MediaSource>` field"

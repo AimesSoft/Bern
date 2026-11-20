@@ -1,7 +1,7 @@
 //! Controls: buttons, text fields, search fields, switches, sliders,
 //! pickers, menus, and the areas that take drops and gestures.
 
-use super::{Generator, Out, designated, motion_ref, null, string, wide};
+use super::{BUILDER, Generator, Out, designated, motion_ref, null, string, wide};
 use bern_ir::{Element, ExprKind, Node, Prop};
 use bern_protocol::{EnumDef, Type};
 
@@ -643,6 +643,120 @@ impl Generator<'_> {
                 ("shape", Self::keyword(element, "shape")),
             ])
         ));
+    }
+
+    pub(super) fn tree_view(&self, out: &mut Out, element: &Element) {
+        let (
+            Some(items),
+            Some(template),
+            Some(Prop::Key { field: key_idx, .. }),
+            Some(Prop::Key {
+                field: parent_idx, ..
+            }),
+        ) = (
+            element.expr("items"),
+            &element.template,
+            element.prop("key"),
+            element.prop("parent"),
+        )
+        else {
+            return;
+        };
+        let props = designated(&[
+            ("id", Some(self.id(element))),
+            ("label", self.text_prop(element, "label")),
+            ("items", Some(self.getter(items))),
+            ("key", Some(key_idx.to_string())),
+            ("parent", Some(parent_idx.to_string())),
+            ("variable", Some(string(&template.var))),
+            ("selection", self.field(element, "selection")),
+            ("expanded", self.field(element, "expanded")),
+            ("action", self.action(element)),
+        ]);
+        self.call(
+            out,
+            &format!("B::TreeView(p, c, {props}, "),
+            &element.children,
+        );
+    }
+
+    pub(super) fn split_pane(&self, out: &mut Out, element: &Element) {
+        if element.children.len() < 2 {
+            return;
+        }
+        let props = designated(&[
+            ("id", element.id.as_deref().map(string)),
+            (
+                "vertical",
+                (element.keyword("axis") == Some("vertical")).then(|| "true".to_string()),
+            ),
+            ("ratio", self.field(element, "ratio")),
+            ("minFirst", self.len(element, "min_first")),
+            ("minSecond", self.len(element, "min_second")),
+        ]);
+        out.open(format!("B::SplitPane(p, c, {props}, {BUILDER}"));
+        self.node(out, &element.children[0]);
+        out.close(format!("}}, {BUILDER}"));
+        out.indent += 1;
+        self.node(out, &element.children[1]);
+        out.close("});");
+    }
+
+    pub(super) fn reorderable(&self, out: &mut Out, element: &Element) {
+        let (Some(items), Some(template), Some(Prop::Key { field: key_idx, .. })) = (
+            element.expr("items"),
+            &element.template,
+            element.prop("key"),
+        ) else {
+            return;
+        };
+        let props = designated(&[
+            ("id", Some(self.id(element))),
+            ("label", self.text_prop(element, "label")),
+            ("items", Some(self.getter(items))),
+            ("key", Some(key_idx.to_string())),
+            ("variable", Some(string(&template.var))),
+            ("from", self.field(element, "move_from")),
+            ("to", self.field(element, "move_to")),
+            ("action", self.action(element)),
+        ]);
+        self.call(
+            out,
+            &format!("B::Reorderable(p, c, {props}, "),
+            &element.children,
+        );
+    }
+
+    pub(super) fn bottom_sheet(&self, out: &mut Out, element: &Element) {
+        let props = designated(&[
+            ("detents", Self::keyword(element, "detents")),
+            (
+                "dragIndicator",
+                (element.keyword("drag_indicator") == Some("false")).then(|| "false".to_string()),
+            ),
+            ("dismiss", self.action(element)),
+        ]);
+        self.call(
+            out,
+            &format!("B::BottomSheet(p, c, {props}, "),
+            &element.children,
+        );
+    }
+
+    pub(super) fn refreshable(&self, out: &mut Out, element: &Element) {
+        let props = designated(&[
+            ("id", Some(self.id(element))),
+            (
+                "refreshing",
+                element.expr("refreshing").map(|e| self.getter(e)),
+            ),
+            ("action", self.action(element)),
+        ]);
+        self.call(
+            out,
+            &format!("B::Refreshable(p, c, {props}, "),
+            &element.children,
+        );
     }
 
     pub(super) fn popover_button(&self, out: &mut Out, element: &Element) {

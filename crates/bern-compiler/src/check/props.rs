@@ -316,6 +316,48 @@ impl Checker<'_> {
         })
     }
 
+    pub(super) fn parent_key(
+        &mut self,
+        expr: &ast::Expr,
+        item_ty: Option<&Type>,
+    ) -> Option<ir::Prop> {
+        let (Some(field), Some(item_ty)) = (
+            match expr {
+                ast::Expr::Path(path) => path.single().cloned(),
+                _ => None,
+            },
+            item_ty,
+        ) else {
+            self.error(
+                expr.span(),
+                "expected the name of an optional parent key field, e.g. `parent: parent_id`",
+            );
+            return None;
+        };
+        let Type::Record { name } = item_ty else {
+            return None;
+        };
+        let def = self.types.record_def(name)?;
+        let Some(index) = def.field_index(&field.to_string()) else {
+            self.error(field.span(), format!("`{name}` has no field `{field}`"));
+            return None;
+        };
+        if !matches!(
+            &def.fields[index].ty,
+            Type::Optional { inner } if matches!(**inner, Type::Int | Type::Text)
+        ) {
+            self.error(
+                field.span(),
+                "`parent` must be an `Option<i64>` or `Option<String>` field matching the node `key`",
+            );
+            return None;
+        }
+        Some(ir::Prop::Key {
+            field: index,
+            name: field.to_string(),
+        })
+    }
+
     pub(super) fn label_field(
         &mut self,
         expr: &ast::Expr,
@@ -492,6 +534,7 @@ impl Checker<'_> {
                 (element, prop_name),
                 ("Image" | "Svg", "width" | "height")
                     | ("Avatar", "size")
+                    | ("SplitPane", "min_first" | "min_second")
                     | ("Grid", "min_width" | "cell_ratio")
                     | ("Progress", "total")
             );

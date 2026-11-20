@@ -770,6 +770,135 @@ impl Generator<'_> {
         ));
     }
 
+    pub(super) fn tree_view(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let (
+            Some(items_expr),
+            Some(template),
+            Some(Prop::Key { name: key_name, .. }),
+            Some(Prop::Key {
+                name: parent_name, ..
+            }),
+        ) = (
+            element.expr("items"),
+            &element.template,
+            element.prop("key"),
+            element.prop("parent"),
+        )
+        else {
+            return;
+        };
+        let label = self.text_prop(element, "label").unwrap_or_default();
+        let items = self.expr(items_expr);
+        let key_prop = member(key_name);
+        let parent_prop = member(parent_name);
+        let var = member(&template.var);
+        let (sel_val, on_sel) = match self.field(element, "selection") {
+            Some(field) => (field.clone(), format!("{{ {field} = it }}")),
+            None => ("null".into(), "null".into()),
+        };
+        let (exp_val, on_exp) = match self.field(element, "expanded") {
+            Some(field) => (field.clone(), format!("{{ {field} = it }}")),
+            None => ("null".into(), "null".into()),
+        };
+        let on_activate = element
+            .action
+            .as_ref()
+            .map(|a| format!("{{ {} }}", self.action(a)))
+            .unwrap_or_else(|| "null".into());
+        out.open(format!(
+            "BernTreeView(target = {}, label = {label}, entries = ({items}).map {{ BernTreeEntry(it, it.{key_prop}, it.{parent_prop}) }}, selectedKey = {sel_val}, onSelect = {on_sel}, externalExpanded = {exp_val}, onExpandedChange = {on_exp}, onActivate = {on_activate}, keyToString = {{ it.toString() }}) {{ {var} ->",
+            self.target(element, ctx)
+        ));
+        self.nodes(out, &element.children, &ctx.within(Scope::Row));
+        out.close("}");
+    }
+
+    pub(super) fn split_pane(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        if element.children.len() < 2 {
+            return;
+        }
+        let target = element
+            .id
+            .as_ref()
+            .map(|_| self.target(element, ctx))
+            .unwrap_or_else(|| "null".into());
+        let vertical = element.keyword("axis") == Some("vertical");
+        let (ratio_val, on_ratio) = match self.field(element, "ratio") {
+            Some(field) => (field.clone(), format!("{{ {field} = it }}")),
+            None => ("null".into(), "null".into()),
+        };
+        let min_first = self
+            .length(element, "min_first")
+            .unwrap_or_else(|| "120.dp".into());
+        let min_second = self
+            .length(element, "min_second")
+            .unwrap_or_else(|| "120.dp".into());
+        out.open(format!(
+            "BernSplitPane(target = {target}, vertical = {vertical}, externalRatio = {ratio_val}, onRatioChange = {on_ratio}, minFirst = {min_first}, minSecond = {min_second}, first = {{"
+        ));
+        self.node(out, &element.children[0], &ctx.within(Scope::Other));
+        out.close("}, second = {");
+        out.indent += 1;
+        self.node(out, &element.children[1], &ctx.within(Scope::Other));
+        out.close("})");
+    }
+
+    pub(super) fn reorderable(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let (Some(items_expr), Some(template), Some(from_field), Some(to_field), Some(action)) = (
+            element.expr("items"),
+            &element.template,
+            self.field(element, "move_from"),
+            self.field(element, "move_to"),
+            &element.action,
+        ) else {
+            return;
+        };
+        let label = self.text_prop(element, "label").unwrap_or_default();
+        let items = self.expr(items_expr);
+        let var = member(&template.var);
+        let act = self.action(action);
+        out.open(format!(
+            "BernReorderable(target = {}, label = {label}, items = {items}, onMove = {{ fromIndex, toIndex -> {from_field} = fromIndex; {to_field} = toIndex; {act} }}) {{ {var} ->",
+            self.target(element, ctx)
+        ));
+        self.nodes(out, &element.children, &ctx.within(Scope::Row));
+        out.close("}");
+    }
+
+    pub(super) fn bottom_sheet(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let detents = element.keyword("detents").unwrap_or("medium");
+        let drag_indicator = element.keyword("drag_indicator") != Some("false");
+        let on_dismiss = element
+            .action
+            .as_ref()
+            .map(|a| format!("{{ {} }}", self.action(a)))
+            .unwrap_or_else(|| "null".into());
+        out.open(format!(
+            "BernBottomSheet(detents = {}, dragIndicator = {drag_indicator}, onDismiss = {on_dismiss}) {{",
+            string(detents)
+        ));
+        self.nodes(out, &element.children, &ctx.within(Scope::Column));
+        out.close("}");
+    }
+
+    pub(super) fn refreshable(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let refreshing = element
+            .expr("refreshing")
+            .map(|e| self.expr(e))
+            .unwrap_or_else(|| "false".into());
+        let act = element
+            .action
+            .as_ref()
+            .map(|a| self.action(a))
+            .unwrap_or_else(|| "Unit".into());
+        out.open(format!(
+            "BernRefreshable(target = {}, refreshing = {refreshing}, onRefresh = {{ {act} }}) {{",
+            self.target(element, ctx)
+        ));
+        self.nodes(out, &element.children, &ctx.within(Scope::Other));
+        out.close("}");
+    }
+
     /// A picker; in a top bar (`toolbar`) the chosen option opening a menu.
     pub(super) fn picker_in(&self, out: &mut Out, element: &Element, ctx: &Ctx, toolbar: bool) {
         let prompt_arg = self

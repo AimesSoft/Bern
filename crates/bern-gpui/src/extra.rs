@@ -2,20 +2,24 @@
 //! `Tooltip`, `Banner`, `Disclosure`, `NumberInput`, and `Alert`.
 
 use crate::controls::ButtonProps;
-use crate::ctx::{Act, Ctx, Model, Press};
+use crate::ctx::{Act, Ctx, Field, Model, Press};
 use crate::icons;
 use crate::session::{Actions, Control};
 use crate::{El, Prominence, Role, protocol::Value};
 use gpui::prelude::*;
 use gpui::{
-    App, Context, FontWeight, MouseButton, Render, Window, anchored, deferred, div, point, px,
+    App, Bounds, Context, FontWeight, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    Pixels, Render, Window, anchored, canvas, deferred, div, point, px, relative,
 };
-use std::cell::RefCell;
-use std::collections::HashMap;
+use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 thread_local! {
     static DISCLOSURE_OPEN: RefCell<HashMap<String, bool>> = RefCell::new(HashMap::new());
+    static TREE_SELECTION: RefCell<HashMap<String, Value>> = RefCell::new(HashMap::new());
+    static TREE_EXPANDED: RefCell<HashMap<String, Vec<Value>>> = RefCell::new(HashMap::new());
+    static SPLIT_RATIO: RefCell<HashMap<String, f64>> = RefCell::new(HashMap::new());
 }
 
 fn disclosure_open(key: &str) -> bool {
@@ -1082,4 +1086,754 @@ pub fn avatar(c: &Ctx, props: AvatarProps) -> El {
         )));
     }
     frame.into_any_element()
+}
+
+pub struct TreeViewProps {
+    pub label: String,
+    pub key_field: usize,
+    pub parent_field: usize,
+    pub selection: Option<Field>,
+    pub expanded: Option<Field>,
+}
+
+/// `TreeView`: hierarchical expandable tree with selection and keyboard/CLI support.
+pub fn tree_view(
+    c: &Ctx,
+    id: &'static str,
+    props: TreeViewProps,
+    items: Vec<Value>,
+    row: &dyn Fn(&Ctx, Value) -> El,
+    action: Option<Act>,
+) -> El {
+    let store_key = c.key(id);
+    let key_of = |item: &Value| crate::value::at(item.clone(), &[props.key_field]);
+    let parent_of =
+        |item: &Value| crate::value::some(crate::value::at(item.clone(), &[props.parent_field]));
+
+    let selected_val: Option<Value> = match props.selection {
+        Some(f) => {
+            let v = c.read(f);
+            if matches!(v, Value::Unit) {
+                None
+            } else {
+                Some(v)
+            }
+        }
+        None => TREE_SELECTION.with(|m| m.borrow().get(&store_key).cloned()),
+    };
+    let expanded_list: Vec<Value> = match props.expanded {
+        Some(f) => crate::value::as_list(c.read(f)),
+        None => TREE_EXPANDED.with(|m| m.borrow().get(&store_key).cloned().unwrap_or_default()),
+    };
+    let expanded_keys: HashSet<String> = expanded_list.iter().map(crate::value::key_text).collect();
+
+    let mut by_key: HashMap<String, usize> = HashMap::new();
+    for (idx, item) in items.iter().enumerate() {
+        by_key.insert(crate::value::key_text(&key_of(item)), idx);
+    }
+    let mut children_of: HashMap<String, Vec<usize>> = HashMap::new();
+    let mut roots: Vec<usize> = Vec::new();
+    for (idx, item) in items.iter().enumerate() {
+        match parent_of(item) {
+            Some(pid) => {
+                let pk = crate::value::key_text(&pid);
+                if by_key.contains_key(&pk) {
+                    children_of.entry(pk).or_default().push(idx);
+                } else {
+                    roots.push(idx);
+                }
+            }
+            None => roots.push(idx),
+        }
+    }
+
+    struct FlatRow {
+        idx: usize,
+        key: Value,
+        key_text: String,
+        depth: usize,
+        has_children: bool,
+        open: bool,
+    }
+    fn walk(
+        idx: usize,
+        depth: usize,
+        items: &[Value],
+        key_field: usize,
+        children_of: &HashMap<String, Vec<usize>>,
+        expanded_keys: &HashSet<String>,
+        visited: &mut HashSet<String>,
+        out: &mut Vec<FlatRow>,
+    ) {
+        let key = crate::value::at(items[idx].clone(), &[key_field]);
+        let kt = crate::value::key_text(&key);
+        if !visited.insert(kt.clone()) {
+            return;
+        }
+        let kids = children_of.get(&kt);
+        let has_children = kids.is_some_and(|k| !k.is_empty());
+        let open = has_children && expanded_keys.contains(&kt);
+        out.push(FlatRow {
+            idx,
+            key,
+            key_text: kt.clone(),
+            depth,
+            has_children,
+            open,
+        });
+        if open && let Some(kids) = kids {
+            for &kid in kids {
+                walk(
+                    kid,
+                    depth + 1,
+                    items,
+                    key_field,
+                    children_of,
+                    expanded_keys,
+                    visited,
+                    out,
+                );
+            }
+        }
+    }
+    let mut flat = Vec::new();
+    let mut visited = HashSet::new();
+    for root_idx in roots {
+        walk(
+            root_idx,
+            0,
+            &items,
+            props.key_field,
+            &children_of,
+            &expanded_keys,
+            &mut visited,
+            &mut flat,
+        );
+    }
+
+    let select_key: Rc<dyn Fn(Value)> = {
+        let c = c.clone();
+        let store_key = store_key.clone();
+        let sel_field = props.selection;
+        Rc::new(move |k: Value| {
+            if let Some(f) = sel_field {
+                c.write(f, k);
+            } else {
+                TREE_SELECTION.with(|m| {
+                    m.borrow_mut().insert(store_key.clone(), k);
+                });
+                crate::host::redraw();
+            }
+        })
+    };
+    let toggle_expand: Rc<dyn Fn(Value)> = {
+        let c = c.clone();
+        let store_key = store_key.clone();
+        let exp_field = props.expanded;
+        Rc::new(move |k: Value| {
+            let kt = crate::value::key_text(&k);
+            let mut cur = match exp_field {
+                Some(f) => crate::value::as_list(c.read(f)),
+                None => {
+                    TREE_EXPANDED.with(|m| m.borrow().get(&store_key).cloned().unwrap_or_default())
+                }
+            };
+            if let Some(pos) = cur.iter().position(|v| crate::value::key_text(v) == kt) {
+                cur.remove(pos);
+            } else {
+                cur.push(k);
+            }
+            if let Some(f) = exp_field {
+                c.write(f, Value::List(cur));
+            } else {
+                TREE_EXPANDED.with(|m| {
+                    m.borrow_mut().insert(store_key.clone(), cur);
+                });
+                crate::host::redraw();
+            }
+        })
+    };
+
+    let key_lookup: Vec<(String, Value)> = items
+        .iter()
+        .map(|item| {
+            let k = key_of(item);
+            (crate::value::key_text(&k), k)
+        })
+        .collect();
+    let cli_select = {
+        let lookup = key_lookup.clone();
+        let select_key = Rc::clone(&select_key);
+        Rc::new(move |text: &str| {
+            let wanted = text.trim();
+            if let Some((_, k)) = lookup.iter().find(|(kt, _)| kt == wanted) {
+                select_key(k.clone());
+                true
+            } else {
+                false
+            }
+        })
+    };
+    let cli_edit = {
+        let lookup = key_lookup;
+        let toggle_expand = Rc::clone(&toggle_expand);
+        Rc::new(move |text: String| {
+            let wanted = text.trim();
+            if let Some((_, k)) = lookup.iter().find(|(kt, _)| kt == wanted) {
+                toggle_expand(k.clone());
+            }
+        })
+    };
+    let cli_activate = action.as_ref().map(|act| {
+        let act = Rc::clone(act);
+        let c = c.clone();
+        Rc::new(move |_: &mut App| act(&c)) as Press
+    });
+
+    c.list(Control {
+        target: c.target(id),
+        window: c.win().id.clone(),
+        role: "tree_view",
+        label: props.label,
+        value: selected_val.as_ref().map(crate::value::key_text),
+        enabled: c.enabled(),
+        actions: Actions {
+            activate: cli_activate,
+            select: Some(cli_select),
+            edit: Some(cli_edit),
+            ..Actions::default()
+        },
+    });
+
+    let hover = c.color("hover.overlay");
+    let selected_bg = c.color("selection.background");
+    let selected_text = selected_val.as_ref().map(crate::value::key_text);
+    let mut rows_els: Vec<El> = Vec::with_capacity(flat.len());
+    for entry in flat {
+        let is_selected = selected_text.as_deref() == Some(entry.key_text.as_str());
+        let row_ctx = c.with_key(entry.key_text.clone());
+        let content = row(&row_ctx, items[entry.idx].clone());
+        let chevron: El = if entry.has_children {
+            let k_toggle = entry.key.clone();
+            let toggle = Rc::clone(&toggle_expand);
+            div()
+                .id(c.element_id(&format!("{id}.toggle.{}", entry.key_text)))
+                .flex()
+                .flex_none()
+                .items_center()
+                .justify_center()
+                .size(px(20.0))
+                .rounded(px(4.0))
+                .hover(move |s| s.bg(hover))
+                .child(icons::icon(
+                    if entry.open {
+                        "chevron.down"
+                    } else {
+                        "chevron.right"
+                    },
+                    12.0,
+                    c.color("icon.secondary"),
+                ))
+                .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+                    cx.stop_propagation();
+                    toggle(k_toggle.clone());
+                })
+                .into_any_element()
+        } else {
+            div().flex_none().size(px(20.0)).into_any_element()
+        };
+        let k_sel = entry.key.clone();
+        let select = Rc::clone(&select_key);
+        let row_act = action.clone();
+        let c_act = c.clone();
+        let mut row_div = div()
+            .id(c.element_id(&format!("{id}.row.{}", entry.key_text)))
+            .flex()
+            .flex_row()
+            .items_center()
+            .w_full()
+            .min_h(px(30.0))
+            .pl(px(8.0 + entry.depth as f32 * 18.0))
+            .pr(px(8.0))
+            .py(px(4.0))
+            .gap(px(6.0))
+            .rounded(px(6.0))
+            .child(chevron)
+            .child(div().flex_1().min_w(px(0.0)).child(content))
+            .on_mouse_down(MouseButton::Left, move |event: &MouseDownEvent, _, cx| {
+                cx.stop_propagation();
+                select(k_sel.clone());
+                if event.click_count >= 2
+                    && let Some(act) = &row_act
+                {
+                    act(&c_act);
+                }
+            });
+        row_div = if is_selected {
+            row_div.bg(selected_bg)
+        } else {
+            row_div.hover(move |s| s.bg(hover))
+        };
+        rows_els.push(row_div.into_any_element());
+    }
+    div()
+        .flex()
+        .flex_col()
+        .w_full()
+        .gap(px(2.0))
+        .children(rows_els)
+        .into_any_element()
+}
+
+pub struct SplitPaneProps {
+    pub id: Option<&'static str>,
+    pub vertical: bool,
+    pub ratio: Option<Field>,
+    pub min_first: f32,
+    pub min_second: f32,
+}
+
+/// `SplitPane`: resizable two-pane split container with draggable divider.
+pub fn split_pane(c: &Ctx, key: &'static str, props: SplitPaneProps, first: El, second: El) -> El {
+    let store_key = c.key(props.id.unwrap_or(key));
+    let clamp_ratio = |raw: f64, total: f64| -> f64 {
+        let mut r = if raw.is_finite() { raw } else { 0.5 };
+        let mut lo = 0.05_f64;
+        let mut hi = 0.95_f64;
+        let min_a = f64::from(props.min_first.max(0.0));
+        let min_b = f64::from(props.min_second.max(0.0));
+        if total > min_a + min_b && total > 0.0 {
+            lo = lo.max(min_a / total);
+            hi = hi.min(1.0 - min_b / total);
+        }
+        r = r.clamp(lo, hi);
+        r
+    };
+    let current = match props.ratio {
+        Some(f) => clamp_ratio(crate::value::as_f64(&c.read(f)), 0.0),
+        None => clamp_ratio(
+            SPLIT_RATIO.with(|m| m.borrow().get(&store_key).copied().unwrap_or(0.5)),
+            0.0,
+        ),
+    };
+    let write_ratio: Rc<dyn Fn(f64)> = {
+        let c = c.clone();
+        let store_key = store_key.clone();
+        let field = props.ratio;
+        Rc::new(move |next: f64| {
+            if let Some(f) = field {
+                c.write(f, Value::Float(next));
+            } else {
+                SPLIT_RATIO.with(|m| {
+                    m.borrow_mut().insert(store_key.clone(), next);
+                });
+                crate::host::redraw();
+            }
+        })
+    };
+    if let Some(id) = props.id {
+        let write_cli = Rc::clone(&write_ratio);
+        let min_first = props.min_first;
+        let min_second = props.min_second;
+        c.list(Control {
+            target: c.target(id),
+            window: c.win().id.clone(),
+            role: "split_pane",
+            label: id.to_string(),
+            value: Some(format!("{current:.4}")),
+            enabled: c.enabled(),
+            actions: Actions {
+                set_number: Some(Rc::new(move |v| {
+                    if v.is_finite() {
+                        let _ = (min_first, min_second);
+                        write_cli(v.clamp(0.05, 0.95));
+                    }
+                })),
+                ..Actions::default()
+            },
+        });
+    }
+
+    let bounds = Rc::new(Cell::new(Bounds::<Pixels>::default()));
+    let dragging = Rc::new(Cell::new(false));
+    let measured = Rc::clone(&bounds);
+    let drag_down = Rc::clone(&dragging);
+    let drag_move = Rc::clone(&dragging);
+    let drag_up = Rc::clone(&dragging);
+    let drag_up_out = Rc::clone(&dragging);
+    let bounds_move = Rc::clone(&bounds);
+    let write_move = Rc::clone(&write_ratio);
+    let vertical = props.vertical;
+    let min_first = props.min_first;
+    let min_second = props.min_second;
+
+    let ratio_at = move |pos: gpui::Point<Pixels>, b: Bounds<Pixels>| -> f64 {
+        let total = if vertical {
+            f64::from(b.size.height)
+        } else {
+            f64::from(b.size.width)
+        };
+        if total <= 1.0 {
+            return current;
+        }
+        let offset = if vertical {
+            f64::from(pos.y - b.origin.y)
+        } else {
+            f64::from(pos.x - b.origin.x)
+        };
+        let min_a = f64::from(min_first.max(0.0));
+        let min_b = f64::from(min_second.max(0.0));
+        let (lo, hi) = if total > min_a + min_b {
+            ((min_a / total).max(0.05), (1.0 - min_b / total).min(0.95))
+        } else {
+            (0.05, 0.95)
+        };
+        (offset / total).clamp(lo, hi)
+    };
+
+    let sep = c.color("separator");
+    let accent = c.color("accent");
+    let handle = div()
+        .id(c.element_id(&format!("{key}.handle")))
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .when(vertical, |el| el.w_full().h(px(8.0)))
+        .when(!vertical, |el| el.h_full().w(px(8.0)))
+        .child(
+            div()
+                .bg(sep)
+                .when(vertical, |el| el.w_full().h(px(1.0)))
+                .when(!vertical, |el| el.h_full().w(px(1.0))),
+        )
+        .hover(move |s| s.bg(gpui::Rgba { a: 0.14, ..accent }))
+        .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+            cx.stop_propagation();
+            drag_down.set(true);
+        });
+
+    let pane_a = div()
+        .flex()
+        .flex_col()
+        .flex_none()
+        .overflow_hidden()
+        .when(vertical, |el| {
+            el.w_full()
+                .h(relative(current as f32))
+                .min_h(px(props.min_first.max(0.0)))
+        })
+        .when(!vertical, |el| {
+            el.h_full()
+                .w(relative(current as f32))
+                .min_w(px(props.min_first.max(0.0)))
+        })
+        .child(first);
+
+    let pane_b = div()
+        .flex()
+        .flex_col()
+        .flex_1()
+        .min_w(px(if vertical {
+            0.0
+        } else {
+            props.min_second.max(0.0)
+        }))
+        .min_h(px(if vertical {
+            props.min_second.max(0.0)
+        } else {
+            0.0
+        }))
+        .overflow_hidden()
+        .child(second);
+
+    div()
+        .id(c.element_id(key))
+        .relative()
+        .flex()
+        .when(vertical, |el| el.flex_col())
+        .when(!vertical, |el| el.flex_row())
+        .size_full()
+        .min_w(px(0.0))
+        .min_h(px(0.0))
+        .child(
+            canvas(move |b, _, _| measured.set(b), |_, _, _, _| {})
+                .absolute()
+                .size_full(),
+        )
+        .child(pane_a)
+        .child(handle)
+        .child(pane_b)
+        .on_mouse_move(move |event: &MouseMoveEvent, _, _| {
+            if drag_move.get() && event.pressed_button == Some(MouseButton::Left) {
+                write_move(ratio_at(event.position, bounds_move.get()));
+            }
+        })
+        .on_mouse_up(MouseButton::Left, move |_: &MouseUpEvent, _, _| {
+            drag_up.set(false);
+        })
+        .on_mouse_up_out(MouseButton::Left, move |_: &MouseUpEvent, _, _| {
+            drag_up_out.set(false);
+        })
+        .into_any_element()
+}
+
+pub struct ReorderableProps {
+    pub label: String,
+    pub key_field: usize,
+    pub from: Field,
+    pub to: Field,
+}
+
+/// `Reorderable`: reorderable vertical list with move up/down buttons and CLI `edit("from:to")`.
+pub fn reorderable(
+    c: &Ctx,
+    id: &'static str,
+    props: ReorderableProps,
+    items: Vec<Value>,
+    row: &dyn Fn(&Ctx, Value) -> El,
+    on_move: Option<Act>,
+) -> El {
+    let count = items.len();
+    let commit_move: Rc<dyn Fn(usize, usize)> = {
+        let c = c.clone();
+        let from = props.from;
+        let to = props.to;
+        let on_move = on_move.clone();
+        Rc::new(move |src: usize, dst: usize| {
+            if src >= count || dst >= count || src == dst {
+                return;
+            }
+            c.write(from, Value::Int(src as i64));
+            c.write(to, Value::Int(dst as i64));
+            if let Some(act) = &on_move {
+                act(&c);
+            }
+        })
+    };
+    let cli_edit = {
+        let commit = Rc::clone(&commit_move);
+        Rc::new(move |text: String| {
+            let trimmed = text.trim();
+            let parts: Vec<&str> = trimmed
+                .split(|ch: char| ch == ':' || ch == ',' || ch == '-' || ch == '>')
+                .filter(|s| !s.is_empty())
+                .collect();
+            if parts.len() == 2
+                && let (Ok(src), Ok(dst)) = (parts[0].trim().parse(), parts[1].trim().parse())
+            {
+                commit(src, dst);
+            }
+        })
+    };
+    c.list(Control {
+        target: c.target(id),
+        window: c.win().id.clone(),
+        role: "reorderable",
+        label: props.label,
+        value: Some(count.to_string()),
+        enabled: c.enabled(),
+        actions: Actions {
+            edit: Some(cli_edit),
+            ..Actions::default()
+        },
+    });
+
+    let hover = c.color("hover.overlay");
+    let mut rows_els: Vec<El> = Vec::with_capacity(count);
+    for (idx, item) in items.into_iter().enumerate() {
+        let kt = crate::value::key_text(&crate::value::at(item.clone(), &[props.key_field]));
+        let row_ctx = c.with_key(kt.clone());
+        let content = row(&row_ctx, item);
+        let can_up = idx > 0;
+        let can_down = idx + 1 < count;
+        let commit_up = Rc::clone(&commit_move);
+        let commit_down = Rc::clone(&commit_move);
+        let up_btn = div()
+            .id(c.element_id(&format!("{id}.up.{kt}")))
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_center()
+            .size(px(24.0))
+            .rounded(px(5.0))
+            .child(icons::icon("chevron.up", 12.0, c.color("icon.secondary")))
+            .when(can_up, |el| {
+                el.hover(move |s| s.bg(hover)).on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    commit_up(idx, idx - 1);
+                })
+            })
+            .when(!can_up, |el| el.opacity(0.35));
+        let down_btn = div()
+            .id(c.element_id(&format!("{id}.down.{kt}")))
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_center()
+            .size(px(24.0))
+            .rounded(px(5.0))
+            .child(icons::icon("chevron.down", 12.0, c.color("icon.secondary")))
+            .when(can_down, |el| {
+                el.hover(move |s| s.bg(hover)).on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    commit_down(idx, idx + 1);
+                })
+            })
+            .when(!can_down, |el| el.opacity(0.35));
+        rows_els.push(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .w_full()
+                .px(px(10.0))
+                .py(px(6.0))
+                .gap(px(8.0))
+                .rounded(px(8.0))
+                .border_1()
+                .border_color(c.color("control.border"))
+                .bg(c.color("surface.panel"))
+                .child(icons::icon(
+                    "chevron.up.chevron.down",
+                    13.0,
+                    c.color("icon.secondary"),
+                ))
+                .child(div().flex_1().min_w(px(0.0)).child(content))
+                .child(
+                    div()
+                        .flex()
+                        .flex_row()
+                        .gap(px(2.0))
+                        .child(up_btn)
+                        .child(down_btn),
+                )
+                .into_any_element(),
+        );
+    }
+    div()
+        .flex()
+        .flex_col()
+        .w_full()
+        .gap(px(4.0))
+        .children(rows_els)
+        .into_any_element()
+}
+
+pub struct BottomSheetProps {
+    pub detents: &'static str,
+    pub drag_indicator: bool,
+}
+
+/// `BottomSheet`: bottom-anchored overlay sheet over a dimmed scrim.
+pub fn bottom_sheet(
+    c: &Ctx,
+    props: BottomSheetProps,
+    children: Vec<El>,
+    dismiss: Option<Act>,
+) -> El {
+    let window_width = c.win().width.get();
+    let window_height = c.win().height.get();
+    let top = c.win().title_bar.get();
+    let inset = c.win().inset.get();
+    let max_h = match props.detents {
+        "medium" => (window_height * 0.55).max(180.0),
+        _ => (window_height * 0.88).max(240.0),
+    };
+    let mut sheet = div()
+        .id("bern-bottom-sheet")
+        .occlude()
+        .flex()
+        .flex_col()
+        .gap(px(10.0))
+        .w(px(640.0_f32.min(window_width.max(240.0))))
+        .max_h(px(max_h))
+        .px(px(18.0))
+        .pt(px(10.0))
+        .pb(px(20.0))
+        .rounded_t(px(18.0))
+        .border_t_1()
+        .border_l_1()
+        .border_r_1()
+        .border_color(c.slot("dialog", "open", "border"))
+        .bg(c.slot("dialog", "open", "background"))
+        .text_color(c.slot("dialog", "open", "foreground"))
+        .shadow_lg()
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
+    if props.drag_indicator {
+        sheet = sheet.child(
+            div().flex().justify_center().w_full().pb(px(4.0)).child(
+                div()
+                    .w(px(36.0))
+                    .h(px(4.0))
+                    .rounded_full()
+                    .bg(c.color("control.border")),
+            ),
+        );
+    }
+    sheet = sheet.children(children);
+
+    let c_dismiss = c.clone();
+    let mut scrim = div()
+        .id("bern-bottom-sheet-scrim")
+        .w(px(window_width))
+        .h(px(window_height + top))
+        .pt(px(top))
+        .flex()
+        .items_end()
+        .justify_center()
+        .bg(c.slot("dialog", "open", "scrim"))
+        .child(sheet);
+    if let Some(on_dismiss) = dismiss {
+        scrim = scrim.on_mouse_down(MouseButton::Left, move |_, _, _| on_dismiss(&c_dismiss));
+    }
+    deferred(
+        anchored()
+            .position_mode(gpui::AnchoredPositionMode::Window)
+            .position(point(px(inset), px(inset)))
+            .child(scrim),
+    )
+    .with_priority(3)
+    .into_any_element()
+}
+
+/// `Refreshable`: wraps scrollable content with a refresh indicator and CLI activate trigger.
+pub fn refreshable(
+    c: &Ctx,
+    id: &'static str,
+    refreshing: bool,
+    child: El,
+    on_refresh: Option<Act>,
+) -> El {
+    let cli_activate = on_refresh.map(|act| {
+        let c = c.clone();
+        Rc::new(move |_: &mut App| act(&c)) as Press
+    });
+    c.list(Control {
+        target: c.target(id),
+        window: c.win().id.clone(),
+        role: "refreshable",
+        label: id.to_string(),
+        value: Some(if refreshing { "true" } else { "false" }.to_string()),
+        enabled: c.enabled(),
+        actions: Actions {
+            activate: cli_activate,
+            ..Actions::default()
+        },
+    });
+    let mut col = div().flex().flex_col().w_full().min_w(px(0.0));
+    if refreshing {
+        col = col.child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .justify_center()
+                .w_full()
+                .py(px(6.0))
+                .gap(px(6.0))
+                .child(icons::icon("arrow.clockwise", 14.0, c.color("accent"))),
+        );
+    }
+    col.child(child).into_any_element()
 }

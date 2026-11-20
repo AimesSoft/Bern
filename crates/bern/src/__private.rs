@@ -57,6 +57,8 @@ pub fn bool_field(_: &SessionField<bool>) {}
 
 pub fn number_field(_: &SessionField<f64>) {}
 
+pub fn int_field(_: &SessionField<i64>) {}
+
 pub fn optional_number_field(_: &SessionField<Option<f64>>) {}
 
 pub fn file_field<T: FileValue>(_: &SessionField<T>) {}
@@ -92,6 +94,8 @@ pub fn list_item<T: BernValue, L: Readable<Vec<T>>>(_: &L) -> T::Ref {
 }
 
 pub fn key<K: ListKey>(_: &K) {}
+
+pub fn parent_key<K: ParentKey>(_: &K) {}
 
 pub fn same_type<T>(_: &T, _: &T) {}
 

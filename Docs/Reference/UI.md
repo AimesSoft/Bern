@@ -504,3 +504,11 @@ Grid(min_width: 160, gap: 16, skeleton: app.loading, skeleton_count: 6) {
 - **`EmptyState(title:, message:, icon:) { … }`** renders a centered placeholder with native empty-view styling (`ContentUnavailableView` on Apple platforms, `adw::StatusPage` on GTK, centered icon/title/message/actions elsewhere).
 - **`Badge(content:, tone:, icon:)`** renders a compact inline status pill (`neutral`, `accent`, `success`, `warning`, `error`).
 - **`Avatar(source:, label:, size:, shape:)`** renders a `circle` or `rounded` avatar showing a bundled or runtime image with automatic initials fallback (`adw::Avatar` on GTK, clipped native image + initials elsewhere).
+
+## Trees, resizable panes, reordering, bottom sheets and pull-to-refresh
+
+- **`TreeView(id:, label:, items:, key:, parent:, selection:, expanded:) |item| { … } => action`** displays a flat parent-linked record list as a collapsible hierarchy with native disclosure chevrons, keyboard navigation, and optional selection/expansion state synced to session fields.
+- **`SplitPane(id:, axis:, ratio:, min_first:, min_second:) { first second }`** arranges two panes side-by-side (`horizontal`) or stacked (`vertical`) with a draggable splitter (`gtk::Paned` on GTK, draggable native divider on SwiftUI, WinUI 3, Compose, Web and GPUI) bound to a `0..1` ratio draft.
+- **`Reorderable(id:, label:, items:, key:, move_from:, move_to:) |item| { … } => action`** renders a list whose items can be reordered by dragging or via accessible move-up/move-down buttons, writing the zero-based `move_from` and `move_to` indices before invoking the bound engine command.
+- **`BottomSheet(detents:, drag_indicator:) { … } => dismiss`** presents a native bottom-anchored modal sheet (`sheet` + `.presentationDetents` on SwiftUI, `adw::Dialog` bottom sheet on GTK, Material 3 `ModalBottomSheet` on Compose, bottom Fluent overlay on WinUI 3, `<dialog>` on Web, deferred bottom overlay on GPUI) whenever mounted inside an `if` branch.
+- **`Refreshable(id:, refreshing:) { child } => refresh`** wraps scrollable content with native pull-to-refresh (`.refreshable` on SwiftUI, Material 3 `PullToRefreshBox` on Compose, touch pull + busy indicator on Web, and top refresh indicator + CLI `activate` across desktop targets).

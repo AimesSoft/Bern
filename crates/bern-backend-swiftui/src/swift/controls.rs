@@ -1194,6 +1194,145 @@ impl Generator<'_> {
         ));
     }
 
+    pub(super) fn tree_view(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let (
+            Some(items_expr),
+            Some(template),
+            Some(Prop::Key { name: key_name, .. }),
+            Some(Prop::Key {
+                name: parent_name, ..
+            }),
+        ) = (
+            element.expr("items"),
+            &element.template,
+            element.prop("key"),
+            element.prop("parent"),
+        )
+        else {
+            return;
+        };
+        let label = self.text_prop(element, "label").unwrap_or_default();
+        let items = self.expr(items_expr);
+        let key_prop = member(key_name);
+        let parent_prop = member(parent_name);
+        let var = member(&template.var);
+        let selection = match self.field(element, "selection") {
+            Some(field) => format!("SwiftUI.Binding(get: {{ {field} }}, set: {{ {field} = $0 }})"),
+            None => "nil".into(),
+        };
+        let expanded = match self.field(element, "expanded") {
+            Some(field) => format!("SwiftUI.Binding(get: {{ {field} }}, set: {{ {field} = $0 }})"),
+            None => "nil".into(),
+        };
+        let on_activate = element
+            .action
+            .as_ref()
+            .map(|a| format!("{{ {} }}", self.action(a)))
+            .unwrap_or_else(|| "nil".into());
+        out.open(format!(
+            "BernTreeView(target: {}, label: {label}, entries: ({items}).map {{ BernTreeEntry(item: $0, key: $0.{key_prop}, parent: $0.{parent_prop}) }}, selection: {selection}, externalExpanded: {expanded}, onActivate: {on_activate}, keyToString: {{ String(describing: $0) }}) {{ {var} in",
+            self.target(element, ctx)
+        ));
+        self.nodes(out, &element.children, ctx);
+        out.close("}");
+    }
+
+    pub(super) fn split_pane(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        if element.children.len() < 2 {
+            return;
+        }
+        let target = element
+            .id
+            .as_ref()
+            .map(|_| self.target(element, ctx))
+            .unwrap_or_else(|| "nil".into());
+        let vertical = element.keyword("axis") == Some("vertical");
+        let ratio = match self.field(element, "ratio") {
+            Some(field) => format!("SwiftUI.Binding(get: {{ {field} }}, set: {{ {field} = $0 }})"),
+            None => "nil".into(),
+        };
+        let min_first = self
+            .length(element, "min_first")
+            .unwrap_or_else(|| "120.0".into());
+        let min_second = self
+            .length(element, "min_second")
+            .unwrap_or_else(|| "120.0".into());
+        out.open(format!(
+            "BernSplitPane(target: {target}, vertical: {vertical}, externalRatio: {ratio}, minFirst: CGFloat({min_first}), minSecond: CGFloat({min_second})) {{"
+        ));
+        self.node(out, &element.children[0], ctx);
+        out.close("} second: {");
+        out.indent += 1;
+        self.node(out, &element.children[1], ctx);
+        out.close("}");
+    }
+
+    pub(super) fn reorderable(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let (
+            Some(items_expr),
+            Some(template),
+            Some(Prop::Key { name: key_name, .. }),
+            Some(from_field),
+            Some(to_field),
+            Some(action),
+        ) = (
+            element.expr("items"),
+            &element.template,
+            element.prop("key"),
+            self.field(element, "move_from"),
+            self.field(element, "move_to"),
+            &element.action,
+        )
+        else {
+            return;
+        };
+        let label = self.text_prop(element, "label").unwrap_or_default();
+        let items = self.expr(items_expr);
+        let key_prop = member(key_name);
+        let var = member(&template.var);
+        let act = self.action(action);
+        out.open(format!(
+            "BernReorderable(target: {}, label: {label}, items: {items}, keyOf: {{ $0.{key_prop} }}, onMove: {{ fromIndex, toIndex in {from_field} = fromIndex; {to_field} = toIndex; {act} }}) {{ {var} in",
+            self.target(element, ctx)
+        ));
+        self.nodes(out, &element.children, ctx);
+        out.close("}");
+    }
+
+    pub(super) fn bottom_sheet(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let detents = element.keyword("detents").unwrap_or("medium");
+        let drag_indicator = element.keyword("drag_indicator") != Some("false");
+        let on_dismiss = element
+            .action
+            .as_ref()
+            .map(|a| format!("{{ {} }}", self.action(a)))
+            .unwrap_or_else(|| "nil".into());
+        out.open(format!(
+            "BernBottomSheet(detents: {}, dragIndicator: {drag_indicator}, onDismiss: {on_dismiss}) {{",
+            string(detents)
+        ));
+        self.nodes(out, &element.children, ctx);
+        out.close("}");
+    }
+
+    pub(super) fn refreshable(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let refreshing = element
+            .expr("refreshing")
+            .map(|e| self.expr(e))
+            .unwrap_or_else(|| "false".into());
+        let act = element
+            .action
+            .as_ref()
+            .map(|a| self.action(a))
+            .unwrap_or_default();
+        out.open(format!(
+            "BernRefreshable(target: {}, refreshing: {refreshing}, onRefresh: {{ {act} }}) {{",
+            self.target(element, ctx)
+        ));
+        self.nodes(out, &element.children, ctx);
+        out.close("}");
+    }
+
     pub(super) fn alert(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         let title = self.text_prop(element, "title").unwrap_or_default();
         let message = self

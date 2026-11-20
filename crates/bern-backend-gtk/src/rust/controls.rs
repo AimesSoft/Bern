@@ -541,6 +541,114 @@ impl Generator<'_> {
             ");",
         );
     }
+
+    pub(super) fn tree_view(&self, out: &mut Out, element: &Element) {
+        let (
+            Some(items),
+            Some(template),
+            Some(Prop::Key { field: key_idx, .. }),
+            Some(Prop::Key {
+                field: parent_idx, ..
+            }),
+        ) = (
+            element.expr("items"),
+            &element.template,
+            element.prop("key"),
+            element.prop("parent"),
+        )
+        else {
+            return;
+        };
+        self.children(
+            out,
+            &format!(
+                "b::TreeView(p, c, b::TreeViewProps {{ id: {}, label: {}, items: {}, key: {key_idx}, parent: {parent_idx}, var: {}, selection: {}, expanded: {}, action: {} }}, ",
+                self.id(element),
+                some(self.text_prop(element, "label")),
+                self.getter(items),
+                string(&template.var),
+                some(self.field(element, "selection")),
+                some(self.field(element, "expanded")),
+                self.action(element),
+            ),
+            &element.children,
+            ");",
+        );
+    }
+
+    pub(super) fn split_pane(&self, out: &mut Out, element: &Element) {
+        if element.children.len() < 2 {
+            return;
+        }
+        out.open(format!(
+            "b::SplitPane(p, c, b::SplitPaneProps {{ id: {}, vertical: {}, ratio: {}, min_first: {}, min_second: {} }}, b::build(|p, c| {{",
+            some(element.id.as_deref().map(string)),
+            element.keyword("axis") == Some("vertical"),
+            some(self.field(element, "ratio")),
+            some(self.num(element, "min_first")),
+            some(self.num(element, "min_second")),
+        ));
+        self.node(out, &element.children[0]);
+        out.close("}), b::build(|p, c| {");
+        out.indent += 1;
+        self.node(out, &element.children[1]);
+        out.close("}));");
+    }
+
+    pub(super) fn reorderable(&self, out: &mut Out, element: &Element) {
+        let (Some(items), Some(template), Some(Prop::Key { field: key_idx, .. })) = (
+            element.expr("items"),
+            &element.template,
+            element.prop("key"),
+        ) else {
+            return;
+        };
+        self.children(
+            out,
+            &format!(
+                "b::Reorderable(p, c, b::ReorderableProps {{ id: {}, label: {}, items: {}, key: {key_idx}, var: {}, from: {}, to: {}, action: {} }}, ",
+                self.id(element),
+                some(self.text_prop(element, "label")),
+                self.getter(items),
+                string(&template.var),
+                self.field(element, "move_from")
+                    .unwrap_or_else(|| "b::Field { session: 0, field: 0 }".into()),
+                self.field(element, "move_to")
+                    .unwrap_or_else(|| "b::Field { session: 0, field: 0 }".into()),
+                self.action(element),
+            ),
+            &element.children,
+            ");",
+        );
+    }
+
+    pub(super) fn bottom_sheet(&self, out: &mut Out, element: &Element) {
+        self.children(
+            out,
+            &format!(
+                "b::BottomSheet(p, c, b::BottomSheetProps {{ detents: {}, drag_indicator: {}, dismiss: {} }}, ",
+                some(element.keyword("detents").map(string)),
+                element.keyword("drag_indicator") != Some("false"),
+                self.action(element),
+            ),
+            &element.children,
+            ");",
+        );
+    }
+
+    pub(super) fn refreshable(&self, out: &mut Out, element: &Element) {
+        self.children(
+            out,
+            &format!(
+                "b::Refreshable(p, c, b::RefreshableProps {{ id: {}, refreshing: {}, action: {} }}, ",
+                self.id(element),
+                some(element.expr("refreshing").map(|e| self.getter(e))),
+                self.action(element),
+            ),
+            &element.children,
+            ");",
+        );
+    }
 }
 
 impl Generator<'_> {

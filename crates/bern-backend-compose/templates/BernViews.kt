@@ -96,12 +96,18 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.TimePicker
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.rememberTimePickerState
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.PlainTooltip
@@ -3443,6 +3449,387 @@ fun BernAvatar(
         } else if (!url.isNullOrEmpty()) {
             BernImageURL(url, null, size, size, ContentScale.Crop)
         }
+    }
+}
+
+data class BernTreeEntry<T, K>(val item: T, val key: K, val parent: K?)
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun <T, K> BernTreeView(
+    target: String,
+    label: String,
+    entries: List<BernTreeEntry<T, K>>,
+    selectedKey: K?,
+    onSelect: ((K) -> Unit)?,
+    externalExpanded: List<K>?,
+    onExpandedChange: ((List<K>) -> Unit)?,
+    onActivate: (() -> Unit)?,
+    keyToString: (K) -> String,
+    row: @Composable RowScope.(T) -> Unit,
+) {
+    var localExpanded by remember { mutableStateOf<List<K>>(emptyList()) }
+    val expandedList = externalExpanded ?: localExpanded
+    val setExpanded: (K, Boolean) -> Unit = { key, open ->
+        val next = if (open) {
+            if (expandedList.contains(key)) expandedList else expandedList + key
+        } else {
+            expandedList.filterNot { it == key }
+        }
+        if (onExpandedChange != null) onExpandedChange(next) else localExpanded = next
+    }
+
+    val known = remember(entries) { entries.map { it.key }.toSet() }
+    val childrenMap = remember(entries) {
+        val map = LinkedHashMap<K, MutableList<BernTreeEntry<T, K>>>()
+        for (e in entries) {
+            val p = e.parent
+            if (p != null && known.contains(p) && p != e.key) {
+                map.getOrPut(p) { mutableListOf() }.add(e)
+            }
+        }
+        map
+    }
+    val roots = remember(entries) {
+        entries.filter { e ->
+            val p = e.parent
+            p == null || !known.contains(p) || p == e.key
+        }
+    }
+    data class FlatRow<T, K>(val entry: BernTreeEntry<T, K>, val depth: Int, val hasChildren: Boolean, val isOpen: Boolean)
+    val visible = remember(entries, expandedList) {
+        val expSet = expandedList.toSet()
+        val out = mutableListOf<FlatRow<T, K>>()
+        val visited = HashSet<K>()
+        fun visit(list: List<BernTreeEntry<T, K>>, depth: Int) {
+            for (e in list) {
+                if (!visited.add(e.key)) continue
+                val kids = childrenMap[e.key].orEmpty()
+                val isOpen = expSet.contains(e.key)
+                out.add(FlatRow(e, depth, kids.isNotEmpty(), isOpen))
+                if (kids.isNotEmpty() && isOpen) visit(kids, depth + 1)
+            }
+        }
+        visit(roots, 0)
+        out
+    }
+
+    BernControl(
+        target,
+        "tree_view",
+        label,
+        actions = BernControlActions(
+            activate = onActivate,
+            edit = { cmd ->
+                val idx = cmd.indexOf(':')
+                if (idx > 0) {
+                    val op = cmd.substring(0, idx).trim().lowercase()
+                    val wanted = cmd.substring(idx + 1).trim()
+                    val hit = entries.firstOrNull { keyToString(it.key) == wanted }
+                    if (hit != null) {
+                        when (op) {
+                            "expand" -> setExpanded(hit.key, true)
+                            "collapse" -> setExpanded(hit.key, false)
+                            "toggle" -> setExpanded(hit.key, !expandedList.contains(hit.key))
+                        }
+                    }
+                }
+            },
+            select = { wanted ->
+                val hit = entries.firstOrNull { keyToString(it.key) == wanted }
+                if (hit != null) {
+                    onSelect?.invoke(hit.key)
+                    true
+                } else {
+                    false
+                }
+            },
+            value = { selectedKey?.let(keyToString) },
+        ),
+    )
+
+    val accent = bernPalette().role("accent")
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics { contentDescription = label },
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        for (item in visible) {
+            val isSel = selectedKey != null && selectedKey == item.entry.key
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(if (isSel) accent.copy(alpha = 0.16f) else Color.Transparent)
+                    .combinedClickable(
+                        onClick = { onSelect?.invoke(item.entry.key) },
+                        onDoubleClick = {
+                            onSelect?.invoke(item.entry.key)
+                            onActivate?.invoke()
+                        },
+                    )
+                    .padding(start = (8 + item.depth * 18).dp, end = 8.dp, top = 5.dp, bottom = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                if (item.hasChildren) {
+                    IconButton(
+                        onClick = { setExpanded(item.entry.key, !item.isOpen) },
+                        modifier = Modifier.size(24.dp),
+                    ) {
+                        Icon(
+                            imageVector = if (item.isOpen) Icons.Filled.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                } else {
+                    Spacer(Modifier.size(24.dp))
+                }
+                row(item.entry.item)
+            }
+        }
+    }
+}
+
+@Composable
+fun BernSplitPane(
+    target: String?,
+    vertical: Boolean,
+    externalRatio: Double?,
+    onRatioChange: ((Double) -> Unit)?,
+    minFirst: Dp,
+    minSecond: Dp,
+    first: @Composable () -> Unit,
+    second: @Composable () -> Unit,
+) {
+    var localRatio by remember { mutableStateOf(0.5) }
+    val raw = externalRatio ?: localRatio
+    val ratio = if (raw.isFinite()) raw.coerceIn(0.05, 0.95) else 0.5
+    val writeRatio: (Double) -> Unit = { next ->
+        val clamped = if (next.isFinite()) next.coerceIn(0.05, 0.95) else 0.5
+        if (onRatioChange != null) onRatioChange(clamped) else localRatio = clamped
+    }
+    if (target != null) {
+        BernControl(
+            target,
+            "split_pane",
+            target,
+            actions = BernControlActions(
+                setNumber = { v -> writeRatio(v) },
+                value = { String.format(java.util.Locale.US, "%.3f", ratio) },
+            ),
+        )
+    }
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = if (vertical) (minFirst + minSecond + 8.dp) else 140.dp),
+    ) {
+        val totalDp = if (vertical) maxHeight else maxWidth
+        val usableDp = (totalDp - 8.dp).coerceAtLeast(1.dp)
+        val lo = (minFirst / usableDp).toDouble().coerceIn(0.05, 0.90)
+        val hi = (1.0 - (minSecond / usableDp).toDouble()).coerceIn(lo, 0.95)
+        val frac = ratio.coerceIn(lo, hi).toFloat()
+        val dragMod = Modifier.pointerInput(vertical, usableDp, lo, hi) {
+            detectDragGestures { change, dragAmount ->
+                change.consume()
+                val usablePx = with(this) { usableDp.toPx() }.coerceAtLeast(1f)
+                val delta = if (vertical) dragAmount.y else dragAmount.x
+                writeRatio((ratio + (delta / usablePx).toDouble()).coerceIn(lo, hi))
+            }
+        }
+        if (vertical) {
+            Column(Modifier.fillMaxSize()) {
+                Box(Modifier.fillMaxWidth().weight(frac)) { first() }
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .then(dragMod),
+                    contentAlignment = Alignment.Center,
+                ) { HorizontalDivider() }
+                Box(Modifier.fillMaxWidth().weight(1f - frac)) { second() }
+            }
+        } else {
+            Row(Modifier.fillMaxSize()) {
+                Box(Modifier.fillMaxHeight().weight(frac)) { first() }
+                Box(
+                    Modifier
+                        .fillMaxHeight()
+                        .width(8.dp)
+                        .then(dragMod),
+                    contentAlignment = Alignment.Center,
+                ) { VerticalDivider() }
+                Box(Modifier.fillMaxHeight().weight(1f - frac)) { second() }
+            }
+        }
+    }
+}
+
+@Composable
+fun <T> BernReorderable(
+    target: String,
+    label: String,
+    items: List<T>,
+    onMove: (Long, Long) -> Unit,
+    row: @Composable RowScope.(T) -> Unit,
+) {
+    var draggingIndex by remember { mutableStateOf<Int?>(null) }
+    var dragOffset by remember { mutableStateOf(0f) }
+    val commitMove: (Int, Int) -> Unit = { from, to ->
+        if (from in items.indices && to in items.indices && from != to) {
+            onMove(from.toLong(), to.toLong())
+        }
+    }
+    BernControl(
+        target,
+        "reorderable",
+        label,
+        actions = BernControlActions(
+            edit = { raw ->
+                val parts = raw.trim().replace("->", ":").split(":")
+                if (parts.size == 2) {
+                    val a = parts[0].trim().toIntOrNull()
+                    val b = parts[1].trim().toIntOrNull()
+                    if (a != null && b != null) commitMove(a, b)
+                }
+            },
+            value = { items.size.toString() },
+        ),
+    )
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics { contentDescription = label },
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        items.forEachIndexed { index, item ->
+            val active = draggingIndex == index
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (active) 0.10f else 0.04f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .offset { androidx.compose.ui.unit.IntOffset(0, if (active) dragOffset.toInt() else 0) },
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Menu,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .size(20.dp)
+                            .pointerInput(index, items.size) {
+                                detectVerticalDragGestures(
+                                    onDragStart = {
+                                        draggingIndex = index
+                                        dragOffset = 0f
+                                    },
+                                    onDragEnd = {
+                                        val steps = kotlin.math.round(dragOffset / 100f).toInt()
+                                        val dest = (index + steps).coerceIn(0, (items.size - 1).coerceAtLeast(0))
+                                        draggingIndex = null
+                                        dragOffset = 0f
+                                        commitMove(index, dest)
+                                    },
+                                    onDragCancel = {
+                                        draggingIndex = null
+                                        dragOffset = 0f
+                                    },
+                                    onVerticalDrag = { change, amount ->
+                                        change.consume()
+                                        dragOffset += amount
+                                    },
+                                )
+                            },
+                    )
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        row(item)
+                    }
+                    IconButton(
+                        onClick = { commitMove(index, index - 1) },
+                        enabled = index > 0,
+                        modifier = Modifier.size(28.dp),
+                    ) {
+                        Icon(Icons.Filled.KeyboardArrowUp, contentDescription = null, modifier = Modifier.size(16.dp))
+                    }
+                    IconButton(
+                        onClick = { commitMove(index, index + 1) },
+                        enabled = index + 1 < items.size,
+                        modifier = Modifier.size(28.dp),
+                    ) {
+                        Icon(Icons.Filled.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun BernBottomSheet(
+    detents: String,
+    dragIndicator: Boolean,
+    onDismiss: (() -> Unit)?,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = detents == "large")
+    ModalBottomSheet(
+        onDismissRequest = { onDismiss?.invoke() },
+        sheetState = sheetState,
+        dragHandle = if (dragIndicator) {
+            { BottomSheetDefaults.DragHandle() }
+        } else {
+            null
+        },
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 12.dp)
+                .navigationBarsPadding(),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            content = content,
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun BernRefreshable(
+    target: String,
+    refreshing: Boolean,
+    onRefresh: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    BernControl(
+        target,
+        "refreshable",
+        target,
+        actions = BernControlActions(
+            activate = onRefresh,
+            value = { if (refreshing) "refreshing" else "idle" },
+        ),
+    )
+    PullToRefreshBox(
+        isRefreshing = refreshing,
+        onRefresh = onRefresh,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        content()
     }
 }
 // @bern:wear-skip-end

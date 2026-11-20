@@ -2,7 +2,7 @@
 
 # 内置组件属性表
 
-更新：2026-11-20。本表从 [bern-ir::spec](../../../crates/bern-ir/src/spec.rs) 的当前公共定义导出，共 83 个内置组件。**粗体属性必填**，其余可选；这些是声明规则，目标实现范围见[平台能力表](Platforms.md)，具体使用见[组件用法](UI.md)。
+更新：2026-11-20。本表从 [bern-ir::spec](../../../crates/bern-ir/src/spec.rs) 的当前公共定义导出，共 88 个内置组件。**粗体属性必填**，其余可选；这些是声明规则，目标实现范围见[平台能力表](Platforms.md)，具体使用见[组件用法](UI.md)。
 
 ## 属性类型
 
@@ -30,6 +30,7 @@
 | `TextField` | 可写文本会话字段 |
 | `KeysField` | 可写 `Vec<String>` 或 `Vec<i64>` 会话字段，存行的键 |
 | `BoolField` | 可写布尔会话字段 |
+| `IntField` | 可写整数（`i64`）会话字段 |
 | `NumberField` | 可写浮点会话字段 |
 | `OptionalNumberField` | 可写的 `Option<f64>` 会话字段，由元素写入，所报告的情况结束时清为 `None` |
 | `PickerField` | 可写、变体带标签的枚举会话字段 |
@@ -169,6 +170,11 @@
 | `EmptyState` | **`title: DisplayText`**<br>`message: DisplayText`<br>`icon: Icon` | 可含操作按钮等子节点；无动作；用于空视图与空搜索结果的居中占位 |
 | `Badge` | **`content: DisplayText`**<br>`tone: neutral / accent / success / warning / error`<br>`icon: Icon` | 不含子节点；无动作；紧凑的行内语义状态胶囊 |
 | `Avatar` | `source: ImageResource`<br>**`label: DisplayText`**<br>`size: Length`<br>`shape: circle / rounded` | 不含子节点；无动作；支持图片与首字母回退的圆形或圆角头像 |
+| `TreeView` | **`id: Id`**<br>**`label: DisplayText`**<br>**`items: Items`**<br>**`key: KeyField`**<br>**`parent: KeyField`**<br>`selection: PositionField`<br>`expanded: KeysField`<br>`feature: Feature` | 使用 `\|item\|` 行模板；动作可选（双击或回车触发）；`parent` 指定指向父节点 `key` 的 `Option<Key>` 字段；`selection` 保存当前选中键，`expanded` 保存已展开节点键列表 |
+| `SplitPane` | `id: Id`<br>`axis: horizontal / vertical`<br>`ratio: NumberField`<br>`min_first: Length`<br>`min_second: Length` | 恰好两个子节点；无动作；带可拖动分隔条的双栏容器，`ratio` 绑定前导栏占比（`0..1`） |
+| `Reorderable` | **`id: Id`**<br>**`label: DisplayText`**<br>**`items: Items`**<br>**`key: KeyField`**<br>**`move_from: IntField`**<br>**`move_to: IntField`**<br>`feature: Feature` | 使用 `\|item\|` 行模板；必须绑定动作；拖拽或上下移动时先把零基源/目标索引写入 `move_from`、`move_to`，再触发动作 |
+| `BottomSheet` | `detents: medium / large / both`<br>`drag_indicator: Flag` | 可含子节点；动作可选（关闭时触发）；挂载即弹出原生底部抽屉（通常放在 `if` 条件内） |
+| `Refreshable` | **`id: Id`**<br>`refreshing: Bool`<br>`feature: Feature` | 恰好一个子节点；必须绑定动作；支持下拉刷新（及 CLI `activate`），并在 `refreshing` 为真时显示原生刷新指示器 |
 | `NativeView` | **`id: Id`**<br>**`label: DisplayText`**<br>`swiftui: NativeFile`<br>`winui3: NativeFile`<br>`compose: NativeFile`<br>`gtk: NativeFile`<br>`gpui: NativeFile`<br>`web: NativeFile` | 仅含 ["NativeValue", "NativeText", "NativeDraft", "NativeAction", "NativeNumber", "NativeBool", "NativeInput", "Fallback", "DoubleTap", "ContextMenu", "WheelUp", "WheelDown"]；至少声明一个后端文件且至少声明一个 CLI 功能入口（`NativeAction` / `NativeNumber` / `NativeBool` / `NativeInput`），最多一个 `Fallback`；缺少当前后端文件时渲染 `Fallback`（若无则编译报错） |
 | `NativeValue` | **`name: NativeName`**<br>**`value: NativeScalar`** | 不含子节点；无动作；直接位于 ["NativeView"]；在生成的 `Props` 中暴露强类型只读字段 |
 | `NativeText` | **`name: NativeName`**<br>**`content: DisplayText`** | 不含子节点；无动作；直接位于 ["NativeView"]；把经过 `tr!` 校验的多语言文本传入 `Props` |

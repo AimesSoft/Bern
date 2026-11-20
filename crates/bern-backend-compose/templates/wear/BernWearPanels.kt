@@ -582,3 +582,197 @@ fun BernAvatar(
         }
     }
 }
+
+data class BernTreeEntry<T, K>(val item: T, val key: K, val parent: K?)
+
+@Composable
+fun <T, K> BernTreeView(
+    target: String,
+    label: String,
+    entries: List<BernTreeEntry<T, K>>,
+    selectedKey: K?,
+    onSelect: ((K) -> Unit)?,
+    externalExpanded: List<K>?,
+    onExpandedChange: ((List<K>) -> Unit)?,
+    onActivate: (() -> Unit)?,
+    keyToString: (K) -> String,
+    row: @Composable RowScope.(T) -> Unit,
+) {
+    var localExpanded by remember { mutableStateOf<List<K>>(emptyList()) }
+    val expandedList = externalExpanded ?: localExpanded
+    val setExpanded: (K, Boolean) -> Unit = { key, open ->
+        val next = if (open) {
+            if (expandedList.contains(key)) expandedList else expandedList + key
+        } else {
+            expandedList.filterNot { it == key }
+        }
+        if (onExpandedChange != null) onExpandedChange(next) else localExpanded = next
+    }
+    BernControl(
+        target,
+        "tree_view",
+        label,
+        actions = BernControlActions(
+            activate = onActivate,
+            edit = { cmd ->
+                val idx = cmd.indexOf(':')
+                if (idx > 0) {
+                    val op = cmd.substring(0, idx).trim().lowercase()
+                    val wanted = cmd.substring(idx + 1).trim()
+                    val hit = entries.firstOrNull { keyToString(it.key) == wanted }
+                    if (hit != null) {
+                        when (op) {
+                            "expand" -> setExpanded(hit.key, true)
+                            "collapse" -> setExpanded(hit.key, false)
+                            "toggle" -> setExpanded(hit.key, !expandedList.contains(hit.key))
+                        }
+                    }
+                }
+            },
+            select = { wanted ->
+                val hit = entries.firstOrNull { keyToString(it.key) == wanted }
+                if (hit != null) {
+                    onSelect?.invoke(hit.key)
+                    true
+                } else {
+                    false
+                }
+            },
+            value = { selectedKey?.let(keyToString) },
+        ),
+    )
+    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        for (entry in entries) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        onSelect?.invoke(entry.key)
+                        onActivate?.invoke()
+                    }
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                row(entry.item)
+            }
+        }
+    }
+}
+
+@Composable
+fun BernSplitPane(
+    target: String?,
+    vertical: Boolean,
+    externalRatio: Double?,
+    onRatioChange: ((Double) -> Unit)?,
+    minFirst: Dp,
+    minSecond: Dp,
+    first: @Composable () -> Unit,
+    second: @Composable () -> Unit,
+) {
+    var localRatio by remember { mutableStateOf(0.5) }
+    val ratio = (externalRatio ?: localRatio).coerceIn(0.05, 0.95)
+    if (target != null) {
+        BernControl(
+            target,
+            "split_pane",
+            target,
+            actions = BernControlActions(
+                setNumber = { v ->
+                    val next = v.coerceIn(0.05, 0.95)
+                    if (onRatioChange != null) onRatioChange(next) else localRatio = next
+                },
+                value = { String.format(java.util.Locale.US, "%.3f", ratio) },
+            ),
+        )
+    }
+    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        first()
+        second()
+    }
+}
+
+@Composable
+fun <T> BernReorderable(
+    target: String,
+    label: String,
+    items: List<T>,
+    onMove: (Long, Long) -> Unit,
+    row: @Composable RowScope.(T) -> Unit,
+) {
+    BernControl(
+        target,
+        "reorderable",
+        label,
+        actions = BernControlActions(
+            edit = { raw ->
+                val parts = raw.trim().replace("->", ":").split(":")
+                if (parts.size == 2) {
+                    val a = parts[0].trim().toIntOrNull()
+                    val b = parts[1].trim().toIntOrNull()
+                    if (a != null && b != null && a in items.indices && b in items.indices && a != b) {
+                        onMove(a.toLong(), b.toLong())
+                    }
+                }
+            },
+            value = { items.size.toString() },
+        ),
+    )
+    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        items.forEachIndexed { index, item ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Row(modifier = Modifier.weight(1f)) { row(item) }
+                if (index > 0) {
+                    FilledTonalButton(onClick = { onMove(index.toLong(), (index - 1).toLong()) }) { Text("^") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun BernBottomSheet(
+    detents: String,
+    dragIndicator: Boolean,
+    onDismiss: (() -> Unit)?,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Dialog(onDismissRequest = { onDismiss?.invoke() }) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            content = content,
+        )
+    }
+}
+
+@Composable
+fun BernRefreshable(
+    target: String,
+    refreshing: Boolean,
+    onRefresh: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    BernControl(
+        target,
+        "refreshable",
+        target,
+        actions = BernControlActions(
+            activate = onRefresh,
+            value = { if (refreshing) "refreshing" else "idle" },
+        ),
+    )
+    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (refreshing) {
+            CircularProgressIndicator(modifier = Modifier.size(18.dp))
+        }
+        content()
+    }
+}
