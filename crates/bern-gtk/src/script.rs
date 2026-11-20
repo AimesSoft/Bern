@@ -18,6 +18,10 @@ impl Host {
         manager.connect_script_message_received(Some("bernScript"), |_, value| {
             bern_script::host::complete(&value.to_string());
         });
+        manager.register_script_message_handler("bernScriptCli", None);
+        manager.connect_script_message_received(Some("bernScriptCli"), |_, value| {
+            bern_script::host::cli(&value.to_string());
+        });
         let view = webkit6::WebView::builder()
             .user_content_manager(&manager)
             .build();
@@ -28,7 +32,7 @@ impl Host {
             }
         });
         view.connect_web_process_terminated(|_, _| bern_script::host::stop());
-        view.load_html(&format!("<!doctype html><body><script>function bernScriptComplete(value){{window.webkit.messageHandlers.bernScript.postMessage(value)}}\n{}</script>", bern_script::HOST_RUNTIME), None);
+        view.load_html(&format!("<!doctype html><body><script>function bernScriptComplete(value){{window.webkit.messageHandlers.bernScript.postMessage(value)}}\nfunction bernScriptCli(value){{window.webkit.messageHandlers.bernScriptCli.postMessage(value)}}\n{}</script>", bern_script::HOST_RUNTIME), None);
         self.view = Some(view);
     }
     fn pump(&mut self, now: f64) {

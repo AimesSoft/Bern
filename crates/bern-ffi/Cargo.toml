@@ -14,6 +14,7 @@ bern-protocol.workspace = true
 bern-command.workspace = true
 bern-runtime.workspace = true
 bern-media.workspace = true
+bern-adapter-cli = { workspace = true, default-features = false, features = ["script"] }
 bern-image = { workspace = true, optional = true }
 bern-transport-ipc = { workspace = true, optional = true }
 bern-adapter-json = { workspace = true, optional = true }

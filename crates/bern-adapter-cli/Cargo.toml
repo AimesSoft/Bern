@@ -7,9 +7,20 @@ license.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 
+[features]
+default = ["ipc"]
+ipc = ["dep:bern-transport-ipc"]
+script = ["dep:bern-script", "dep:bern-command", "dep:bern-runtime"]
+
 [dependencies]
 bern-protocol.workspace = true
 bern-media.workspace = true
 bern-adapter-json.workspace = true
-bern-transport-ipc.workspace = true
+bern-transport-ipc = { workspace = true, optional = true }
+bern-script = { workspace = true, optional = true }
+bern-command = { workspace = true, optional = true }
+bern-runtime = { workspace = true, optional = true }
 serde_json.workspace = true
+
+[dev-dependencies]
+bern-adapter-cli = { path = ".", features = ["script"] }

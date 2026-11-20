@@ -102,6 +102,8 @@ pub enum Entry {
     Json,
     /// A WebUI page, in a browser.
     Web,
+    /// A JavaScript context calling the in-process CLI interface.
+    Script,
     Test,
 }
 
@@ -112,6 +114,7 @@ impl Entry {
             Entry::Cli => "cli",
             Entry::Json => "json",
             Entry::Web => "web",
+            Entry::Script => "script",
             Entry::Test => "test",
         }
     }

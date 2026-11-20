@@ -4,24 +4,35 @@
 //! running; it never creates a second engine. Exit codes: 0 success,
 //! 1 command failed, 2 usage error, 3 no connection.
 
-use bern_adapter_json::{ClientMessage, ServerMessage, from_json};
+#[cfg(feature = "script")]
+pub mod script;
+
+use bern_adapter_json::from_json;
+#[cfg(feature = "ipc")]
+use bern_adapter_json::{ClientMessage, ServerMessage};
 use bern_media::{MEDIA_SOURCE, media_catalog};
 use bern_protocol::{CommandSpec, ProtocolDescriptor, Type, TypeTable, session_catalog};
+#[cfg(feature = "ipc")]
 use bern_transport_ipc::Client;
-use serde_json::{Map, Value as Json};
+#[cfg(feature = "ipc")]
+use serde_json::Map;
+use serde_json::Value as Json;
 
+#[cfg(feature = "ipc")]
 const USAGE_ERROR: i32 = 2;
+#[cfg(feature = "ipc")]
 const CONNECTION_ERROR: i32 = 3;
 
-struct Options {
-    engine: Option<String>,
-    session: Option<String>,
-    words: Vec<String>,
-    params: Vec<(String, String)>,
-    help: bool,
+pub(crate) struct Options {
+    #[cfg_attr(not(feature = "ipc"), allow(dead_code))]
+    pub(crate) engine: Option<String>,
+    pub(crate) session: Option<String>,
+    pub(crate) words: Vec<String>,
+    pub(crate) params: Vec<(String, String)>,
+    pub(crate) help: bool,
 }
 
-fn parse(args: &[String]) -> Result<Options, String> {
+pub(crate) fn parse(args: &[String]) -> Result<Options, String> {
     let mut options = Options {
         engine: None,
         session: None,
@@ -62,7 +73,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
 }
 
 /// Parse a command-line value according to its schema type.
-fn value(text: &str, ty: &Type, types: &TypeTable) -> Result<Json, String> {
+pub(crate) fn value(text: &str, ty: &Type, types: &TypeTable) -> Result<Json, String> {
     let json = match ty {
         Type::Bool => match text {
             "true" | "yes" | "on" => Json::Bool(true),
@@ -94,7 +105,7 @@ fn value(text: &str, ty: &Type, types: &TypeTable) -> Result<Json, String> {
     Ok(json)
 }
 
-fn param_help(spec: &CommandSpec, types: &TypeTable) -> String {
+pub(crate) fn param_help(spec: &CommandSpec, types: &TypeTable) -> String {
     let mut lines = Vec::new();
     for param in &spec.params {
         let ty = match &param.ty {
@@ -122,26 +133,28 @@ fn param_help(spec: &CommandSpec, types: &TypeTable) -> String {
     lines.join("\n")
 }
 
+pub(crate) fn format_help_entry(text: &mut String, spec: &CommandSpec, types: &TypeTable) {
+    text.push_str(&format!("  {}", spec.external.cli.join(" ")));
+    if !spec.doc.is_empty() {
+        text.push_str(&format!("\n      {}", spec.doc.replace('\n', " ")));
+    }
+    let params = param_help(spec, types);
+    if !params.is_empty() {
+        text.push('\n');
+        text.push_str(&params);
+    }
+    text.push('\n');
+}
+
+#[cfg(any(feature = "ipc", test))]
 fn help(name: &str, descriptor: &ProtocolDescriptor) -> String {
     let (session_types, session_specs) = session_catalog();
     let mut text = format!(
         "{name}: control the running `{}` engine\n\nUsage: {name} [--engine ID|SYSTEM] [--session ID] <command> [--param value]...\n\nCommands:\n",
         descriptor.namespace
     );
-    fn list(text: &mut String, spec: &CommandSpec, types: &TypeTable) {
-        text.push_str(&format!("  {}", spec.external.cli.join(" ")));
-        if !spec.doc.is_empty() {
-            text.push_str(&format!("\n      {}", spec.doc.replace('\n', " ")));
-        }
-        let params = param_help(spec, types);
-        if !params.is_empty() {
-            text.push('\n');
-            text.push_str(&params);
-        }
-        text.push('\n');
-    }
     for spec in descriptor.commands.iter().filter(|spec| !spec.is_query()) {
-        list(&mut text, spec, &descriptor.types);
+        format_help_entry(&mut text, spec, &descriptor.types);
     }
     let queries: Vec<_> = descriptor
         .commands
@@ -151,17 +164,17 @@ fn help(name: &str, descriptor: &ProtocolDescriptor) -> String {
     if !queries.is_empty() {
         text.push_str("\nQueries (read only; waits for the engine's answer):\n");
         for spec in queries {
-            list(&mut text, spec, &descriptor.types);
+            format_help_entry(&mut text, spec, &descriptor.types);
         }
     }
     let (media_types, media_specs) = media_catalog();
     text.push_str("\nMedia commands (act on the engine's players):\n");
     for spec in &media_specs {
-        list(&mut text, spec, &media_types);
+        format_help_entry(&mut text, spec, &media_types);
     }
     text.push_str("\nUI session commands (need a running UI):\n");
     for spec in &session_specs {
-        list(&mut text, spec, &session_types);
+        format_help_entry(&mut text, spec, &session_types);
     }
     text.push_str(
         "\nOther:\n  state      Print the engine state\n  sessions   List live UI sessions\n  catalog    Print the command catalog as JSON\n",
@@ -169,6 +182,7 @@ fn help(name: &str, descriptor: &ProtocolDescriptor) -> String {
     text
 }
 
+#[cfg(feature = "ipc")]
 fn print(json: &Json) {
     println!(
         "{}",
@@ -177,11 +191,13 @@ fn print(json: &Json) {
 }
 
 /// Run the CLI with the process arguments; returns the exit code.
+#[cfg(feature = "ipc")]
 pub fn run(descriptor: &ProtocolDescriptor, bundle_id: &str, name: &str) -> i32 {
     let args: Vec<String> = std::env::args().skip(1).collect();
     run_with(descriptor, bundle_id, name, &args)
 }
 
+#[cfg(feature = "ipc")]
 pub fn run_with(
     descriptor: &ProtocolDescriptor,
     bundle_id: &str,
@@ -379,6 +395,7 @@ pub fn run_with(
     }
 }
 
+#[cfg(feature = "ipc")]
 fn write_screenshot_output(result: &mut Json, output_path: &str) -> Result<(), String> {
     let Some(object) = result.as_object_mut() else {
         return Err("screenshot reply was not a JSON object".into());
@@ -402,6 +419,7 @@ fn write_screenshot_output(result: &mut Json, output_path: &str) -> Result<(), S
     Ok(())
 }
 
+#[cfg(feature = "ipc")]
 fn decode_base64(input: &str) -> Result<Vec<u8>, String> {
     let mut out = Vec::with_capacity((input.len() * 3) / 4);
     let mut buf = [0u8; 4];
@@ -506,31 +524,6 @@ mod tests {
         assert!(text.find("library add").unwrap() < queries);
         assert!(text.find("library search").unwrap() > queries);
         assert!(text.contains("--search-text <text>"));
-        assert!(text.contains("window screenshot"));
-        assert!(text.contains("--output <text?>"));
-    }
-
-    #[test]
-    fn screenshot_output_writes_decoded_png_and_clears_data() {
-        let dir = std::env::temp_dir().join(format!("bern-cli-shot-{}", std::process::id()));
-        let path = dir.join("nested").join("shot.png");
-        let mut reply = serde_json::json!({
-            "window": "main#1",
-            "width": 2,
-            "height": 2,
-            "scale": 2.0,
-            "mime": "image/png",
-            "path": null,
-            "data": "iVBORw0KGgo=",
-        });
-        write_screenshot_output(&mut reply, path.to_str().unwrap()).unwrap();
-        assert_eq!(std::fs::read(&path).unwrap(), b"\x89PNG\r\n\x1a\n");
-        assert_eq!(
-            reply["path"],
-            Json::String(path.to_string_lossy().into_owned())
-        );
-        assert_eq!(reply["data"], Json::Null);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

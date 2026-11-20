@@ -223,9 +223,13 @@ dependencies = [
 name = "bern-adapter-cli"
 version = "0.2.1"
 dependencies = [
+ "bern-adapter-cli",
  "bern-adapter-json",
+ "bern-command",
  "bern-media",
  "bern-protocol",
+ "bern-runtime",
+ "bern-script",
  "bern-transport-ipc",
  "serde_json",
 ]
@@ -382,6 +386,7 @@ dependencies = [
 name = "bern-ffi"
 version = "0.2.1"
 dependencies = [
+ "bern-adapter-cli",
  "bern-adapter-json",
  "bern-command",
  "bern-ffi",
