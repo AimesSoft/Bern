@@ -206,7 +206,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "bern"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern-command",
  "bern-macros",
@@ -221,7 +221,7 @@ dependencies = [
 
 [[package]]
 name = "bern-adapter-cli"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern-adapter-json",
  "bern-media",
@@ -232,7 +232,7 @@ dependencies = [
 
 [[package]]
 name = "bern-adapter-json"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern-media",
  "bern-protocol",
@@ -242,7 +242,7 @@ dependencies = [
 
 [[package]]
 name = "bern-backend-compose"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern-compiler",
  "bern-ir",
@@ -255,7 +255,7 @@ dependencies = [
 
 [[package]]
 name = "bern-backend-gpui"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern-backend-web",
  "bern-compiler",
@@ -268,7 +268,7 @@ dependencies = [
 
 [[package]]
 name = "bern-backend-gtk"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern-compiler",
  "bern-ir",
@@ -280,7 +280,7 @@ dependencies = [
 
 [[package]]
 name = "bern-backend-swiftui"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern-compiler",
  "bern-ir",
@@ -293,7 +293,7 @@ dependencies = [
 
 [[package]]
 name = "bern-backend-web"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern-compiler",
  "bern-ir",
@@ -306,7 +306,7 @@ dependencies = [
 
 [[package]]
 name = "bern-backend-winui3"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern-compiler",
  "bern-ir",
@@ -318,7 +318,7 @@ dependencies = [
 
 [[package]]
 name = "bern-cli"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern-backend-compose",
  "bern-backend-gpui",
@@ -341,7 +341,7 @@ dependencies = [
 
 [[package]]
 name = "bern-command"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern-protocol",
  "block2",
@@ -362,7 +362,7 @@ dependencies = [
 
 [[package]]
 name = "bern-compiler"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern-ir",
  "bern-media",
@@ -380,7 +380,7 @@ dependencies = [
 
 [[package]]
 name = "bern-ffi"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern-adapter-json",
  "bern-command",
@@ -400,7 +400,7 @@ dependencies = [
 
 [[package]]
 name = "bern-image"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "png 0.18.1",
  "zune-jpeg 0.5.15",
@@ -408,7 +408,7 @@ dependencies = [
 
 [[package]]
 name = "bern-ir"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern-protocol",
  "serde",
@@ -417,7 +417,7 @@ dependencies = [
 
 [[package]]
 name = "bern-macros"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern-ir",
  "bern-protocol",
@@ -430,14 +430,14 @@ dependencies = [
 
 [[package]]
 name = "bern-media"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern-protocol",
 ]
 
 [[package]]
 name = "bern-protocol"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -445,14 +445,14 @@ dependencies = [
 
 [[package]]
 name = "bern-runtime"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern-protocol",
 ]
 
 [[package]]
 name = "bern-script"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "boa_engine",
  "boa_gc",
@@ -462,7 +462,7 @@ dependencies = [
 
 [[package]]
 name = "bern-svg"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "roxmltree 0.21.1",
  "tiny-skia",
@@ -470,7 +470,7 @@ dependencies = [
 
 [[package]]
 name = "bern-syntax"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern-media",
  "bern-protocol",
@@ -481,7 +481,7 @@ dependencies = [
 
 [[package]]
 name = "bern-target-api"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern-ir",
  "bern-media",
@@ -498,11 +498,11 @@ dependencies = [
 
 [[package]]
 name = "bern-theme"
-version = "0.1.20"
+version = "0.2.0"
 
 [[package]]
 name = "bern-transport-ipc"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern-adapter-json",
  "bern-command",
@@ -516,7 +516,7 @@ dependencies = [
 
 [[package]]
 name = "bern-transport-ws"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern-adapter-json",
  "bern-command",
@@ -762,7 +762,7 @@ checksum = "8f1fe948ff07f4bd06c30984e69f5b4899c516a3ef74f34df92a2df2ab535495"
 
 [[package]]
 name = "catalog-core"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern",
  "catalog-protocol",
@@ -770,14 +770,14 @@ dependencies = [
 
 [[package]]
 name = "catalog-protocol"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern",
 ]
 
 [[package]]
 name = "catalog-ui"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern",
  "catalog-protocol",
@@ -1297,7 +1297,7 @@ dependencies = [
 
 [[package]]
 name = "gallery-core"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern",
  "gallery-protocol",
@@ -1305,14 +1305,14 @@ dependencies = [
 
 [[package]]
 name = "gallery-protocol"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern",
 ]
 
 [[package]]
 name = "gallery-ui"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern",
  "gallery-protocol",
@@ -1404,7 +1404,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "hello-core"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern",
  "hello-protocol",
@@ -1412,14 +1412,14 @@ dependencies = [
 
 [[package]]
 name = "hello-protocol"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern",
 ]
 
 [[package]]
 name = "hello-ui"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern",
  "hello-protocol",
@@ -1761,7 +1761,7 @@ dependencies = [
 
 [[package]]
 name = "names-core"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern",
  "names-protocol",
@@ -1769,14 +1769,14 @@ dependencies = [
 
 [[package]]
 name = "names-protocol"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern",
 ]
 
 [[package]]
 name = "names-ui"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern",
  "names-protocol",
@@ -1784,7 +1784,7 @@ dependencies = [
 
 [[package]]
 name = "native-controls-core"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern",
  "native-controls-protocol",
@@ -1792,14 +1792,14 @@ dependencies = [
 
 [[package]]
 name = "native-controls-protocol"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern",
 ]
 
 [[package]]
 name = "native-controls-ui"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern",
  "native-controls-protocol",
@@ -1826,7 +1826,7 @@ dependencies = [
 
 [[package]]
 name = "notes-core"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern",
  "notes-protocol",
@@ -1834,14 +1834,14 @@ dependencies = [
 
 [[package]]
 name = "notes-protocol"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern",
 ]
 
 [[package]]
 name = "notes-ui"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern",
  "notes-protocol",
@@ -2181,7 +2181,7 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
 name = "planner-core"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern",
  "planner-protocol",
@@ -2189,14 +2189,14 @@ dependencies = [
 
 [[package]]
 name = "planner-protocol"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern",
 ]
 
 [[package]]
 name = "planner-ui"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern",
  "notes-protocol",
@@ -2625,7 +2625,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "showcase-core"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern",
  "bern-compiler",
@@ -2634,14 +2634,14 @@ dependencies = [
 
 [[package]]
 name = "showcase-protocol"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern",
 ]
 
 [[package]]
 name = "showcase-ui"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern",
  "showcase-protocol",
@@ -2650,7 +2650,7 @@ dependencies = [
 
 [[package]]
 name = "showcase-widgets"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern",
 ]
@@ -2766,7 +2766,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "svg-demo-core"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern",
  "svg-demo-protocol",
@@ -2774,14 +2774,14 @@ dependencies = [
 
 [[package]]
 name = "svg-demo-protocol"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern",
 ]
 
 [[package]]
 name = "svg-demo-ui"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern",
  "svg-demo-protocol",
@@ -2838,7 +2838,7 @@ checksum = "c0e973b34477b7823833469eb0f5a3a60370fef7a453e02d751b59180d0a5a05"
 
 [[package]]
 name = "tags-core"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern",
  "notes-protocol",
@@ -2847,7 +2847,7 @@ dependencies = [
 
 [[package]]
 name = "tags-protocol"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern",
 ]
@@ -3310,7 +3310,7 @@ dependencies = [
 
 [[package]]
 name = "wear-demo-core"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern",
  "wear-demo-protocol",
@@ -3318,14 +3318,14 @@ dependencies = [
 
 [[package]]
 name = "wear-demo-protocol"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern",
 ]
 
 [[package]]
 name = "wear-demo-ui"
-version = "0.1.20"
+version = "0.2.0"
 dependencies = [
  "bern",
  "wear-demo-protocol",
