@@ -286,6 +286,15 @@ impl SessionHandler for UiBridge {
             ))
         })
     }
+
+    fn dispatch(
+        self: Arc<Self>,
+        command: SessionCommand,
+        params: Vec<Value>,
+        reply: Box<dyn FnOnce(Result<Value, CommandError>) + Send>,
+    ) {
+        let _ = self.run(command, params, reply);
+    }
 }
 
 impl UiBridge {
@@ -498,6 +507,7 @@ pub struct BernApp {
     queries: query::Subscriptions,
     _subscription: Guard,
     _media_subscription: Guard,
+    _script_cli: Option<bern_adapter_cli::script::CliHostGuard>,
     channel: Option<Channel>,
     /// The engine host's channel, in the WebUI build.
     #[cfg(feature = "remote")]
@@ -630,7 +640,14 @@ pub unsafe fn start_app<E: EngineProtocol>(
             None
         };
         let session_id = format!("{}-ui", host.engine_id());
-        let app = assemble(
+        let program = host.descriptor().namespace.clone();
+        let script_cli = bern_adapter_cli::script::install_host(
+            host.clone(),
+            media.clone(),
+            sessions.clone(),
+            program,
+        );
+        let mut app = assemble(
             Arc::new(host),
             Arc::new(media),
             sessions,
@@ -639,6 +656,7 @@ pub unsafe fn start_app<E: EngineProtocol>(
             callbacks,
             channel,
         );
+        app._script_cli = Some(script_cli);
         app.sessions.register(app.bridge.clone());
         Ok(app)
     }));
@@ -801,6 +819,7 @@ pub(crate) fn assemble(
         queries,
         _subscription: subscription,
         _media_subscription: media_subscription,
+        _script_cli: None,
         channel,
         #[cfg(feature = "remote")]
         remote: None,

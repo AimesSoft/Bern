@@ -146,6 +146,7 @@ pub mod entry {
     /// version.
     pub const QUERY: u32 = 5;
     pub const WEB: u32 = 6;
+    pub const SCRIPT: u32 = 7;
 
     pub fn name(entry: u32) -> &'static str {
         match entry {
@@ -153,6 +154,7 @@ pub mod entry {
             CLI => "cli",
             JSON => "json",
             WEB => "web",
+            SCRIPT => "script",
             TEST => "test",
             QUERY => "query",
             _ => "other",
@@ -423,6 +425,7 @@ pub(crate) fn job(catalog: u16, command: usize, context: &CallContext) -> Option
                 Entry::Cli => entry::CLI,
                 Entry::Json => entry::JSON,
                 Entry::Web => entry::WEB,
+                Entry::Script => entry::SCRIPT,
                 Entry::Test => entry::TEST,
             },
             hash(&context.request_id),

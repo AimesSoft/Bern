@@ -542,12 +542,46 @@ impl UiSession {
 
 /// Executes framework session commands for one live UI session. Targets
 /// implement it so external entries reach the real control bindings.
-pub trait SessionHandler: Send + Sync {
+pub trait SessionHandler: Send + Sync + 'static {
     fn session_id(&self) -> String;
     /// Open window instance ids, for discovery.
     fn windows(&self) -> Vec<String>;
     /// Run a session command and wait for its result.
     fn handle(&self, command: SessionCommand, params: Vec<Value>) -> Result<Value, CommandError>;
+    /// Run a session command and deliver its result to `reply`.
+    /// Asynchronous bridges override this so callers do not block a thread.
+    fn dispatch(
+        self: Arc<Self>,
+        command: SessionCommand,
+        params: Vec<Value>,
+        reply: Box<dyn FnOnce(Result<Value, CommandError>) + Send>,
+    ) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let slot = Arc::new(Mutex::new(Some(reply)));
+            let worker_slot = Arc::clone(&slot);
+            if std::thread::Builder::new()
+                .name("bern-session-dispatch".into())
+                .spawn(move || {
+                    let result = self.handle(command, params);
+                    if let Some(reply) = worker_slot.lock().expect("reply lock").take() {
+                        reply(result);
+                    }
+                })
+                .is_err()
+                && let Some(reply) = slot.lock().expect("reply lock").take()
+            {
+                reply(Err(CommandError::new(
+                    "ui_unavailable",
+                    "could not start a session dispatch thread",
+                )));
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            reply(self.handle(command, params));
+        }
+    }
 }
 
 /// Live UI sessions that external entries may address by `session_id`.
@@ -581,6 +615,30 @@ impl Sessions {
             .collect()
     }
 
+    fn resolve(
+        &self,
+        session_id: Option<&str>,
+        command: SessionCommand,
+    ) -> Result<Arc<dyn SessionHandler>, CommandError> {
+        let sessions = self.inner.lock().expect("sessions lock");
+        match session_id {
+            Some(id) => sessions.get(id).cloned().ok_or_else(|| {
+                CommandError::new("session_not_found", format!("no live UI session `{id}`"))
+            }),
+            None => match sessions.len() {
+                0 => Err(CommandError::new(
+                    "requires_ui_session",
+                    format!("`{}` needs a live UI session", command.id()),
+                )),
+                1 => Ok(sessions.values().next().unwrap().clone()),
+                _ => Err(CommandError::new(
+                    "session_required",
+                    "several UI sessions are live; name one with session_id",
+                )),
+            },
+        }
+    }
+
     /// Route a session command. Without a session id the command goes to
     /// the only live session; none or several sessions are explicit errors.
     pub fn handle(
@@ -589,30 +647,23 @@ impl Sessions {
         command: SessionCommand,
         params: Vec<Value>,
     ) -> Result<Value, CommandError> {
-        let handler = {
-            let sessions = self.inner.lock().expect("sessions lock");
-            match session_id {
-                Some(id) => sessions.get(id).cloned().ok_or_else(|| {
-                    CommandError::new("session_not_found", format!("no live UI session `{id}`"))
-                })?,
-                None => match sessions.len() {
-                    0 => {
-                        return Err(CommandError::new(
-                            "requires_ui_session",
-                            format!("`{}` needs a live UI session", command.id()),
-                        ));
-                    }
-                    1 => sessions.values().next().unwrap().clone(),
-                    _ => {
-                        return Err(CommandError::new(
-                            "session_required",
-                            "several UI sessions are live; name one with session_id",
-                        ));
-                    }
-                },
-            }
-        };
+        let handler = self.resolve(session_id, command)?;
         handler.handle(command, params)
+    }
+
+    /// Route a session command without blocking the caller when the live
+    /// session supports asynchronous completion.
+    pub fn dispatch(
+        &self,
+        session_id: Option<&str>,
+        command: SessionCommand,
+        params: Vec<Value>,
+        reply: Box<dyn FnOnce(Result<Value, CommandError>) + Send>,
+    ) {
+        match self.resolve(session_id, command) {
+            Ok(handler) => handler.dispatch(command, params, reply),
+            Err(error) => reply(Err(error)),
+        }
     }
 }
 

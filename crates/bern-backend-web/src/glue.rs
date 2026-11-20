@@ -270,7 +270,7 @@ bern-media = {{ {media} }}
 bern-runtime = {{ {runtime} }}
 bern-transport-ipc = {{ {ipc} }}
 bern-transport-ws = {{ {ws} }}
-bern-adapter-cli = {{ {cli} }}
+bern-adapter-cli = {{ {cli}, features = ["script"] }}
 {protocol} = {{ path = "{protocol_path}" }}
 {engine} = {{ path = "{engine_path}" }}
 {modules}
@@ -347,6 +347,7 @@ fn main() {{
     let host = bern_command::Host::start({engine});
     let media = bern_media::MediaHub::new(&[{players}]);
     let sessions = bern_runtime::Sessions::new();
+    let _script_cli = bern_adapter_cli::script::install_host(host.clone(), media.clone(), sessions.clone(), {program:?});
     {ipc_start}
     bern_transport_ws::install(host.clone(), sessions.clone(), media.clone(), root.clone());
     let server = match bern_transport_ws::Server::start(host.clone(), sessions, media, root, port) {{

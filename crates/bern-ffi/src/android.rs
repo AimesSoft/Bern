@@ -903,6 +903,16 @@ pub unsafe extern "system" fn Java_dev_bern_runtime_BernNative_scriptComplete(
         bern_script::host::complete(json);
     }
 }
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn Java_dev_bern_runtime_BernNative_scriptCli(
+    env: *mut JNIEnv,
+    _: jobject,
+    bytes: jbyteArray,
+) {
+    if let Ok(json) = std::str::from_utf8(&unsafe { bytes_in(env, bytes) }) {
+        bern_script::host::cli(json);
+    }
+}
 
 native!(Java_dev_bern_runtime_BernNative_svgCached(env, key: jbyteArray) -> jint {
     let key = bytes_in(env, key);

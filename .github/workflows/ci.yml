@@ -45,7 +45,9 @@ jobs:
           restore-keys: workspace-${{ runner.os }}-
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo clippy -p bern-script --features boa --all-targets -- -D warnings
       - run: cargo test --workspace --no-fail-fast
+      - run: cargo test -p bern-script --features boa
 
   javascript:
     name: JavaScript runtimes

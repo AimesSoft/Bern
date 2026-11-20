@@ -22,3 +22,14 @@ pub unsafe extern "C" fn bern_script_complete(bytes: *const u8, len: usize) {
         bern_script::host::complete(json);
     }
 }
+/// # Safety
+/// `bytes` points to `len` bytes for the duration of this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bern_script_cli(bytes: *const u8, len: usize) {
+    if bytes.is_null() {
+        return;
+    }
+    if let Ok(json) = std::str::from_utf8(unsafe { std::slice::from_raw_parts(bytes, len) }) {
+        bern_script::host::cli(json);
+    }
+}
