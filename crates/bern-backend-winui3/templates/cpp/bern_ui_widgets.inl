@@ -2648,7 +2648,8 @@ inline Segments MakeSegments(Ctx const& ctx, std::vector<Str> const& labels, std
         controls::StackPanel row;
         row.Orientation(controls::Orientation::Horizontal);
         row.Spacing(2);
-        auto buttons = std::make_shared<std::vector<controls::Primitives::ToggleButton>>();
+        using Buttons = std::vector<controls::Primitives::ToggleButton>;
+        auto buttons = std::make_shared<Buttons>();
         auto handler = std::make_shared<std::function<void(int)>>();
         auto updating = std::make_shared<bool>(false);
         for (size_t i = 0; i < labels.size(); ++i) {
@@ -2656,8 +2657,9 @@ inline Segments MakeSegments(Ctx const& ctx, std::vector<Str> const& labels, std
             auto label = labels[i];
             Reactive::Run([button, label, ctx] { button.Content(winrt::box_value(label(ctx))); });
             int index = static_cast<int>(i);
-            button.Click([buttons, handler, updating, index](auto&&, auto&&) {
-                if (*updating) return;
+            button.Click([weak = std::weak_ptr<Buttons>(buttons), handler, updating, index](auto&&, auto&&) {
+                auto buttons = weak.lock();
+                if (!buttons || *updating) return;
                 for (size_t j = 0; j < buttons->size(); ++j) (*buttons)[j].IsChecked(static_cast<int>(j) == index);
                 if (*handler) (*handler)(index);
             });
@@ -2730,7 +2732,9 @@ inline void Picker(Parent const& p, Ctx const& ctx, PickerProps props) {
         if (prompt) Reactive::Run([box, prompt] { box.PlaceholderText(prompt()); });
         else if (text) Reactive::Run([box, text] { box.PlaceholderText(text()); });
         auto updating = std::make_shared<bool>(false);
-        auto filter = [box, options, ctx](winrt::hstring const& query) {
+        auto filter = [weakBox = winrt::make_weak(box), options, ctx](winrt::hstring const& query) {
+            auto box = weakBox.get();
+            if (!box) return;
             auto items = winrt::single_threaded_vector<winrt::Windows::Foundation::IInspectable>();
             for (auto const& opt : *options) {
                 auto lbl = opt.label(ctx);

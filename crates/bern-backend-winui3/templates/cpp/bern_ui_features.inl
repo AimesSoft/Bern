@@ -133,7 +133,8 @@ struct ScrollProps {
 /// `fraction` of the way along the item at the same fraction of the view
 /// (0 its start, 0.5 its center).
 inline std::optional<double> OffsetOf(ScrollInfo const& scroll, xaml::UIElement const& item, double fraction) {
-    auto viewer = scroll.viewer;
+    auto viewer = scroll.viewer.get();
+    if (!viewer) return std::nullopt;
     auto content = viewer.Content().try_as<xaml::UIElement>();
     auto framework = item.try_as<xaml::FrameworkElement>();
     if (!content || !framework) return std::nullopt;
@@ -157,7 +158,7 @@ inline std::optional<double> OffsetOf(ScrollInfo const& scroll, xaml::UIElement 
 /// The element of the row of `key` in a grid of `scroll` that builds only
 /// the rows near the view, built there; none when no such grid has it.
 inline xaml::UIElement RevealItem(ScrollInfo& scroll, std::string const& key) {
-    for (auto const& reveal : scroll.reveal)
+    for (auto const& [token, reveal] : scroll.reveal)
         if (auto element = reveal(key)) return element;
     return nullptr;
 }
@@ -165,9 +166,8 @@ inline xaml::UIElement RevealItem(ScrollInfo& scroll, std::string const& key) {
 /// The items of `scroll` still on screen, by key.
 inline std::vector<std::pair<std::string, xaml::UIElement>> ItemsOf(ScrollInfo& scroll) {
     std::vector<std::pair<std::string, xaml::UIElement>> items;
-    std::erase_if(scroll.items, [](auto const& item) { return !item.second.get(); });
-    for (auto const& [key, weak] : scroll.items)
-        if (auto element = weak.get(); element && element.as<xaml::FrameworkElement>().IsLoaded()) items.emplace_back(key, element);
+    for (auto const& [token, item] : scroll.items)
+        if (auto element = item.second.get(); element && element.as<xaml::FrameworkElement>().IsLoaded()) items.emplace_back(item.first, element);
     return items;
 }
 
@@ -413,7 +413,8 @@ inline void LazyGrid(Parent const& p, Ctx const& ctx, GridProps props, EachProps
     SetRole(panel, L"bern-fill-width");
     LazyGridPanel* grid = impl.get();
     KeepReflow(panel, [grid](Motion const* motion) { grid->reflow = motion; });
-    grid->scrolls = ctx.scroll && !ctx.scroll->horizontal;
+    auto viewport = ctx.scroll ? ctx.scroll->viewer.get() : nullptr;
+    grid->scrolls = viewport && !ctx.scroll->horizontal;
     auto keep = winrt::make_weak(panel);
     auto relayout = [keep] {
         if (auto panel = keep.get()) panel.InvalidateMeasure();
@@ -469,8 +470,8 @@ inline void LazyGrid(Parent const& p, Ctx const& ctx, GridProps props, EachProps
         grid->Children().Append(item->host);
         // The row's element, known by its key: scroll views find their
         // items this way.
-        if (scroll && item->host.Children().Size() > 0)
-            scroll->items.emplace_back(id, winrt::make_weak(item->host.Children().GetAt(0)));
+        if (scroll && scroll->tracksItems && item->host.Children().Size() > 0)
+            TrackScrollItem(scroll, *item->owner, id, item->host.Children().GetAt(0));
         return item;
     };
     grid->drop = [grid](std::shared_ptr<LazyGridPanel::Item> const& item) {
@@ -482,8 +483,9 @@ inline void LazyGrid(Parent const& p, Ctx const& ctx, GridProps props, EachProps
     // effective viewport says nothing.
     auto look = [keep, grid, scroll] {
         auto panel = keep.get();
-        if (!panel || !grid->scrolls || !scroll->viewer) return;
-        auto viewer = scroll->viewer;
+        if (!panel || !grid->scrolls) return;
+        auto viewer = scroll->viewer.get();
+        if (!viewer) return;
         auto port = static_cast<float>(viewer.ViewportHeight());
         if (port <= 0) return;
         try {
@@ -501,6 +503,7 @@ inline void LazyGrid(Parent const& p, Ctx const& ctx, GridProps props, EachProps
         if (grid->scrolls && !grid->Current()) grid->Later();
     });
     winrt::event_token viewed{}, sized{};
+    uint64_t revealToken = 0;
     // A scroll view's `position` reaches rows not built yet.
     if (grid->scrolls) {
         auto follow = [grid, look](auto&&, auto&&) {
@@ -508,17 +511,18 @@ inline void LazyGrid(Parent const& p, Ctx const& ctx, GridProps props, EachProps
             look();
             if (!grid->Current()) grid->Later();
         };
-        viewed = scroll->viewer.ViewChanged(follow);
-        sized = scroll->viewer.SizeChanged(follow);
-        scroll->reveal.push_back([keep, grid, scroll](std::string const& key) -> xaml::UIElement {
+        viewed = viewport.ViewChanged(follow);
+        sized = viewport.SizeChanged(follow);
+        revealToken = scroll->nextReveal++;
+        scroll->reveal.emplace(revealToken, [keep, grid, weakViewer = scroll->viewer](std::string const& key) -> xaml::UIElement {
             auto panel = keep.get();
-            if (!panel || !grid->make || !scroll->viewer) return nullptr;
+            auto viewer = weakViewer.get();
+            if (!panel || !grid->make || !viewer) return nullptr;
             auto at = std::find(grid->keys.begin(), grid->keys.end(), key);
             if (at == grid->keys.end()) return nullptr;
             size_t row = static_cast<size_t>(at - grid->keys.begin()) / grid->columns;
             if (row >= grid->Rows()) return nullptr;
             // Stand near the row, and build the rows in sight there.
-            auto viewer = scroll->viewer;
             float port = static_cast<float>(viewer.ViewportHeight());
             float y = static_cast<float>(grid->padding.Top) + grid->starts[row];
             try {
@@ -571,11 +575,14 @@ inline void LazyGrid(Parent const& p, Ctx const& ctx, GridProps props, EachProps
             return 0;
         });
     });
-    Reactive::OnCleanup([impl, sighted, scroll, viewed, sized] {
+    Reactive::OnCleanup([impl, sighted, scroll, viewed, sized, revealToken] {
         impl->EffectiveViewportChanged(sighted);
         if (impl->scrolls) {
-            scroll->viewer.ViewChanged(viewed);
-            scroll->viewer.SizeChanged(sized);
+            scroll->reveal.erase(revealToken);
+            if (auto viewer = scroll->viewer.get()) {
+                viewer.ViewChanged(viewed);
+                viewer.SizeChanged(sized);
+            }
         }
         for (auto& [key, item] : impl->built) item->owner->Dispose();
         impl->built.clear();
@@ -617,8 +624,9 @@ inline void ScrollView(Parent const& p, Ctx const& ctx, ScrollProps props, Build
         scroller.AddHandler(xaml::UIElement::PointerPressedEvent(), winrt::box_value(follow), true);
     }
     auto scroll = std::make_shared<ScrollInfo>();
-    scroll->viewer = scroller;
+    scroll->viewer = winrt::make_weak(scroller);
     scroll->horizontal = horizontal;
+    scroll->tracksItems = props.snap || props.position.has_value();
     auto inner = ctx;
     inner.scroll = scroll;
     children(Parent::Of(panel), inner);
@@ -670,8 +678,11 @@ inline void ScrollView(Parent const& p, Ctx const& ctx, ScrollProps props, Build
     bool center = props.snap && std::string_view(props.snap) == "center";
     double fraction = center ? 0.5 : props.anchor.value_or(0);
     bool startSnap = props.snap && std::string_view(props.snap) == "start";
-    auto padding = [scroll, panel, center, startSnap, horizontal] {
+    auto padding = [scroll, weakPanel = winrt::make_weak(panel), center, startSnap, horizontal] {
         if (!center && !startSnap) return;
+        auto panel = weakPanel.get();
+        auto viewer = scroll->viewer.get();
+        if (!panel || !viewer) return;
         double largest = 0;
         double lastOffset = -INFINITY;
         double lastSize = 0;
@@ -682,7 +693,7 @@ inline void ScrollView(Parent const& p, Ctx const& ctx, ScrollProps props, Build
             auto offset = OffsetOf(*scroll, item, 0);
             if (offset && *offset > lastOffset) { lastOffset = *offset; lastSize = size; }
         }
-        double port = horizontal ? scroll->viewer.ViewportWidth() : scroll->viewer.ViewportHeight();
+        double port = horizontal ? viewer.ViewportWidth() : viewer.ViewportHeight();
         double room = center ? (std::max)(0.0, (port - largest) / 2) : 0;
         double tail = startSnap && lastSize > 0 ? (std::max)(0.0, port - lastSize) : room;
         auto flex = panel.as<xaml::FrameworkElement>();
@@ -694,7 +705,9 @@ inline void ScrollView(Parent const& p, Ctx const& ctx, ScrollProps props, Build
     scroller.SizeChanged([padding](auto&&, auto&&) { padding(); });
     panel.as<xaml::FrameworkElement>().SizeChanged([padding](auto&&, auto&&) { padding(); });
     auto nearest = [scroll, fraction]() -> std::optional<std::pair<std::string, xaml::UIElement>> {
-        double now = scroll->horizontal ? scroll->viewer.HorizontalOffset() : scroll->viewer.VerticalOffset();
+        auto viewer = scroll->viewer.get();
+        if (!viewer) return std::nullopt;
+        double now = scroll->horizontal ? viewer.HorizontalOffset() : viewer.VerticalOffset();
         std::optional<std::pair<std::string, xaml::UIElement>> best;
         double distance = INFINITY;
         for (auto const& item : ItemsOf(*scroll)) {
@@ -709,11 +722,13 @@ inline void ScrollView(Parent const& p, Ctx const& ctx, ScrollProps props, Build
         return best;
     };
     auto scrollTo = [scroll, fraction](xaml::UIElement const& item, bool smooth) {
+        auto viewer = scroll->viewer.get();
+        if (!viewer) return;
         auto offset = OffsetOf(*scroll, item, fraction);
         if (!offset) return;
         scroll->byCode = true;
-        if (scroll->horizontal) scroll->viewer.ChangeView(*offset, nullptr, nullptr, !smooth || Reduced());
-        else scroll->viewer.ChangeView(nullptr, *offset, nullptr, !smooth || Reduced());
+        if (scroll->horizontal) viewer.ChangeView(*offset, nullptr, nullptr, !smooth || Reduced());
+        else viewer.ChangeView(nullptr, *offset, nullptr, !smooth || Reduced());
     };
     // Scrolling that ends between items comes to rest on the nearest one,
     // unless the position stands at an anchor of its own: then the view
@@ -727,7 +742,9 @@ inline void ScrollView(Parent const& p, Ctx const& ctx, ScrollProps props, Build
         if (args.IsIntermediate() || !*placed) return;
         auto item = nearest();
         if (!item) return;
-        double now = scroll->horizontal ? scroll->viewer.HorizontalOffset() : scroll->viewer.VerticalOffset();
+        auto viewer = scroll->viewer.get();
+        if (!viewer) return;
+        double now = scroll->horizontal ? viewer.HorizontalOffset() : viewer.VerticalOffset();
         if (auto arrived = travelling->get()) {
             // A scroll the field asked for: until it reaches its item, the
             // view goes on to it (a row built only now has the view stand
