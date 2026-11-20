@@ -1321,28 +1321,43 @@ inline void Enter(std::string const& key, xaml::UIElement const& element, Win* w
 /// The scroll view content is in: its viewer, axis, and the Composition
 /// property set of its scrolling.
 struct ScrollInfo {
-    controls::ScrollViewer viewer{nullptr};
+    // Descendant event handlers keep this context; XAML owns the viewer.
+    winrt::weak_ref<controls::ScrollViewer> viewer;
     bool horizontal = false;
     composition::CompositionPropertySet scrolling{nullptr};
     /// Rows of the lists inside, by key, for snapping and `position`.
-    std::vector<std::pair<std::string, winrt::weak_ref<xaml::UIElement>>> items;
+    bool tracksItems = false;
+    uint64_t nextItem = 0;
+    std::map<uint64_t, std::pair<std::string, winrt::weak_ref<xaml::UIElement>>> items;
     /// Grids inside that build only the rows near the view: each builds
     /// the row of a key there and gives its element, or none.
-    std::vector<std::function<xaml::UIElement(std::string const&)>> reveal;
+    std::map<uint64_t, std::function<xaml::UIElement(std::string const&)>> reveal;
+    uint64_t nextReveal = 0;
     /// Set while a scroll the view itself asked for is under way, so it is
     /// not taken for the person's.
     bool byCode = false;
 };
+
+inline void TrackScrollItem(std::shared_ptr<ScrollInfo> const& scroll, Scope& owner, std::string const& key, xaml::UIElement const& element) {
+    if (!scroll->tracksItems) return;
+    auto token = scroll->nextItem++;
+    scroll->items.emplace(token, std::make_pair(key, winrt::make_weak(element)));
+    owner.OnDispose([weak = std::weak_ptr<ScrollInfo>(scroll), token] {
+        if (auto scroll = weak.lock()) scroll->items.erase(token);
+    });
+}
 
 /// Scale and opacity by the distance of the element's center from the
 /// middle of its scroll view: at the middle `scale` and full opacity; half
 /// a viewport plus half its size away, plain size and `opacity`. A
 /// Composition expression follows the scrolling.
 inline void ScrollEffect(controls::Grid const& wrapper, std::shared_ptr<ScrollInfo> const& scroll, double scale, double opacity, double originX = 0.5, double originY = 0.5) {
-    if (!scroll || !scroll->viewer || Reduced()) return;
+    if (!scroll || Reduced()) return;
+    auto viewer = scroll->viewer.get();
+    if (!viewer) return;
     auto visual = xaml::Hosting::ElementCompositionPreview::GetElementVisual(wrapper);
     auto compositor = visual.Compositor();
-    if (!scroll->scrolling) scroll->scrolling = xaml::Hosting::ElementCompositionPreview::GetScrollViewerManipulationPropertySet(scroll->viewer);
+    if (!scroll->scrolling) scroll->scrolling = xaml::Hosting::ElementCompositionPreview::GetScrollViewerManipulationPropertySet(viewer);
     auto props = compositor.CreatePropertySet();
     props.InsertScalar(L"center", 0);
     props.InsertScalar(L"port", 0);
@@ -1358,7 +1373,6 @@ inline void ScrollEffect(controls::Grid const& wrapper, std::shared_ptr<ScrollIn
     fading.SetReferenceParameter(L"scroll", scroll->scrolling);
     visual.StartAnimation(L"Scale", scaling);
     visual.StartAnimation(L"Opacity", fading);
-    auto viewer = scroll->viewer;
     bool horizontal = scroll->horizontal;
     auto update = [weak = winrt::make_weak(wrapper), viewer = winrt::make_weak(viewer), props, visual, horizontal, originX, originY] {
         auto element = weak.get();

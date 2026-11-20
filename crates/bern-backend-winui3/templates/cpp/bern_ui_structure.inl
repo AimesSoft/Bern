@@ -285,10 +285,10 @@ inline void Each(Parent const& p, Ctx const& ctx, EachProps props, Build row) {
                 created->owner->Run([&] { row(created->region, rowCtx); });
                 // The row's element, known by its key: scroll views find
                 // their items this way.
-                if (ctx.scroll) {
+                if (ctx.scroll && ctx.scroll->tracksItems) {
                     std::vector<xaml::UIElement> elements;
                     created->region.region->Elements(elements, false);
-                    if (!elements.empty()) ctx.scroll->items.emplace_back(id, winrt::make_weak(elements.front()));
+                    if (!elements.empty()) TrackScrollItem(ctx.scroll, *created->owner, id, elements.front());
                 }
                 next.push_back(created);
             }
@@ -1104,7 +1104,7 @@ struct TabsRegistry {
     bool updating = false;
     bool settling = false;
     std::function<std::optional<uint32_t>(xaml::UIElement const&)> position;
-    std::function<void(xaml::UIElement const&)> show;
+    std::function<void(TabsRegistry&, xaml::UIElement const&)> show;
 
     Entry const* Selected(Value const& value) const {
         for (auto const& entry : entries)
@@ -1163,12 +1163,12 @@ inline void Tabs(Parent const& p, Ctx const& ctx, TabsProps props, Build const& 
     auto list = Children::OfVector<controls::SelectorBarItem>(bar.Items());
     items = Parent::Into(list);
     registry->position = list->find;
-    registry->show = [bar, registry](xaml::UIElement const& item) {
+    registry->show = [bar](TabsRegistry& tabs, xaml::UIElement const& item) {
         auto chosen = item ? item.as<controls::SelectorBarItem>() : nullptr;
         if (bar.SelectedItem() == chosen) return;
-        registry->updating = true;
+        tabs.updating = true;
         bar.SelectedItem(chosen);
-        registry->updating = false;
+        tabs.updating = false;
     };
     bar.SelectionChanged([weak = std::weak_ptr<TabsRegistry>(registry), ctx, selection](controls::SelectorBar const& sender, auto&&) {
         auto registry = weak.lock();
@@ -1184,8 +1184,8 @@ inline void Tabs(Parent const& p, Ctx const& ctx, TabsProps props, Build const& 
     items = Parent::Of(row);
     auto list = Children::Of(row);
     registry->position = list->find;
-    registry->show = [registry](xaml::UIElement const& item) {
-        for (auto const& entry : registry->entries)
+    registry->show = [](TabsRegistry& tabs, xaml::UIElement const& item) {
+        for (auto const& entry : tabs.entries)
             entry.item.as<controls::Primitives::ToggleButton>().IsChecked(entry.item == item);
     };
 #endif
@@ -1203,7 +1203,7 @@ inline void Tabs(Parent const& p, Ctx const& ctx, TabsProps props, Build const& 
         auto value = ctx.Read(selection);
         Reactive::Untrack([&] {
             auto entry = registry->Selected(value);
-            registry->show(entry ? entry->item : nullptr);
+            registry->show(*registry, entry ? entry->item : nullptr);
             if (!entry) {
                 if (!registry->settling) {
                     registry->settling = true;
@@ -1281,7 +1281,9 @@ inline void Tab(Parent const& p, Ctx const& ctx, TabSpec spec) {
     else if (label) Reactive::Run([item, label, ctx] { item.Content(winrt::box_value(label(ctx))); });
     auto value = entry.value;
     auto selection = registry->selection;
-    item.Click([ctx, selection, value](auto&&, auto&&) { ctx.Write(selection, value); });
+    auto clickCtx = ctx;
+    clickCtx.tabs.reset();
+    item.Click([clickCtx, selection, value](auto&&, auto&&) { clickCtx.Write(selection, value); });
 #endif
     if (iconOnly && label)
         Reactive::Run([item, label, ctx] {
