@@ -542,7 +542,7 @@ impl UiSession {
 
 /// Executes framework session commands for one live UI session. Targets
 /// implement it so external entries reach the real control bindings.
-pub trait SessionHandler: Send + Sync {
+pub trait SessionHandler: Send + Sync + 'static {
     fn session_id(&self) -> String;
     /// Open window instance ids, for discovery.
     fn windows(&self) -> Vec<String>;
