@@ -523,6 +523,9 @@ mod boa {
         timeout_ms: u64,
     }
 
+    type PendingCliMap = Rc<RefCell<BTreeMap<u64, PendingCli>>>;
+    type PendingEvalList = Vec<(JsPromise, Shared)>;
+
     pub(crate) fn worker(
         policy: Arc<RwLock<CliPolicy>>,
     ) -> std::result::Result<mpsc::Sender<Message>, Error> {
@@ -546,8 +549,7 @@ mod boa {
             .set_loop_iteration_limit(1_000_000);
         context.runtime_limits_mut().set_recursion_limit(512);
 
-        let pending_cli: Rc<RefCell<BTreeMap<u64, PendingCli>>> =
-            Rc::new(RefCell::new(BTreeMap::new()));
+        let pending_cli: PendingCliMap = Rc::new(RefCell::new(BTreeMap::new()));
         let next_call_id = Rc::new(Cell::new(1u64));
         install_bern_global(
             &mut context,
@@ -557,7 +559,7 @@ mod boa {
             next_call_id,
         );
 
-        let mut pending_evals: Vec<(JsPromise, Shared)> = Vec::new();
+        let mut pending_evals: PendingEvalList = Vec::new();
         let mut runs: u32 = 0;
 
         loop {
@@ -627,7 +629,7 @@ mod boa {
         context: &mut JsContext,
         reply_tx: mpsc::Sender<Message>,
         policy: Arc<RwLock<CliPolicy>>,
-        pending_cli: Rc<RefCell<BTreeMap<u64, PendingCli>>>,
+        pending_cli: PendingCliMap,
         next_call_id: Rc<Cell<u64>>,
     ) {
         // SAFETY: Captured values are non-GC Rust handles (`mpsc::Sender`, `Arc`, `Rc<Cell>`) plus
@@ -844,10 +846,7 @@ mod boa {
         }
     }
 
-    fn expire_timed_out_cli(
-        pending_cli: &Rc<RefCell<BTreeMap<u64, PendingCli>>>,
-        context: &mut JsContext,
-    ) {
+    fn expire_timed_out_cli(pending_cli: &PendingCliMap, context: &mut JsContext) {
         let now = Instant::now();
         let expired_ids: Vec<u64> = pending_cli
             .borrow()
@@ -900,8 +899,8 @@ mod boa {
         source: &str,
         state: Shared,
         context: &mut JsContext,
-        pending_cli: &Rc<RefCell<BTreeMap<u64, PendingCli>>>,
-        pending_evals: &mut Vec<(JsPromise, Shared)>,
+        pending_cli: &PendingCliMap,
+        pending_evals: &mut PendingEvalList,
     ) {
         let value = match context.eval(Source::from_bytes(source)) {
             Ok(value) => value,
@@ -940,8 +939,8 @@ mod boa {
     }
 
     fn settle_pending_evals(
-        pending_evals: &mut Vec<(JsPromise, Shared)>,
-        pending_cli: &Rc<RefCell<BTreeMap<u64, PendingCli>>>,
+        pending_evals: &mut PendingEvalList,
+        pending_cli: &PendingCliMap,
         context: &mut JsContext,
     ) {
         let no_more_cli = pending_cli.borrow().is_empty();

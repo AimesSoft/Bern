@@ -239,7 +239,11 @@ impl CliDispatcher for ScriptCliHost {
         let (session_types, session_specs) = session_catalog();
         let (media_types, media_specs) = media_catalog();
 
-        let (target, params, session) = match input {
+        let ResolvedCall {
+            target,
+            params,
+            session,
+        } = match input {
             CliInput::Line { line } => {
                 let tokens = match split_line(&line) {
                     Ok(tokens) => tokens,
@@ -309,7 +313,11 @@ impl CliDispatcher for ScriptCliHost {
                     ))));
                     return;
                 }
-                (resolved, params, session)
+                ResolvedCall {
+                    target: resolved,
+                    params,
+                    session,
+                }
             }
         };
 
@@ -457,6 +465,12 @@ impl CliDispatcher for ScriptCliHost {
     }
 }
 
+struct ResolvedCall<'a> {
+    target: ResolvedTarget<'a>,
+    params: Map<String, Json>,
+    session: Option<String>,
+}
+
 fn resolve_argv<'a>(
     descriptor: &'a ProtocolDescriptor,
     media_types: &bern_protocol::TypeTable,
@@ -464,10 +478,14 @@ fn resolve_argv<'a>(
     session_types: &bern_protocol::TypeTable,
     session_specs: &[CommandSpec],
     args: &[String],
-) -> Result<(ResolvedTarget<'a>, Map<String, Json>, Option<String>), CliError> {
+) -> Result<ResolvedCall<'a>, CliError> {
     let options = parse(args).map_err(CliError::invalid_params)?;
     if options.help {
-        return Ok((ResolvedTarget::Help, Map::new(), options.session));
+        return Ok(ResolvedCall {
+            target: ResolvedTarget::Help,
+            params: Map::new(),
+            session: options.session,
+        });
     }
     if options.words.is_empty() {
         return Err(CliError::invalid_params("CLI command must not be empty"));
@@ -508,7 +526,11 @@ fn resolve_argv<'a>(
             }
         }
     }
-    Ok((target, params, options.session))
+    Ok(ResolvedCall {
+        target,
+        params,
+        session: options.session,
+    })
 }
 
 fn fill_cli_params(
