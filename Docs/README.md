@@ -2,35 +2,52 @@
 
 # Bern documentation
 
-Updated: 2026-11-20. To get started, use the [quick start in the root README](../README.md#quick-start); buildable examples are in [examples](../examples/). Look up the current interfaces and platform status starting from the reference documents below.
+Updated: 2026-11-21. To install `bern` and build your first app, start from the [quick start in the root README](../README.md#quick-start); complete buildable apps live in [examples/](../examples/).
+
+## Where to start
+
+| Goal | Read first |
+| --- | --- |
+| Build a UI with standard controls, layouts, skeletons or `NativeView` | [Component usage](Reference/UI.md) and [Component property table](Reference/Component-Properties.md) |
+| Check what each backend supports and how it has been verified | [Platform capabilities and verification scope](Reference/Platforms.md) |
+| Embed JavaScript plugins or script automation with `bern.cli` | [JavaScript and `bern.cli`](Implementation/JavaScript.md) |
+| Embed platform-specific native controls beside Rust UI files | [Co-located native views](Implementation/Native-Views.md) |
+| Target GPUI or a specific OS backend | [GPUI](Implementation/GPUI.md) or the platform notes below |
+| Understand the architecture, protocol, theming and command model | [Architecture and semantics](Design.md) |
 
 ## Current interfaces
 
-- [Component usage](Reference/UI.md): text and formatting, the player coordinate scene, control groups and sizes, controlled input, images and the masonry layout, Hero, onboarding, search, the idle state, keyboard and keyboard shortcuts, the menu bar, and storage.
-- [Complete component property table](Reference/Component-Properties.md): all built-in components, property types, required properties, children and action rules, exported from the current `bern-ir::spec`.
-- [Platform capabilities and verification scope](Reference/Platforms.md): support listed by backend feature flag, keeping declared support, build verification and interaction verification apart.
-- [Performance tracing](Reference/Tracing.md): the rules of `BERN_TRACE` and `trace.*`, what each segment means, the terminal summary, `trace.report` and the timeline file.
+- [Component usage](Reference/UI.md): text and ICU formatting, coordinate scenes, control groups, engine-controlled inputs, images and masonry grids, Hero transitions, onboarding, search, idle state, keyboard shortcuts, menu bar, storage, automatic skeletons, `NativeView`, and the full standard control catalog (`TreeView`, `SplitPane`, `Reorderable`, `BottomSheet`, `Refreshable`, `DatePicker`, `TimePicker`, `NumberInput`, `Alert`, `Banner`, `Disclosure`, `Tooltip`, `EmptyState`, `Badge`, `Avatar`).
+- [Complete component property table](Reference/Component-Properties.md): all built-in components, property types, required properties, children and action rules, exported from `bern-ir::spec`.
+- [Platform capabilities and verification scope](Reference/Platforms.md): support listed by backend feature flag and cross-platform capability, keeping declared support, build verification and real-device interaction verification apart.
+- [Performance tracing](Reference/Tracing.md): `BERN_TRACE` and `trace.*` rules, segment definitions, terminal summaries, `trace.report` and timeline exports.
 
 ## Architecture and design
 
 - [Architecture and semantics](Design.md): component declarations, modules, theme, commands, windows, media, app icons and clearly marked future designs.
-- [Platform adaptation guidelines](Adaptation/README.md): Apple, Android, Windows / Linux, the Web, and platforms under research; an adaptation goal does not mean it is implemented today.
-- [React Native research](Research/ReactNative.md): a comparison of the runtime-bridge and build-time-generation architectures.
+- [Platform adaptation guidelines](Adaptation/README.md): Apple, Android, Windows / Linux, the Web and platforms under research; an adaptation goal does not mean a backend is implemented today.
+- [React Native research](Research/ReactNative.md): a comparison of runtime-bridge and build-time-generation architectures.
 
 ## Implementation and topics
 
-- [macOS](Implementation/macOS-SwiftUI.md), [iOS](Implementation/iOS-SwiftUI.md), [tvOS](Implementation/tvOS-SwiftUI.md), [watchOS](Implementation/watchOS-SwiftUI.md), [Android](Implementation/Android-Compose.md), [Windows](Implementation/Windows-WinUI3.md), [Linux](Implementation/Linux-GTK.md), [Web](Implementation/Web.md): implementation details, past verifications and limitations.
-- [GPUI](Implementation/GPUI.md): the self-drawn desktop target that is chosen explicitly, first version (macOS, Windows, Linux): dependency versions, structure, window frames and video surfaces, implemented components and measurements.
-- [Co-located native views](Implementation/Native-Views.md): `NativeView` for embedding per-backend native UI files beside Rust declarations with typed `Props`/`Actions`/`Theme`, mandatory CLI entries, `tr!` localization linting and `Fallback`.
-- [Animated SVG](Implementation/Animated-SVG.md): the optional component's interface, resources, dependencies, static fallback and verification scope.
-- [JavaScript and target capabilities](Implementation/JavaScript.md): conditional builds for WebView / browser and Boa, the script context and capability branches.
+### Platform backends
+
+- **Apple**: [macOS (SwiftUI)](Implementation/macOS-SwiftUI.md) · [iOS / iPadOS (SwiftUI)](Implementation/iOS-SwiftUI.md) · [watchOS (SwiftUI)](Implementation/watchOS-SwiftUI.md) · [tvOS (SwiftUI)](Implementation/tvOS-SwiftUI.md)
+- **Desktop & mobile**: [Windows (WinUI 3 & XAML Islands)](Implementation/Windows-WinUI3.md) · [Linux (GTK 4)](Implementation/Linux-GTK.md) · [Android & Wear OS (Jetpack Compose)](Implementation/Android-Compose.md)
+- **Optional GPU & Web**: [GPUI (macOS, Windows, Linux)](Implementation/GPUI.md) · [Web app & WebUI (DOM + WebAssembly)](Implementation/Web.md)
+
+### Focused topics
+
+- [Co-located native views](Implementation/Native-Views.md): `NativeView` for placing per-backend native UI files beside Rust declarations with typed `Props`/`Actions`/`Theme`, mandatory CLI entries, `tr!` localization linting and `Fallback`.
+- [JavaScript and `bern.cli`](Implementation/JavaScript.md): opt-in `javascript = true` targets (in-process Boa on all native targets, Web Worker on the Web), persistent script contexts, in-process `globalThis.bern.cli(...)`, host-side allowlist/denylist `CliPolicy` rules and `window.webview` branches.
+- [Animated SVG](Implementation/Animated-SVG.md): pure-Rust `BSVG` bytecode rendering with zero WebView dependency, resource declarations, static fallback and verification scope.
 - [Building by module](Implementation/Module-Builds.md): `--exclude-module`, compile-time UI conditions and optional Cargo dependencies.
-- [The app's own browser extensions](Implementation/Web-Extensions.md): `web_extension` for the browser target, the app's own media executor, WASM imports and the file preparation hook.
+- [The app's own browser extensions](Implementation/Web-Extensions.md): `web_extension` for the browser target, custom media executors, WASM imports and file preparation hooks.
 
 ## Update rules
 
-When a component or property changes, update the property table and the usage guide; when a backend gains a feature, update the capability table; acceptance records state the date, target, scenario and what was not verified. Successful code generation, a successful native build and passing interaction on a real device are three different conclusions. After adding a record, also check the older "not yet implemented" and "not verified" entries, so that the same capability does not have conflicting states across the documentation.
+When a component or property changes, update the property table and the usage guide; when a backend gains a feature, update the capability table; acceptance records state the date, target, scenario and what was not verified. Successful code generation, a successful native build and passing interaction on a real device are three different conclusions. After adding a record, also check older "not yet implemented" and "not verified" entries so the same capability does not have conflicting states across the documentation.
 
-The interfaces come from the [bern-ir component definitions](../crates/bern-ir/src/spec.rs), and the capabilities come from [bern-target-api](../crates/bern-target-api/src/lib.rs) (the check rules are in [check/](../crates/bern-target-api/src/check/)) and each backend's TargetDescriptor. The implementation logs keep historical context and cannot override the interface facts in the current reference tables.
+The interfaces come from [bern-ir component definitions](../crates/bern-ir/src/spec.rs), and the capabilities come from [bern-target-api](../crates/bern-target-api/src/lib.rs) (check rules in [check/](../crates/bern-target-api/src/check/)) and each backend's `TargetDescriptor`. Implementation logs preserve historical context and cannot override the interface facts in the current reference tables.
 
-The documentation is in two languages. English is the default version, in `Docs/` and in `README.md` and `CONTRIBUTING.md` at the root; Simplified Chinese is in `Docs/zh-CN/` (with the same file names as the English) and in `README.zh-CN.md` and `CONTRIBUTING.zh-CN.md`. A change to one page changes both languages in the same commit: headings, table rows and code blocks correspond one to one, and relative links and anchors resolve. `cargo test -p bern --test docs` checks this.
+The documentation is maintained in two languages. English is the default under `Docs/`, `README.md` and `CONTRIBUTING.md`; Simplified Chinese lives under `Docs/zh-CN/` (with matching file names), `README.zh-CN.md` and `CONTRIBUTING.zh-CN.md`. Every change updates both languages in the same commit with matching headings, table rows, code blocks, links and anchors, verified by `cargo test -p bern --test docs`.

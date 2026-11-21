@@ -2,7 +2,7 @@
 
 # 平台能力与验证范围
 
-更新：2026-11-14。下表按 [bern-target-api](../../../crates/bern-target-api/src/lib.rs) 与各后端 `TargetDescriptor.features` 整理。macOS 与 iOS 共用同一份 SwiftUI 清单；tvOS 与 watchOS 与它们共用 SwiftUI 生成器，清单在 [tvOS 描述](../../../crates/bern-backend-swiftui/src/tvos.rs)与 [watchOS 描述](../../../crates/bern-backend-swiftui/src/watchos.rs)中单列。
+更新：2026-11-21。下表按 [bern-target-api](../../../crates/bern-target-api/src/lib.rs) 与各后端 `TargetDescriptor.features` 整理。macOS 与 iOS 共用同一份 SwiftUI 清单；tvOS 与 watchOS 与它们共用 SwiftUI 生成器，清单在 [tvOS 描述](../../../crates/bern-backend-swiftui/src/tvos.rs)与 [watchOS 描述](../../../crates/bern-backend-swiftui/src/watchos.rs)中单列。
 
 可选的 GPUI 目标（`ui = "gpui"`，macOS、Windows、Linux）是第一版，三个平台都构建并运行过，下表不含它；它声明的组件与功能见 [GPUI 实现记录](../Implementation/GPUI.md)。
 
@@ -104,6 +104,9 @@
 | `Search(suggest: true)` | 未输入时就列出结果：SwiftUI 与 Web 获得焦点时、电视上一直列出（tvOS 模拟器实测）；Compose 的工具栏搜索页本来打开就列出；GTK 与 WinUI 3 获得焦点时弹出。tvOS 以外未实测交互 |
 | 性能追踪（`BERN_TRACE`、`trace.*`、`bern run --trace`） | 共用的 Rust 一侧对所有目标相同：规则与过滤、记录与汇总、时间线、会话命令，以及引擎（排队、执行、快照、比较、模块调用、`span!`）与桥接（解码、按字段编码、回调触发）的分段。各前端界面线程的打点尚未接入，交互链路与长帧暂不出现。见[性能追踪](Tracing.md) |
 | `default_focus` | `Button` / `IconButton` 出现时取得焦点，六个目标生成：tvOS 是焦点区域的首选焦点（模拟器实测），macOS / iOS 用 `FocusState`，Web 调用 `focus()`，Compose 用 `FocusRequester`，GTK 与 WinUI 3 在控件显示后请求焦点；tvOS 以外未实测；GTK 在 Ubuntu 24.04 虚拟机上编译并通过 Clippy 与生成应用的类型检查，WinUI 3 在 Windows PC 上用 MSVC 编译生成的 gallery |
+| 默认骨架图 | `Query`（省略 `loading:` 时默认启用）、`skeleton: <bool>` 容器与显式 `Skeleton` 原语在全部六个后端于编译期直接从真实界面树投影骨架图，自带 120 ms 防闪烁、轻柔呼吸脉冲、减少动态效果适配与统一无障碍播报。见[默认骨架图](UI.md#默认骨架图) |
+| 内置窗口截图（`window.screenshot`） | 内置会话命令 `window screenshot --output <路径>`，在桌面、移动、手表与 Web 后端经应用 CLI 直接截取当前窗口 PNG，不依赖外部录屏权限 |
+| 进程内 JavaScript 与 `bern.cli` | 按目标配置 `javascript = true` 启用：全部原生目标（含 GPUI 与手表端）统一在进程内运行 Boa，不拉起隐藏 WebView；`web_mode = "app"` 使用浏览器 Worker。每个上下文注入 `globalThis.bern.cli(...)` 直通命令目录，并由 Rust 侧 `CliPolicy` 黑白名单控制权限（默认全开）。见[JavaScript 与 `bern.cli`](../Implementation/JavaScript.md) |
 
 ## 最近新增能力的验证
 

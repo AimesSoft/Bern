@@ -1,8 +1,12 @@
 [English](../../Implementation/JavaScript.md) · **简体中文**
 
-# JavaScript 与目标能力
+# JavaScript 与 `bern.cli`
 
-Bern 的 `bern::script` 提供独立、持久的 JavaScript 上下文。目标配置启用脚本执行；插件调用接口在各平台保持一致。
+更新：2026-11-21。Bern 的 `bern::script` 提供按需启用、彼此隔离、持久存活的 JavaScript 上下文，并默认内建进程内 `bern.cli(...)` 接口直通应用命令目录。未启用脚本的应用不链接任何 JavaScript 运行时。
+
+## 启用 JavaScript
+
+在 `Bern.toml` 中按目标配置 `javascript = true`：
 
 ```toml
 [targets.macos]
@@ -13,7 +17,7 @@ javascript = true
 platform = "windows"
 javascript = true
 
-# 可选：需要去掉 SVG/WebPage 的 WebView 依赖的发行版。
+# 可选：在保留 JS 脚本能力的同时去掉 SVG/WebPage 的 WebView 依赖。
 [targets.linux_plain]
 platform = "linux"
 webview = false
@@ -22,11 +26,19 @@ javascript = true
 
 | 目标 | JS 后端 |
 | --- | --- |
-| macOS / iOS / tvOS / watchOS | Boa 0.22，纯 Rust 随应用编译 |
-| Windows / Linux / Android / Wear OS | Boa 0.22，纯 Rust 随应用编译 |
-| Web，web_mode = "app" | 浏览器 Worker |
+| macOS / iOS / tvOS / watchOS | Boa 0.22，纯 Rust 进程内编译 |
+| Windows / Linux / Android / Wear OS | Boa 0.22，纯 Rust 进程内编译 |
+| 桌面端 GPUI（macOS / Windows / Linux） | Boa 0.22，纯 Rust 进程内编译 |
+| Web（`web_mode = "app"`） | 浏览器 Web Worker |
 
-`javascript` 默认关闭，应用只需要声明这一项：每个目标用什么宿主由 Bern 决定，包在 `bern-script` 上设置特性时 `bern build` 会报错。测试没有目标可运行，可以在 dev-dependencies 里打开 `boa`。所有原生目标（`macos`、`ios`、`tvos`、`watchos`、`windows`、`linux`、`android`、`wearos` 及 GPUI 桌面目标）统一在进程内启用 `bern-script/boa`，运行脚本不再拉起隐藏的系统 WebView 进程群（如 `msedgewebview2.exe`、`WKWebView` XPC 进程或 `WebKitWebProcess`）；仅本身运行在浏览器内的 `platform = "browser"`（`web_mode = "app"`）使用浏览器 Worker。脚本功能目前用于引擎与 UI 同进程的目标；Web 的远程 `web_mode = "ui"` 暂不提供远程脚本路由，而独立 WebUI 引擎宿主在进程内以 Boa 运行脚本，并通过 `Sessions` 将 `bern.cli` 路由至已连接的页面。
+关键构建规则：
+
+- `javascript` 默认关闭。应用只需在 `Bern.toml` 里打开 `javascript = true`，具体宿主由 Bern 按目标选定；如果在包里手动为 `bern-script` 配置 Cargo feature，`bern build` 会直接拒绝。
+- 没有构建目标上下文的独立单元测试可以在 `[dev-dependencies]` 中启用 `bern-script/boa`。
+- 所有原生目标统一在进程内启用 `bern-script/boa`，执行脚本不会拉起隐藏的系统 WebView 进程群（如 `msedgewebview2.exe`、`WKWebView` XPC 进程或 `WebKitWebProcess`）；仅运行在浏览器内的 `platform = "browser"`（`web_mode = "app"`）使用 Web Worker。
+- 脚本上下文要求引擎与脚本宿主位于同一进程。远程 `web_mode = "ui"` 页面本身不做远程脚本路由；独立 WebUI 引擎宿主在进程内以 Boa 运行脚本，并通过 `Sessions` 将 `bern.cli` 会话命令路由到已连接的页面。
+
+## 脚本上下文基础
 
 ```rust
 async fn example() -> Result<(), bern::script::Error> {
@@ -38,11 +50,13 @@ async fn example() -> Result<(), bern::script::Error> {
 }
 ```
 
-`Context` 应在插件存活期间保留；各上下文的全局变量独立。`eval` 返回可 await 的 `Evaluation`，也可使用 `try_result` 非阻塞读取。不要在 UI 线程阻塞等待。返回值使用 JSON，undefined 对应 null，脚本异常返回 `Error`。
+- 在插件或脚本会话存活期间保持 `Context` 实例；不同上下文之间的全局变量完全隔离。
+- `eval` 返回可 `await` 的 `Evaluation`，也可用 `try_result` 非阻塞轮询。请勿在 UI 线程上阻塞等待。
+- 跨边界返回值采用 JSON：`undefined` 映射为 `null`，未捕获的脚本异常返回 `bern::script::Error`。
 
 ## 进程内 `bern.cli` 接口
 
-启用 JavaScript 后，每个上下文默认注入 `globalThis.bern.cli(...)`，在进程内直接对接运行中应用的统一命令目录（`Host`、`MediaHub` 与 `Sessions`），无需开启 IPC 套接字。由此发出的引擎命令携带 `Entry::Script` 来源标识。
+启用 JavaScript 后，每个上下文默认注入 `globalThis.bern.cli(...)`，在进程内直接对接运行中应用的统一命令目录（`Host`、`MediaHub` 与 `Sessions`），无需开启 IPC 套接字。由此触发的引擎命令携带 `Entry::Script` 来源标识。
 
 ```js
 // 1. CLI 命令行字符串（与外部应用 CLI 语法一致，支持引号转义）
@@ -62,7 +76,7 @@ const sessions = await bern.cli("sessions");
 const helpText = await bern.cli("help");
 ```
 
-`bern.cli` 始终返回 `Promise`，从而保证同一份脚本在原生 Boa 与浏览器 Web Worker 上行为一致。失败时 reject 为携带 `.code`（如 `permission_denied`、`invalid_params`、`unknown_command`、`cli_timeout` 或 `cli_unavailable`）与 `.message` 的 JavaScript `Error`。
+`bern.cli` 始终返回 `Promise`，从而保证同一份脚本在原生 Boa 与浏览器 Web Worker 上行为一致。调用失败时 reject 为携带 `.code`（如 `permission_denied`、`invalid_params`、`unknown_command`、`cli_timeout` 或 `cli_unavailable`）与 `.message` 的 JavaScript `Error`。
 
 ## 黑白名单策略
 
@@ -99,14 +113,21 @@ let plugin = Context::with_policy(
 | `@meta` | `state`、`sessions`、`catalog` 与 `help` |
 | 精确 ID | 指定目标本身（如 `media.seek`、`ui.activate`、`state`） |
 
-黑名单优先级始终高于白名单。默认情况下 `catalog` 与 `help` 会按当前上下文的策略自动过滤（`filter_catalog(true)`），`state` 快照同时遵守 `allow_state` / `allow_state_only` / `deny_state`。应用还可以通过 `CliPolicy::with_filter(...)` 挂接动态 Rust 拦截器，在执行前按解析后的参数或实时权限状态做二次校验。
+- 黑名单优先级始终高于白名单。
+- 默认情况下 `catalog` 与 `help` 会按当前上下文策略自动过滤（`filter_catalog(true)`），`state` 快照同时遵守 `allow_state`、`allow_state_only` 与 `deny_state`。
+- 需要按具体参数或运行期实时状态拦截时，可通过 `CliPolicy::with_filter(...)` 挂接动态 Rust 拦截器，在执行前进行二次校验。
 
-Web 端（`platform = "browser"`）每个上下文使用独立 Worker，异步结果（含 `bern.cli` 调用）通过宿主桥回传；脚本求值超时 30 秒，`bern.cli` 超时遵循 `CliPolicy::with_timeout_ms`（默认 10 秒），释放上下文和停止宿主会结束待处理请求。浏览器宿主提供单调时钟，因此 WebAssembly 不依赖 `std::time::Instant`。
+## 运行模型与超时
 
-原生目标上，Boa 为每个上下文运行带事件循环的轻量独立工作线程，并限制循环次数与递归深度。支持普通表达式、JSON、连续 `await bern.cli(...)` 以及同步求值期间触发的后台异步回调；依赖未安装外部宿主的 Promise 仍返回错误。
+- **原生目标（Boa）**：每个上下文运行在带事件循环的轻量独立工作线程上，并限制循环次数与递归深度。支持普通表达式、JSON、连续 `await bern.cli(...)` 链以及求值期间调度的异步回调；依赖未安装外部宿主的 Promise 返回错误。
+- **Web 端（`platform = "browser"`）**：每个上下文使用独立 Web Worker，异步结果（含 `bern.cli` 调用）通过宿主桥回传。脚本求值超时 30 秒，`bern.cli` 超时遵循 `CliPolicy::with_timeout_ms`（默认 10 秒），释放上下文或停止宿主会取消所有待处理请求。浏览器宿主提供单调时钟，因此 WebAssembly 不依赖 `std::time::Instant`。
 
-UI 可用 `if window.webview { ... } else { ... }`。这是编译期条件，未选分支不进入目标检查和代码生成。`Svg(static_source: ...)` 的自动静态回退见 [动画 SVG](Animated-SVG.md)。
+## 编译期 `window.webview` 分支
 
-验证：`cargo test -p bern-script`、`cargo test -p bern-script --features boa`、`cargo test -p bern-adapter-cli`、`cargo test -p bern-cli --test svg_targets`、`node --test crates/bern-script/tests/browser.test.mjs`。
+UI 声明可使用 `if window.webview { ... } else { ... }`。这是编译期条件，未选分支不进入目标能力检查与代码生成。`Svg(static_source: ...)` 的自动静态回退见[动画 SVG](Animated-SVG.md)。
 
-2026-11-14 验证：编译器／IR／目标 API 单元测试、全平台生成与回退测试、Boa 的持久变量／上下文隔离／JSON／Promise／异常／循环限制测试及浏览器 Worker 测试全部通过；所有原生目标统一生成带 `features = ["boa"]` 的进程内脚本引擎，不再创建隐藏 WebView 脚本宿主。
+## 验证范围
+
+验证命令：`cargo test -p bern-script`、`cargo test -p bern-script --features boa`、`cargo test -p bern-adapter-cli`、`cargo test -p bern-cli --test svg_targets`、`node --test crates/bern-script/tests/browser.test.mjs`。
+
+2026-11-21 验证：CI 中的工作区测试、`bern-script --features boa` 测试、`bern-adapter-cli::script` 测试与 `browser.test.mjs` Worker 测试全部通过，覆盖进程内 `bern.cli` 全部调用形态、`CliPolicy` 黑白名单／状态／目录过滤、动态拦截器、超时、Boa 持久上下文事件循环与浏览器 Worker 桥接。

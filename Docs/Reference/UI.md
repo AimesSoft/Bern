@@ -2,7 +2,7 @@
 
 # Current component usage
 
-Updated: 2026-10-28. This document describes the interfaces that can be declared today; for the complete properties, required items, child nodes and action rules see the [component property table](Component-Properties.md), and for what each backend accepts see the [platform capability table](Platforms.md). Projects that can be built directly are in `examples/hello`, `examples/showcase`, `examples/planner` and `examples/gallery`; the snippets below omit the enclosing component, protocol and state definitions.
+Updated: 2026-11-21. This document describes the interfaces that can be declared today; for the complete properties, required items, child nodes and action rules see the [component property table](Component-Properties.md), and for what each backend accepts see the [platform capability table](Platforms.md). Complete buildable projects are in `examples/hello`, `examples/showcase`, `examples/planner`, `examples/gallery`, `examples/native-controls`, `examples/wearos` and `examples/svg-animation`; the snippets below omit the enclosing component, protocol and state definitions.
 
 ## Declarations and data sources
 
@@ -85,7 +85,7 @@ ScaleBox(width: 1280, height: 720) {
 
 The `duration` of `Marquee` is the number of seconds one pass takes to cross the content area from right to left, and the current runtime uses at least 1 second; `phase` is the starting fraction of the cycle, recommended 0–1, default 0. `paused` defaults to false, and `opacity` defaults to 1 and is clamped to 0–1. The clock is managed by the presentation layer and can resume after pausing; under Reduce Motion the content is presented statically. It only expresses looping scrolling content and provides no per-frame callbacks, video clock synchronization or danmaku scheduling engine.
 
-These three components are provided by the `scaled_scene` capability, currently supported by SwiftUI and the Web. SwiftUI applies one overall scale; the Web updates the scale through a ResizeObserver and stops observing on unmount. iOS shares the generation path; no player device interaction acceptance was done in this round.
+These three components are provided by the `scaled_scene` capability, declared across SwiftUI, Web, Compose, GTK, WinUI 3 and GPUI (see [Platform capabilities](Platforms.md) for verification scope). SwiftUI applies one overall scale; the Web updates the scale through a ResizeObserver and stops observing on unmount.
 
 ## Control containers and sizes
 

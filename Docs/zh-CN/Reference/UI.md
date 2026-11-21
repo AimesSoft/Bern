@@ -2,7 +2,7 @@
 
 # 当前组件用法
 
-更新：2026-10-28。本文说明当前可声明的接口；完整属性、必填项、子节点与动作规则见[组件属性表](Component-Properties.md)，各后端的接受范围见[平台能力表](Platforms.md)。可直接构建的工程在 `examples/hello`、`examples/showcase`、`examples/planner`、`examples/gallery`；下文片段省略所在组件、协议与状态定义。
+更新：2026-11-21。本文说明当前可声明的接口；完整属性、必填项、子节点与动作规则见[组件属性表](Component-Properties.md)，各后端的接受范围见[平台能力表](Platforms.md)。可直接构建的完整工程在 `examples/hello`、`examples/showcase`、`examples/planner`、`examples/gallery`、`examples/native-controls`、`examples/wearos` 与 `examples/svg-animation`；下文片段省略所在组件、协议与状态定义。
 
 ## 声明与数据来源
 
@@ -85,7 +85,7 @@ ScaleBox(width: 1280, height: 720) {
 
 `Marquee` 的 `duration` 是一轮从右向左经过内容区的秒数，当前运行时至少使用 1 秒；`phase` 是起始周期比例，建议 0–1，默认 0。`paused` 默认 false，`opacity` 默认 1 并限制到 0–1。时钟由呈现层管理，暂停后可以继续，减少动态效果时静态呈现。它只表达循环滚动内容，不提供逐帧回调、视频时钟同步或弹幕调度引擎。
 
-这三个组件由 `scaled_scene` 能力提供，当前支持 SwiftUI 和 Web。SwiftUI 使用一次整体缩放；Web 通过 ResizeObserver 更新缩放并在卸载时解除观察。iOS 共用生成路径，本轮未做播放器设备交互验收。
+这三个组件由 `scaled_scene` 能力提供，SwiftUI、Web、Compose、GTK、WinUI 3 与 GPUI 均已支持（验证范围见[平台能力表](Platforms.md)）。SwiftUI 使用一次整体缩放；Web 通过 ResizeObserver 更新缩放并在卸载时解除观察。
 
 ## 控件容器与尺寸
 

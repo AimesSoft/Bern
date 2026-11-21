@@ -6,9 +6,10 @@
 
 <p><b>一つの Rust 宣言を、各プラットフォーム自身のネイティブ UI へコンパイル。</b></p>
 
-<p>デスクトップ・スマートフォン・ウォッチ・テレビ・Web をカバーし、AI のために作られた：SwiftUI、WinUI 3、GTK 4、Jetpack Compose、GPUI、そして Web。<br>
-デスクトップ・モバイル・ウェアラブルでは標準で JS エンジンやブラウザーを同梱しません。<br>
-<b>Skills + CLI：</b>IPC を有効にすると、エージェントは <code>SKILL.md</code> でコマンドを調べ、アプリの CLI からコントロールを名前で操作できます。</p>
+<p>デスクトップ・スマートフォン・タブレット・ウォッチ・テレビ・Web を一つの <code>ui!</code> 宣言から：<br>
+SwiftUI、WinUI 3、GTK 4、Jetpack Compose、GPUI、Web DOM/WASM。<br>
+既定で JS エンジンやブラウザーを同梱せず、必要時のみプロセス内 JavaScript と <code>bern.cli</code> を有効化。<br>
+<b>AI のための設計：</b>書き漏れはコンパイルエラーになり、エージェントは <code>SKILL.md</code> とアプリ CLI で名前指定の操作を行います。</p>
 
 <p>
 <img alt="macOS · SwiftUI" src="https://img.shields.io/badge/macOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
@@ -24,9 +25,10 @@
 </p>
 
 <p>
+<a href="https://bern.aimes-soft.com"><img alt="公式サイト" src="https://img.shields.io/badge/%E5%85%AC%E5%BC%8F%E3%82%B5%E3%82%A4%E3%83%88-bern.aimes--soft.com-111827?style=flat-square"></a>
 <img alt="Skills + CLI" src="https://img.shields.io/badge/AI-Skills%20%2B%20CLI-8B5CF6?style=flat-square">
 <img alt="メモリ約 40 MB" src="https://img.shields.io/badge/%E3%83%A1%E3%83%A2%E3%83%AA-%E7%B4%84%2040%20MB-0EA5E9?style=flat-square">
-<img alt="JS エンジンなし" src="https://img.shields.io/badge/JS%20%E3%82%A8%E3%83%B3%E3%82%B8%E3%83%B3-%E3%81%AA%E3%81%97-111827?style=flat-square">
+<img alt="JS エンジン：任意有効" src="https://img.shields.io/badge/JS%20%E3%82%A8%E3%83%B3%E3%82%B8%E3%83%B3-%E4%BB%BB%E6%84%8F%E6%9C%89%E5%8A%B9-111827?style=flat-square">
 <img alt="Rust 1.99" src="https://img.shields.io/badge/Rust-1.99-B7410E?style=flat-square&logo=rust&logoColor=white">
 <a href="LICENSE"><img alt="ライセンス：MIT" src="https://img.shields.io/badge/%E3%83%A9%E3%82%A4%E3%82%BB%E3%83%B3%E3%82%B9-MIT-22C55E?style=flat-square"></a>
 <img alt="状態：早期プレビュー" src="https://img.shields.io/badge/%E7%8A%B6%E6%85%8B-%E6%97%A9%E6%9C%9F%E3%83%97%E3%83%AC%E3%83%93%E3%83%A5%E3%83%BC-F59E0B?style=flat-square">
@@ -40,13 +42,14 @@
 </p>
 
 <p>
+<a href="https://bern.aimes-soft.com">公式サイト</a> ·
+<a href="https://bern.aimes-soft.com/docs">オンライン文書</a> ·
 <a href="#bern-を選ぶ理由">Bern を選ぶ理由</a> ·
 <a href="#bern-を使っているアプリ">Bern を使っているアプリ</a> ·
 <a href="#ai-のための設計">AI のための設計</a> ·
 <a href="#実測値">実測値</a> ·
 <a href="#他のフレームワークとの比較">比較</a> ·
-<a href="#クイックスタート">クイックスタート</a> ·
-<a href="Docs/Design.md">設計ドキュメント</a>
+<a href="#クイックスタート">クイックスタート</a>
 </p>
 
 </div>
@@ -94,7 +97,7 @@
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/why-ja-dark.svg">
-<img alt="Bern を選ぶ理由：ネイティブ UI へコンパイルし、一つの Rust 宣言から各プラットフォーム自身の UI コードを生成、実行時に JS エンジンなし。AI のための設計で、書き漏れはコンパイルエラー、SKILL.md でコマンドを調べ、アプリの CLI から名前でボタンを操作。クロスプラットフォームとは思えない軽さで、macOS は 39 MB・0.4 秒・2.7 MB、Windows は 35 MB・0.3 秒・4.2 MB、Web は 189 KB" src="Docs/Assets/tables/why-ja-light.svg" width="100%">
+<img alt="Bern を選ぶ理由：ネイティブ UI へコンパイルし、一つの Rust 宣言から各プラットフォーム自身の UI コードを生成、既定で JS エンジンなし。AI のための設計で、書き漏れはコンパイルエラー、SKILL.md とアプリ CLI で名前指定の操作やウィンドウ撮影が可能。クロスプラットフォームとは思えない軽さで、macOS は 39 MB・0.4 秒・2.7 MB、Windows は 35 MB・0.3 秒・4.2 MB、Web は 189 KB" src="Docs/Assets/tables/why-ja-light.svg" width="100%">
 </picture>
 
 ## Bern を使っているアプリ
@@ -158,6 +161,7 @@ $ showcase ui inspect                 # エージェントが読むのはピク�
 [{ "target": "controls_page.sync", "role": "switch", "label": "Sync", "value": "false", "enabled": true, … }, …]
 
 $ showcase ui set-bool --target controls_page.sync --value true
+$ showcase window screenshot --output shot.png
 
 $ showcase window close --window settings#1
 { "outcome": "ConfirmationRequired", "message": "Do you want to save the display name?",
@@ -167,7 +171,22 @@ $ showcase window confirm-close --window settings#1 --confirmation settings#1:c1
 { "outcome": "Rejected", "reason": "save_failed: invalid_name: a display name has 1 to 40 characters …" }
 ```
 
-`showcase showcase set-display-name --name Demo` のようなアプリ固有のコマンドも含め、人も同じコマンドを実行できます。CLI はアプリと同じビルドのものを使います。リモートからは制御チャネルのあるマシンに SSH で接続し、接続先を所有するアカウントで実行します。コントロールが無効、ダイアログで操作できない、対象が存在しないといった場合、CLI はエラーコードを返します。
+`showcase showcase set-display-name --name Demo` のようなアプリ固有のコマンドや、組み込みのウィンドウ撮影（`window screenshot`）も含め、人も同じコマンドを実行できます。CLI はアプリと同じビルドのものを使います。リモートからは制御チャネルのあるマシンに SSH で接続し、接続先を所有するアカウントで実行します。コントロールが無効、ダイアログで操作できない、対象が存在しないといった場合、CLI はエラーコードを返します。
+
+### JavaScript で拡張する：プロセス内 `bern.cli`
+
+スクリプトを有効にしないアプリには JS ランタイムが一切リンクされません。ターゲットに `javascript = true` を設定すると、すべての `bern::script::Context`（ネイティブではプロセス内 Boa、Web ではブラウザー Worker）に `globalThis.bern.cli(...)` が公開され、Rust 側の許可／拒否リスト（既定は `CliPolicy::allow_all()`）のもとでコマンドカタログへ直接アクセスできます。
+
+```rust
+let js = bern::script::Context::with_policy(
+    bern::script::CliPolicy::allow_only(["media.*", "@queries", "state", "catalog"])
+        .deny("media.bind")
+        .with_label("example.plugin"),
+)?;
+js.eval(r#"await bern.cli("media seek --player-id main --position-ms 90000")"#).await?;
+```
+
+呼び出し形式、ポリシーパターン、動的フィルターの詳細は [JavaScript とターゲット機能](Docs/Implementation/JavaScript.md) を参照してください。
 
 ## 実測値
 
@@ -196,21 +215,15 @@ $ showcase window confirm-close --window settings#1 --confirmation settings#1:c1
 </picture>
 
 <details>
-<summary><b>さらに：</b>動画、非同期クエリ、スタイルとモーション、描画、メディアアプリ向けのコンポーネント、渡されたファイルの読み取り、モジュール化アプリ、アダプティブレイアウト…</summary>
+<summary><b>さらに：</b>標準コントロール一式、自動スケルトン、スタイルとモーション、メディア、システム統合、モジュール化、<code>NativeView</code>、選択式 JS…</summary>
 <br>
 
-- **動画**：`Video` は AVFoundation、Windows Media Foundation、GStreamer、Android の Media3、HTML メディアで再生され、コントロールバーはコマンド駆動、プレーヤーはページをまたいで再生を続けられます。
-- **非同期クエリ**：`Query` の購読は読み込み中・空・失敗・更新中の状態を持ち、最新の応答だけを表示します。
-- **アダプティブレイアウト**：ビューが実際に得た幅に応じて `compact`、`medium`、`expanded`、`large` の 4 段階からレイアウトを選びます。式からもウィンドウの段階を読めるので、余白を段階ごとに変えられます。
-- **型付きナビゲーション**：サイドバー、型付きルートによるプッシュナビゲーション、タブ、ツールバー、メニュー。
-- **機能契約**：各レイアウトでコンポーネントが満たすべき機能を宣言し、網羅をコンパイラーが証明します。
-- **同梱リソース**：`Bern.toml` で宣言したファイルをビルド時に検査し、実行時は名前で参照します。
-- **画像とレイアウト**：`Image` は同梱画像を表示し、HDR 画像（PQ・HLG の PNG、ゲインマップ付き JPEG）は HDR を表示できる画面で HDR のまま表示します。宣言されていないリソースはコンパイルエラーになります。`Grid` は幅に応じて列数を増減し、`Stack` は 9 方向の配置で重ね、`Progress` はプログレスバーか不確定の進捗を表示します。
-- **スタイルの上書きとモーション**：コントロールは既定でプラットフォームの見た目です。一つのデザインにそろえたいときは、`style!` でアプリ全体の上書き、ばねのモーション、出現と消失のトランジション、時間差の登場、共有要素を宣言します。ターゲットが表示できない上書きはビルドエラーになります（5 つのフロントエンドすべてに実装）。
-- **描画と比率での配置**：`Canvas` は意味的な色で図形、データの曲線、チェック柄を描き、`Text` にはハイライトの下地を付けられます。`Rail` は状態が示す比率の位置に要素を置き、タイムライン、プログレスバー上の目盛り、伸びていく背景に使えます。
-- **メディアアプリ向けのコンポーネント**：サイドバー下部の領域、ツールバーの検索と結果、インスペクター、トースト、分割ボタンと任意の内容を出すポップオーバーボタン、内容を持つボタンとホバー時の表示、ショートカット、ファイルの選択とドロップ、スクロールのスナップ、ピンチとドラッグでの値の調整。5 つのフロントエンドすべてに実装しています。
-- **渡されたファイルの読み取り**：ユーザーが選んだ、ドロップした、またはアプリで開いたファイルの名前と中身を、エンジンは `MediaSource::file_name()` と `open()` で読み取ります。ローカルのパス、Android の `content://` ドキュメント、Web ページの `blob:` ファイルを同じ書き方で扱えます。
-- **モジュール化アプリ**：アプリはシェルと複数のモジュールで構成され、各モジュールが独自のプロトコル、エンジン、UI、翻訳を持ち、実行中に切り替えられます。`bern new --module` で追加でき、複数の人や AI が並行して開発できます（macOS と Android で検証済み）。
+- **アダプティブレイアウトとナビゲーション**：`compact`・`medium`・`expanded`・`large` の 4 段階に加え `watch`・`tv` 向けレイアウト。型付きプッシュナビゲーション、`SplitView` サイドバー、`Tabs` と `TabAccessory`、ツールバー、メニュー、`Grid`（メイソンリー対応）、`Stack`、`SplitPane`、`Accordion`、コンパイル時機能契約。
+- **充実したネイティブコントロール**：`Table`、`TreeView`、`Reorderable`、`BottomSheet`、`Refreshable`、`DatePicker`、`TimePicker`、`NumberInput`、`ColorPicker`、`ShortcutInput`、`Tooltip`、`Banner`、`Disclosure`、`Alert`、`EmptyState`、`Badge`、`Avatar`、`Text(selectable:)` とインライン Markdown、動的検索対応 `Picker(style: combobox)`、複数ファイル `pick:` とネイティブ `save:` ダイアログ。
+- **自動スケルトン、スタイルとモーション**：`Query` や `skeleton: <bool>` コンテナーからコンパイル時に実際の UI 構造を投影する自動スケルトン（120 ms ちらつき防止、時間差入場、視差効果低減対応）。`style!` による全体上書き、ばねモーション、共有要素 Hero、純 Rust アニメーション `Svg`（WebView 不要）、HDR `Image`、`Canvas` 描画、比率配置の `Rail`。
+- **メディア、非同期クエリ、ファイル**：各プラットフォームのメディアスタックや独自 `MediaKernel` で動く `Video`、`players.<id>.<field>` の直接参照、読み込み・空・失敗・更新を扱う `Query`、`Bern.toml` の同梱リソース、ローカルパス / Android `content://` / Web `blob:` を統一する `MediaSource`、関連付け起動 `[[app.opens]]`、メモリ配信 `bern::files::serve`。
+- **デスクトップとシステム統合**：トレイ常駐 `StatusItem`（単色 SVG アイコンとログイン時起動）、macOS `MenuBar`、アンカー付きフローティングウィンドウ、組み込み `window.screenshot`、ポインターイベント（`DoubleTap`、`ContextMenu`、`WheelUp`/`WheelDown`）、`Slider(hover:)`、埋め込み `WebPage`。
+- **拡張性**：モジュール化アプリ（`bern new --module`）、Rust ファイルの隣に各プラットフォーム実装を並べる `NativeView`（型付き props、`tr!` 検査、必須 CLI エントリ、`Fallback` 付き。[Native Views](Docs/Implementation/Native-Views.md)）、必要に応じて有効化するプロセス内 JavaScript と `bern.cli` の許可／拒否ポリシー（[JavaScript](Docs/Implementation/JavaScript.md)）。
 
 </details>
 
@@ -225,16 +238,18 @@ flowchart LR
     end
     P --> C{{"bern build<br/>コンパイラー + IR"}}
     U --> C
-    C --> S["SwiftUI<br/>macOS · iOS"]
-    C --> W["WinUI 3<br/>Windows"]
+    C --> S["SwiftUI<br/>macOS · iOS · watchOS · tvOS"]
+    C --> W["WinUI 3 / Islands<br/>Windows"]
     C --> G["GTK 4<br/>Linux"]
-    C --> A["Jetpack Compose<br/>Android"]
+    C --> A["Jetpack Compose<br/>Android · Wear OS"]
+    C --> P2["GPUI<br/>macOS · Windows · Linux"]
     C --> B["DOM + WASM<br/>Web"]
     E <--> K[["コマンドカタログ"]]
     K <--> N["ネイティブ UI"]
     K <--> L["アプリ CLI"]
+    K <--> JS["JS · bern.cli"]
     K <--> J["JSON チャネル"]
-    K --> S["SKILL.md"]
+    K --> SK["SKILL.md"]
 ```
 
 1. **プロトコル**：`#[bern::protocol]` で値の型、読み取り専用の状態、コマンドとクエリのトレイトを宣言します。
@@ -323,7 +338,7 @@ counter counter add --by 5
 counter catalog
 ```
 
-`Bern.toml` では言語、テーマ、ソース、同梱リソース、ビルドターゲットを宣言します。完全な例は[ショーケース](examples/showcase)をご覧ください。文字スタイル、ボタン、スイッチ、スライダー、テキストフィールド、エンジンのクエリによる検索、リストから詳細へのナビゲーション、動画、そしてタブと閉じる確認を持つ設定ウィンドウを備えたサイドバー型アプリです。[プランナー](examples/planner)は、スタイルの上書き、モーション、`Canvas` を使ったモジュール化アプリです。[パターン集](examples/gallery)はメディアアプリ向けのコンポーネントを示します。ポスターウォールの時間差の登場、タイムラインの比率での配置、音量のポップオーバーボタン、4 段階のサイズに応じて変わる余白とレイアウト、そしてドロップした動画のファイル名・形式・サイズをエンジンがファイルから読み取る例です。
+`Bern.toml` では言語、テーマ、ソース、同梱リソース、ビルドターゲットを宣言します。完全な例は[ショーケース](examples/showcase)をご覧ください。文字スタイル、ボタン、スイッチ、スライダー、テキストフィールド、エンジンのクエリによる検索、リストから詳細へのナビゲーション、動画、そしてタブと閉じる確認を持つ設定ウィンドウを備えたサイドバー型アプリです。[プランナー](examples/planner)は、スタイルの上書き、モーション、`Canvas` を使ったモジュール化アプリです。[パターン集](examples/gallery)はメディアアプリ向けのコンポーネントを示します。ポスターウォールの時間差の登場、タイムラインの比率での配置、音量のポップオーバーボタン、4 段階のサイズに応じて変わる余白とレイアウト、そしてドロップした動画のファイル名・形式・サイズをエンジンがファイルから読み取る例です。[ネイティブコントロール](examples/native-controls)は `NativeView` で 6 バックエンドにネイティブ UI を隣接配置する例、[ウォッチデモ](examples/wearos)はウォッチターゲット、[アニメーション SVG](examples/svg-animation)は純 Rust ベクターアニメーションの例です。
 
 ## 対応プラットフォーム
 
@@ -335,6 +350,10 @@ counter catalog
 実装記録：[macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [watchOS](Docs/Implementation/watchOS-SwiftUI.md) · [tvOS](Docs/Implementation/tvOS-SwiftUI.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Android と Wear OS](Docs/Implementation/Android-Compose.md) · [GPUI](Docs/Implementation/GPUI.md) · [Web と WebUI](Docs/Implementation/Web.md)。次のプラットフォームは[適応仕様](Docs/Adaptation/README.md)にあります。
 
 UI 技術を省略するとプラットフォームの既定が選ばれます。既定が使えないときは、別の技術へ黙って切り替えずにエラーになります。
+
+### Bern を GPUI の UI フレームワークとして使う
+
+GPUI は高速な GPU 描画をもたらしますが、標準のコントロールライブラリは付属しません。macOS・Windows・Linux で `ui = "gpui"` を指定すると、Bern をそのまま GPUI 上の宣言的 UI フレームワークとして使えます。ひとつの `ui!` 宣言にデスクトップ標準コントロール、ライト／ダークのセマンティックテーマ、ばねモーション、コンパイル時チェック、Skills + CLI がすべて揃います。独自の GPU 描画が必要な箇所は `NativeView(gpui: "...")` でネイティブ GPUI コードを隣接配置でき、ロジックを書き換えずにシステムネイティブ UI やモバイル・ウォッチ・Web へ広げることもできます。
 
 ### Windows と iOS にはフロントエンドが 2 つある
 
@@ -459,7 +478,7 @@ bern run
 
 ```text
 $ bern doctor
-bern 0.1.0 on macOS (aarch64)
+bern 0.2.1 on macOS (aarch64)
 
 [✓] Rust: rustc 1.99.0, cargo 1.99.0
 [✓] macOS · SwiftUI: macOS SDK 26.5, Swift 6.3.2
@@ -509,6 +528,7 @@ showcase ui set-bool --target controls_page.sync --value true
 showcase showcase search-library --text mo                   # エンジンへのクエリ
 showcase window open --kind settings
 showcase window list                                         # ウィンドウの実際の状態
+showcase window screenshot --output shot.png                 # ウィンドウを PNG 撮影
 ssh HOST /path/to/showcase state
 ```
 
@@ -518,7 +538,7 @@ ssh HOST /path/to/showcase state
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/roadmap-ja-dark.svg">
-<img alt="ロードマップ：フェーズ 1 から 4 と、フェーズ 7 のスタイル・モーション・モジュール化アプリ・メディアアプリ向けコンポーネントは完了。フェーズ 5 のほかのネイティブフロントエンドとフェーズ 6 のコンポーネントと開発ツールが進行中" src="Docs/Assets/tables/roadmap-ja-light.svg" width="100%">
+<img alt="ロードマップ：フェーズ 1〜4、フェーズ 6 標準コントロールとツール、フェーズ 7 スタイル・モーション・モジュール化アプリが完了。フェーズ 5 は残りの選択式フロントエンドを継続中" src="Docs/Assets/tables/roadmap-ja-light.svg" width="100%">
 </picture>
 
 ## リポジトリ構成
@@ -546,12 +566,14 @@ cargo test --workspace
 
 ## ドキュメント
 
-- [ドキュメント索引](Docs/README.md) · [現在のコンポーネントガイド](Docs/Reference/UI.md) · [プロパティ一覧](Docs/Reference/Component-Properties.md) · [プラットフォーム対応と検証範囲](Docs/Reference/Platforms.md)
-- [設計ドキュメント](Docs/Design.md)：目標、アーキテクチャ、コンポーネント、テーマ、コマンド、ウィンドウ、メディア
-- [適応仕様](Docs/Adaptation/README.md)：Apple、Windows と Linux、Web、Android、HarmonyOS
-- 実装記録：[macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [tvOS](Docs/Implementation/tvOS-SwiftUI.md) · [Android](Docs/Implementation/Android-Compose.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web](Docs/Implementation/Web.md)
+検索可能なオンラインドキュメントは **[bern.aimes-soft.com/docs](https://bern.aimes-soft.com/docs)**、またはこのリポジトリから閲覧できます：
 
-ドキュメントは英語で書かれています。[簡体字中国語版](Docs/zh-CN/README.md)もあります。
+- **リファレンス**：[ドキュメント索引](Docs/README.md) · [現在のコンポーネントガイド](Docs/Reference/UI.md) · [プロパティ一覧](Docs/Reference/Component-Properties.md) · [プラットフォーム対応と検証範囲](Docs/Reference/Platforms.md) · [パフォーマンストレース](Docs/Reference/Tracing.md)
+- **設計**：[設計ドキュメント](Docs/Design.md) · [適応仕様](Docs/Adaptation/README.md) · [React Native 調査](Docs/Research/ReactNative.md)
+- **トピック**：[隣接ネイティブビュー](Docs/Implementation/Native-Views.md) · [JavaScript と `bern.cli`](Docs/Implementation/JavaScript.md) · [アニメーション SVG](Docs/Implementation/Animated-SVG.md) · [モジュール別ビルド](Docs/Implementation/Module-Builds.md) · [ブラウザー拡張](Docs/Implementation/Web-Extensions.md)
+- **バックエンド**：[macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [watchOS](Docs/Implementation/watchOS-SwiftUI.md) · [tvOS](Docs/Implementation/tvOS-SwiftUI.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Android と Wear OS](Docs/Implementation/Android-Compose.md) · [GPUI](Docs/Implementation/GPUI.md) · [Web と WebUI](Docs/Implementation/Web.md)
+
+ドキュメントは英語で書かれています。[簡体字中国語版](Docs/zh-CN/README.md)（[オンライン](https://bern.aimes-soft.com/docs/zh-CN)）もあります。
 
 ## ライセンス
 

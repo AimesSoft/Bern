@@ -1,8 +1,12 @@
 **English** · [简体中文](../zh-CN/Implementation/JavaScript.md)
 
-# JavaScript and target capabilities
+# JavaScript and `bern.cli`
 
-Bern's `bern::script` provides independent, persistent JavaScript contexts. The target configuration enables script execution; the interface plugins call stays the same across platforms.
+Updated: 2026-11-21. Bern's `bern::script` crate provides opt-in, isolated, persistent JavaScript contexts with a built-in in-process `bern.cli(...)` bridge to the application's command catalog. Apps that do not enable scripting link zero JavaScript runtime.
+
+## Enabling JavaScript
+
+Enable `javascript = true` per target in `Bern.toml`:
 
 ```toml
 [targets.macos]
@@ -13,7 +17,7 @@ javascript = true
 platform = "windows"
 javascript = true
 
-# Optional: a distribution that needs to drop the WebView dependency for SVG/WebPage.
+# Optional: drop WebView dependencies for SVG/WebPage while keeping JS scripting.
 [targets.linux_plain]
 platform = "linux"
 webview = false
@@ -22,11 +26,19 @@ javascript = true
 
 | Target | JS backend |
 | --- | --- |
-| macOS / iOS / tvOS / watchOS | Boa 0.22, pure Rust compiled with the app |
-| Windows / Linux / Android / Wear OS | Boa 0.22, pure Rust compiled with the app |
-| Web, web_mode = "app" | Browser Worker |
+| macOS / iOS / tvOS / watchOS | Boa 0.22, pure Rust compiled in process |
+| Windows / Linux / Android / Wear OS | Boa 0.22, pure Rust compiled in process |
+| Desktop GPUI (macOS / Windows / Linux) | Boa 0.22, pure Rust compiled in process |
+| Web (`web_mode = "app"`) | Browser Web Worker |
 
-`javascript` is off by default, and it is all an application says: the host of each target is Bern's to pick, and `bern build` refuses a package that sets features on `bern-script`. A test, which has no target to run in, may turn on `boa` as a dev-dependency. Every native target (`macos`, `ios`, `tvos`, `watchos`, `windows`, `linux`, `android`, `wearos`, and GPUI desktop targets) enables `bern-script/boa` in-process so plugins never spawn hidden WebView processes (such as `msedgewebview2.exe`, `WKWebView` XPC processes, or `WebKitWebProcess`); only `platform = "browser"` (`web_mode = "app"`), which already runs inside a browser, uses a Web Worker. The script feature is currently used for targets where the engine and the UI run in the same process; the Web's remote `web_mode = "ui"` does not yet provide remote script routing, while the standalone WebUI engine host runs scripts in-process on Boa and routes `bern.cli` to connected pages through `Sessions`.
+Key build rules:
+
+- `javascript` is off by default. An application only toggles `javascript = true` in `Bern.toml`; Bern selects the backend per target, and `bern build` rejects packages that set features directly on `bern-script`.
+- Standalone unit tests that run outside a target may enable `bern-script/boa` under `[dev-dependencies]`.
+- Every native target enables `bern-script/boa` in process, so script execution never spawns hidden system WebView processes (`msedgewebview2.exe`, `WKWebView` XPC helpers or `WebKitWebProcess`). Only `platform = "browser"` (`web_mode = "app"`) uses a Web Worker.
+- Scripting targets run the engine and script host in the same process. Remote `web_mode = "ui"` pages do not perform remote script routing; instead, the standalone WebUI engine host runs scripts in process on Boa and routes `bern.cli` session calls to connected pages through `Sessions`.
+
+## Script context basics
 
 ```rust
 async fn example() -> Result<(), bern::script::Error> {
@@ -38,11 +50,13 @@ async fn example() -> Result<(), bern::script::Error> {
 }
 ```
 
-A `Context` should be kept for as long as the plugin is alive; the global variables of each context are independent. `eval` returns an awaitable `Evaluation`, and `try_result` can also read it without blocking. Do not block and wait on the UI thread. Return values use JSON, undefined maps to null, and script exceptions return `Error`.
+- Keep each `Context` alive for the lifetime of the plugin or script session; global variables are isolated per context.
+- `eval` returns an awaitable `Evaluation` (and `try_result` polls without blocking). Never block-wait on the UI thread.
+- Values cross the boundary as JSON: `undefined` maps to `null`, and unhandled JavaScript exceptions return `bern::script::Error`.
 
 ## In-process `bern.cli` interface
 
-When JavaScript is enabled, every context exposes `globalThis.bern.cli(...)`, routing directly to the running application's command catalog (`Host`, `MediaHub`, and `Sessions`) in-process without opening an IPC socket. Engine commands invoked this way arrive with `Entry::Script`.
+When JavaScript is enabled, every context exposes `globalThis.bern.cli(...)`, routing directly to the running application's command catalog (`Host`, `MediaHub` and `Sessions`) in process without opening an IPC socket. Engine commands invoked from JavaScript arrive with `Entry::Script`.
 
 ```js
 // 1. CLI command line (same syntax as the application CLI, with quote escaping)
@@ -62,11 +76,11 @@ const sessions = await bern.cli("sessions");
 const helpText = await bern.cli("help");
 ```
 
-`bern.cli` always returns a `Promise` so the same script runs identically on native Boa and browser Web Workers. Failures reject with a JavaScript `Error` carrying `.code` (such as `permission_denied`, `invalid_params`, `unknown_command`, `cli_timeout`, or `cli_unavailable`) and `.message`.
+`bern.cli` always returns a `Promise`, so the same script runs identically on native Boa and browser Web Workers. Failures reject with a JavaScript `Error` carrying `.code` (such as `permission_denied`, `invalid_params`, `unknown_command`, `cli_timeout` or `cli_unavailable`) and `.message`.
 
 ## Allowlist and denylist policies
 
-`Context::new()` defaults to `CliPolicy::allow_all()`, giving scripts full access to the application's CLI. Applications that run untrusted scripts or permissioned plugins construct contexts with `Context::with_policy(...)` and can update permissions at runtime with `Context::set_policy(...)`. All rules are enforced on the Rust host side against the resolved canonical target id before execution:
+`Context::new()` defaults to `CliPolicy::allow_all()`, giving scripts full access to the application's CLI. Applications running third-party scripts or permissioned plugins construct contexts with `Context::with_policy(...)` and can update policies live with `Context::set_policy(...)`. Every check runs on the Rust host side against the resolved canonical target id before execution:
 
 ```rust
 use bern::script::{CliPolicy, Context};
@@ -90,23 +104,30 @@ let plugin = Context::with_policy(
 
 | Pattern | Matches |
 | --- | --- |
-| `*` | Every command, query, media command, session command, and metadata target |
+| `*` | Every command, query, media command, session command and metadata target |
 | `<namespace>.*` | Every canonical id under that namespace (for example `media.*`, `ui.*`, `window.*`, `trace.*`) |
 | `@queries` | All read-only engine queries |
 | `@engine` | All engine commands and queries |
 | `@media` | All media commands |
-| `@session` | All UI, window, and trace session commands |
-| `@meta` | `state`, `sessions`, `catalog`, and `help` |
+| `@session` | All UI, window and trace session commands |
+| `@meta` | `state`, `sessions`, `catalog` and `help` |
 | Exact id | That exact target (for example `media.seek`, `ui.activate`, `state`) |
 
-Deny rules always override allow rules. By default `catalog` and `help` are filtered to entries allowed by the context's policy (`filter_catalog(true)`), and `state` snapshots honor `allow_state` / `allow_state_only` / `deny_state`. Applications can also attach a dynamic Rust interceptor with `CliPolicy::with_filter(...)` to inspect resolved parameters or live permission state before a call executes.
+- Deny rules always override allow rules.
+- By default `catalog` and `help` are filtered to entries allowed by the context's policy (`filter_catalog(true)`), and `state` snapshots honor `allow_state`, `allow_state_only` and `deny_state`.
+- For parameter-level or dynamic runtime checks, attach a Rust interceptor with `CliPolicy::with_filter(...)` to inspect resolved arguments or live permission state before execution.
 
-On the Web (`platform = "browser"`), each context uses one Worker and asynchronous results (including `bern.cli` calls) come back through the host bridge; evaluations time out after 30 seconds, `bern.cli` calls follow `CliPolicy::with_timeout_ms` (default 10 seconds), and releasing a context or stopping the host ends pending requests. The browser host provides a monotonic clock, so WebAssembly does not depend on `std::time::Instant`.
+## Execution model and timeouts
 
-On native targets, Boa uses a lightweight worker thread with an event loop for each context and limits loop iterations and recursion depth. It supports plain expressions, JSON, `await bern.cli(...)` chains, and background async callbacks triggered during synchronous evaluations; Promises that depend on an uninstalled external host still return an error.
+- **Native targets (Boa)**: each context runs on a lightweight worker thread with an event loop and enforces loop iteration and recursion limits. It supports plain expressions, JSON, chained `await bern.cli(...)` calls and async callbacks scheduled during evaluation; Promises that depend on an uninstalled external host return an error.
+- **Web (`platform = "browser"`)**: each context uses a dedicated Web Worker and exchanges asynchronous results (including `bern.cli` requests) over the host bridge. Script evaluations time out after 30 seconds, `bern.cli` calls follow `CliPolicy::with_timeout_ms` (default 10 seconds), and dropping a context or stopping the host cancels pending requests. The browser host supplies a monotonic clock so WebAssembly does not depend on `std::time::Instant`.
 
-The UI can use `if window.webview { ... } else { ... }`. This is a compile-time condition: the branch not chosen does not enter target checks or code generation. For the automatic static fallback of `Svg(static_source: ...)`, see [Animated SVG](Animated-SVG.md).
+## Compile-time `window.webview` branches
 
-Verification: `cargo test -p bern-script`, `cargo test -p bern-script --features boa`, `cargo test -p bern-adapter-cli`, `cargo test -p bern-cli --test svg_targets`, `node --test crates/bern-script/tests/browser.test.mjs`.
+UI declarations can branch on `if window.webview { ... } else { ... }`. This condition is resolved at compile time: the unselected branch is excluded from target capability checks and code generation. For the automatic static fallback of `Svg(static_source: ...)`, see [Animated SVG](Animated-SVG.md).
 
-Verified on 2026-11-14: compiler / IR / target API unit tests, generation and fallback tests across all platforms, Boa persistent-variable / context-isolation / JSON / Promise / exception / loop-limit tests, and browser Worker tests all passed; all native targets generate `bern-script` with `features = ["boa"]` without spawning hidden WebView script hosts.
+## Verification
+
+Commands: `cargo test -p bern-script`, `cargo test -p bern-script --features boa`, `cargo test -p bern-adapter-cli`, `cargo test -p bern-cli --test svg_targets`, `node --test crates/bern-script/tests/browser.test.mjs`.
+
+Verified on 2026-11-21: workspace tests, `bern-script --features boa` tests, `bern-adapter-cli::script` tests and `browser.test.mjs` Worker tests passed in CI, covering in-process `bern.cli` invocation forms, `CliPolicy` allowlist/denylist/state/catalog filtering, dynamic filters, timeouts, Boa persistent contexts/event loops and browser Worker bridging across native and Web targets.
