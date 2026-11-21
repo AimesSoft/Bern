@@ -5047,10 +5047,20 @@ inline void Form(Parent const& p, Ctx const& ctx, Str const& title, FormProps fo
     controls::StackPanel content;
     content.Spacing(form.gap.value_or(24));
     content.MaxWidth(1000);
+    content.VerticalAlignment(xaml::VerticalAlignment::Top);
     auto saved = currentForm;
     currentForm = std::make_shared<FormProps>(form);
+    // Keep the width-clamped panel out of ScrollContentPresenter's direct
+    // child slot: XAML's ScrollContentPresenter refuses to use ActualWidth as
+    // the scroll extent when its direct child sets MaxWidth, so
+    // DirectManipulation centers a narrower DesiredSize while arranging the
+    // panel at 1000 DIP, pushing it past the viewport's right edge. Wrapping
+    // it in a full-width Grid keeps extent == viewport and lets XAML layout
+    // center the clamped panel cleanly.
+    controls::Grid host;
+    host.Children().Append(content);
     controls::ScrollViewer scroller;
-    scroller.Content(content);
+    scroller.Content(host);
     scroller.HorizontalScrollBarVisibility(controls::ScrollBarVisibility::Disabled);
     scroller.VerticalScrollBarVisibility(controls::ScrollBarVisibility::Auto);
     MarkFill(scroller);

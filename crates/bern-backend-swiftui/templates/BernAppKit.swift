@@ -300,7 +300,6 @@ extension BernHost {
             platform.openSettings?()
         } else {
             if kind.isUtility, let existing = windows[kindID]?.nsWindow {
-                if let overlay = kind.overlay { placeBesideOverlay(existing, overlay: overlay) }
                 existing.orderFrontRegardless()
                 return
             }
@@ -347,13 +346,10 @@ extension BernHost {
                 }
             } ?? false
         }
+        guard !active else { return }
         for context in Array(windows.values) {
             guard let kind = kinds.first(where: { $0.id == context.kindID }), kind.overlay == overlayID else { continue }
-            if active, let win = context.nsWindow {
-                placeBesideOverlay(win, overlay: overlayID)
-            } else {
-                _ = try? requestClose(context)
-            }
+            _ = try? requestClose(context)
         }
     }
 

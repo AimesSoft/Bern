@@ -1544,9 +1544,16 @@ inline std::string OpenDialog(std::shared_ptr<Win> const& win) {
 
 /// Open a window of `kind`, or show the one already open. Returns the
 /// instance id.
+/// Whether `overlay` currently has an unlocked free overlay rect.
+inline bool OverlayActive(std::string const& overlay) {
+    if (overlay.empty()) return true;
+    double ox = 0, oy = 0, ow = 0, oh = 0;
+    return bern_overlay_rect(reinterpret_cast<uint8_t const*>(overlay.data()), overlay.size(), &ox, &oy, &ow, &oh) != 0;
+}
+
 /// Position a window anchored to an overlay beside that overlay on the same
-/// monitor's work area. Returns false if the overlay is absent, locked, or
-/// taskbar-anchored.
+/// monitor's work area when first opened. Returns false if the overlay is
+/// absent, locked, or taskbar-anchored.
 inline bool PlaceBesideOverlay(Win& win) {
     auto const& def = win.Def();
     if (def.overlay.empty()) return true;
@@ -1587,7 +1594,6 @@ inline std::string Open(std::string const& kindId) {
     if (kind < 0) throw Fault{"target_not_found", "no window kind `" + kindId + "`"};
     for (auto const& existing : all)
         if (existing->kind == kind) {
-            PlaceBesideOverlay(*existing);
             Show(*existing);
             return existing->id;
         }
@@ -2340,12 +2346,12 @@ inline void Run(uint64_t request, uint32_t index, Reader& reader) {
     }
     case 25: {
         auto overlayId = reader.Text();
-        std::vector<std::shared_ptr<Win>> matched;
-        for (auto const& win : WindowManager::all) {
-            if (win->Def().overlay == overlayId) matched.push_back(win);
-        }
-        for (auto const& win : matched) {
-            if (!WindowManager::PlaceBesideOverlay(*win)) {
+        if (!WindowManager::OverlayActive(overlayId)) {
+            std::vector<std::shared_ptr<Win>> matched;
+            for (auto const& win : WindowManager::all) {
+                if (win->Def().overlay == overlayId) matched.push_back(win);
+            }
+            for (auto const& win : matched) {
                 WindowManager::RequestClose(win, true);
             }
         }
