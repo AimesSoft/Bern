@@ -1714,14 +1714,10 @@ object BernHost {
     }
 
     fun syncOverlay(overlayID: String) {
-        val active = BernOverlay.isActive(overlayID)
+        if (BernOverlay.isActive(overlayID)) return
         for (kind in kinds) {
             if (kind.overlay != overlayID) continue
-            if (active) {
-                BernOverlay.repositionWindow(appContext, kind.id)
-            } else {
-                close(kind.id)
-            }
+            close(kind.id)
         }
     }
 
@@ -2917,14 +2913,6 @@ internal object BernOverlay {
         // @bern:wear-skip-end
     }
 
-    fun repositionWindow(context: Context?, kindID: String) {
-        // @bern:wear-skip-start
-        if (context != null) {
-            BernOverlayWindows.reposition(context, kindID)
-        }
-        // @bern:wear-skip-end
-    }
-
     /// Mark the bar of `id` as showing or not, raising the window by it or
     /// lowering it back.
     private fun barred(context: Context, id: String, on: Boolean) {
@@ -3008,9 +2996,6 @@ internal object BernOverlay {
                             layout.x = startX + (event.rawX - downX).toInt()
                             layout.y = startY + (event.rawY - downY).toInt()
                             manager.updateViewLayout(created, layout)
-                            // @bern:wear-skip-start
-                            BernOverlayWindows.repositionForOverlay(context, id)
-                            // @bern:wear-skip-end
                         }
                     }
                     android.view.MotionEvent.ACTION_UP ->
@@ -3139,7 +3124,6 @@ internal object BernOverlayWindows {
     fun open(context: Context, kind: BernWindowKind): Boolean {
         val renderer = BernHost.overlayRenderer ?: return false
         if (open.containsKey(kind.id)) {
-            reposition(context, kind.id)
             return true
         }
         val metrics = context.resources.displayMetrics
@@ -3179,23 +3163,6 @@ internal object BernOverlayWindows {
         manager.addView(view, lp)
         open[kind.id] = entry
         return true
-    }
-
-    fun reposition(context: Context, kindID: String) {
-        val entry = open[kindID] ?: return
-        position(context, entry.kind, entry.layout)
-        try {
-            (context.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager)
-                .updateViewLayout(entry.view, entry.layout)
-        } catch (_: Exception) {}
-    }
-
-    fun repositionForOverlay(context: Context, overlayId: String) {
-        for (entry in open.values.toList()) {
-            if (entry.kind.overlay == overlayId) {
-                reposition(context, entry.kind.id)
-            }
-        }
     }
 
     fun close(context: Context, kindID: String) {

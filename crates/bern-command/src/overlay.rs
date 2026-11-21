@@ -65,23 +65,24 @@ pub fn screen_rect(id: &str) -> Option<(f64, f64, f64, f64)> {
         .copied()
 }
 
-/// Register a callback invoked when an overlay moves, resizes, locks, or hides.
+/// Register a callback invoked when an active free overlay locks, hides, or
+/// moves to the taskbar.
 pub fn set_sync_hook(hook: impl Fn(&str) + Send + Sync + 'static) {
     *SYNC_HOOK.write().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(hook));
 }
 
 pub(crate) fn update_rect(id: &str, rect: Option<(f64, f64, f64, f64)>) {
-    let changed = {
+    let deactivated = {
         let mut rects = RECTS.lock().unwrap_or_else(|e| e.into_inner());
         match rect {
             Some(r) => {
-                let prev = rects.insert(id.to_string(), r);
-                prev != Some(r)
+                rects.insert(id.to_string(), r);
+                false
             }
             None => rects.remove(id).is_some(),
         }
     };
-    if changed && let Some(hook) = SYNC_HOOK.read().unwrap_or_else(|e| e.into_inner()).clone() {
+    if deactivated && let Some(hook) = SYNC_HOOK.read().unwrap_or_else(|e| e.into_inner()).clone() {
         hook(id);
     }
 }
@@ -3585,5 +3586,35 @@ mod tests {
         };
         let occupied = [(0, 900), (920, 1280)];
         assert_eq!(pick_taskbar_room(bar, &occupied, 8, 40, 200, None), None);
+    }
+
+    #[test]
+    fn update_rect_notifies_sync_hook_only_on_deactivation() {
+        let id = "test_overlay_sync_deactivate";
+        let events = Arc::new(Mutex::new(Vec::<String>::new()));
+        let seen = events.clone();
+        set_sync_hook(move |overlay_id| {
+            seen.lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(overlay_id.to_string());
+        });
+
+        update_rect(id, Some((100.0, 200.0, 300.0, 60.0)));
+        assert_eq!(screen_rect(id), Some((100.0, 200.0, 300.0, 60.0)));
+        // Resizing or moving an active overlay updates the cached rect for
+        // future openings without pushing an already-open utility window.
+        update_rect(id, Some((120.0, 210.0, 520.0, 90.0)));
+        assert_eq!(screen_rect(id), Some((120.0, 210.0, 520.0, 90.0)));
+        assert!(events.lock().unwrap().is_empty());
+
+        // Hiding, locking, or moving to the taskbar clears the rect and fires
+        // the sync hook once so anchored utility windows close.
+        update_rect(id, None);
+        assert_eq!(screen_rect(id), None);
+        assert_eq!(*events.lock().unwrap(), vec![id.to_string()]);
+
+        // Repeated None updates do not fire again.
+        update_rect(id, None);
+        assert_eq!(*events.lock().unwrap(), vec![id.to_string()]);
     }
 }
