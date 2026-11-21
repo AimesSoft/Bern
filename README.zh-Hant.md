@@ -6,9 +6,10 @@
 
 <p><b>一份 Rust 宣告，編譯成每個平台自己的原生介面。</b></p>
 
-<p>涵蓋桌面、手機、手錶、電視與網頁，為 AI 而建：SwiftUI、WinUI 3、GTK 4、Jetpack Compose、GPUI 與 Web。<br>
-桌面、手機與手錶端預設不隨附 JS 引擎或瀏覽器。<br>
-<b>Skills + CLI：</b>啟用 IPC 後，Agent 可在 <code>SKILL.md</code> 查詢指令，再用應用程式的 CLI 依名稱操作控制項。</p>
+<p>桌面、手機、平板、手錶、電視與 Web，出自同一份 <code>ui!</code> 宣告：<br>
+SwiftUI、WinUI 3、GTK 4、Jetpack Compose、GPUI 與 Web DOM/WASM。<br>
+預設不隨附 JS 引擎或瀏覽器，按需啟用行程內 JavaScript 與 <code>bern.cli</code>。<br>
+<b>為 AI 而建：</b>寫漏的內容在編譯期直接報錯，Agent 讀 <code>SKILL.md</code> 並透過應用程式 CLI 依名稱操作控制項。</p>
 
 <p>
 <img alt="macOS · SwiftUI" src="https://img.shields.io/badge/macOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
@@ -24,9 +25,10 @@
 </p>
 
 <p>
+<a href="https://bern.aimes-soft.com"><img alt="官網" src="https://img.shields.io/badge/%E5%AE%98%E7%B6%B2-bern.aimes--soft.com-111827?style=flat-square"></a>
 <img alt="Skills + CLI" src="https://img.shields.io/badge/AI-Skills%20%2B%20CLI-8B5CF6?style=flat-square">
 <img alt="記憶體約 40 MB" src="https://img.shields.io/badge/%E8%A8%98%E6%86%B6%E9%AB%94-%E7%B4%84%2040%20MB-0EA5E9?style=flat-square">
-<img alt="無 JS 引擎" src="https://img.shields.io/badge/JS%20%E5%BC%95%E6%93%8E-%E7%84%A1-111827?style=flat-square">
+<img alt="JS 引擎：預設無 · 可選" src="https://img.shields.io/badge/JS%20%E5%BC%95%E6%93%8E-%E9%A0%90%E8%A8%AD%E7%84%A1%20%C2%B7%20%E5%8F%AF%E9%81%B8-111827?style=flat-square">
 <img alt="Rust 1.99" src="https://img.shields.io/badge/Rust-1.99-B7410E?style=flat-square&logo=rust&logoColor=white">
 <a href="LICENSE"><img alt="授權：MIT" src="https://img.shields.io/badge/%E6%8E%88%E6%AC%8A-MIT-22C55E?style=flat-square"></a>
 <img alt="狀態：早期預覽" src="https://img.shields.io/badge/%E7%8B%80%E6%85%8B-%E6%97%A9%E6%9C%9F%E9%A0%90%E8%A6%BD-F59E0B?style=flat-square">
@@ -40,13 +42,14 @@
 </p>
 
 <p>
+<a href="https://bern.aimes-soft.com">官網</a> ·
+<a href="https://bern.aimes-soft.com/docs/zh-CN">線上文件</a> ·
 <a href="#為什麼選擇-bern">為什麼選擇 Bern</a> ·
 <a href="#誰使用了-bern">誰使用了 Bern</a> ·
 <a href="#為-ai-而建">為 AI 而建</a> ·
 <a href="#實測數據">實測數據</a> ·
 <a href="#與其他跨平台框架比較">比較</a> ·
-<a href="#快速開始">快速開始</a> ·
-<a href="Docs/zh-CN/Design.md">設計文件</a>
+<a href="#快速開始">快速開始</a>
 </p>
 
 </div>
@@ -94,7 +97,7 @@
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/why-zh-Hant-dark.svg">
-<img alt="為什麼選擇 Bern：編譯成原生介面，一份 Rust 宣告產生各平台自己的 UI 程式碼，執行時沒有 JS 引擎；為 AI 而建，漏寫是編譯錯誤，Agent 在 SKILL.md 查詢指令，再用應用程式的 CLI 依名稱操作按鈕；輕到不像跨平台，macOS 記憶體 39 MB、0.4 秒出現視窗、應用程式套件 2.7 MB，Windows 35 MB、0.3 秒、4.2 MB，Web 189 KB" src="Docs/Assets/tables/why-zh-Hant-light.svg" width="100%">
+<img alt="為什麼選擇 Bern：編譯成原生介面，一份 Rust 宣告產生各平台自己的 UI 程式碼，預設無 JS 引擎；為 AI 而建，漏寫是編譯錯誤，Agent 在 SKILL.md 查詢指令、用應用程式 CLI 操作控制項並截取視窗；輕到不像跨平台，macOS 記憶體 39 MB、0.4 秒出現視窗、應用程式套件 2.7 MB，Windows 35 MB、0.3 秒、4.2 MB，Web 189 KB" src="Docs/Assets/tables/why-zh-Hant-light.svg" width="100%">
 </picture>
 
 ## 誰使用了 Bern
@@ -158,16 +161,32 @@ $ showcase ui inspect                 # Agent 讀到的是語意，不是像素
 [{ "target": "controls_page.sync", "role": "switch", "label": "同步", "value": "false", "enabled": true, … }, …]
 
 $ showcase ui set-bool --target controls_page.sync --value true
+$ showcase window screenshot --output shot.png
 
 $ showcase window close --window settings#1
-{ "outcome": "ConfirmationRequired", "message": "要存储对显示名称的更改吗？",
+{ "outcome": "ConfirmationRequired", "message": "要儲存對顯示名稱的變更嗎？",
   "decisions": ["Save", "Discard", "Cancel"], "confirmation": "settings#1:c1", … }
 
 $ showcase window confirm-close --window settings#1 --confirmation settings#1:c1 --decision Save
 { "outcome": "Rejected", "reason": "save_failed: invalid_name: a display name has 1 to 40 characters …" }
 ```
 
-你也可以執行相同的指令，包括 `showcase showcase set-display-name --name Demo` 這類應用程式自訂的命令。請使用與應用程式一同建置的 CLI；從遠端操作時，透過 SSH 登入控制通道所在的主機，以擁有該端點的帳號執行。控制項遭停用、被對話框擋住或不存在時，CLI 會傳回明確的錯誤碼。
+你也可以執行相同的指令，包括 `showcase showcase set-display-name --name Demo` 這類應用程式自訂的命令，或透過內建的 `window screenshot` 直接截取視窗畫面。請使用與應用程式一同建置的 CLI；從遠端操作時，透過 SSH 登入控制通道所在的主機，以擁有該端點的帳號執行。控制項遭停用、被對話框擋住或不存在時，CLI 會傳回明確的錯誤碼。
+
+### 以 JavaScript 擴充：行程內 `bern.cli`
+
+未啟用腳本的應用程式不會連結任何 JS 執行環境。當目標設定 `javascript = true` 後，每個 `bern::script::Context`（原生目標統一採行程內 Boa，Web 目標為瀏覽器 Worker）預設注入 `globalThis.bern.cli(...)`，直通應用程式命令目錄，並由 Rust 側黑白名單把關權限（預設 `CliPolicy::allow_all()`）：
+
+```rust
+let js = bern::script::Context::with_policy(
+    bern::script::CliPolicy::allow_only(["media.*", "@queries", "state", "catalog"])
+        .deny("media.bind")
+        .with_label("example.plugin"),
+)?;
+js.eval(r#"await bern.cli("media seek --player-id main --position-ms 90000")"#).await?;
+```
+
+完整的呼叫形式、規則模式與動態攔截器見[JavaScript 與目標能力](Docs/zh-CN/Implementation/JavaScript.md)。
 
 ## 實測數據
 
@@ -196,21 +215,15 @@ $ showcase window confirm-close --window settings#1 --confirmation settings#1:c1
 </picture>
 
 <details>
-<summary><b>還有：</b>影片、非同步查詢、樣式與動效、自繪、媒體類應用程式的元件、讀取交來的檔案、模組化應用程式、自適應版面…</summary>
+<summary><b>還有：</b>完整標準控制項、預設骨架圖、樣式與動效、媒體與檔案、系統整合、模組化應用程式、<code>NativeView</code> 與可選 JS…</summary>
 <br>
 
-- **影片**：`Video` 分別執行於 AVFoundation、Windows Media Foundation、GStreamer、Android 的 Media3 與 HTML 媒體，控制列由命令驅動，播放器可以跨頁面持續播放。
-- **非同步查詢**：`Query` 訂閱具備載入、空結果、失敗與重新整理狀態，只顯示最新的回覆。
-- **自適應版面**：依視圖實際取得的空間在 `compact`、`medium`、`expanded`、`large` 四檔中選擇版面；運算式也能讀取視窗所在的檔位，例如依檔位設定頁邊距。
-- **型別化導覽**：側邊欄、帶型別化路由的推入式導覽、分頁、工具列與選單。
-- **功能契約**：宣告元件在每種版面中必須涵蓋的功能，由編譯器證明涵蓋完整。
-- **隨附資源**：在 `Bern.toml` 中宣告檔案，建置時檢查，執行時依名稱定位。
-- **圖片與版面**：`Image` 顯示隨附圖片，未宣告的資源在編譯時報錯，HDR 圖片（PQ、HLG 的 PNG 與帶增益圖的 JPEG）在能顯示 HDR 的螢幕上以 HDR 顯示；`Grid` 依可用寬度自動增減欄數，`Stack` 疊放並依九個方位對齊，`Progress` 顯示進度列或不確定進度。
-- **樣式覆寫與動效**：控制項預設是平台外觀；需要統一設計時，用 `style!` 為整個應用程式宣告覆寫、彈簧動效、出現與消失轉場、錯開進場和共享元素，目標做不到的覆寫在建置時報錯（五個前端都已實作）。
-- **自繪與按比例擺放**：`Canvas` 用語義色彩繪製形狀、資料曲線與格紋圖案，`Text` 可以加標註底紋；`Rail` 把元素放在狀態給出的比例處，例如時間軸、進度列上的刻度與漲滿的底色。
-- **媒體類應用程式的元件**：側邊欄底部區域、工具列搜尋與結果、側面板、輕提示、分體按鈕與彈出任意內容的浮層按鈕、帶內容的按鈕與懸停顯示、快速鍵、檔案選取與拖入、捲動停靠、雙指縮放與拖曳調值，五個前端都已實作。
-- **讀取交來的檔案**：使用者選取、拖入或用應用程式開啟的檔案，引擎用 `MediaSource::file_name()` 與 `open()` 讀取名稱與內容；本機路徑、Android 的 `content://` 文件與網頁的 `blob:` 檔案寫法相同。
-- **模組化應用程式**：應用程式由外殼與多個模組組成，每個模組有自己的協定、引擎、介面與翻譯，可以在執行時開關；`bern new --module` 新增模組，適合多人與多個 AI 分頭開發（已在 macOS 與 Android 上驗證）。
+- **自適應版面與導覽**：`compact`、`medium`、`expanded`、`large` 四檔尺寸與 `watch`、`tv` 版面；型別化推入式導覽、`SplitView` 側邊欄、`Tabs` 與 `TabAccessory`、工具列、選單、`Grid`（含瀑布流）、`Stack`、`SplitPane`、`Accordion` 與編譯期功能契約。
+- **完整原生控制項體系**：`Table`、`TreeView`、`Reorderable`、`BottomSheet`、`Refreshable`、`DatePicker`、`TimePicker`、`NumberInput`、`ColorPicker`、`ShortcutInput`、`Tooltip`、`Banner`、`Disclosure`、`Alert`、`EmptyState`、`Badge`、`Avatar`、`Text(selectable:)` 與行內 Markdown、動態可搜尋 `Picker(style: combobox)`、多檔案 `pick:` 與原生 `save:` 對話框。
+- **預設骨架圖、樣式與動效**：`Query` 與 `skeleton: <bool>` 容器於編譯期直接從真實介面樹投影骨架圖（120 ms 防閃爍、錯峰輕浮進場、自動遵循減少動態效果）；`style!` 全域覆寫、彈簧動效與共享元素 Hero、純 Rust 動畫 `Svg`（零 WebView）、HDR `Image`、`Canvas` 自繪與比例軌道 `Rail`。
+- **媒體、非同步查詢與檔案**：`Video` 串接各平台原生媒體堆疊或應用自備 `MediaKernel`，支援直讀 `players.<id>.<field>`；`Query` 訂閱管理載入、空狀態、失敗與重新整理；`Bern.toml` 隨附資源；跨本機路徑 / Android `content://` / Web `blob:` 統一的 `MediaSource`、系統開啟方式 `[[app.opens]]` 與記憶體供圖 `bern::files::serve`。
+- **桌面與系統整合**：系統匣 `StatusItem`（單色 SVG 圖示與登入時啟動）、macOS `MenuBar`、浮層錨定工具窗、內建 `window.screenshot`、指標事件（`DoubleTap`、`ContextMenu`、`WheelUp`/`WheelDown`）、`Slider(hover:)` 與內嵌 `WebPage`。
+- **擴充能力**：模組化應用程式（`bern new --module`）、緊鄰嵌入各平台原生程式碼的 `NativeView`（含強型別 props、`tr!` 檢查、強制 CLI 入口與 `Fallback`，見[緊鄰原生視圖](Docs/zh-CN/Implementation/Native-Views.md)），以及按需啟用的行程內 JavaScript 與 `bern.cli` 黑白名單（見[JavaScript 與目標能力](Docs/zh-CN/Implementation/JavaScript.md)）。
 
 </details>
 
@@ -225,16 +238,18 @@ flowchart LR
     end
     P --> C{{"bern build<br/>編譯器 + IR"}}
     U --> C
-    C --> S["SwiftUI<br/>macOS · iOS"]
-    C --> W["WinUI 3<br/>Windows"]
+    C --> S["SwiftUI<br/>macOS · iOS · watchOS · tvOS"]
+    C --> W["WinUI 3 / Islands<br/>Windows"]
     C --> G["GTK 4<br/>Linux"]
-    C --> A["Jetpack Compose<br/>Android"]
+    C --> A["Jetpack Compose<br/>Android · Wear OS"]
+    C --> P2["GPUI<br/>macOS · Windows · Linux"]
     C --> B["DOM + WASM<br/>Web"]
     E <--> K[["命令目錄"]]
     K <--> N["原生介面"]
     K <--> L["應用程式 CLI"]
+    K <--> JS["JS · bern.cli"]
     K <--> J["JSON 通道"]
-    K --> S["SKILL.md"]
+    K --> SK["SKILL.md"]
 ```
 
 1. **協定**：`#[bern::protocol]` 宣告值型別、唯讀狀態，以及命令與查詢 trait。
@@ -323,7 +338,7 @@ counter counter add --by 5
 counter catalog
 ```
 
-`Bern.toml` 宣告語言、主題、原始碼、隨附資源與建置目標。完整範例請見[控制項展示應用程式](examples/showcase)：側邊欄應用程式，包含文字層級、按鈕、開關、滑桿、輸入框、由引擎查詢驅動的搜尋、清單到詳細資料的導覽、影片，以及具備分頁與關閉確認的設定視窗。[計畫應用程式](examples/planner)示範模組化應用程式、樣式覆寫、動效與 `Canvas`。[圖案集](examples/gallery)示範媒體類應用程式的元件：海報牆的錯開進場、時間軸的按比例擺放、音量浮層按鈕、隨四檔尺寸變化的頁邊距與版面，以及拖入影片後由引擎讀出檔名、格式與大小。
+`Bern.toml` 宣告語言、主題、原始碼、隨附資源與建置目標。完整範例請見[控制項展示應用程式](examples/showcase)：側邊欄應用程式，包含文字層級、按鈕、開關、滑桿、輸入框、由引擎查詢驅動的搜尋、清單到詳細資料的導覽、影片，以及具備分頁與關閉確認的設定視窗。[計畫應用程式](examples/planner)示範模組化應用程式、樣式覆寫、動效與 `Canvas`。[圖案集](examples/gallery)示範媒體類應用程式的元件：海報牆的錯開進場、時間軸的按比例擺放、音量浮層按鈕、隨四檔尺寸變化的頁邊距與版面，以及拖入影片後由引擎讀出檔名、格式與大小。[原生控制項範例](examples/native-controls)示範透過 `NativeView` 在六個後端緊鄰嵌入平台原生控制項，[手錶端範例](examples/wearos)示範手錶目標，[動畫 SVG](examples/svg-animation)示範純 Rust 向量動畫。
 
 ## 支援的平台
 
@@ -335,6 +350,10 @@ counter catalog
 實作紀錄：[macOS](Docs/zh-CN/Implementation/macOS-SwiftUI.md) · [iOS](Docs/zh-CN/Implementation/iOS-SwiftUI.md) · [watchOS](Docs/zh-CN/Implementation/watchOS-SwiftUI.md) · [tvOS](Docs/zh-CN/Implementation/tvOS-SwiftUI.md) · [Windows](Docs/zh-CN/Implementation/Windows-WinUI3.md) · [Linux](Docs/zh-CN/Implementation/Linux-GTK.md) · [Android 與 Wear OS](Docs/zh-CN/Implementation/Android-Compose.md) · [GPUI](Docs/zh-CN/Implementation/GPUI.md) · [Web 與 WebUI](Docs/zh-CN/Implementation/Web.md)；下一步的平台見[適配規範](Docs/zh-CN/Adaptation/README.md)。
 
 未指定 UI 技術時採用平台的預設技術；預設技術無法使用時直接回報錯誤，不會悄悄換成另一套技術。
+
+### 把 Bern 當作 GPUI 的 UI 框架
+
+GPUI 提供高效能 GPU 繪製，但本身不帶標準控制項函式庫。在 macOS、Windows 或 Linux 目標裡加上 `ui = "gpui"`，就能直接把 Bern 當作 GPUI 的宣告式 UI 框架使用：一份 `ui!` 開箱自帶全套桌面控制項、語意深淺色主題、彈簧動效、編譯期多語言與功能契約檢查，以及 Skills + CLI。需要自訂 GPU 繪製的地方，以 `NativeView(gpui: "...")` 緊鄰嵌入原生 GPUI 程式碼即可；未來想切回系統原生控制項，或擴展到 iOS、Android、watchOS、Wear OS 與 Web，商業邏輯與宣告都不必重寫。
 
 ### Windows 與 iOS 各有兩個前端
 
@@ -459,7 +478,7 @@ bern run
 
 ```text
 $ bern doctor
-bern 0.1.0 on macOS (aarch64)
+bern 0.2.1 on macOS (aarch64)
 
 [✓] Rust: rustc 1.99.0, cargo 1.99.0
 [✓] macOS · SwiftUI: macOS SDK 26.5, Swift 6.3.2
@@ -509,6 +528,7 @@ showcase ui set-bool --target controls_page.sync --value true
 showcase showcase search-library --text mo                   # 引擎查詢
 showcase window open --kind settings
 showcase window list                                         # 視窗的實際狀態
+showcase window screenshot --output shot.png                 # 截取視窗 PNG
 ssh HOST /path/to/showcase state
 ```
 
@@ -518,7 +538,7 @@ ssh HOST /path/to/showcase state
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/roadmap-zh-Hant-dark.svg">
-<img alt="路線圖：階段 1 到 4 與階段 7 樣式動效、模組化應用程式與媒體類元件已完成；階段 5 其他原生前端、階段 6 元件庫與開發工具正在進行" src="Docs/Assets/tables/roadmap-zh-Hant-light.svg" width="100%">
+<img alt="路線圖：階段 1 到 4、階段 6 標準控制項體系與工具鏈、階段 7 樣式動效與模組化應用程式均已完成；階段 5 持續推進其他可選前端" src="Docs/Assets/tables/roadmap-zh-Hant-light.svg" width="100%">
 </picture>
 
 ## 儲存庫結構
@@ -546,12 +566,14 @@ cargo test --workspace
 
 ## 文件
 
-- [文件目錄](Docs/zh-CN/README.md) · [目前元件用法](Docs/zh-CN/Reference/UI.md) · [完整屬性表](Docs/zh-CN/Reference/Component-Properties.md) · [平台能力與驗證範圍](Docs/zh-CN/Reference/Platforms.md)（簡體中文）
-- [設計文件](Docs/zh-CN/Design.md)：目標、架構、元件、主題、命令、視窗與媒體
-- [適配規範](Docs/zh-CN/Adaptation/README.md)：Apple、Windows 與 Linux、Web、Android、HarmonyOS
-- 實作紀錄：[macOS](Docs/zh-CN/Implementation/macOS-SwiftUI.md) · [iOS](Docs/zh-CN/Implementation/iOS-SwiftUI.md) · [tvOS](Docs/zh-CN/Implementation/tvOS-SwiftUI.md) · [Android](Docs/zh-CN/Implementation/Android-Compose.md) · [Windows](Docs/zh-CN/Implementation/Windows-WinUI3.md) · [Linux](Docs/zh-CN/Implementation/Linux-GTK.md) · [Web](Docs/zh-CN/Implementation/Web.md)
+線上瀏覽可檢索文件：**[bern.aimes-soft.com/docs/zh-CN](https://bern.aimes-soft.com/docs/zh-CN)**，或在儲存庫中直接閱讀：
 
-設計與實作文件以簡體中文撰寫，另有[英文版](Docs/README.md)。
+- **介面參考**：[文件目錄](Docs/zh-CN/README.md) · [目前元件用法](Docs/zh-CN/Reference/UI.md) · [完整屬性表](Docs/zh-CN/Reference/Component-Properties.md) · [平台能力與驗證範圍](Docs/zh-CN/Reference/Platforms.md) · [效能追蹤](Docs/zh-CN/Reference/Tracing.md)（簡體中文）
+- **架構與設計**：[設計文件](Docs/zh-CN/Design.md) · [適配規範](Docs/zh-CN/Adaptation/README.md) · [React Native 研究](Docs/zh-CN/Research/ReactNative.md)
+- **專題文件**：[緊鄰原生視圖](Docs/zh-CN/Implementation/Native-Views.md) · [JavaScript 與 `bern.cli`](Docs/zh-CN/Implementation/JavaScript.md) · [動畫 SVG](Docs/zh-CN/Implementation/Animated-SVG.md) · [依模組編譯](Docs/zh-CN/Implementation/Module-Builds.md) · [應用瀏覽器擴充](Docs/zh-CN/Implementation/Web-Extensions.md)
+- **平台實作**：[macOS](Docs/zh-CN/Implementation/macOS-SwiftUI.md) · [iOS](Docs/zh-CN/Implementation/iOS-SwiftUI.md) · [watchOS](Docs/zh-CN/Implementation/watchOS-SwiftUI.md) · [tvOS](Docs/zh-CN/Implementation/tvOS-SwiftUI.md) · [Windows](Docs/zh-CN/Implementation/Windows-WinUI3.md) · [Linux](Docs/zh-CN/Implementation/Linux-GTK.md) · [Android 與 Wear OS](Docs/zh-CN/Implementation/Android-Compose.md) · [GPUI](Docs/zh-CN/Implementation/GPUI.md) · [Web 與 WebUI](Docs/zh-CN/Implementation/Web.md)
+
+設計與實作文件以簡體中文撰寫，另有[英文版](Docs/README.md)（[線上版](https://bern.aimes-soft.com/docs)）。
 
 ## 授權
 

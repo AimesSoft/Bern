@@ -6,9 +6,10 @@
 
 <p><b>One Rust declaration, compiled into each platform's own native UI.</b></p>
 
-<p>From desktop, mobile, watch and TV to the Web, built for AI: SwiftUI, WinUI 3, GTK 4, Jetpack Compose, GPUI and the Web.<br>
-No JS engine or embedded browser by default on desktop, mobile or wearables.<br>
-<b>Skills + CLI:</b> With IPC enabled, agents read <code>SKILL.md</code> and use the app CLI to operate controls by name.</p>
+<p>Desktop, mobile, tablet, watch, TV and the Web — from one <code>ui!</code> declaration:<br>
+SwiftUI, WinUI 3, GTK 4, Jetpack Compose, GPUI and Web DOM/WASM.<br>
+Zero JS engine or embedded browser by default; opt in to in-process JavaScript with <code>bern.cli</code>.<br>
+<b>Built for AI:</b> omissions fail to compile, and agents drive running apps by name via <code>SKILL.md</code> and the app CLI.</p>
 
 <p>
 <img alt="macOS · SwiftUI" src="https://img.shields.io/badge/macOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
@@ -24,9 +25,10 @@ No JS engine or embedded browser by default on desktop, mobile or wearables.<br>
 </p>
 
 <p>
+<a href="https://bern.aimes-soft.com"><img alt="Website" src="https://img.shields.io/badge/website-bern.aimes--soft.com-111827?style=flat-square"></a>
 <img alt="Skills + CLI" src="https://img.shields.io/badge/AI-Skills%20%2B%20CLI-8B5CF6?style=flat-square">
 <img alt="Memory about 40 MB" src="https://img.shields.io/badge/memory-about%2040%20MB-0EA5E9?style=flat-square">
-<img alt="No JS engine" src="https://img.shields.io/badge/JS%20engine-none-111827?style=flat-square">
+<img alt="JS engine: opt-in" src="https://img.shields.io/badge/JS%20engine-opt--in-111827?style=flat-square">
 <img alt="Rust 1.99" src="https://img.shields.io/badge/Rust-1.99-B7410E?style=flat-square&logo=rust&logoColor=white">
 <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-22C55E?style=flat-square"></a>
 <img alt="Status: early preview" src="https://img.shields.io/badge/status-early%20preview-F59E0B?style=flat-square">
@@ -40,13 +42,14 @@ No JS engine or embedded browser by default on desktop, mobile or wearables.<br>
 </p>
 
 <p>
+<a href="https://bern.aimes-soft.com">Website</a> ·
+<a href="https://bern.aimes-soft.com/docs">Online docs</a> ·
 <a href="#why-bern">Why Bern</a> ·
 <a href="#who-uses-bern">Who uses Bern</a> ·
 <a href="#built-for-ai">Built for AI</a> ·
 <a href="#measured">Measured</a> ·
 <a href="#compared-with-other-cross-platform-frameworks">Comparison</a> ·
-<a href="#quick-start">Quick start</a> ·
-<a href="Docs/Design.md">Design document</a>
+<a href="#quick-start">Quick start</a>
 </p>
 
 </div>
@@ -94,7 +97,7 @@ No JS engine or embedded browser by default on desktop, mobile or wearables.<br>
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/why-en-dark.svg">
-<img alt="Why Bern: compiled into native UI, one Rust declaration generating each platform's own UI code with no JS engine at runtime; built for AI, where omissions are compile errors and agents read SKILL.md and activate buttons by name with the app CLI; too light to feel cross-platform, 39 MB, 0.4 s and 2.7 MB on macOS, 35 MB, 0.3 s and 4.2 MB on Windows, 189 KB on the web" src="Docs/Assets/tables/why-en-light.svg" width="100%">
+<img alt="Why Bern: compiled into native UI, one Rust declaration generating each platform's own UI code with no JS engine by default; built for AI, where omissions are compile errors and agents use SKILL.md, the app CLI and window screenshots; too light to feel cross-platform, 39 MB, 0.4 s and 2.7 MB on macOS, 35 MB, 0.3 s and 4.2 MB on Windows, 189 KB on the web" src="Docs/Assets/tables/why-en-light.svg" width="100%">
 </picture>
 
 ## Who uses Bern
@@ -158,6 +161,7 @@ $ showcase ui inspect                 # the agent reads meaning, not pixels
 [{ "target": "controls_page.sync", "role": "switch", "label": "Sync", "value": "false", "enabled": true, … }, …]
 
 $ showcase ui set-bool --target controls_page.sync --value true
+$ showcase window screenshot --output shot.png
 
 $ showcase window close --window settings#1
 { "outcome": "ConfirmationRequired", "message": "Do you want to save the display name?",
@@ -167,7 +171,22 @@ $ showcase window confirm-close --window settings#1 --confirmation settings#1:c1
 { "outcome": "Rejected", "reason": "save_failed: invalid_name: a display name has 1 to 40 characters …" }
 ```
 
-You can run the same commands yourself, including app-specific ones such as `showcase showcase set-display-name --name Demo`. Use the CLI from the same build as the app. Over SSH, run it on the machine hosting the control channel, under the account that owns the endpoint. If a control is disabled, blocked by a dialog or missing, the CLI returns an error code.
+You can run the same commands yourself, including app-specific ones such as `showcase showcase set-display-name --name Demo` or built-in window screenshots (`window screenshot`). Use the CLI from the same build as the app. Over SSH, run it on the machine hosting the control channel, under the account that owns the endpoint. If a control is disabled, blocked by a dialog or missing, the CLI returns an error code.
+
+### Extending with JavaScript: in-process `bern.cli`
+
+Apps that do not enable scripting link zero JS runtime. When a target sets `javascript = true`, every `bern::script::Context` (in-process Boa on native targets, Web Worker on the Web) exposes `globalThis.bern.cli(...)` directly against the app's command catalog, with host-side allowlist/denylist control (`CliPolicy::allow_all()` by default):
+
+```rust
+let js = bern::script::Context::with_policy(
+    bern::script::CliPolicy::allow_only(["media.*", "@queries", "state", "catalog"])
+        .deny("media.bind")
+        .with_label("example.plugin"),
+)?;
+js.eval(r#"await bern.cli("media seek --player-id main --position-ms 90000")"#).await?;
+```
+
+See [JavaScript and target capabilities](Docs/Implementation/JavaScript.md) for the full call forms, policy patterns and dynamic filters.
 
 ## Measured
 
@@ -196,23 +215,15 @@ You can run the same commands yourself, including app-specific ones such as `sho
 </picture>
 
 <details>
-<summary><b>And more:</b> video, async queries, styles and motion, drawing, media app components, reading the files users hand you, modular apps, adaptive layouts…</summary>
+<summary><b>And more:</b> full standard controls, automatic skeletons, style and motion, media, system integration, modular apps, <code>NativeView</code> and opt-in JS…</summary>
 <br>
 
-- **Video**: `Video` plays on AVFoundation, Windows Media Foundation, GStreamer, Media3 on Android or HTML media, with a command-driven control bar and players that outlive a page.
-- **Async queries**: `Query` subscriptions with loading, empty, failure and refresh states; only the latest answer is shown.
-- **Adaptive layouts**: layouts for `compact`, `medium`, `expanded` and `large`, chosen by the space a view actually gets; expressions read the window's size too, for margins that grow with it.
-- **Typed navigation**: sidebars, push navigation with typed routes, tabs, toolbars and menus.
-- **Feature contracts**: declare which features a component must cover in each layout; the compiler proves the coverage.
-- **Bundled resources**: files declared in `Bern.toml`, checked at build time and located by name at runtime.
-- **Images and layout**: `Image` shows bundled pictures, HDR ones (PQ and HLG PNGs, JPEGs with a gain map) in HDR where the display can, and an undeclared one fails to compile; `Grid` adds and drops columns with the width, `Stack` layers views with nine alignments, `Progress` shows a bar or indeterminate progress.
-- **Style overrides and motion**: controls keep the platform look by default; for one design everywhere, `style!` declares app-wide overrides, spring motion, appear and disappear transitions, staggered entrances and shared elements, and an override a target cannot show fails the build (on all five front ends).
-- **Drawing and placing by fraction**: `Canvas` draws shapes, data curves and check patterns in semantic colors, and `Text` can carry a highlight mark; `Rail` puts elements at fractions that come from state, for timelines, ticks on a progress bar or a fill that grows.
-- **Media app components**: a sidebar footer, toolbar search with results, an inspector, toasts, split buttons and popover buttons holding any content, buttons with content that reveal more on hover, shortcuts, picking and dropping files, scroll snapping, pinch and drag to set a value, on all five front ends.
-- **Reading the files users hand you**: for a file the user picked, dropped or opened with the app, the engine gets its name and bytes with `MediaSource::file_name()` and `open()`, the same for a local path, an Android `content://` document or a page's `blob:` file.
-- **Modular apps**: an app is a shell and modules, each with its own protocol, engine, interface and translations, switchable at runtime; `bern new --module` adds one, so several people and AIs can work side by side (verified on macOS and Android).
-- **Desktop system integration & rich controls**: system tray icon and menu (`StatusItem`, with monochrome SVG icons and launch-at-login), macOS `MenuBar`, `Table`, `ColorPicker`, `ShortcutInput`, pure-Rust animated `Svg` (zero WebView), embedded `WebPage`, floating overlay utility windows, pointer events (`DoubleTap`, `ContextMenu`, `WheelUp`/`WheelDown`), `Slider(hover:)` and direct `players.<id>.<field>` bindings.
-- **Co-located native views (`NativeView`)**: drop platform-native files (`*.swiftui.swift`, `*.winui3.cpp`, `*.compose.kt`, `*.gtk.rs`, `*.gpui.rs`, `*.web.js`) right beside your Rust `.rs` file for platform-specific controls or custom surfaces, while keeping typed props, `tr!` localization checks, mandatory CLI control entries and `Fallback` in Rust (see [Native Views](Docs/Implementation/Native-Views.md)).
+- **Adaptive layouts & navigation**: four-tier size classes (`compact`, `medium`, `expanded`, `large`) plus `watch` and `tv`; typed push navigation, `SplitView` sidebars, `Tabs` with `TabAccessory`, toolbars, menus, `Grid` (including masonry), `Stack`, `SplitPane`, `Accordion` and compile-time feature contracts.
+- **Full standard controls**: `Table`, `TreeView`, `Reorderable`, `BottomSheet`, `Refreshable`, `DatePicker`, `TimePicker`, `NumberInput`, `ColorPicker`, `ShortcutInput`, `Tooltip`, `Banner`, `Disclosure`, `Alert`, `EmptyState`, `Badge`, `Avatar`, `Text(selectable:)` / inline Markdown, dynamic searchable `Picker(style: combobox)`, multi-file `pick:` and native `save:` dialogs.
+- **Automatic skeletons, style & motion**: compile-time projected skeletons on `Query` and `skeleton: <bool>` containers (120 ms anti-flicker, staggered entrance, reduced-motion aware); `style!` app-wide overrides, spring motion, shared-element Hero transitions, pure-Rust animated `Svg` (zero WebView), HDR `Image`, `Canvas` drawing and proportional `Rail`s.
+- **Media, async queries & files**: `Video` on native media stacks or a custom `MediaKernel`, direct `players.<id>.<field>` bindings, `Query` subscriptions (loading, empty, failure, refresh), bundled resources in `Bern.toml`, unified `MediaSource` across local paths / Android `content://` / Web `blob:`, system file open handlers (`[[app.opens]]`) and in-memory `bern::files::serve`.
+- **Desktop & system integration**: system tray `StatusItem` (monochrome SVG icons + launch at login), macOS `MenuBar`, floating overlay utility windows, built-in `window.screenshot`, pointer events (`DoubleTap`, `ContextMenu`, `WheelUp`/`WheelDown`), `Slider(hover:)` and embedded `WebPage`.
+- **Extensibility**: modular apps (`bern new --module`), co-located per-platform native views (`NativeView` with typed props, `tr!` linting, mandatory CLI entries and `Fallback`, see [Native Views](Docs/Implementation/Native-Views.md)), and opt-in in-process JavaScript with `bern.cli` and allowlist/denylist policies ([JavaScript](Docs/Implementation/JavaScript.md)).
 
 </details>
 
@@ -236,6 +247,7 @@ flowchart LR
     E <--> K[["Command catalog"]]
     K <--> N["Native UI"]
     K <--> L["App CLI"]
+    K <--> JS["JS · bern.cli"]
     K <--> J["JSON channel"]
     K --> SK["SKILL.md"]
 ```
@@ -466,7 +478,7 @@ The new app is a window with a counter, with one crate each for the protocol, th
 
 ```text
 $ bern doctor
-bern 0.1.0 on macOS (aarch64)
+bern 0.2.1 on macOS (aarch64)
 
 [✓] Rust: rustc 1.99.0, cargo 1.99.0
 [✓] macOS · SwiftUI: macOS SDK 26.5, Swift 6.3.2
@@ -516,6 +528,7 @@ showcase ui set-bool --target controls_page.sync --value true
 showcase showcase search-library --text mo                   # an engine query
 showcase window open --kind settings
 showcase window list                                         # actual window state
+showcase window screenshot --output shot.png                 # capture window PNG
 ssh HOST /path/to/showcase state
 ```
 
@@ -525,7 +538,7 @@ The target setting `channels = ["ipc"]` enables external control. On Android, ru
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/roadmap-en-dark.svg">
-<img alt="Roadmap: phases 1 to 4 and phase 7, style, motion, modular apps and media app components, are done; phase 5 other native front ends and phase 6 components and tooling are in progress" src="Docs/Assets/tables/roadmap-en-light.svg" width="100%">
+<img alt="Roadmap: phases 1 to 4, phase 6 standard controls and tooling, and phase 7 style, motion and modular apps are done; phase 5 continues with optional front ends" src="Docs/Assets/tables/roadmap-en-light.svg" width="100%">
 </picture>
 
 ## Repository
@@ -553,12 +566,14 @@ Tests include declarations that must fail to compile, and type-check the generat
 
 ## Documentation
 
-- [Documentation index](Docs/README.md) · [Current component guide](Docs/Reference/UI.md) · [Property reference](Docs/Reference/Component-Properties.md) · [Platform capabilities and verification](Docs/Reference/Platforms.md)
-- [Design document](Docs/Design.md) – goals, architecture, components, theming, commands, windows, media
-- [Adaptation specs](Docs/Adaptation/README.md) – Apple, Windows and Linux, Web, Android, HarmonyOS
-- Implementation notes – [macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [tvOS](Docs/Implementation/tvOS-SwiftUI.md) · [Android](Docs/Implementation/Android-Compose.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web](Docs/Implementation/Web.md)
+Browse the searchable docs online at **[bern.aimes-soft.com/docs](https://bern.aimes-soft.com/docs)**, or read them in this repository:
 
-The documentation is also available in [Simplified Chinese](Docs/zh-CN/README.md).
+- **Reference**: [Documentation index](Docs/README.md) · [Component guide](Docs/Reference/UI.md) · [Property table](Docs/Reference/Component-Properties.md) · [Platform capabilities](Docs/Reference/Platforms.md) · [Performance tracing](Docs/Reference/Tracing.md)
+- **Architecture**: [Design document](Docs/Design.md) · [Adaptation specs](Docs/Adaptation/README.md) · [React Native study](Docs/Research/ReactNative.md)
+- **Topics**: [Co-located native views](Docs/Implementation/Native-Views.md) · [JavaScript & `bern.cli`](Docs/Implementation/JavaScript.md) · [Animated SVG](Docs/Implementation/Animated-SVG.md) · [Module builds](Docs/Implementation/Module-Builds.md) · [Web extensions](Docs/Implementation/Web-Extensions.md)
+- **Backends**: [macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [watchOS](Docs/Implementation/watchOS-SwiftUI.md) · [tvOS](Docs/Implementation/tvOS-SwiftUI.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Android & Wear OS](Docs/Implementation/Android-Compose.md) · [GPUI](Docs/Implementation/GPUI.md) · [Web & WebUI](Docs/Implementation/Web.md)
+
+The documentation is also available in [Simplified Chinese](Docs/zh-CN/README.md) ([online](https://bern.aimes-soft.com/docs/zh-CN)).
 
 ## License
 

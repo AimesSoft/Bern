@@ -2,15 +2,15 @@
 
 # Bern UI 框架设计文档
 
-- 版本：v0.34
+- 版本：v0.35
 - 状态：架构与语义规范；当前接口、平台支持与待实现目标分别标注
-- 更新日期：2026-10-21
+- 更新日期：2026-11-21
 - 项目名称：Bern UI
 - 仓库：AimesSoft/Bern
 - 主要开发语言：Rust
 - 首个目标平台：macOS（SwiftUI）
 
-当前已提供 macOS / iOS / tvOS SwiftUI、Android Compose、Windows WinUI 3、Linux GTK 和 Web 后端，以及命令、查询、会话、模块组合、资源、构建与打包工具。近期补齐了 Web 设置与引导、受控控件、搜索面板、播放器坐标布局、共享胶囊控件和图片跨分栏 Hero。各后端的功能覆盖与验证程度不同，以[平台能力表](Reference/Platforms.md)及各平台实现记录为准。
+当前已提供 macOS / iOS / iPadOS / watchOS / tvOS SwiftUI、Android 与 Wear OS Jetpack Compose、Windows WinUI 3（含 XAML Islands 回退）、Linux GTK 4、桌面 GPUI 和 Web DOM/WASM 后端，以及命令、查询、会话、模块组合、资源、构建与打包工具。近期版本（`0.2.x`）补齐了完整标准控件体系、编译期默认骨架图、内置窗口截图（`window.screenshot`）、紧邻原生视图 `NativeView`、纯 Rust 动画 `Svg`，以及按需启用的进程内 JavaScript（`bern.cli` 与 `CliPolicy` 黑白名单策略）。各后端的功能覆盖与验证程度不同，以[平台能力表](Reference/Platforms.md)及各平台实现记录为准。
 
 编写界面时使用[组件参考](Reference/UI.md)和[完整属性表](Reference/Component-Properties.md)。本文保留架构决策、语义与后续目标；入口和专题索引见[文档目录](README.md)。
 
@@ -34,7 +34,7 @@ Bern 是一个基于 Rust、以命令为中心的模块化应用框架，Bern UI
 
 **Web 提供两种独立构建产物。** Web 应用在浏览器内运行 UI 与 Rust WASM 业务引擎；WebUI 只包含界面、前端运行时和协议客户端，通过 JSON 控制通道连接独立运行的 Bern 引擎。两种构建共用 Web 后端、组件声明与命令协议，业务引擎的运行位置由构建配置明确选择。
 
-本文同时保留已实现语义与明确标注的后续设计。当前组件和属性以 `bern-ir::spec::COMPONENTS` 为准，目标支持以各后端的 `TargetDescriptor` 与能力检查为准；本文中的省略号及伪代码用于解释语义。可构建的完整应用见 `examples/hello`、`examples/showcase`、`examples/planner`、`examples/gallery` 和 `examples/svg-animation`。API 尚处于早期演进阶段，不把待实现条目当作现有接口。
+本文同时保留已实现语义与明确标注的后续设计。当前组件和属性以 `bern-ir::spec::COMPONENTS` 为准，目标支持以各后端的 `TargetDescriptor` 与能力检查为准；本文中的省略号及伪代码用于解释语义。可构建的完整应用见 `examples/hello`、`examples/showcase`、`examples/planner`、`examples/gallery`、`examples/native-controls`、`examples/wearos` 与 `examples/svg-animation`。API 尚处于早期演进阶段，不把待实现条目当作现有接口。
 
 ## 项目目标
 
@@ -96,12 +96,12 @@ Bern 名称来自《海猫鸣泣之时》中的 Frederica Bernkastel。Bern 作�
 | UI 技术 | 目标运行平台 | 生成产物 | 定位与阶段 |
 | --- | --- | --- | --- |
 | Web DOM | 浏览器 | Web 应用或 WebUI；共用 HTML、CSS、绑定与前端 WASM，按模式决定是否包含业务引擎 | 第二个正式后端，需 Bern 自定视觉规范与主题算法，两种模式均需验收 |
-| SwiftUI | macOS、iOS、tvOS | SwiftUI 视图、Swift 绑定与平台工程集成 | macOS、iOS 与 tvOS 默认；macOS 为首个正式后端，iOS 与 tvOS 目标已构建模拟器应用，真机签名与打包后续实现 |
-| GTK | Linux | GTK 控件、Rust 绑定与桌面集成 | Linux 默认；阶段五第一批已实现 |
-| WinUI 3 | Windows | WinUI 3 界面（无运行时时回退到系统 XAML）、C++/WinRT 平台宿主与 Rust 桥接 | Windows 默认；阶段五第二批已实现 |
-| Jetpack Compose | Android | Kotlin Compose UI、绑定与 Android 工程集成 | Android 默认；第一版已实现 |
+| SwiftUI | macOS、iOS / iPadOS、watchOS、tvOS | SwiftUI 视图、Swift 绑定与平台工程集成 | Apple 平台默认；macOS 为首个正式后端，iOS、iPadOS、watchOS 与 tvOS 目标均已实现并支持 `.ipa` 打包 |
+| GTK | Linux | GTK 控件、Rust 绑定与桌面集成 | Linux 默认；已实现并支持 `.deb` 与 `.tar.gz` 打包 |
+| WinUI 3 | Windows | WinUI 3 界面（无运行时时回退到系统 XAML）、C++/WinRT 平台宿主与 Rust 桥接 | Windows 默认；已实现并支持双前端打包 |
+| Jetpack Compose | Android、Wear OS | Kotlin Compose UI、绑定与 Android 工程集成 | Android（手机、平板、电视）与 Wear OS 默认；已实现并支持 `.apk` / `.aab` 打包 |
 | Flutter | Flutter 支持且 Bern 已适配的平台 | Dart Widget、绑定代码与 Flutter 工程集成 | 可选跨平台目标 |
-| GPUI | Windows、macOS、Linux（含没有桌面环境的嵌入式 Linux） | GPUI Rust UI、Rust 运行时与原生窗口 | 可选桌面目标，面向大型生产力软件、跨平台一致外观与嵌入式设备；macOS 第一版 |
+| GPUI | Windows、macOS、Linux（含没有桌面环境的嵌入式 Linux） | GPUI Rust UI、Rust 运行时与原生窗口 | 可选 GPU 桌面目标，已在 macOS、Windows 与 Linux 实现，支持紧邻 `NativeView` |
 | AppKit | macOS | AppKit 控件及窗口集成 | 可独立扩展，或辅助 SwiftUI 适配 |
 
 PC 默认采用各平台的原生 UI 技术：`swiftui + macos`、`gtk + linux`、`winui3 + windows`。`swiftui + macos` 是首个正式实现目标：macOS 有明确的设计规范和成熟的原生组件库，最容易达到系统自带应用的视觉水准，并验证完整架构。Web 没有统一的样式规范，需要 Bern 自行定义视觉规范与主题算法，作为第二个正式目标。其他桌面默认映射不代表对应后端已经实现。
@@ -379,7 +379,7 @@ hooks = ["links.resolve"]
 
 - 权限组由应用定义，列出可用的 `commands`、`queries`、`state`、`events` 与 `hooks`，可以写 `模块.*`。组名是任意字符串，不必与命名空间对应。
 - 插件在清单中申请权限组，安装时显示给用户。调用未获准的接口由宿主拒绝并返回 `permission_denied`；检查在宿主一侧进行，插件脚本无法绕过。
-- 插件自己的存储、设置与日志不需要权限。会话命令（窗口、导航、`ui.activate` 等）首版不开放给插件。
+- 插件自己的存储、设置与日志不需要权限。在本文所述的高层插件清单模型中会话命令（窗口、导航、`ui.activate` 等）默认受限；当应用直接使用 `bern::script` 时，内置进程内接口 `globalThis.bern.cli(...)` 默认开放完整命令目录（引擎、媒体、会话与元命令），并允许应用在 Rust 宿主侧通过 `CliPolicy` 黑白名单按需收紧权限（见[JavaScript 与 `bern.cli`](Implementation/JavaScript.md)）。
 - 应用改了开放给插件的命令名或参数时提高 `api`；插件声明的 `api` 与应用不同时拒绝装入。
 
 ### 插件包

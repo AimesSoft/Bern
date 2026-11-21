@@ -2,15 +2,15 @@
 
 # Bern UI framework design document
 
-- Version: v0.34
+- Version: v0.35
 - Status: architecture and semantics specification; current interfaces, platform support and targets yet to be implemented are marked separately
-- Updated: 2026-10-21
+- Updated: 2026-11-21
 - Project name: Bern UI
 - Repository: AimesSoft/Bern
 - Main development language: Rust
 - First target platform: macOS (SwiftUI)
 
-Backends are currently provided for macOS / iOS / tvOS SwiftUI, Android Compose, Windows WinUI 3, Linux GTK and the Web, along with tools for commands, queries, sessions, module composition, resources, building and packaging. Recent work filled in Web settings and onboarding, controlled controls, the search panel, the player coordinate layout, shared capsule controls and image Hero transitions across split-view columns. Feature coverage and the degree of verification differ between backends; the [platform capability table](Reference/Platforms.md) and each platform's implementation notes are authoritative.
+Backends are currently provided for macOS / iOS / iPadOS / watchOS / tvOS SwiftUI, Android & Wear OS Jetpack Compose, Windows WinUI 3 (with XAML Islands fallback), Linux GTK 4, desktop GPUI, and Web DOM/WASM, along with tools for commands, queries, sessions, module composition, resources, building and packaging. Recent releases (`0.2.x`) added the full standard control catalog, compile-time automatic skeletons, built-in window screenshots (`window.screenshot`), co-located `NativeView`, pure-Rust animated `Svg`, and opt-in in-process JavaScript (`bern.cli` with `CliPolicy` allowlist/denylist rules). Feature coverage and the degree of verification differ between backends; the [platform capability table](Reference/Platforms.md) and each platform's implementation notes are authoritative.
 
 Write interfaces with the [component reference](Reference/UI.md) and the [full property table](Reference/Component-Properties.md). This document keeps the architectural decisions, semantics and future targets; entry points and the topic index are in the [documentation index](README.md).
 
@@ -34,7 +34,7 @@ The core constraint established in this version is: **UI components that can be 
 
 **The Web provides two independent build outputs.** A Web app runs the UI and the Rust WASM business engine in the browser; WebUI contains only the interface, the frontend runtime and the protocol client, and connects to a separately running Bern engine through the JSON control channel. The two builds share the Web backend, component declarations and command protocol; where the business engine runs is chosen explicitly by the build configuration.
 
-This document keeps both implemented semantics and clearly marked future designs. Current components and properties are defined by `bern-ir::spec::COMPONENTS`, and target support by each backend's `TargetDescriptor` and capability checks; the ellipses and pseudocode in this document explain semantics. Complete buildable apps are in `examples/hello`, `examples/showcase`, `examples/planner`, `examples/gallery` and `examples/svg-animation`. The API is still in an early stage of evolution; items yet to be implemented are not to be taken as existing interfaces.
+This document keeps both implemented semantics and clearly marked future designs. Current components and properties are defined by `bern-ir::spec::COMPONENTS`, and target support by each backend's `TargetDescriptor` and capability checks; the ellipses and pseudocode in this document explain semantics. Complete buildable apps are in `examples/hello`, `examples/showcase`, `examples/planner`, `examples/gallery`, `examples/native-controls`, `examples/wearos` and `examples/svg-animation`. The API is still in an early stage of evolution; items yet to be implemented are not to be taken as existing interfaces.
 
 ## Project goals
 
@@ -96,12 +96,12 @@ A platform is not permanently bound to one UI technology. A build target is dete
 | UI technology | Target runtime platform | Generated output | Role and phase |
 | --- | --- | --- | --- |
 | Web DOM | Browser | Web app or WebUI; shares HTML, CSS, bindings and frontend WASM, with the mode deciding whether the business engine is included | Second official backend; needs Bern's own design guidelines and theme algorithm; both modes need acceptance |
-| SwiftUI | macOS, iOS, tvOS | SwiftUI views, Swift bindings and platform project integration | Default for macOS, iOS and tvOS; macOS is the first official backend; the iOS and tvOS targets have built simulator apps, while device signing and packaging come later |
-| GTK | Linux | GTK widgets, Rust bindings and desktop integration | Linux default; first batch of Phase 5 implemented |
-| WinUI 3 | Windows | WinUI 3 interface (falling back to system XAML when the runtime is absent), C++/WinRT platform host and Rust bridge | Windows default; second batch of Phase 5 implemented |
-| Jetpack Compose | Android | Kotlin Compose UI, bindings and Android project integration | Android default; first version implemented |
+| SwiftUI | macOS, iOS / iPadOS, watchOS, tvOS | SwiftUI views, Swift bindings and platform project integration | Default for Apple platforms; macOS is the first official backend, and iOS, iPadOS, watchOS and tvOS targets are implemented with `.ipa` packaging |
+| GTK | Linux | GTK widgets, Rust bindings and desktop integration | Linux default; implemented with `.deb` and `.tar.gz` packaging |
+| WinUI 3 | Windows | WinUI 3 interface (falling back to system XAML when the runtime is absent), C++/WinRT platform host and Rust bridge | Windows default; implemented with dual-frontend packaging |
+| Jetpack Compose | Android, Wear OS | Kotlin Compose UI, bindings and Android project integration | Default for Android (phone, tablet, TV) and Wear OS; implemented with `.apk` / `.aab` packaging |
 | Flutter | Platforms that Flutter supports and Bern has adapted to | Dart Widgets, binding code and Flutter project integration | Optional cross-platform target |
-| GPUI | Windows, macOS, Linux (including embedded Linux without a desktop environment) | GPUI Rust UI, Rust runtime and native windows | Optional desktop target for large productivity software, a consistent cross-platform look and embedded devices; first version on macOS |
+| GPUI | Windows, macOS, Linux (including embedded Linux without a desktop environment) | GPUI Rust UI, Rust runtime and native windows | Optional GPU desktop target implemented on macOS, Windows and Linux, with co-located `NativeView` |
 | AppKit | macOS | AppKit controls and window integration | Can be extended independently, or assist SwiftUI adaptation |
 
 PCs default to each platform's native UI technology: `swiftui + macos`, `gtk + linux`, `winui3 + windows`. `swiftui + macos` is the first official implementation target: macOS has clear design guidelines and a mature native component library, making it the easiest place to reach the visual standard of the system's own apps and to verify the complete architecture. The Web has no unified style guidelines, so Bern must define its own design guidelines and theme algorithm; it is the second official target. The other desktop default mappings do not mean the corresponding backends have been implemented.
@@ -379,7 +379,7 @@ hooks = ["links.resolve"]
 
 - Permission groups are defined by the app and list the available `commands`, `queries`, `state`, `events` and `hooks`; `module.*` may be written. A group name is an arbitrary string and need not correspond to a namespace.
 - A plugin requests permission groups in its manifest, and they are shown to the user at installation. A call to an interface that was not granted is rejected by the host with `permission_denied`; the check is made on the host side, and plugin scripts cannot bypass it.
-- A plugin's own storage, settings and logs need no permission. Session commands (windows, navigation, `ui.activate` and so on) are not opened to plugins in the first version.
+- A plugin's own storage, settings and logs need no permission. In the high-level plugin manifest model described here, session commands (windows, navigation, `ui.activate` and so on) are restricted by default; when an app embeds `bern::script` directly, the built-in in-process `globalThis.bern.cli(...)` interface exposes the full command catalog (engine, media, session and metadata) by default and lets the app narrow or gate access on the Rust host side via `CliPolicy` allowlist/denylist rules (see [JavaScript and `bern.cli`](Implementation/JavaScript.md)).
 - When the app changes the names or parameters of the commands opened to plugins, it raises `api`; a plugin whose declared `api` differs from the app's is refused loading.
 
 ### Plugin packages

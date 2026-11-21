@@ -6,9 +6,10 @@
 
 <p><b>一份 Rust 声明，编译成每个平台自己的原生界面。</b></p>
 
-<p>覆盖桌面、手机、手表、电视与网页，为 AI 而建：SwiftUI、WinUI 3、GTK 4、Jetpack Compose、GPUI 与 Web。<br>
-桌面、手机与手表端默认不捆绑 JS 引擎或浏览器。<br>
-<b>Skills + CLI：</b>开启 IPC 后，Agent 从 <code>SKILL.md</code> 查命令，用应用 CLI 按名称操作控件。</p>
+<p>桌面、手机、平板、手表、电视与 Web，出自同一份 <code>ui!</code> 声明：<br>
+SwiftUI、WinUI 3、GTK 4、Jetpack Compose、GPUI 与 Web DOM/WASM。<br>
+默认不捆绑 JS 引擎或浏览器，按需启用进程内 JavaScript 与 <code>bern.cli</code>。<br>
+<b>为 AI 而建：</b>写漏的内容在编译期直接报错，Agent 读 <code>SKILL.md</code> 并通过应用 CLI 按名称操作控件。</p>
 
 <p>
 <img alt="macOS · SwiftUI" src="https://img.shields.io/badge/macOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
@@ -24,9 +25,10 @@
 </p>
 
 <p>
+<a href="https://bern.aimes-soft.com"><img alt="官网" src="https://img.shields.io/badge/%E5%AE%98%E7%BD%91-bern.aimes--soft.com-111827?style=flat-square"></a>
 <img alt="Skills + CLI" src="https://img.shields.io/badge/AI-Skills%20%2B%20CLI-8B5CF6?style=flat-square">
 <img alt="内存约 40 MB" src="https://img.shields.io/badge/%E5%86%85%E5%AD%98-%E7%BA%A6%2040%20MB-0EA5E9?style=flat-square">
-<img alt="无 JS 引擎" src="https://img.shields.io/badge/JS%20%E5%BC%95%E6%93%8E-%E6%97%A0-111827?style=flat-square">
+<img alt="JS 引擎：默认无 · 可选" src="https://img.shields.io/badge/JS%20%E5%BC%95%E6%93%8E-%E9%BB%98%E8%AE%A4%E6%97%A0%20%C2%B7%20%E5%8F%AF%E9%80%89-111827?style=flat-square">
 <img alt="Rust 1.99" src="https://img.shields.io/badge/Rust-1.99-B7410E?style=flat-square&logo=rust&logoColor=white">
 <a href="LICENSE"><img alt="许可证：MIT" src="https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF%E8%AF%81-MIT-22C55E?style=flat-square"></a>
 <img alt="状态：早期预览" src="https://img.shields.io/badge/%E7%8A%B6%E6%80%81-%E6%97%A9%E6%9C%9F%E9%A2%84%E8%A7%88-F59E0B?style=flat-square">
@@ -40,13 +42,14 @@
 </p>
 
 <p>
+<a href="https://bern.aimes-soft.com">官网</a> ·
+<a href="https://bern.aimes-soft.com/docs/zh-CN">在线文档</a> ·
 <a href="#为什么是-bern">为什么是 Bern</a> ·
 <a href="#谁使用了-bern">谁使用了 Bern</a> ·
 <a href="#为-ai-而建">为 AI 而建</a> ·
 <a href="#实测数据">实测数据</a> ·
 <a href="#与其他跨平台框架对比">对比</a> ·
-<a href="#快速开始">快速开始</a> ·
-<a href="Docs/zh-CN/Design.md">设计文档</a>
+<a href="#快速开始">快速开始</a>
 </p>
 
 </div>
@@ -94,7 +97,7 @@
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/why-dark.svg">
-<img alt="为什么是 Bern：编译成原生界面，一份 Rust 声明生成各平台自己的 UI 代码，运行时没有 JS 引擎；为 AI 而建，漏写是编译错误，Agent 从 SKILL.md 查命令，用应用 CLI 按名称操作按钮；轻到不像跨平台，macOS 内存 39 MB、0.4 秒出窗口、应用包 2.7 MB，Windows 35 MB、0.3 秒、4.2 MB，Web 189 KB" src="Docs/Assets/tables/why-light.svg" width="100%">
+<img alt="为什么是 Bern：编译成原生界面，一份 Rust 声明生成各平台自己的 UI 代码，默认无 JS 引擎；为 AI 而建，漏写是编译错误，Agent 从 SKILL.md 查命令、用应用 CLI 操作控件并截取窗口；轻到不像跨平台，macOS 内存 39 MB、0.4 秒出窗口、应用包 2.7 MB，Windows 35 MB、0.3 秒、4.2 MB，Web 189 KB" src="Docs/Assets/tables/why-light.svg" width="100%">
 </picture>
 
 ## 谁使用了 Bern
@@ -158,6 +161,7 @@ $ showcase ui inspect                 # Agent 读到的是语义，不是像素
 [{ "target": "controls_page.sync", "role": "switch", "label": "同步", "value": "false", "enabled": true, … }, …]
 
 $ showcase ui set-bool --target controls_page.sync --value true
+$ showcase window screenshot --output shot.png
 
 $ showcase window close --window settings#1
 { "outcome": "ConfirmationRequired", "message": "要存储对显示名称的更改吗？",
@@ -167,7 +171,22 @@ $ showcase window confirm-close --window settings#1 --confirmation settings#1:c1
 { "outcome": "Rejected", "reason": "save_failed: invalid_name: a display name has 1 to 40 characters …" }
 ```
 
-你也可以运行同样的命令，包括 `showcase showcase set-display-name --name Demo` 这样的业务命令。请使用与应用同一次构建生成的 CLI；远端操作时，用 SSH 登录控制通道所在的机器，以拥有该端点的账户运行。控件被禁用、被对话框挡住或不存在时，CLI 会返回明确的错误码。
+你也可以运行同样的命令，包括 `showcase showcase set-display-name --name Demo` 这样的业务命令，或用内置的 `window screenshot` 直接截取窗口画面。请使用与应用同一次构建生成的 CLI；远端操作时，用 SSH 登录控制通道所在的机器，以拥有该端点的账户运行。控件被禁用、被对话框挡住或不存在时，CLI 会返回明确的错误码。
+
+### 用 JavaScript 扩展：进程内 `bern.cli`
+
+未启用脚本的应用不链接任何 JS 运行时。当目标配置 `javascript = true` 后，每个 `bern::script::Context`（原生目标统一进程内 Boa，Web 目标为浏览器 Worker）都会默认注入 `globalThis.bern.cli(...)`，直通应用命令目录，并由 Rust 侧黑白名单控制权限（默认 `CliPolicy::allow_all()`）：
+
+```rust
+let js = bern::script::Context::with_policy(
+    bern::script::CliPolicy::allow_only(["media.*", "@queries", "state", "catalog"])
+        .deny("media.bind")
+        .with_label("example.plugin"),
+)?;
+js.eval(r#"await bern.cli("media seek --player-id main --position-ms 90000")"#).await?;
+```
+
+完整的调用形式、规则模式与动态拦截器见[JavaScript 与目标能力](Docs/zh-CN/Implementation/JavaScript.md)。
 
 ## 实测数据
 
@@ -196,23 +215,15 @@ $ showcase window confirm-close --window settings#1 --confirmation settings#1:c1
 </picture>
 
 <details>
-<summary><b>还有：</b>视频、异步查询、样式与动效、自绘、媒体类应用的组件、读取交来的文件、模块化应用、自适应布局…</summary>
+<summary><b>还有：</b>完整标准控件、默认骨架图、样式与动效、媒体与文件、系统集成、模块化应用、<code>NativeView</code> 与可选 JS…</summary>
 <br>
 
-- **视频**：`Video` 分别运行在 AVFoundation、Windows Media Foundation、GStreamer、Android 的 Media3 与 HTML 媒体上，控制条由命令驱动，播放器可以跨页面继续播放。
-- **异步查询**：`Query` 订阅带有加载、空结果、失败与刷新状态，只显示最新的答复。
-- **自适应布局**：按视图实际获得的空间在 `compact`、`medium`、`expanded`、`large` 四档中选择布局；表达式也能读窗口所在的档，例如按档位设置页边距。
-- **类型化导航**：侧边栏、带类型化路由的推入导航、页签、工具栏与菜单。
-- **功能契约**：声明组件在每种布局中必须覆盖的功能，由编译器证明覆盖完整。
-- **随包资源**：在 `Bern.toml` 中声明文件，构建时检查，运行时按名称定位。
-- **图片与布局**：`Image` 显示随包图片，未声明的资源在编译时报错，HDR 图片（PQ、HLG 的 PNG 与带增益图的 JPEG）在能显示 HDR 的屏幕上按 HDR 显示；`Grid` 按可用宽度自动增减列数，`Stack` 叠放并按九个方位对齐，`Progress` 显示进度条或不确定进度。
-- **样式覆盖与动效**：控件默认是平台外观；需要统一设计时，用 `style!` 为全应用声明覆盖、弹簧动效、出现与消失过渡、错开入场和共享元素，目标做不到的覆盖在构建时报错（五个前端都已实现）。
-- **自绘与按比例摆放**：`Canvas` 用语义颜色画形状、数据曲线与格纹图案，`Text` 可以加标注底纹；`Rail` 把元素放在状态给出的比例处，例如时间轴、进度条上的刻度与涨满的底色。
-- **媒体类应用的组件**：侧边栏底部区域、工具栏搜索与结果、侧面板、轻提示、分体按钮与弹出任意内容的浮层按钮、带内容的按钮与悬停显示、快捷键、文件选择与拖入、滚动停靠、双指缩放与拖动调值，五个前端都已实现。
-- **读取交来的文件**：用户选中、拖入或用应用打开的文件，引擎用 `MediaSource::file_name()` 与 `open()` 读取名字与内容；本地路径、Android 的 `content://` 文档与网页的 `blob:` 文件写法相同。
-- **模块化应用**：应用由外壳和多个模块组成，每个模块有自己的协议、引擎、界面与翻译，可以在运行时开关；`bern new --module` 新建模块，适合多人和多个 AI 分头开发（已在 macOS 与 Android 上验证）。
-- **桌面集成与丰富控件**：系统托盘图标与菜单（`StatusItem`，支持单色 SVG 与登录时启动）、macOS `MenuBar`、`Table`、`ColorPicker`、`ShortcutInput`、纯 Rust 原生动画 `Svg`（零 WebView）、内嵌 `WebPage`、浮层锚定工具窗、全元素指针事件（`DoubleTap`、`ContextMenu`、`WheelUp`/`WheelDown`）、`Slider(hover:)` 与声明直读 `players.<id>.<field>`。
-- **紧邻原生视图（`NativeView`）**：直接在 Rust 声明 `.rs` 文件同目录放入各平台原生代码（`*.swiftui.swift`、`*.winui3.cpp`、`*.compose.kt`、`*.gtk.rs`、`*.gpui.rs`、`*.web.js`）来嵌入平台特有控件或专业画布，同时由 Rust 统一管住强类型输入、`tr!` 多语言检查、强制规范化 CLI 入口与 `Fallback`（见[紧邻原生视图](Docs/zh-CN/Implementation/Native-Views.md)）。
+- **自适应布局与导航**：`compact`、`medium`、`expanded`、`large` 四档尺寸与 `watch`、`tv` 布局；类型化推入导航、`SplitView` 侧边栏、`Tabs` 与 `TabAccessory`、工具栏、菜单、`Grid`（含瀑布流）、`Stack`、`SplitPane`、`Accordion` 与编译期功能契约。
+- **完整原生控件体系**：`Table`、`TreeView`、`Reorderable`、`BottomSheet`、`Refreshable`、`DatePicker`、`TimePicker`、`NumberInput`、`ColorPicker`、`ShortcutInput`、`Tooltip`、`Banner`、`Disclosure`、`Alert`、`EmptyState`、`Badge`、`Avatar`、`Text(selectable:)` 与行内 Markdown、动态可搜索 `Picker(style: combobox)`、多文件 `pick:` 与原生 `save:` 对话框。
+- **默认骨架图、样式与动效**：`Query` 与 `skeleton: <bool>` 容器在编译期直接从真实界面树投影骨架图（120 ms 防闪烁、错峰轻浮入场、自动遵循减少动态效果）；`style!` 全局覆盖、弹簧动效与共享元素 Hero、纯 Rust 动画 `Svg`（零 WebView）、HDR `Image`、`Canvas` 自绘与比例轨道 `Rail`。
+- **媒体、异步查询与文件**：`Video` 接入各平台原生媒体栈或应用自带 `MediaKernel`，支持直读 `players.<id>.<field>`；`Query` 订阅管理加载、空态、失败与刷新；`Bern.toml` 随包资源；跨本地路径 / Android `content://` / Web `blob:` 统一的 `MediaSource`、系统打开方式 `[[app.opens]]` 与内存供图 `bern::files::serve`。
+- **桌面与系统集成**：系统托盘 `StatusItem`（单色 SVG 图标与登录时启动）、macOS `MenuBar`、浮层锚定工具窗、内置 `window.screenshot`、指针事件（`DoubleTap`、`ContextMenu`、`WheelUp`/`WheelDown`）、`Slider(hover:)` 与内嵌 `WebPage`。
+- **扩展能力**：模块化应用（`bern new --module`）、紧邻嵌入各平台原生代码的 `NativeView`（含强类型 props、`tr!` 检查、强制 CLI 入口与 `Fallback`，见[紧邻原生视图](Docs/zh-CN/Implementation/Native-Views.md)），以及按需启用的进程内 JavaScript 与 `bern.cli` 黑白名单（见[JavaScript 与目标能力](Docs/zh-CN/Implementation/JavaScript.md)）。
 
 </details>
 
@@ -236,6 +247,7 @@ flowchart LR
     E <--> K[["命令目录"]]
     K <--> N["原生界面"]
     K <--> L["应用 CLI"]
+    K <--> JS["JS · bern.cli"]
     K <--> J["JSON 通道"]
     K --> SK["SKILL.md"]
 ```
@@ -466,7 +478,7 @@ bern run
 
 ```text
 $ bern doctor
-bern 0.1.0 on macOS (aarch64)
+bern 0.2.1 on macOS (aarch64)
 
 [✓] Rust: rustc 1.99.0, cargo 1.99.0
 [✓] macOS · SwiftUI: macOS SDK 26.5, Swift 6.3.2
@@ -516,6 +528,7 @@ showcase ui set-bool --target controls_page.sync --value true
 showcase showcase search-library --text mo                   # 引擎查询
 showcase window open --kind settings
 showcase window list                                         # 窗口的实际状态
+showcase window screenshot --output shot.png                 # 截取窗口 PNG
 ssh HOST /path/to/showcase state
 ```
 
@@ -525,7 +538,7 @@ ssh HOST /path/to/showcase state
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/roadmap-dark.svg">
-<img alt="路线图：阶段 1 到 4 与阶段 7 样式动效、模块化应用与媒体类组件已完成；阶段 5 其他原生前端、阶段 6 组件库与开发工具正在进行" src="Docs/Assets/tables/roadmap-light.svg" width="100%">
+<img alt="路线图：阶段 1 到 4、阶段 6 标准控件体系与工具链、阶段 7 样式动效与模块化应用均已完成；阶段 5 继续推进其他可选前端" src="Docs/Assets/tables/roadmap-light.svg" width="100%">
 </picture>
 
 ## 仓库结构
@@ -553,12 +566,14 @@ cargo test --workspace
 
 ## 文档
 
-- [文档目录](Docs/zh-CN/README.md) · [当前组件用法](Docs/zh-CN/Reference/UI.md) · [完整属性表](Docs/zh-CN/Reference/Component-Properties.md) · [平台能力与验证范围](Docs/zh-CN/Reference/Platforms.md)
-- [设计文档](Docs/zh-CN/Design.md)：目标、架构、组件、主题、命令、窗口与媒体
-- [适配规范](Docs/zh-CN/Adaptation/README.md)：Apple、Windows 与 Linux、Web、Android、HarmonyOS
-- 实现记录：[macOS](Docs/zh-CN/Implementation/macOS-SwiftUI.md) · [iOS](Docs/zh-CN/Implementation/iOS-SwiftUI.md) · [tvOS](Docs/zh-CN/Implementation/tvOS-SwiftUI.md) · [Android](Docs/zh-CN/Implementation/Android-Compose.md) · [Windows](Docs/zh-CN/Implementation/Windows-WinUI3.md) · [Linux](Docs/zh-CN/Implementation/Linux-GTK.md) · [Web](Docs/zh-CN/Implementation/Web.md)
+在线浏览可检索文档：**[bern.aimes-soft.com/docs/zh-CN](https://bern.aimes-soft.com/docs/zh-CN)**，或在仓库中直接阅读：
 
-文档另有[英文版](Docs/README.md)。
+- **接口参考**：[文档目录](Docs/zh-CN/README.md) · [当前组件用法](Docs/zh-CN/Reference/UI.md) · [完整属性表](Docs/zh-CN/Reference/Component-Properties.md) · [平台能力与验证范围](Docs/zh-CN/Reference/Platforms.md) · [性能追踪](Docs/zh-CN/Reference/Tracing.md)
+- **架构与设计**：[设计文档](Docs/zh-CN/Design.md) · [适配规范](Docs/zh-CN/Adaptation/README.md) · [React Native 研究](Docs/zh-CN/Research/ReactNative.md)
+- **专题文档**：[紧邻原生视图](Docs/zh-CN/Implementation/Native-Views.md) · [JavaScript 与 `bern.cli`](Docs/zh-CN/Implementation/JavaScript.md) · [动画 SVG](Docs/zh-CN/Implementation/Animated-SVG.md) · [按模块编译](Docs/zh-CN/Implementation/Module-Builds.md) · [应用浏览器扩展](Docs/zh-CN/Implementation/Web-Extensions.md)
+- **平台实现**：[macOS](Docs/zh-CN/Implementation/macOS-SwiftUI.md) · [iOS](Docs/zh-CN/Implementation/iOS-SwiftUI.md) · [watchOS](Docs/zh-CN/Implementation/watchOS-SwiftUI.md) · [tvOS](Docs/zh-CN/Implementation/tvOS-SwiftUI.md) · [Windows](Docs/zh-CN/Implementation/Windows-WinUI3.md) · [Linux](Docs/zh-CN/Implementation/Linux-GTK.md) · [Android 与 Wear OS](Docs/zh-CN/Implementation/Android-Compose.md) · [GPUI](Docs/zh-CN/Implementation/GPUI.md) · [Web 与 WebUI](Docs/zh-CN/Implementation/Web.md)
+
+文档另有[英文版](Docs/README.md)（[在线版](https://bern.aimes-soft.com/docs)）。
 
 ## 许可证
 

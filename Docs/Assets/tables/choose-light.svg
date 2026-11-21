@@ -27,8 +27,8 @@
 <text x="0.0" y="750.5" font-size="13.5" fill="#1F2328">想用一份 Rust 代码做出各平台原生应用的团队：每个平台都是系统自己的</text>
 <text x="0.0" y="771.5" font-size="13.5" fill="#1F2328">控件与观感，业务逻辑只写一次，AI 既能写它、也能直接用它。</text>
 <text x="504.0" y="729.0" font-size="12.5" font-weight="700" fill="#1A7F37">为什么选它</text>
-<text x="504.0" y="750.5" font-size="13.5" fill="#1F2328">编译成各平台自己的 UI 代码，运行时没有 JS 引擎、没有自绘层：macOS</text>
-<text x="504.0" y="771.5" font-size="13.5" fill="#1F2328">上 39 MB 内存、0.4 秒出窗口、应用包 2.7 MB。漏写的翻译、某个布局里忘</text>
-<text x="504.0" y="792.5" font-size="13.5" fill="#1F2328">了的入口在编译时就报错；Agent 从 SKILL.md 查命令，用应用 CLI 按名</text>
-<text x="504.0" y="813.5" font-size="13.5" fill="#1F2328">称操作按钮。RustSend 已经用它跑在五个平台上。</text>
+<text x="504.0" y="750.5" font-size="13.5" fill="#1F2328">编译成各平台自己的 UI 代码，默认无 JS 引擎、无自绘层：macOS 上 39</text>
+<text x="504.0" y="771.5" font-size="13.5" fill="#1F2328">MB 内存、0.4 秒出窗口、应用包 2.7 MB。漏写的翻译与入口在编译期报错；</text>
+<text x="504.0" y="792.5" font-size="13.5" fill="#1F2328">Agent 经 SKILL.md 与 CLI 操作应用，启用脚本时 JS 也能通过 <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">bern.cli</tspan></text>
+<text x="504.0" y="813.5" font-size="13.5" fill="#1F2328">与黑白名单接入同一套命令目录。</text>
 </svg>
