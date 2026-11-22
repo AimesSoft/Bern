@@ -2,7 +2,7 @@
 
 # Performance tracing
 
-Updated: 2026-10-21. The framework instruments each stage itself, to find the step where the UI stalls: how long a command waits in the engine's queue and how long it runs, how much the state's snapshot, comparison and encoding each take, how large each field is, how long before the UI thread starts processing and how long the write takes, and on which frame the result reaches the screen. For the design, see ["Debugging and performance tracing" in the architecture document](../Design.md#debugging-and-performance-tracing).
+Updated: 2026-10-21. The framework instruments each stage itself, to find the step where the UI stalls: how long a command waits in the engine's queue and how long it runs, how much the state's snapshot, comparison and encoding each take, how large each field is, how long before the UI thread starts processing and how long the write takes, and on which frame the result reaches the screen. For the overall engine and bridge pipeline, see [Architecture overview](../Architecture.md).
 
 **Implementation progress**: the switch, filters, recording, summaries, the timeline, the `trace.*` session commands, `bern run --trace`, the engine side (②③④, queries, calls between modules, `span!`) and the bridge side (decoding, per-field encoding, callback firing) are implemented and verified in Rust tests. The frontends' instrumentation on the UI thread side (①⑤⑥, control actions, frame ticks, long frames) is not yet wired in: for now there are only engine and bridge segments, and interaction chains and long frames appear only once the frontends are wired in.
 

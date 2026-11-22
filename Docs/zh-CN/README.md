@@ -1,55 +1,69 @@
 [English](../README.md) · **简体中文**
 
-# Bern 文档
+# 文档
 
-更新：2026-11-22。安装 `bern` 并运行第一个应用请从根目录 [README 的快速开始](../../README.zh-CN.md#快速开始)入手；完整可构建示例在 [examples/](../../examples/)。
+第一次使用 Bern，请从 **开发指南** 开始学习如何用 Rust 编写应用；配置、调试或打包具体操作系统时请查 **平台操作手册**；需要核对 `ui!` 语法、组件属性或平台能力支持表时，请查阅 **接口参考**。
 
-## 按场景快速查阅
+## 按任务速查
 
-| 你想做什么 | 建议先读 |
+| 你想做什么 | 对应文档 |
 | --- | --- |
-| 用标准控件、自适应布局、默认骨架图或 `NativeView` 编写界面 | [当前组件用法](Reference/UI.md)与[完整组件属性表](Reference/Component-Properties.md) |
-| 核对各后端支持范围、构建证据与真机验证状态 | [平台能力与验证范围](Reference/Platforms.md) |
-| 随时脱离 Bern 导出独立可编译的各平台纯原生 IDE 项目 | [导出为独立纯原生项目](Implementation/Eject.md) |
-| 启用 JavaScript 脚本或用 `bern.cli` 与黑白名单做插件系统 | [JavaScript 与 `bern.cli`](Implementation/JavaScript.md) |
-| 在 Rust 声明旁紧邻嵌入各平台原生控件或自绘视图 | [紧邻原生视图](Implementation/Native-Views.md) |
-| 选用 GPUI 后端或排查特定平台细节 | [GPUI](Implementation/GPUI.md)或下方各平台实现记录 |
-| 了解整体架构、协议、主题、窗口与命令模型 | [架构与语义规范](Design.md) |
+| 从零安装 `bern` 并跑通第一个应用 | [快速上手](Guides/Quick-Start.md) |
+| 用 Rust 定义状态、命令、查询与错误处理 | [协议与引擎](Guides/Protocol-and-Engine.md) |
+| 编写自适应布局、导航、弹层、电视与手表界面 | [布局与导航](Guides/Layouts-and-Navigation.md) |
+| 接入多语言翻译（`tr!`）、主题与样式（`style!`） | [本地化与样式](Guides/Localization-and-Styling.md) |
+| 配置多窗口、图标、系统托盘、文件与媒体播放 | [窗口、资源与文件](Guides/Windows-Resources-and-Files.md) |
+| 用配套应用 CLI 与 AI Skill 自动化操控和截图 | [应用 CLI 与 Skill](Guides/App-CLI-and-Skills.md) |
+| 导出独立纯原生 IDE 工程，解除框架锁定 | [导出为独立纯原生项目](Topics/Eject.md) |
+| 配置特定平台工具链、调试、签名与打包 | [平台操作手册](#平台操作手册) |
+| 查阅组件属性清单或平台能力支持矩阵 | [接口参考](#接口参考) |
+| 了解编译流水线与框架架构不变量 | [架构总览](Architecture.md) |
 
-## 当前接口
+## 总览
 
-- [当前组件用法](Reference/UI.md)：文本与 ICU 格式化、坐标场景、控件容器、引擎受控输入、图片与瀑布流、Hero 过渡、引导、搜索、空闲状态、键盘快捷键、菜单栏、存储、默认骨架图、`NativeView`，以及完整标准控件体系（`TreeView`、`SplitPane`、`Reorderable`、`BottomSheet`、`Refreshable`、`DatePicker`、`TimePicker`、`NumberInput`、`Alert`、`Banner`、`Disclosure`、`Tooltip`、`EmptyState`、`Badge`、`Avatar`）。
-- [完整组件属性表](Reference/Component-Properties.md)：从当前 `bern-ir::spec` 导出的全部内置组件、属性类型、必填项、子节点和动作规则。
-- [平台能力与验证范围](Reference/Platforms.md)：按后端功能标记与跨平台能力列出支持范围，将声明支持、构建验证与实机交互验证分开记录。
-- [性能追踪](Reference/Tracing.md)：`BERN_TRACE` 与 `trace.*` 规则、各分段含义、终端汇总、`trace.report` 与时间线导出。
+- [架构总览](Architecture.md) — 编译流水线（`#[bern::protocol]` / `ui!` → IR → 原生目标）、引擎边界与核心架构不变量。
 
-## 架构与设计
+## 开发指南
 
-- [架构与语义规范](Design.md)：组件声明、模块、主题、命令、窗口、媒体、应用图标和明确标注的后续设计。
-- [平台适配规范](Adaptation/README.md)：Apple、Android、Windows / Linux、Web 以及研究中的平台；适配目标不代表当前已实现后端。
-- [React Native 研究](Research/ReactNative.md)：运行时桥接与构建期生成两种架构的比较。
+- [快速上手](Guides/Quick-Start.md) — 安装 `bern`、使用 `bern new` 创建项目、理解三 crate 结构并跑通 `check` / `run` / `package` 循环。
+- [协议与引擎](Guides/Protocol-and-Engine.md) — `#[bern::protocol]`、`#[bern::session]`、`#[bern::value]`、`Query`、后台任务、本地存储与凭据管理。
+- [布局与导航](Guides/Layouts-and-Navigation.md) — `Adaptive` 四档尺寸与 TV/Watch 布局、`SplitView`、`TabView`、`Modal`、`Dialog`、`Shortcut` 与 `default_focus`。
+- [本地化与样式](Guides/Localization-and-Styling.md) — `tr!`、`strings/*.toml`、复数与日期格式化、语义色、`style!` 与运行时深浅色/色板切换。
+- [窗口、资源与文件](Guides/Windows-Resources-and-Files.md) — 多窗口场景、`MenuBar`、`StatusItem`、`[app.icon]`、`[[app.opens]]`、文件选择与 `MediaSource` / `Video`。
+- [应用 CLI 与 Skill](Guides/App-CLI-and-Skills.md) — 使用生成的配套应用 CLI、IPC 路由、`window screenshot`、`ui.*` 控制命令与自动生成的 `SKILL.md`。
 
-## 实现与专题
+## 平台操作手册
 
-### 平台后端
+面向每个平台的实战手册，涵盖环境准备、`Bern.toml` 配置、构建调试、平台适配要点以及打包与签名：
 
-- **Apple**：[macOS（SwiftUI）](Implementation/macOS-SwiftUI.md) · [iOS / iPadOS（SwiftUI）](Implementation/iOS-SwiftUI.md) · [watchOS（SwiftUI）](Implementation/watchOS-SwiftUI.md) · [tvOS（SwiftUI）](Implementation/tvOS-SwiftUI.md)
-- **桌面与移动**：[Windows（WinUI 3 与 XAML Islands）](Implementation/Windows-WinUI3.md) · [Linux（GTK 4）](Implementation/Linux-GTK.md) · [Android 与 Wear OS（Jetpack Compose）](Implementation/Android-Compose.md)
-- **可选 GPU 与 Web**：[GPUI（macOS、Windows、Linux）](Implementation/GPUI.md) · [Web 应用与 WebUI（DOM + WebAssembly）](Implementation/Web.md)
+- [macOS](Platforms/macOS.md) — SwiftUI + AppKit（`.app`、`.dmg` 与 Apple 公证）
+- [iOS 与 iPadOS](Platforms/iOS.md) — SwiftUI + UIKit、双前端回退（`swiftui` + `swiftui-16`）、模拟器与 `.ipa`
+- [watchOS](Platforms/watchOS.md) — 独立 Watch-Only SwiftUI、`Layout(size: watch)`（`B401`）与 `.ipa`
+- [tvOS](Platforms/tvOS.md) — Apple TV SwiftUI、Siri Remote 焦点控制、Top Shelf 图标与 `.ipa`
+- [Windows](Platforms/Windows.md) — C++/WinRT 双前端（WinUI 3 + XAML Islands）、Direct2D 安装包与 `.zip`
+- [Linux](Platforms/Linux.md) — GTK 4 + libadwaita、StatusNotifierItem、`.deb` 与 `.tar.gz`
+- [Android 与 Wear OS](Platforms/Android.md) — Jetpack Compose Material 3 与 Wear Compose、SAF、`.apk` 与 `.aab`
+- [GPUI](Platforms/GPUI.md) — 可选的跨桌面统一 GPU 渲染后端（`ui = "gpui"`）
+- [Web](Platforms/Web.md) — 纯前端 WASM 应用（`web_mode = "app"`）、原生引擎 WebUI（`web_mode = "ui"`）与内嵌 `web_ui`
 
-### 专题文档
+## 专题扩展
 
-- [导出为独立纯原生项目](Implementation/Eject.md)：`bern eject` 导出独立可构建的 `.xcodeproj`、Gradle、Visual Studio `.sln`/`.vcxproj`、Cargo 与零打包器 ES 模块工程，支持完全离线自包含 Rust 后端源码（`--engine source`）与预编译引擎二进制（`--engine prebuilt`）两种模式。
-- [紧邻原生视图](Implementation/Native-Views.md)：在 Rust 声明同目录放置各平台原生 UI 文件的 `NativeView`，含强类型 `Props`/`Actions`/`Theme`、强制 CLI 入口、`tr!` 多语言检查与 `Fallback`。
-- [JavaScript 与 `bern.cli`](Implementation/JavaScript.md)：按需启用的 `javascript = true`（所有原生目标统一进程内 Boa，Web 目标为浏览器 Worker）、持久脚本上下文、进程内 `globalThis.bern.cli(...)`、Rust 侧黑白名单 `CliPolicy` 与 `window.webview` 编译期分支。
-- [动画 SVG](Implementation/Animated-SVG.md)：零 WebView 依赖的纯 Rust `BSVG` 字节码渲染、资源声明、静态回退与验证范围。
-- [按模块编译](Implementation/Module-Builds.md)：`--exclude-module`、编译期 UI 条件和可选 Cargo 依赖。
-- [应用自己的浏览器扩展](Implementation/Web-Extensions.md)：浏览器目标的 `web_extension`、应用自带媒体执行端、WASM 导入与文件准备钩子。
+- [导出为独立纯原生项目](Topics/Eject.md) — `bern eject` 可随时导出标准 `.xcodeproj`、Gradle、Visual Studio `.sln`/`.vcxproj`、独立 Cargo 与零打包器 ES 模块工程（支持 `--engine source` 与 `--engine prebuilt`）。
+- [原生视图](Topics/Native-Views.md) — 与 Rust 源码同仓的跨平台原生视图（`NativeView`），含类型化 props、`tr!` 校验、CLI 入口与 `Fallback`。
+- [JavaScript 与 `bern.cli`](Topics/JavaScript.md) — 按目标开启的进程内 JavaScript（`bern::script`）、`bern.cli(...)` 与宿主 `CliPolicy` 策略。
+- [动画 SVG](Topics/Animated-SVG.md) — 编译期 `BSVG` 字节码与全平台纯 Rust 动画渲染。
+- [按模块构建](Topics/Module-Builds.md) — 使用 `bern new --module` 与 `--exclude-module` 拆分独立功能模块。
+- [Web 扩展](Topics/Web-Extensions.md) — 通过 `web_extension` 集成自定义 JS/WASM 浏览器扩展。
+
+## 接口参考
+
+- [UI 声明参考](Reference/UI.md) — `ui!` 语法、表达式、导航、格式化、动效与自动骨架屏。
+- [组件属性表](Reference/Component-Properties.md) — 所有内置组件的属性、子节点与动作清单。
+- [平台能力与验证范围](Reference/Platforms.md) — 各目标特性标记支持矩阵与当前验证说明。
+- [性能追踪](Reference/Tracing.md) — `BERN_TRACE`、`bern run --trace`、`trace.*` CLI 命令与时间线输出格式。
 
 ## 更新规则
 
-组件或属性变化时同步属性表与用法；后端新增功能时同步能力表；验收记录写清日期、目标、场景及未验证范围。代码生成成功、原生构建成功和实际设备交互通过是三个不同结论。新增记录后同时检查旧“尚未实现”“未验证”条目，避免同一能力在文档中有互相冲突的状态。
-
-接口来源为 [bern-ir 组件定义](../../crates/bern-ir/src/spec.rs)，能力来源为 [bern-target-api](../../crates/bern-target-api/src/lib.rs)（检查规则在 [check/](../../crates/bern-target-api/src/check/)）与各后端 `TargetDescriptor`。实现日志保留历史上下文，不能覆盖当前参考表中的接口事实。
-
-文档同步维护英文与简体中文两种语言。英文为默认版本，位于 `Docs/`、`README.md` 与 `CONTRIBUTING.md`；简体中文位于 `Docs/zh-CN/`（文件名与英文一一对应）、`README.zh-CN.md` 与 `CONTRIBUTING.zh-CN.md`。任何修改都在同一次提交中同步两边：标题层级、表格行与代码块一一对应，相对链接与锚点均有效，由 `cargo test -p bern --test docs` 自动校验。
+- 每当组件、属性、目标选项或 `Bern.toml` 配置项发生变化时，在同一改动中同步更新对应的开发指南、平台手册与[接口参考](#接口参考)。
+- 保持 `Docs/` 与 `Docs/zh-CN/` 的目录和文档结构一一对应（标题层级、代码块数与表格行数一致），并通过 `cargo test -p bern --test docs` 校验。
+- 文档内容以框架当前实际行为为准，不再保留过期的历史设计草稿或私有应用名称。

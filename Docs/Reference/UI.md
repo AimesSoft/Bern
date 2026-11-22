@@ -249,7 +249,7 @@ Tabs(id: tv_tabs, selection: draft.page) {
 }
 ```
 
-For the scope of each target see the [platform capability table](Platforms.md); for tvOS focus, remote control and scaled scenes see the [tvOS implementation notes](../Implementation/tvOS-SwiftUI.md).
+For the scope of each target see the [platform capability table](Platforms.md); for tvOS focus, remote control and scaled scenes see the [tvOS platform guide](../Platforms/tvOS.md).
 
 ## Menu bar and rebindable keyboard shortcuts
 
@@ -276,7 +276,7 @@ WindowSet(handle: AppWindows, primary: main) {
 }
 ```
 
-For the scope of each target see the [platform capability table](Platforms.md); for semantics and implementation progress see [keyboard shortcuts and the menu bar in the design document](../Design.md#menu-bar).
+For the scope of each target see the [platform capability table](Platforms.md); for usage see [Layouts and navigation](../Guides/Layouts-and-Navigation.md) and [Windows, resources, and files](../Guides/Windows-Resources-and-Files.md).
 
 ## Status bar items (tray)
 
@@ -303,7 +303,7 @@ StatusItem(icon: "sun.max.fill", label: tr! { "zh-Hans" => "显示器调节", "e
 }
 ```
 
-For semantics and each platform's implementation see [status bar items in the design document](../Design.md#status-bar-item).
+For usage and per-platform behavior see [Windows, resources, and files](../Guides/Windows-Resources-and-Files.md).
 
 ## Tables
 
@@ -441,7 +441,7 @@ See `examples/native-controls/` for a complete six-backend demonstration.
 
 ## Other interfaces
 
-Animated SVG is a standalone component used on demand; for its interface, resource declarations, platform dependencies and lifecycle see the [dedicated document](../Implementation/Animated-SVG.md). For the full semantics of the video player, queries, modules, themes and the command protocol, continue to see the [design document](../Design.md) and the corresponding implementation notes.
+Animated SVG is a standalone component used on demand; for its interface, resource declarations, platform dependencies and lifecycle see [Animated SVG](../Topics/Animated-SVG.md). For full workflows on the video player, queries, modules, themes and the command protocol, see the [Guides](../README.md#guides) and [Architecture overview](../Architecture.md).
 
 ### Hiding unavailable menu items
 

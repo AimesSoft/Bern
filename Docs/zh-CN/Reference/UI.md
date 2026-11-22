@@ -249,7 +249,7 @@ Tabs(id: tv_tabs, selection: draft.page) {
 }
 ```
 
-各目标的范围见[平台能力表](Platforms.md)，tvOS 的焦点、遥控与缩放场景见 [tvOS 实现记录](../Implementation/tvOS-SwiftUI.md)。
+各目标的范围见[平台能力表](Platforms.md)，tvOS 的焦点、遥控与缩放场景见 [tvOS 平台手册](../Platforms/tvOS.md)。
 
 ## 菜单栏与可改的快捷键
 
@@ -276,7 +276,7 @@ WindowSet(handle: AppWindows, primary: main) {
 }
 ```
 
-各目标的范围见[平台能力表](Platforms.md)，语义与实现进度见[设计文档的快捷键与菜单栏](../Design.md#菜单栏)。
+各目标的范围见[平台能力表](Platforms.md)，用法详见[布局与导航](../Guides/Layouts-and-Navigation.md)与[窗口、资源与文件](../Guides/Windows-Resources-and-Files.md)。
 
 ## 状态栏项（托盘）
 
@@ -303,7 +303,7 @@ StatusItem(icon: "sun.max.fill", label: tr! { "zh-Hans" => "显示器调节", "e
 }
 ```
 
-语义与各平台的实现见[设计文档的状态栏项](../Design.md#状态栏项)。
+用法与各平台行为见[窗口、资源与文件](../Guides/Windows-Resources-and-Files.md)。
 
 ## 表格
 
@@ -441,7 +441,7 @@ NativeView(
 
 ## 其他接口
 
-动画 SVG 是按需使用的独立组件，接口、资源声明、平台依赖与生命周期见[专项文档](../Implementation/Animated-SVG.md)。视频播放器、查询、模块、主题及命令协议的完整语义继续见[设计文档](../Design.md)与对应实现记录。
+动画 SVG 是按需使用的独立组件，接口、资源声明、平台依赖与生命周期见[动画 SVG](../Topics/Animated-SVG.md)。视频播放器、查询、模块、主题及命令协议的完整用法请查阅[开发指南](../README.md#开发指南)与[架构总览](../Architecture.md)。
 
 ### 隐藏不可用的菜单项
 
