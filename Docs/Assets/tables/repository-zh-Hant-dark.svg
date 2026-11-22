@@ -51,5 +51,5 @@
 <text x="132.0" y="474.1" font-size="13.5" fill="#F0F6FC"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#79C0FF">examples/native-controls</tspan> · <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#79C0FF">wearos</tspan> · <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#79C0FF">svg-animation</tspan></text>
 <text x="520.0" y="474.1" font-size="13.5" fill="#9198A1">專項範例：緊鄰 <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#79C0FF">NativeView</tspan>、手錶端、純 Rust 動畫 SVG</text>
 <text x="132.0" y="500.1" font-size="13.5" fill="#F0F6FC"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#79C0FF">Docs/</tspan></text>
-<text x="520.0" y="500.1" font-size="13.5" fill="#9198A1">中英雙語參考文件、設計規範與各平台實作紀錄</text>
+<text x="520.0" y="500.1" font-size="13.5" fill="#9198A1">中英雙語開發指南、平台操作手冊、專題與介面參考</text>
 </svg>

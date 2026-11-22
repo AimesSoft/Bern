@@ -56,6 +56,6 @@
 <text x="520.0" y="554.0" font-size="13.5" fill="#59636E">特化サンプル：隣接 <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">NativeView</tspan>、ウォッチ、純 Rust アニメーション</text>
 <text x="520.0" y="574.0" font-size="13.5" fill="#59636E">SVG</text>
 <text x="132.0" y="600.0" font-size="13.5" fill="#1F2328"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">Docs/</tspan></text>
-<text x="520.0" y="600.0" font-size="13.5" fill="#59636E">英中バイリンガル参照ガイド、設計ドキュメント、各プラットフォーム</text>
-<text x="520.0" y="620.0" font-size="13.5" fill="#59636E">実装記録</text>
+<text x="520.0" y="600.0" font-size="13.5" fill="#59636E">英中バイリンガル開発ガイド、プラットフォーム手順書、トピックとリ</text>
+<text x="520.0" y="620.0" font-size="13.5" fill="#59636E">ファレンス</text>
 </svg>

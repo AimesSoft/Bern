@@ -4,12 +4,12 @@
 
 <h1>Bern</h1>
 
-<p><b>One Rust declaration, compiled into each platform's own native UI.</b></p>
+<p><b>A cross-platform native UI framework for Rust.</b></p>
 
-<p>Desktop, mobile, tablet, watch, TV and the Web — from one <code>ui!</code> declaration:<br>
-SwiftUI, WinUI 3, GTK 4, Jetpack Compose, GPUI and Web DOM/WASM.<br>
-Zero JS engine or embedded browser by default; opt in to in-process JavaScript with <code>bern.cli</code>.<br>
-<b>Built for AI:</b> omissions fail to compile, and agents drive running apps by name via <code>SKILL.md</code> and the app CLI.</p>
+<p>Write both your app logic and declarative <code>ui!</code> views in Rust — no embedded browser, no hand-written platform glue.<br>
+At build time, Bern compiles one Rust codebase into SwiftUI, WinUI 3, GTK 4, Jetpack Compose, GPUI and Web DOM/WASM<br>
+across desktop, mobile, tablet, watch, TV and the Web.<br>
+A typed protocol and command architecture keeps business logic in plain Rust, catches omissions at compile time, and ships an app CLI + <code>SKILL.md</code> out of the box.</p>
 
 <p>
 <img alt="macOS · SwiftUI" src="https://img.shields.io/badge/macOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
@@ -26,9 +26,9 @@ Zero JS engine or embedded browser by default; opt in to in-process JavaScript w
 
 <p>
 <a href="https://bern.aimes-soft.com"><img alt="Website" src="https://img.shields.io/badge/website-bern.aimes--soft.com-111827?style=flat-square"></a>
-<img alt="Skills + CLI" src="https://img.shields.io/badge/AI-Skills%20%2B%20CLI-8B5CF6?style=flat-square">
+<img alt="Native UI: no WebView" src="https://img.shields.io/badge/UI-native%20%C2%B7%20no%20WebView-111827?style=flat-square">
 <img alt="Memory about 40 MB" src="https://img.shields.io/badge/memory-about%2040%20MB-0EA5E9?style=flat-square">
-<img alt="JS engine: opt-in" src="https://img.shields.io/badge/JS%20engine-opt--in-111827?style=flat-square">
+<img alt="Skills + CLI" src="https://img.shields.io/badge/AI-Skills%20%2B%20CLI-8B5CF6?style=flat-square">
 <img alt="Rust 1.99" src="https://img.shields.io/badge/Rust-1.99-B7410E?style=flat-square&logo=rust&logoColor=white">
 <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-22C55E?style=flat-square"></a>
 <img alt="Status: early preview" src="https://img.shields.io/badge/status-early%20preview-F59E0B?style=flat-square">
@@ -45,7 +45,7 @@ Zero JS engine or embedded browser by default; opt in to in-process JavaScript w
 <a href="https://bern.aimes-soft.com">Website</a> ·
 <a href="https://bern.aimes-soft.com/docs">Online docs</a> ·
 <a href="#why-bern">Why Bern</a> ·
-<a href="#who-uses-bern">Who uses Bern</a> ·
+<a href="#how-to-build-software-in-rust">How to build in Rust</a> ·
 <a href="#built-for-ai">Built for AI</a> ·
 <a href="#measured">Measured</a> ·
 <a href="#compared-with-other-cross-platform-frameworks">Comparison</a> ·
@@ -65,6 +65,21 @@ Zero JS engine or embedded browser by default; opt in to in-process JavaScript w
 <td width="50%" align="center"><img src="Docs/Assets/screenshots/linux-en.png" alt="The showcase on Linux with GTK 4 and libadwaita"><br><sub><b>Linux</b> · GTK 4 + libadwaita</sub></td>
 <td width="50%" align="center"><img src="Docs/Assets/screenshots/web-en.png" alt="The showcase in a browser"><br><sub><b>Web</b> · DOM + WebAssembly</sub></td>
 </tr>
+</table>
+
+<table>
+<tr>
+<td width="25%" align="center"><img src="Docs/Assets/screenshots/ios-en.png" width="175" alt="The showcase on iPhone with SwiftUI"><br><sub><b>iOS</b> · SwiftUI</sub></td>
+<td width="25%" align="center"><img src="Docs/Assets/screenshots/android-en.png" width="175" alt="The showcase on Android with Jetpack Compose"><br><sub><b>Android</b> · Jetpack Compose</sub></td>
+<td width="50%" align="center"><img src="Docs/Assets/screenshots/gpui-zh.png" width="360" alt="Native controls demo on macOS with GPUI"><br><sub><b>Desktop · GPUI</b> (<code>ui = "gpui"</code> with co-located <code>NativeView</code>)</sub></td>
+</tr>
+</table>
+
+<details>
+<summary><b>More form factors:</b> iPad, Android Tablet, Apple TV, Android TV, iPhone Duo, watchOS &amp; Wear OS</summary>
+<br>
+
+<table>
 <tr>
 <td width="50%" align="center"><img src="Docs/Assets/screenshots/ipad-en.png" alt="The showcase on iPad with SwiftUI"><br><sub><b>iPad</b> · iPadOS SwiftUI</sub></td>
 <td width="50%" align="center"><img src="Docs/Assets/screenshots/android-tablet-en.png" alt="The showcase on an Android tablet with Jetpack Compose"><br><sub><b>Android Tablet</b> · Jetpack Compose</sub></td>
@@ -77,52 +92,217 @@ Zero JS engine or embedded browser by default; opt in to in-process JavaScript w
 
 <table>
 <tr>
-<td width="32%" align="center"><img src="Docs/Assets/screenshots/ios-en.png" width="190" alt="The showcase on iPhone with SwiftUI"><br><sub><b>iOS</b> · SwiftUI</sub></td>
-<td width="36%" align="center"><img src="Docs/Assets/screenshots/iphone-duo-en.png" width="235" alt="The showcase on iPhone Duo with SwiftUI"><br><sub><b>iPhone Duo</b> · SwiftUI</sub></td>
-<td width="32%" align="center"><img src="Docs/Assets/screenshots/android-en.png" width="190" alt="The showcase on Android with Jetpack Compose"><br><sub><b>Android</b> · Jetpack Compose</sub></td>
+<td width="40%" align="center"><img src="Docs/Assets/screenshots/iphone-duo-en.png" width="235" alt="The showcase on iPhone Duo with SwiftUI"><br><sub><b>iPhone Duo</b> · SwiftUI</sub></td>
+<td width="30%" align="center"><img src="Docs/Assets/screenshots/watchos-en.png" width="145" alt="Watch demo on watchOS with SwiftUI"><br><sub><b>watchOS</b> · SwiftUI</sub></td>
+<td width="30%" align="center"><img src="Docs/Assets/screenshots/wearos-zh.png" width="145" alt="Watch demo on Wear OS with Compose"><br><sub><b>Wear OS</b> · Compose Material 3</sub></td>
 </tr>
 </table>
 
-<table>
-<tr>
-<td width="25%" align="center"><img src="Docs/Assets/screenshots/watchos-en.png" width="145" alt="Watch demo on watchOS with SwiftUI"><br><sub><b>watchOS</b> · SwiftUI</sub></td>
-<td width="25%" align="center"><img src="Docs/Assets/screenshots/wearos-zh.png" width="145" alt="Watch demo on Wear OS with Compose"><br><sub><b>Wear OS</b> · Compose Material 3</sub></td>
-<td width="50%" align="center"><img src="Docs/Assets/screenshots/gpui-zh.png" width="360" alt="Native controls demo on macOS with GPUI"><br><sub><b>Desktop · GPUI</b> (<code>ui = "gpui"</code> with co-located <code>NativeView</code>)</sub></td>
-</tr>
-</table>
+</details>
 
-<p align="center"><sub>One Rust declaration across desktop, tablet, TV, phone, watch and Web. On system targets Bern draws no pixels of its own;<br>when you want unified GPU rendering, switch to <code>ui = "gpui"</code> without rewriting your app.</sub></p>
+<p align="center"><sub>One Rust codebase across desktop, mobile, tablet, TV, watch and Web. On system targets Bern draws no pixels of its own;<br>when you want unified GPU rendering, switch to <code>ui = "gpui"</code> without rewriting your app.</sub></p>
 
 ## Why Bern
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/why-en-dark.svg">
-<img alt="Why Bern: compiled into native UI, one Rust declaration generating each platform's own UI code with no JS engine by default; built for AI, where omissions are compile errors and agents use SKILL.md, the app CLI and window screenshots; too light to feel cross-platform, 39 MB, 0.4 s and 2.7 MB on macOS, 35 MB, 0.3 s and 4.2 MB on Windows, 189 KB on the web" src="Docs/Assets/tables/why-en-light.svg" width="100%">
+<img alt="Why Bern: compiled into native UI, generating SwiftUI, WinUI 3, GTK 4, Compose, GPUI and Web code from Rust with zero WebView by default; all Rust with logic separated from UI, plain Rust engine, compile-time checks for omissions and automatic app CLI plus SKILL.md; too light to feel cross-platform, 39 MB, 0.4 s and 2.7 MB on macOS, 35 MB, 0.3 s and 4.2 MB on Windows, 189 KB on the web" src="Docs/Assets/tables/why-en-light.svg" width="100%">
 </picture>
 
-## Who uses Bern
+## How to build software in Rust
 
-<table>
-<tr>
-<td width="33%" valign="top">
-<a href="https://github.com/AimesSoft/RustSend"><img src="Docs/Assets/projects/rustsend.png" width="56" height="56" alt="RustSend"></a>
-<h3><a href="https://github.com/AimesSoft/RustSend">RustSend</a></h3>
-<p>Local file sharing compatible with LocalSend. Send files, folders and text across devices.</p>
-</td>
-<td width="33%" valign="top">
-<a href="https://github.com/zhaohuaxs/lambda"><img src="Docs/Assets/projects/lambda.png" width="56" height="56" alt="Lambda"></a>
-<h3><a href="https://github.com/zhaohuaxs/lambda">Lambda</a></h3>
-<p>A Windows and Android archive manager powered by 7-Zip. Create encrypted archives, extract files and preview their contents.</p>
-</td>
-<td width="33%" valign="top">
-<a href="https://github.com/MCDFsteve/Enji"><img src="Docs/Assets/projects/enji.png" width="56" height="56" alt="Enji Music"></a>
-<h3><a href="https://github.com/MCDFsteve/Enji">Enji Music</a></h3>
-<p>A third-party NetEase Cloud Music client with online and local playback, synced lyrics and playlist management.</p>
-</td>
-</tr>
-</table>
+With Bern, you stay in Rust from data model to native release bundle — no hand-written Swift, C++, or Kotlin glue unless you explicitly drop into a platform-specific `NativeView`. To avoid the classic Rust GUI headaches (callbacks fighting the borrow checker, UI threads tangled with async I/O, per-platform build plumbing), every Bern app is cleanly split into three layers:
+
+```mermaid
+flowchart LR
+    subgraph app["Your application (100% Rust)"]
+        P["Protocol<br/>types · state · commands"]
+        U["UI declarations<br/>#[component] + ui!"]
+        E["Engine<br/>plain Rust"]
+    end
+    P --> C{{"bern build<br/>compiler + IR"}}
+    U --> C
+    C --> S["SwiftUI<br/>macOS · iOS · watchOS · tvOS"]
+    C --> W["WinUI 3 / Islands<br/>Windows"]
+    C --> G["GTK 4<br/>Linux"]
+    C --> A["Jetpack Compose<br/>Android · Wear OS"]
+    C --> P2["GPUI<br/>macOS · Windows · Linux"]
+    C --> B["DOM + WASM<br/>Web"]
+    E <--> K[["Command catalog"]]
+    K <--> N["Native UI"]
+    K <--> L["App CLI"]
+    K <--> JS["JS · bern.cli"]
+    K <--> J["JSON channel"]
+    K --> SK["SKILL.md"]
+```
+
+1. **Protocol** — `#[bern::protocol]` declares value types, the read-only state snapshot, and the command and query traits.
+2. **Engine** — ordinary Rust that implements those traits. It never sees a window, widget, or transport, so you freely use `tokio`, `reqwest`, `rusqlite`, or any Rust crate and unit-test it with plain `cargo test`.
+3. **Interface** — `#[component]` functions written with `ui!` right inside `.rs` files. Views read state and dispatch typed commands; the compiler lowers them into a shared IR and generates each platform's own native UI code, linked directly to your Rust engine.
+
+### Project structure
+
+Running `bern new tasks` scaffolds a standard Cargo workspace with `Bern.toml` declaring languages, theme, bundled resources, and target platforms:
+
+```text
+tasks/
+├── Bern.toml           # App metadata, languages, resources & targets
+├── tasks-protocol/     # 1. Shared contract: values, read-only state & commands
+├── tasks-core/         # 2. Business engine: plain Rust, zero UI dependency
+└── tasks-ui/           # 3. Declarative UI: #[component] + ui! + tr!
+```
+
+### A complete mini app: Tasks
+
+**1 · Protocol (`tasks-protocol/src/lib.rs`)**: value types, read-only state, and typed commands
+
+```rust
+#[bern::protocol(namespace = "tasks", version = 1)]
+pub mod tasks {
+    use bern::prelude::*;
+
+    #[value]
+    pub struct Task {
+        pub id: i64,
+        #[content]
+        pub title: String,
+        pub done: bool,
+    }
+
+    #[state]
+    pub struct State {
+        pub items: Vec<Task>,
+        pub remaining: i64,
+    }
+
+    #[commands]
+    pub trait Commands {
+        /// Add a task and return its id.
+        #[errors("empty_title")]
+        fn add(&mut self, title: String) -> Result<i64, CommandError>;
+
+        /// Toggle a task's completion state.
+        fn toggle(&mut self, id: i64) -> Result<(), CommandError>;
+    }
+}
+```
+
+**2 · Engine (`tasks-core/src/lib.rs`)**: plain Rust business logic, zero UI coupling
+
+```rust
+use bern::CommandError;
+use tasks_protocol::tasks::{self, State, Task};
+
+pub struct TasksEngine {
+    state: State,
+    next_id: i64,
+}
+
+impl Default for TasksEngine {
+    fn default() -> Self {
+        Self { state: State { items: Vec::new(), remaining: 0 }, next_id: 0 }
+    }
+}
+
+impl tasks::Commands for TasksEngine {
+    fn add(&mut self, title: String) -> Result<i64, CommandError> {
+        if title.trim().is_empty() {
+            return Err(CommandError::new("empty_title", "title cannot be empty"));
+        }
+        self.next_id += 1;
+        self.state.items.push(Task { id: self.next_id, title, done: false });
+        self.state.remaining += 1;
+        Ok(self.next_id)
+    }
+
+    fn toggle(&mut self, id: i64) -> Result<(), CommandError> {
+        if let Some(task) = self.state.items.iter_mut().find(|t| t.id == id) {
+            task.done = !task.done;
+            self.state.remaining += if task.done { -1 } else { 1 };
+        }
+        Ok(())
+    }
+}
+
+impl tasks::Engine for TasksEngine {
+    fn state(&self) -> &State { &self.state }
+}
+```
+
+**3 · Interface (`tasks-ui/src/lib.rs`)**: declarative `ui!` in Rust with local drafts and inline localization
+
+```rust
+#[bern::session]
+pub struct Draft {
+    pub title: String,
+    pub only_open: bool,
+}
+
+#[component]
+pub fn tasks_view(app: tasks::Client, #[session] draft: Draft) -> impl View {
+    ui! {
+        Form {
+            Section(title: tr! {
+                "zh-Hans" => "待办（剩余 {n} 项）",
+                "en" => "Tasks ({n} left)";
+                n: app.remaining
+            }) {
+                Row(gap: 8) {
+                    TextInput(
+                        id: new_task,
+                        label: tr! { "zh-Hans" => "新任务", "en" => "New task" },
+                        value: draft.title,
+                        prompt: tr! { "zh-Hans" => "写点要做的事…", "en" => "Add a task…" },
+                        submit: clear
+                    ) => app.add(draft.title)
+                    Button(
+                        id: add,
+                        label: tr! { "zh-Hans" => "添加", "en" => "Add" },
+                        prominence: prominent,
+                        clears: draft.title
+                    ) => app.add(draft.title)
+                }
+                Switch(
+                    id: only_open,
+                    label: tr! { "zh-Hans" => "只看未完成", "en" => "Only open" },
+                    value: draft.only_open
+                )
+                ForEach(items: app.items, key: id) |task| {
+                    if !draft.only_open || !task.done {
+                        Switch(
+                            id: done,
+                            label: task.title,
+                            checked: task.done,
+                            style: checkbox
+                        ) => app.toggle(task.id)
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+### Check, run and ship
+
+One `bern` tool drives the entire lifecycle — compile-time verification, native execution across devices, release packaging, and the generated app CLI:
+
+```sh
+bern check                          # verify types, translations and layout coverage
+bern run                            # run native UI on this OS (SwiftUI / WinUI 3 / GTK 4)
+bern run --target web_app           # or Android, iOS, GPUI, Web from the same Rust code
+bern package                        # build release .dmg / installer / .deb / .apk / .ipa / Web
+
+# Because every UI action is a protocol command, the built app also ships its own CLI:
+tasks ui inspect
+tasks tasks add --title "Ship v1.0"
+```
+
+For full multi-page apps in this repository, see [showcase](examples/showcase) (all controls, engine-backed async search, list-to-detail navigation, video, and a settings window with close confirmation), [planner](examples/planner) (modular app, style overrides, spring motion and `Canvas`), [gallery](examples/gallery) (poster wall, proportional timeline, four-tier adaptive layouts and file drop), [native-controls](examples/native-controls) (co-located per-platform `NativeView`), [wearos](examples/wearos) (watch targets), and [svg-animation](examples/svg-animation) (pure-Rust animated SVG).
 
 ## Built for AI
+
+Because every UI view is statically checked at compile time and every interaction flows through the command catalog, Bern naturally makes AI coding and AI automation reliable instead of guesswork.
 
 ### Writing code: what the AI forgets, the compiler remembers
 
@@ -173,21 +353,6 @@ $ showcase window confirm-close --window settings#1 --confirmation settings#1:c1
 
 You can run the same commands yourself, including app-specific ones such as `showcase showcase set-display-name --name Demo` or built-in window screenshots (`window screenshot`). Use the CLI from the same build as the app. Over SSH, run it on the machine hosting the control channel, under the account that owns the endpoint. If a control is disabled, blocked by a dialog or missing, the CLI returns an error code.
 
-### Extending with JavaScript: in-process `bern.cli`
-
-Apps that do not enable scripting link zero JS runtime. When a target sets `javascript = true`, every `bern::script::Context` (in-process Boa on native targets, Web Worker on the Web) exposes `globalThis.bern.cli(...)` directly against the app's command catalog, with host-side allowlist/denylist control (`CliPolicy::allow_all()` by default):
-
-```rust
-let js = bern::script::Context::with_policy(
-    bern::script::CliPolicy::allow_only(["media.*", "@queries", "state", "catalog"])
-        .deny("media.bind")
-        .with_label("example.plugin"),
-)?;
-js.eval(r#"await bern.cli("media seek --player-id main --position-ms 90000")"#).await?;
-```
-
-See [JavaScript and target capabilities](Docs/Implementation/JavaScript.md) for the full call forms, policy patterns and dynamic filters.
-
 ## Measured
 
 <picture>
@@ -207,7 +372,29 @@ See [JavaScript and target capabilities](Docs/Implementation/JavaScript.md) for 
 
 </details>
 
-## More
+## Who uses Bern
+
+<table>
+<tr>
+<td width="33%" valign="top">
+<a href="https://github.com/AimesSoft/RustSend"><img src="Docs/Assets/projects/rustsend.png" width="56" height="56" alt="RustSend"></a>
+<h3><a href="https://github.com/AimesSoft/RustSend">RustSend</a></h3>
+<p>Local file sharing compatible with LocalSend. Send files, folders and text across devices.</p>
+</td>
+<td width="33%" valign="top">
+<a href="https://github.com/zhaohuaxs/lambda"><img src="Docs/Assets/projects/lambda.png" width="56" height="56" alt="Lambda"></a>
+<h3><a href="https://github.com/zhaohuaxs/lambda">Lambda</a></h3>
+<p>A Windows and Android archive manager powered by 7-Zip. Create encrypted archives, extract files and preview their contents.</p>
+</td>
+<td width="33%" valign="top">
+<a href="https://github.com/MCDFsteve/Enji"><img src="Docs/Assets/projects/enji.png" width="56" height="56" alt="Enji Music"></a>
+<h3><a href="https://github.com/MCDFsteve/Enji">Enji Music</a></h3>
+<p>A third-party NetEase Cloud Music client with online and local playback, synced lyrics and playlist management.</p>
+</td>
+</tr>
+</table>
+
+## More capabilities & extensions
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/more-en-dark.svg">
@@ -223,122 +410,24 @@ See [JavaScript and target capabilities](Docs/Implementation/JavaScript.md) for 
 - **Automatic skeletons, style & motion**: compile-time projected skeletons on `Query` and `skeleton: <bool>` containers (120 ms anti-flicker, staggered entrance, reduced-motion aware); `style!` app-wide overrides, spring motion, shared-element Hero transitions, pure-Rust animated `Svg` (zero WebView), HDR `Image`, `Canvas` drawing and proportional `Rail`s.
 - **Media, async queries & files**: `Video` on native media stacks or a custom `MediaKernel`, direct `players.<id>.<field>` bindings, `Query` subscriptions (loading, empty, failure, refresh), bundled resources in `Bern.toml`, unified `MediaSource` across local paths / Android `content://` / Web `blob:`, system file open handlers (`[[app.opens]]`) and in-memory `bern::files::serve`.
 - **Desktop & system integration**: system tray `StatusItem` (monochrome SVG icons + launch at login), macOS `MenuBar`, floating overlay utility windows, built-in `window.screenshot`, pointer events (`DoubleTap`, `ContextMenu`, `WheelUp`/`WheelDown`), `Slider(hover:)` and embedded `WebPage`.
-- **Extensibility**: modular apps (`bern new --module`), co-located per-platform native views (`NativeView` with typed props, `tr!` linting, mandatory CLI entries and `Fallback`, see [Native Views](Docs/Implementation/Native-Views.md)), and opt-in in-process JavaScript with `bern.cli` and allowlist/denylist policies ([JavaScript](Docs/Implementation/JavaScript.md)).
+- **Extensibility**: modular apps (`bern new --module`), co-located per-platform native views (`NativeView` with typed props, `tr!` linting, mandatory CLI entries and `Fallback`, see [Native Views](Docs/Topics/Native-Views.md)), and opt-in in-process JavaScript with `bern.cli` and allowlist/denylist policies ([JavaScript](Docs/Topics/JavaScript.md)).
 
 </details>
 
-## How it works
+### Extending with JavaScript: in-process `bern.cli`
 
-```mermaid
-flowchart LR
-    subgraph app["Your application (Rust)"]
-        P["Protocol<br/>types · state · commands"]
-        U["UI declarations<br/>component + ui!"]
-        E["Engine<br/>plain Rust"]
-    end
-    P --> C{{"bern build<br/>compiler + IR"}}
-    U --> C
-    C --> S["SwiftUI<br/>macOS · iOS · watchOS · tvOS"]
-    C --> W["WinUI 3 / Islands<br/>Windows"]
-    C --> G["GTK 4<br/>Linux"]
-    C --> A["Jetpack Compose<br/>Android · Wear OS"]
-    C --> P2["GPUI<br/>macOS · Windows · Linux"]
-    C --> B["DOM + WASM<br/>Web"]
-    E <--> K[["Command catalog"]]
-    K <--> N["Native UI"]
-    K <--> L["App CLI"]
-    K <--> JS["JS · bern.cli"]
-    K <--> J["JSON channel"]
-    K --> SK["SKILL.md"]
-```
-
-1. **Protocol** – `#[bern::protocol]` declares value types, the read-only state and the command and query traits.
-2. **Engine** – implements those traits in ordinary Rust; it never sees a window, a control or a transport.
-3. **Interface** – `#[component]` functions whose body is a `ui!` declaration. The compiler reads them into a shared intermediate representation, and each target module generates native code from it. Adding a target never touches the parser, the IR or your business logic.
-
-## A taste of Bern
-
-**1 · Protocol**: types, state and commands
+Apps that do not enable scripting link zero JS runtime. When a target sets `javascript = true`, every `bern::script::Context` (in-process Boa on native targets, Web Worker on the Web) exposes `globalThis.bern.cli(...)` directly against the app's command catalog, with host-side allowlist/denylist control (`CliPolicy::allow_all()` by default):
 
 ```rust
-#[bern::protocol(namespace = "counter", version = 1)]
-pub mod counter {
-    use bern::prelude::*;
-
-    #[state]
-    pub struct State {
-        pub count: i64,
-    }
-
-    #[commands]
-    pub trait Commands {
-        /// Add to the count.
-        fn add(&mut self, by: i64) -> Result<(), CommandError>;
-    }
-}
+let js = bern::script::Context::with_policy(
+    bern::script::CliPolicy::allow_only(["media.*", "@queries", "state", "catalog"])
+        .deny("media.bind")
+        .with_label("example.plugin"),
+)?;
+js.eval(r#"await bern.cli("media seek --player-id main --position-ms 90000")"#).await?;
 ```
 
-**2 · Engine**: plain Rust, no UI
-
-```rust
-use bern::CommandError;
-
-pub struct Counter {
-    state: counter::State,
-}
-
-impl Default for Counter {
-    fn default() -> Self {
-        Self { state: counter::State { count: 0 } }
-    }
-}
-
-impl counter::Commands for Counter {
-    fn add(&mut self, by: i64) -> Result<(), CommandError> {
-        self.state.count += by;
-        Ok(())
-    }
-}
-
-impl counter::Engine for Counter {
-    fn state(&self) -> &counter::State {
-        &self.state
-    }
-}
-```
-
-**3 · Interface**: a `ui!` declaration
-
-```rust
-#[component]
-pub fn counter_view(app: counter::Client) -> impl View {
-    ui! {
-        Form {
-            Text(content: tr! {
-                "zh-Hans" => "已计数 {n} 次",
-                "en" => "Counted {n} times";
-                n: app.count
-            })
-            Button(
-                id: add,
-                label: tr! { "zh-Hans" => "加一", "en" => "Add one" },
-                prominence: prominent
-            ) => app.add(1)
-        }
-    }
-}
-```
-
-**4 · Everyone drives the same engine**
-
-```sh
-counter ui inspect
-counter ui activate --target counter_view.add
-counter counter add --by 5
-counter catalog
-```
-
-`Bern.toml` declares languages, theme, sources, bundled resources and targets. See the full [showcase](examples/showcase): a sidebar app with text styles, buttons, switches, sliders, text fields, an engine-backed search, list-to-detail navigation, video, and a settings window with tabs and a close confirmation. The [planner](examples/planner) is a modular app with style overrides, motion and `Canvas`. The [gallery](examples/gallery) shows the media app components: a poster wall that enters in turn, a timeline placed by fraction, a volume popover, margins and layouts that follow the four sizes, and a dropped video whose name, format and size the engine reads from the file. See [native-controls](examples/native-controls) for co-located per-platform native controls via `NativeView`, [wearos](examples/wearos) for watch targets, and [svg-animation](examples/svg-animation) for pure-Rust animated SVG.
+See [JavaScript and target capabilities](Docs/Topics/JavaScript.md) for the full call forms, policy patterns and dynamic filters.
 
 ## Platforms
 
@@ -347,7 +436,7 @@ counter catalog
 <img alt="Platforms: macOS, Windows, Linux, the web app, WebUI, Android, Wear OS, watchOS, tvOS, iOS and desktop GPUI" src="Docs/Assets/tables/platforms-en-light.svg" width="100%">
 </picture>
 
-Implementation notes: [macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [watchOS](Docs/Implementation/watchOS-SwiftUI.md) · [tvOS](Docs/Implementation/tvOS-SwiftUI.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Android & Wear OS](Docs/Implementation/Android-Compose.md) · [GPUI](Docs/Implementation/GPUI.md) · [Web and WebUI](Docs/Implementation/Web.md); the next platforms are in the [adaptation specs](Docs/Adaptation/README.md).
+Platform guides: [macOS](Docs/Platforms/macOS.md) · [iOS](Docs/Platforms/iOS.md) · [watchOS](Docs/Platforms/watchOS.md) · [tvOS](Docs/Platforms/tvOS.md) · [Windows](Docs/Platforms/Windows.md) · [Linux](Docs/Platforms/Linux.md) · [Android & Wear OS](Docs/Platforms/Android.md) · [GPUI](Docs/Platforms/GPUI.md) · [Web & WebUI](Docs/Platforms/Web.md).
 
 Omitting the UI technology picks the platform default; an unavailable default fails loudly instead of silently switching to another stack.
 
@@ -376,7 +465,7 @@ frontends = ["winui3"]   # asks to install the runtime on a system without it
 frontends = ["swiftui"]  # iOS 17 and later
 ```
 
-With both iOS front ends, `packages = "separate"` makes one `.ipa` of each. The [Windows](Docs/Implementation/Windows-WinUI3.md) and [iOS](Docs/Implementation/iOS-SwiftUI.md) implementation notes give the rules of the choice, and what is reduced on iOS 16.
+With both iOS front ends, `packages = "separate"` makes one `.ipa` of each. The [Windows](Docs/Platforms/Windows.md) and [iOS](Docs/Platforms/iOS.md) platform guides cover the selection rules and what is reduced on iOS 16.
 
 ## Compared with other cross-platform frameworks
 
@@ -478,7 +567,7 @@ The new app is a window with a counter, with one crate each for the protocol, th
 
 ```text
 $ bern doctor
-bern 0.2.1 on macOS (aarch64)
+bern 0.2.2 on macOS (aarch64)
 
 [✓] Rust: rustc 1.99.0, cargo 1.99.0
 [✓] macOS · SwiftUI: macOS SDK 26.5, Swift 6.3.2
@@ -517,7 +606,7 @@ bern eject --target macos --out ./native-macos                   # offline Rust 
 bern eject --target ios --engine prebuilt --release --out ./ios  # prebuilt XCFramework, no Rust required
 ```
 
-`bern eject` exports standard platform-native IDE projects (`.xcodeproj`, Gradle, Visual Studio `.sln` + `.vcxproj`, standalone Cargo, or zero-bundler ES modules) with UI sources split per component and window, leaving the original Bern project untouched. Choose `--engine source` (default) to vendor a complete offline Rust workspace wired into the native IDE build, or `--engine prebuilt` to embed pre-compiled engine binaries so native developers can open and build without installing Rust or Bern. See [Ejecting to standalone native projects](Docs/Implementation/Eject.md).
+`bern eject` exports standard platform-native IDE projects (`.xcodeproj`, Gradle, Visual Studio `.sln` + `.vcxproj`, standalone Cargo, or zero-bundler ES modules) with UI sources split per component and window, leaving the original Bern project untouched. Choose `--engine source` (default) to vendor a complete offline Rust workspace wired into the native IDE build, or `--engine prebuilt` to embed pre-compiled engine binaries so native developers can open and build without installing Rust or Bern. See [Ejecting to standalone native projects](Docs/Topics/Eject.md).
 
 ### Run the showcase
 
@@ -577,10 +666,10 @@ Tests include declarations that must fail to compile, and type-check the generat
 
 Browse the searchable docs online at **[bern.aimes-soft.com/docs](https://bern.aimes-soft.com/docs)**, or read them in this repository:
 
-- **Reference**: [Documentation index](Docs/README.md) · [Component guide](Docs/Reference/UI.md) · [Property table](Docs/Reference/Component-Properties.md) · [Platform capabilities](Docs/Reference/Platforms.md) · [Performance tracing](Docs/Reference/Tracing.md)
-- **Architecture**: [Design document](Docs/Design.md) · [Adaptation specs](Docs/Adaptation/README.md) · [React Native study](Docs/Research/ReactNative.md)
-- **Topics**: [Ejecting to native projects](Docs/Implementation/Eject.md) · [Co-located native views](Docs/Implementation/Native-Views.md) · [JavaScript & `bern.cli`](Docs/Implementation/JavaScript.md) · [Animated SVG](Docs/Implementation/Animated-SVG.md) · [Module builds](Docs/Implementation/Module-Builds.md) · [Web extensions](Docs/Implementation/Web-Extensions.md)
-- **Backends**: [macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [watchOS](Docs/Implementation/watchOS-SwiftUI.md) · [tvOS](Docs/Implementation/tvOS-SwiftUI.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Android & Wear OS](Docs/Implementation/Android-Compose.md) · [GPUI](Docs/Implementation/GPUI.md) · [Web & WebUI](Docs/Implementation/Web.md)
+- **Guides**: [Quick start](Docs/Guides/Quick-Start.md) · [Protocol & engine](Docs/Guides/Protocol-and-Engine.md) · [Layouts & navigation](Docs/Guides/Layouts-and-Navigation.md) · [Localization & styling](Docs/Guides/Localization-and-Styling.md) · [Windows, resources & files](Docs/Guides/Windows-Resources-and-Files.md) · [App CLI & Skills](Docs/Guides/App-CLI-and-Skills.md)
+- **Platforms**: [macOS](Docs/Platforms/macOS.md) · [iOS](Docs/Platforms/iOS.md) · [watchOS](Docs/Platforms/watchOS.md) · [tvOS](Docs/Platforms/tvOS.md) · [Windows](Docs/Platforms/Windows.md) · [Linux](Docs/Platforms/Linux.md) · [Android & Wear OS](Docs/Platforms/Android.md) · [GPUI](Docs/Platforms/GPUI.md) · [Web & WebUI](Docs/Platforms/Web.md)
+- **Topics**: [Ejecting to native projects](Docs/Topics/Eject.md) · [Co-located native views](Docs/Topics/Native-Views.md) · [JavaScript & `bern.cli`](Docs/Topics/JavaScript.md) · [Animated SVG](Docs/Topics/Animated-SVG.md) · [Module builds](Docs/Topics/Module-Builds.md) · [Web extensions](Docs/Topics/Web-Extensions.md)
+- **Reference & Architecture**: [Documentation index](Docs/README.md) · [Architecture overview](Docs/Architecture.md) · [Component guide](Docs/Reference/UI.md) · [Property table](Docs/Reference/Component-Properties.md) · [Platform capabilities](Docs/Reference/Platforms.md) · [Performance tracing](Docs/Reference/Tracing.md)
 
 The documentation is also available in [Simplified Chinese](Docs/zh-CN/README.md) ([online](https://bern.aimes-soft.com/docs/zh-CN)).
 

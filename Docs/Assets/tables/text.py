@@ -51,19 +51,18 @@ CHOOSE_KEYS = ["electron", "tauri", "flutter", "rn", "avalonia", "qt", "gpui", "
 TEXT = {
     "zh-Hans": dict(
         why=[
-            dict(icon="window", title="编译成原生界面", blocks=[
-                ("lead", "一份 Rust 声明，编译成 SwiftUI、WinUI 3、GTK 4、Jetpack Compose、GPUI 与 Web。"),
-                ("list", ["构建时生成各平台自己的 UI 代码", "默认不带 JS 引擎，没有虚拟 DOM", "系统目标就是平台原生控件本身"]),
-                ("note", "目标和 React Native 相近，做法不同：React Native 在运行时用 JS 引擎协调原生视图。"),
+            dict(icon="window", title="编译成真正的原生界面", blocks=[
+                ("lead", "用 Rust 写一套界面，构建时直接生成 SwiftUI、WinUI 3、GTK 4、Compose、GPUI 与 Web 代码。"),
+                ("list", ["系统目标即平台原生控件，默认无 WebView", "外观、深浅色、输入法与无障碍跟随系统", "需要统一 GPU 渲染时一键切到 `ui = \"gpui\"`"]),
+                ("note", "不同于网页套壳或全自绘引擎：不捆绑浏览器，也无需按平台手写 Swift / C++ / Kotlin 胶水。"),
             ]),
-            dict(icon="sparkle", title="为 AI 而建：写得对，用得上", blocks=[
-                ("tag", "AI 写代码"),
-                ("text", "漏掉的翻译、漏掉的界面入口、没登记的按钮、没命令化的操作，都是编译错误，并指到具体的文件和行。"),
-                ("tag", "AI 用应用"),
-                ("text", "Agent 从 SKILL.md 查命令，用应用 CLI 按名称操作控件并可直接截取窗口画面，走的和用户点击是同一段代码。"),
+            dict(icon="code", title="全 Rust 开发，逻辑与界面分离", blocks=[
+                ("lead", "协议定义状态与命令，引擎写纯 Rust 业务，界面用 `ui!` 声明。"),
+                ("list", ["业务层不依赖 UI，直接用 tokio 等 Rust 生态并可独立单测", "漏翻译、漏布局入口、错绑定在编译期报错", "所有操作皆命令：自动生成应用 CLI、`SKILL.md` 与可选 JS 接口"]),
+                ("note", "既适合人写，也天生适合 AI 写代码、用应用：编译期兜底防漏，运行时按语义命令操作。"),
             ]),
             dict(icon="bolt", title="轻到不像跨平台", blocks=[
-                ("text", "桌面上默认不带浏览器内核和 JS 引擎，业务引擎编译成原生代码，运行在应用进程内。"),
+                ("text", "桌面端默认不带浏览器内核与 JS 引擎，Rust 业务引擎编译成原生代码，直接运行在应用进程内。"),
                 stats(("内存", "出窗口", "体积"), "秒"),
                 ("note", "release 版展示应用实测。Windows 不需要 .NET；Web 为 gzip 后，含 Rust 引擎。"),
             ]),
@@ -193,24 +192,23 @@ TEXT = {
             "构建工具 `bern`：创建、检查、构建、运行、打包与诊断",
             "核心示例：展示应用、最小窗口、模块化计划、媒体图案集",
             "专项示例：紧邻 `NativeView`、手表端、纯 Rust 动画 SVG",
-            "中英双语参考文档、设计规范与各平台实现记录",
+            "中英双语开发指南、平台操作手册、专题与接口参考",
         ]),
     ),
     "zh-Hant": dict(
         why=[
-            dict(icon="window", title="編譯成原生介面", blocks=[
-                ("lead", "一份 Rust 宣告，編譯成 SwiftUI、WinUI 3、GTK 4、Jetpack Compose、GPUI 與 Web。"),
-                ("list", ["建置時產生各平台自己的 UI 程式碼", "預設不帶 JS 引擎，沒有虛擬 DOM", "系統目標就是平台原生控制項本身"]),
-                ("note", "目標與 React Native 相近，做法不同：React Native 在執行時以 JS 引擎協調原生視圖。"),
+            dict(icon="window", title="編譯成真正的原生介面", blocks=[
+                ("lead", "用 Rust 寫一套介面，建置時直接產生 SwiftUI、WinUI 3、GTK 4、Compose、GPUI 與 Web 程式碼。"),
+                ("list", ["系統目標即平台原生控制項，預設無 WebView", "外觀、深淺色、輸入法與無障礙跟隨系統", "需要統一 GPU 繪製時一鍵切換 `ui = \"gpui\"`"]),
+                ("note", "不同於網頁套殼或全自繪引擎：不隨附瀏覽器，也不必按平台手寫 Swift / C++ / Kotlin 膠水。"),
             ]),
-            dict(icon="sparkle", title="為 AI 而建：寫得對，用得上", blocks=[
-                ("tag", "AI 寫程式"),
-                ("text", "漏掉的翻譯、漏掉的介面入口、沒登記的按鈕、沒命令化的操作，都是編譯錯誤，並指向具體的檔案與行。"),
-                ("tag", "AI 使用應用程式"),
-                ("text", "Agent 在 SKILL.md 查詢指令，用應用程式 CLI 依名稱操作控制項並可直接截取視窗畫面，執行的程式碼與點按相同。"),
+            dict(icon="code", title="全 Rust 開發，邏輯與介面分離", blocks=[
+                ("lead", "協定定義狀態與命令，引擎寫純 Rust 業務，介面以 `ui!` 宣告。"),
+                ("list", ["業務層不依賴 UI，直接用 tokio 等 Rust 生態並可獨立單測", "漏翻譯、漏版面入口、錯綁定在編譯期報錯", "所有操作皆命令：自動產生應用程式 CLI、`SKILL.md` 與可選 JS 介面"]),
+                ("note", "既適合人寫，也天生適合 AI 寫程式、用應用：編譯期把關防漏，執行時以語意命令操作。"),
             ]),
             dict(icon="bolt", title="輕到不像跨平台", blocks=[
-                ("text", "桌面上預設不帶瀏覽器核心與 JS 引擎，商業引擎編譯成原生程式碼，在應用程式行程內執行。"),
+                ("text", "桌面端預設不帶瀏覽器核心與 JS 引擎，Rust 商業引擎編譯成原生程式碼，直接於應用程式行程內執行。"),
                 stats(("記憶體", "出現視窗", "大小"), "秒"),
                 ("note", "release 版展示應用程式實測。Windows 不需要 .NET；Web 為 gzip 後，含 Rust 引擎。"),
             ]),
@@ -340,25 +338,26 @@ TEXT = {
             "建置工具 `bern`：建立、檢查、建置、執行、打包與診斷",
             "核心範例：展示應用、最小視窗、模組化計畫、媒體圖案集",
             "專項範例：緊鄰 `NativeView`、手錶端、純 Rust 動畫 SVG",
-            "中英雙語參考文件、設計規範與各平台實作紀錄",
+            "中英雙語開發指南、平台操作手冊、專題與介面參考",
         ]),
     ),
     "en": dict(
         why=[
             dict(icon="window", title="Compiled into native UI", blocks=[
-                ("lead", "One Rust declaration compiles into SwiftUI, WinUI 3, GTK 4, Jetpack Compose, GPUI and the Web."),
-                ("list", ["Each platform's own UI code, generated at build time", "No JS engine by default and no virtual DOM",
-                          "System targets use the platform's own controls"]),
-                ("note", "The goal is close to React Native's; the approach differs: React Native coordinates native views from a JS engine at runtime."),
+                ("lead", "Write UI once in Rust; Bern generates SwiftUI, WinUI 3, GTK 4, Compose, GPUI and Web code."),
+                ("list", ["Real OS controls, zero WebView by default", "Look, dark mode, IME and a11y from the OS",
+                          "Switch to `ui = \"gpui\"` for unified GPU UI"]),
+                ("note", "Unlike WebView shells or self-drawn toolkits: no browser engine and no hand-written Swift, C++ or Kotlin glue."),
             ]),
-            dict(icon="sparkle", title="Built for AI: written right, ready to use", blocks=[
-                ("tag", "AI writing code"),
-                ("text", "Forgotten translations, missing UI entry points, unregistered buttons and actions without a command are compile errors, pointing at the file and line."),
-                ("tag", "AI using the app"),
-                ("text", "Agents find commands in SKILL.md, operate controls by name through the app CLI, and capture window screenshots directly."),
+            dict(icon="code", title="All Rust, clean separation", blocks=[
+                ("lead", "A protocol declares state and commands; plain Rust runs the engine; `ui!` declares views."),
+                ("list", ["UI-free logic: any Rust crate, plain `cargo test`",
+                          "Missing translations and entries fail to compile",
+                          "Command-driven: ships app CLI and `SKILL.md`"]),
+                ("note", "Built for humans and AI alike: the compiler catches omissions and agents drive the app semantically."),
             ]),
             dict(icon="bolt", title="Too light to feel cross-platform", blocks=[
-                ("text", "No browser engine and no JS engine on the desktop by default; the business engine compiles to native code and runs in process."),
+                ("text", "No browser or JS engine on the desktop by default; the Rust engine compiles to native code in process."),
                 stats(("Memory", "Window", "Size"), "s"),
                 ("note", "Measured on the release showcase. No .NET on Windows; the web figure is gzipped and includes the Rust engine."),
             ]),
@@ -498,24 +497,23 @@ TEXT = {
             "The build tool `bern`: create, check, build, run, package and doctor",
             "Core examples: showcase, hello, modular planner and media gallery",
             "Focused examples: co-located `NativeView`, watches and animated SVG",
-            "Bilingual reference guides, design spec and platform implementation notes",
+            "Bilingual guides, platform manuals, topics and reference",
         ]),
     ),
     "ja": dict(
         why=[
             dict(icon="window", title="ネイティブ UI へコンパイル", blocks=[
-                ("lead", "一つの Rust 宣言を、SwiftUI、WinUI 3、GTK 4、Jetpack Compose、GPUI、Web へコンパイルします。"),
-                ("list", ["各プラットフォーム自身の UI コードをビルド時に生成", "既定で JS エンジンなし、仮想 DOM もなし", "システム目標はプラットフォーム標準のコントロールそのもの"]),
-                ("note", "目指すところは React Native に近く、やり方が違います。React Native は実行時に JS エンジンからネイティブビューを調整します。"),
+                ("lead", "Rust で一度書けば、ビルド時に SwiftUI、WinUI 3、GTK 4、Compose、GPUI、Web を生成します。"),
+                ("list", ["OS 標準のコントロール、既定で WebView なし", "外観・ダークモード・IME は OS に準拠", "統一 GPU 描画は `ui = \"gpui\"` で切替"]),
+                ("note", "ブラウザー同梱も、Swift / C++ / Kotlin の手書き糊付けコードも不要です。"),
             ]),
-            dict(icon="sparkle", title="AI のための設計：正しく書けて、すぐ使える", blocks=[
-                ("tag", "AI がコードを書く"),
-                ("text", "漏れた翻訳、UI の入口、未登録のボタン、コマンド化されていない操作は、すべてコンパイルエラーになり、ファイルと行を指し示します。"),
-                ("tag", "AI がアプリを使う"),
-                ("text", "エージェントは SKILL.md でコマンドを調べ、アプリの CLI から名前で操作し、ウィンドウのスクリーンショットも直接取得できます。"),
+            dict(icon="code", title="すべて Rust、ロジックと UI を分離", blocks=[
+                ("lead", "プロトコルで状態とコマンドを定義し、普通の Rust でエンジン、`ui!` で画面を書きます。"),
+                ("list", ["UI 非依存の業務ロジックを `cargo test` で単体検証", "翻訳漏れ・入口忘れ・誤バインドはコンパイルエラー", "全操作がコマンド化され、CLI と `SKILL.md` を自動生成"]),
+                ("note", "人にも AI にも扱いやすい設計：コンパイラーが漏れを防ぎ、意味ベースで操作できます。"),
             ]),
             dict(icon="bolt", title="クロスプラットフォームとは思えない軽さ", blocks=[
-                ("text", "デスクトップでは既定でブラウザーエンジンも JS エンジンも同梱せず、業務エンジンはネイティブコードとして同一プロセスで動きます。"),
+                ("text", "デスクトップは既定でブラウザーも JS エンジンも不要。Rust エンジンは同一プロセスでネイティブ動作します。"),
                 stats(("メモリ", "表示", "サイズ"), "秒"),
                 ("note", "release ビルドのショーケースの実測。Windows は .NET 不要、Web は gzip 後で Rust エンジン込み。"),
             ]),
@@ -654,7 +652,7 @@ TEXT = {
             "ビルドツール `bern`：作成、チェック、ビルド、実行、配布、環境確認",
             "主要サンプル：ショーケース、最小ウィンドウ、モジュール化プランナー、パターン集",
             "特化サンプル：隣接 `NativeView`、ウォッチ、純 Rust アニメーション SVG",
-            "英中バイリンガル参照ガイド、設計ドキュメント、各プラットフォーム実装記録",
+            "英中バイリンガル開発ガイド、プラットフォーム手順書、トピックとリファレンス",
         ]),
     ),
 }
@@ -662,7 +660,7 @@ TEXT = {
 
 ALT = {
     "zh-Hans": dict(
-        why="为什么是 Bern：编译成原生界面，一份 Rust 声明生成各平台自己的 UI 代码，默认无 JS 引擎；为 AI 而建，漏写是编译错误，Agent 从 SKILL.md 查命令、用应用 CLI 操作控件并截取窗口；轻到不像跨平台，macOS 内存 39 MB、0.4 秒出窗口、应用包 2.7 MB，Windows 35 MB、0.3 秒、4.2 MB，Web 189 KB",
+        why="核心特色：编译成真正的原生界面，用 Rust 生成 SwiftUI、WinUI 3、GTK 4、Compose、GPUI 与 Web 代码，默认无 WebView；全 Rust 开发、逻辑与界面分离，协议定义状态与命令、引擎纯 Rust 可独立单测、漏翻译与漏入口编译期报错并自动生成 CLI 与 SKILL.md；轻到不像跨平台，macOS 内存 39 MB、0.4 秒出窗口、应用包 2.7 MB，Windows 35 MB、0.3 秒、4.2 MB，Web 189 KB",
         ai="AI 漏掉的五类问题与 Bern 的处理：少写一种语言报 B102，某个布局缺功能入口报 B201，入口没有登记到功能报 B202，入口只在条件分支里报 B203，给按钮挂任意代码则根本写不出来",
         measured="实测数据：macOS（SwiftUI）启动 0.41 秒、内存 39 MB、应用包 2.7 MB；Windows（WinUI 3）0.32 秒、35 MB、应用目录 4.2 MB；Web 全部资源 gzip 后 189 KB",
         more="更多能力：每个操作都是命令、编译期就做检查、业务逻辑留在 Rust、从第一天起就本地化、深浅色零配置、声明式多窗口",
@@ -674,7 +672,7 @@ ALT = {
         repository="仓库结构：核心、运行时、目标模块、入口与工具、示例与文档各自包含的 crate 与目录",
     ),
     "zh-Hant": dict(
-        why="為什麼選擇 Bern：編譯成原生介面，一份 Rust 宣告產生各平台自己的 UI 程式碼，預設無 JS 引擎；為 AI 而建，漏寫是編譯錯誤，Agent 在 SKILL.md 查詢指令、用應用程式 CLI 操作控制項並截取視窗；輕到不像跨平台，macOS 記憶體 39 MB、0.4 秒出現視窗、應用程式套件 2.7 MB，Windows 35 MB、0.3 秒、4.2 MB，Web 189 KB",
+        why="核心特色：編譯成真正的原生介面，用 Rust 產生 SwiftUI、WinUI 3、GTK 4、Compose、GPUI 與 Web 程式碼，預設無 WebView；全 Rust 開發、邏輯與介面分離，協定定義狀態與命令、引擎純 Rust 可獨立單測、漏翻譯與漏入口編譯期報錯並自動產生 CLI 與 SKILL.md；輕到不像跨平台，macOS 記憶體 39 MB、0.4 秒出現視窗、應用程式套件 2.7 MB，Windows 35 MB、0.3 秒、4.2 MB，Web 189 KB",
         ai="AI 漏掉的五類問題與 Bern 的處理：少寫一種語言報 B102，某個版面缺功能入口報 B201，入口沒有登記到功能報 B202，入口只在條件分支裡報 B203，給按鈕掛任意程式碼則根本寫不出來",
         measured="實測數據：macOS（SwiftUI）啟動 0.41 秒、記憶體 39 MB、應用程式套件 2.7 MB；Windows（WinUI 3）0.32 秒、35 MB、應用程式目錄 4.2 MB；Web 全部資源 gzip 後 189 KB",
         more="更多能力：每個操作都是命令、編譯期就做檢查、商業邏輯留在 Rust、從第一天起就在地化、深淺色零設定、宣告式多視窗",
@@ -686,7 +684,7 @@ ALT = {
         repository="儲存庫結構：核心、執行環境、目標模組、入口與工具、範例與文件各自包含的 crate 與目錄",
     ),
     "en": dict(
-        why="Why Bern: compiled into native UI, one Rust declaration generating each platform's own UI code with no JS engine by default; built for AI, where omissions are compile errors and agents use SKILL.md, the app CLI and window screenshots; too light to feel cross-platform, 39 MB, 0.4 s and 2.7 MB on macOS, 35 MB, 0.3 s and 4.2 MB on Windows, 189 KB on the web",
+        why="Why Bern: compiled into native UI, generating SwiftUI, WinUI 3, GTK 4, Compose, GPUI and Web code from Rust with zero WebView by default; all Rust with logic separated from UI, plain Rust engine, compile-time checks for omissions and automatic app CLI plus SKILL.md; too light to feel cross-platform, 39 MB, 0.4 s and 2.7 MB on macOS, 35 MB, 0.3 s and 4.2 MB on Windows, 189 KB on the web",
         ai="Five things an AI forgets and what Bern does: a missing language is B102, a feature without an entry in some layout is B201, an entry not registered to a feature is B202, an entry only inside a conditional branch is B203, and arbitrary code on a button cannot be written at all",
         measured="Measured: macOS (SwiftUI) launches in 0.41 s with 39 MB of memory and a 2.7 MB bundle; Windows (WinUI 3) in 0.32 s with 35 MB and a 4.2 MB folder; the web app is 189 KB gzipped",
         more="More: every action is a command, checked at compile time, your logic stays in Rust, localized from day one, dark mode with zero setup, declarative multi-window",
@@ -698,7 +696,7 @@ ALT = {
         repository="Repository: the crates and directories in core, runtime, targets, entries and tools, and examples and docs",
     ),
     "ja": dict(
-        why="Bern を選ぶ理由：ネイティブ UI へコンパイルし、一つの Rust 宣言から各プラットフォーム自身の UI コードを生成、既定で JS エンジンなし。AI のための設計で、書き漏れはコンパイルエラー、SKILL.md とアプリ CLI で名前指定の操作やウィンドウ撮影が可能。クロスプラットフォームとは思えない軽さで、macOS は 39 MB・0.4 秒・2.7 MB、Windows は 35 MB・0.3 秒・4.2 MB、Web は 189 KB",
+        why="Bern の特長：本物のネイティブ UI へコンパイルし、Rust から SwiftUI、WinUI 3、GTK 4、Compose、GPUI、Web のコードを生成、既定で WebView なし。すべて Rust でロジックと UI を分離し、普通の Rust エンジン、コンパイル時の漏れ検査、アプリ CLI と SKILL.md が自動で付属。クロスプラットフォームとは思えない軽さで、macOS は 39 MB・0.4 秒・2.7 MB、Windows は 35 MB・0.3 秒・4.2 MB、Web は 189 KB",
         ai="AI が漏らす 5 つのことと Bern の扱い：翻訳の不足は B102、あるレイアウトに機能の入口がないと B201、入口が機能に未登録なら B202、入口が条件分岐の中だけなら B203、ボタンへの任意のコードはそもそも書けない",
         measured="実測値：macOS（SwiftUI）は起動 0.41 秒、メモリ 39 MB、アプリバンドル 2.7 MB。Windows（WinUI 3）は 0.32 秒、35 MB、アプリフォルダー 4.2 MB。Web は全アセットを gzip して 189 KB",
         more="その他の機能：すべての操作はコマンド、コンパイル時にチェック、ロジックは Rust のまま、初日からローカライズ、ダークモードは設定不要、宣言的マルチウィンドウ",

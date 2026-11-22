@@ -4,12 +4,12 @@
 
 <h1>Bern</h1>
 
-<p><b>一份 Rust 声明，编译成每个平台自己的原生界面。</b></p>
+<p><b>用 Rust 编写跨平台原生应用的 UI 框架。</b></p>
 
-<p>桌面、手机、平板、手表、电视与 Web，出自同一份 <code>ui!</code> 声明：<br>
-SwiftUI、WinUI 3、GTK 4、Jetpack Compose、GPUI 与 Web DOM/WASM。<br>
-默认不捆绑 JS 引擎或浏览器，按需启用进程内 JavaScript 与 <code>bern.cli</code>。<br>
-<b>为 AI 而建：</b>写漏的内容在编译期直接报错，Agent 读 <code>SKILL.md</code> 并通过应用 CLI 按名称操作控件。</p>
+<p>业务逻辑和声明式 <code>ui!</code> 界面全用 Rust 编写——不捆绑浏览器内核，也无需按平台手写胶水代码。<br>
+构建时直接编译成各平台自己的原生界面（SwiftUI、WinUI 3、GTK 4、Jetpack Compose，以及可选 GPUI 与 Web），<br>
+覆盖桌面、手机、平板、手表、电视与网页。<br>
+基于类型化协议与命令架构：逻辑留在纯 Rust，写漏在编译期报错，顺带自动生成应用 CLI 与 <code>SKILL.md</code>。</p>
 
 <p>
 <img alt="macOS · SwiftUI" src="https://img.shields.io/badge/macOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
@@ -26,9 +26,9 @@ SwiftUI、WinUI 3、GTK 4、Jetpack Compose、GPUI 与 Web DOM/WASM。<br>
 
 <p>
 <a href="https://bern.aimes-soft.com"><img alt="官网" src="https://img.shields.io/badge/%E5%AE%98%E7%BD%91-bern.aimes--soft.com-111827?style=flat-square"></a>
-<img alt="Skills + CLI" src="https://img.shields.io/badge/AI-Skills%20%2B%20CLI-8B5CF6?style=flat-square">
+<img alt="原生界面：无 WebView" src="https://img.shields.io/badge/%E7%95%8C%E9%9D%A2-%E5%8E%9F%E7%94%9F%20%C2%B7%20%E6%97%A0%20WebView-111827?style=flat-square">
 <img alt="内存约 40 MB" src="https://img.shields.io/badge/%E5%86%85%E5%AD%98-%E7%BA%A6%2040%20MB-0EA5E9?style=flat-square">
-<img alt="JS 引擎：默认无 · 可选" src="https://img.shields.io/badge/JS%20%E5%BC%95%E6%93%8E-%E9%BB%98%E8%AE%A4%E6%97%A0%20%C2%B7%20%E5%8F%AF%E9%80%89-111827?style=flat-square">
+<img alt="Skills + CLI" src="https://img.shields.io/badge/AI-Skills%20%2B%20CLI-8B5CF6?style=flat-square">
 <img alt="Rust 1.99" src="https://img.shields.io/badge/Rust-1.99-B7410E?style=flat-square&logo=rust&logoColor=white">
 <a href="LICENSE"><img alt="许可证：MIT" src="https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF%E8%AF%81-MIT-22C55E?style=flat-square"></a>
 <img alt="状态：早期预览" src="https://img.shields.io/badge/%E7%8A%B6%E6%80%81-%E6%97%A9%E6%9C%9F%E9%A2%84%E8%A7%88-F59E0B?style=flat-square">
@@ -44,8 +44,8 @@ SwiftUI、WinUI 3、GTK 4、Jetpack Compose、GPUI 与 Web DOM/WASM。<br>
 <p>
 <a href="https://bern.aimes-soft.com">官网</a> ·
 <a href="https://bern.aimes-soft.com/docs/zh-CN">在线文档</a> ·
-<a href="#为什么是-bern">为什么是 Bern</a> ·
-<a href="#谁使用了-bern">谁使用了 Bern</a> ·
+<a href="#核心特色">核心特色</a> ·
+<a href="#用-rust-怎么编写软件">用 Rust 怎么编写软件</a> ·
 <a href="#为-ai-而建">为 AI 而建</a> ·
 <a href="#实测数据">实测数据</a> ·
 <a href="#与其他跨平台框架对比">对比</a> ·
@@ -65,6 +65,21 @@ SwiftUI、WinUI 3、GTK 4、Jetpack Compose、GPUI 与 Web DOM/WASM。<br>
 <td width="50%" align="center"><img src="Docs/Assets/screenshots/linux-en.png" alt="展示应用在 Linux（GTK 4 与 libadwaita）上"><br><sub><b>Linux</b> · GTK 4 + libadwaita</sub></td>
 <td width="50%" align="center"><img src="Docs/Assets/screenshots/web-zh.png" alt="展示应用在浏览器中"><br><sub><b>Web</b> · DOM + WebAssembly</sub></td>
 </tr>
+</table>
+
+<table>
+<tr>
+<td width="25%" align="center"><img src="Docs/Assets/screenshots/ios-zh.png" width="175" alt="展示应用在 iPhone（iOS SwiftUI）上"><br><sub><b>iOS</b> · SwiftUI</sub></td>
+<td width="25%" align="center"><img src="Docs/Assets/screenshots/android-zh.png" width="175" alt="展示应用在 Android（Jetpack Compose）上"><br><sub><b>Android</b> · Jetpack Compose</sub></td>
+<td width="50%" align="center"><img src="Docs/Assets/screenshots/gpui-zh.png" width="360" alt="原生控件示例在 macOS GPUI 上"><br><sub><b>桌面端 · GPUI</b>（<code>ui = "gpui"</code>，搭配紧邻 <code>NativeView</code>）</sub></td>
+</tr>
+</table>
+
+<details>
+<summary><b>更多设备形态：</b>iPad、Android 平板、Apple TV、Android 电视、iPhone Duo、watchOS 与 Wear OS</summary>
+<br>
+
+<table>
 <tr>
 <td width="50%" align="center"><img src="Docs/Assets/screenshots/ipad-zh.png" alt="展示应用在 iPad（iPadOS SwiftUI）上"><br><sub><b>iPad</b> · iPadOS SwiftUI</sub></td>
 <td width="50%" align="center"><img src="Docs/Assets/screenshots/android-tablet-zh.png" alt="展示应用在 Android 平板（Jetpack Compose）上"><br><sub><b>Android 平板</b> · Jetpack Compose</sub></td>
@@ -77,52 +92,217 @@ SwiftUI、WinUI 3、GTK 4、Jetpack Compose、GPUI 与 Web DOM/WASM。<br>
 
 <table>
 <tr>
-<td width="32%" align="center"><img src="Docs/Assets/screenshots/ios-zh.png" width="190" alt="展示应用在 iPhone（iOS SwiftUI）上"><br><sub><b>iOS</b> · SwiftUI</sub></td>
-<td width="36%" align="center"><img src="Docs/Assets/screenshots/iphone-duo-zh.png" width="235" alt="展示应用在 iPhone Duo（iOS SwiftUI）上"><br><sub><b>iPhone Duo</b> · SwiftUI</sub></td>
-<td width="32%" align="center"><img src="Docs/Assets/screenshots/android-zh.png" width="190" alt="展示应用在 Android（Jetpack Compose）上"><br><sub><b>Android</b> · Jetpack Compose</sub></td>
+<td width="40%" align="center"><img src="Docs/Assets/screenshots/iphone-duo-zh.png" width="235" alt="展示应用在 iPhone Duo（iOS SwiftUI）上"><br><sub><b>iPhone Duo</b> · SwiftUI</sub></td>
+<td width="30%" align="center"><img src="Docs/Assets/screenshots/watchos-en.png" width="145" alt="手表应用在 watchOS（SwiftUI）上"><br><sub><b>watchOS</b> · SwiftUI</sub></td>
+<td width="30%" align="center"><img src="Docs/Assets/screenshots/wearos-zh.png" width="145" alt="手表应用在 Wear OS（Compose）上"><br><sub><b>Wear OS</b> · Compose Material 3</sub></td>
 </tr>
 </table>
 
-<table>
-<tr>
-<td width="25%" align="center"><img src="Docs/Assets/screenshots/watchos-en.png" width="145" alt="手表应用在 watchOS（SwiftUI）上"><br><sub><b>watchOS</b> · SwiftUI</sub></td>
-<td width="25%" align="center"><img src="Docs/Assets/screenshots/wearos-zh.png" width="145" alt="手表应用在 Wear OS（Compose）上"><br><sub><b>Wear OS</b> · Compose Material 3</sub></td>
-<td width="50%" align="center"><img src="Docs/Assets/screenshots/gpui-zh.png" width="360" alt="原生控件示例在 macOS GPUI 上"><br><sub><b>桌面端 · GPUI</b>（<code>ui = "gpui"</code>，搭配紧邻 <code>NativeView</code>）</sub></td>
-</tr>
-</table>
+</details>
 
-<p align="center"><sub>同一份 Rust 声明覆盖桌面、平板、电视、手机、手表与网页。在系统原生目标上 Bern 不自己画任何一个像素；<br>需要统一 GPU 渲染时，切换到 <code>ui = "gpui"</code> 即可直接把 Bern 当作 GPUI 的声明式 UI 框架。</sub></p>
+<p align="center"><sub>同一份 Rust 代码覆盖桌面、手机、平板、电视、手表与网页。在系统原生目标上 Bern 不自己画任何一个像素；<br>需要统一 GPU 渲染时，切换到 <code>ui = "gpui"</code> 即可直接把 Bern 当作 GPUI 的声明式 UI 框架。</sub></p>
 
-## 为什么是 Bern
+## 核心特色
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/why-dark.svg">
-<img alt="为什么是 Bern：编译成原生界面，一份 Rust 声明生成各平台自己的 UI 代码，默认无 JS 引擎；为 AI 而建，漏写是编译错误，Agent 从 SKILL.md 查命令、用应用 CLI 操作控件并截取窗口；轻到不像跨平台，macOS 内存 39 MB、0.4 秒出窗口、应用包 2.7 MB，Windows 35 MB、0.3 秒、4.2 MB，Web 189 KB" src="Docs/Assets/tables/why-light.svg" width="100%">
+<img alt="核心特色：编译成真正的原生界面，用 Rust 生成 SwiftUI、WinUI 3、GTK 4、Compose、GPUI 与 Web 代码，默认无 WebView；全 Rust 开发、逻辑与界面分离，协议定义状态与命令、引擎纯 Rust 可独立单测、漏翻译与漏入口编译期报错并自动生成 CLI 与 SKILL.md；轻到不像跨平台，macOS 内存 39 MB、0.4 秒出窗口、应用包 2.7 MB，Windows 35 MB、0.3 秒、4.2 MB，Web 189 KB" src="Docs/Assets/tables/why-light.svg" width="100%">
 </picture>
 
-## 谁使用了 Bern
+## 用 Rust 怎么编写软件
 
-<table>
-<tr>
-<td width="33%" valign="top">
-<a href="https://github.com/AimesSoft/RustSend"><img src="Docs/Assets/projects/rustsend.png" width="56" height="56" alt="RustSend"></a>
-<h3><a href="https://github.com/AimesSoft/RustSend">RustSend</a></h3>
-<p>兼容 LocalSend 的局域网文件传输工具，支持文件、文件夹与文字互传。</p>
-</td>
-<td width="33%" valign="top">
-<a href="https://github.com/zhaohuaxs/lambda"><img src="Docs/Assets/projects/lambda.png" width="56" height="56" alt="Lambda"></a>
-<h3><a href="https://github.com/zhaohuaxs/lambda">Lambda</a></h3>
-<p>内置 7-Zip 的 Windows / Android 压缩包管理器，支持加密压缩、解压与内容预览。</p>
-</td>
-<td width="33%" valign="top">
-<a href="https://github.com/MCDFsteve/Enji"><img src="Docs/Assets/projects/enji.png" width="56" height="56" alt="Enji Music"></a>
-<h3><a href="https://github.com/MCDFsteve/Enji">Enji Music</a></h3>
-<p>网易云音乐第三方客户端，支持在线与本地音乐、同步歌词和歌单管理。</p>
-</td>
-</tr>
-</table>
+在 Bern 里，从数据模型到各平台安装包全程只写 Rust，不需要手写 Swift、C++ 或 Kotlin 胶水代码（只有在确实要调用某个平台特有控件时，才可选用 `NativeView` 局部嵌入）。为了避开 Rust 写 GUI 最常见的痛点——回调与借用检查冲突、异步 IO 和界面线程纠缠、多端工程配置繁琐——每个 Bern 应用都固定拆成三层：
+
+```mermaid
+flowchart LR
+    subgraph app["你的应用（纯 Rust）"]
+        P["协议<br/>类型 · 状态 · 命令"]
+        U["界面声明<br/>#[component] + ui!"]
+        E["引擎<br/>普通 Rust"]
+    end
+    P --> C{{"bern build<br/>编译器 + IR"}}
+    U --> C
+    C --> S["SwiftUI<br/>macOS · iOS · watchOS · tvOS"]
+    C --> W["WinUI 3 / Islands<br/>Windows"]
+    C --> G["GTK 4<br/>Linux"]
+    C --> A["Jetpack Compose<br/>Android · Wear OS"]
+    C --> P2["GPUI<br/>macOS · Windows · Linux"]
+    C --> B["DOM + WASM<br/>Web"]
+    E <--> K[["命令目录"]]
+    K <--> N["原生界面"]
+    K <--> L["应用 CLI"]
+    K <--> JS["JS · bern.cli"]
+    K <--> J["JSON 通道"]
+    K --> SK["SKILL.md"]
+```
+
+1. **协议（Protocol）**：用 `#[bern::protocol]` 声明数据结构、只读状态快照，以及命令和查询 trait。
+2. **引擎（Engine）**：用最普通的 Rust 实现这些 trait。引擎看不到任何窗口、控件或传输层，你可以照常使用 `tokio`、`reqwest`、`rusqlite` 等任意 Rust crate，并用 `cargo test` 直接做单元测试。
+3. **界面（Interface）**：在 `.rs` 文件中编写带 `#[component]` 与 `ui!` 的组件函数。界面只读取状态和派发类型化命令；编译器在构建期把声明读入共享 IR，生成各平台自己的原生 UI 代码，并直接链接到你的 Rust 引擎。
+
+### 项目结构
+
+运行 `bern new tasks` 会生成一个标准 Cargo 工作区，根目录的 `Bern.toml` 负责声明语言、主题、随包资源和目标平台：
+
+```text
+tasks/
+├── Bern.toml           # 应用信息、多语言、资源与目标平台配置
+├── tasks-protocol/     # 1. 共享协议：值类型、只读状态与命令签名
+├── tasks-core/         # 2. 业务引擎：纯普通 Rust，零 UI 依赖
+└── tasks-ui/           # 3. 声明式界面：#[component] + ui! + tr!
+```
+
+### 迷你软件示例：待办清单
+
+**1 · 协议（`tasks-protocol/src/lib.rs`）**：值类型、只读状态与类型化命令
+
+```rust
+#[bern::protocol(namespace = "tasks", version = 1)]
+pub mod tasks {
+    use bern::prelude::*;
+
+    #[value]
+    pub struct Task {
+        pub id: i64,
+        #[content]
+        pub title: String,
+        pub done: bool,
+    }
+
+    #[state]
+    pub struct State {
+        pub items: Vec<Task>,
+        pub remaining: i64,
+    }
+
+    #[commands]
+    pub trait Commands {
+        /// 新增一条待办并返回编号。
+        #[errors("empty_title")]
+        fn add(&mut self, title: String) -> Result<i64, CommandError>;
+
+        /// 切换指定待办的完成状态。
+        fn toggle(&mut self, id: i64) -> Result<(), CommandError>;
+    }
+}
+```
+
+**2 · 引擎（`tasks-core/src/lib.rs`）**：普通 Rust 业务逻辑，完全不碰 UI
+
+```rust
+use bern::CommandError;
+use tasks_protocol::tasks::{self, State, Task};
+
+pub struct TasksEngine {
+    state: State,
+    next_id: i64,
+}
+
+impl Default for TasksEngine {
+    fn default() -> Self {
+        Self { state: State { items: Vec::new(), remaining: 0 }, next_id: 0 }
+    }
+}
+
+impl tasks::Commands for TasksEngine {
+    fn add(&mut self, title: String) -> Result<i64, CommandError> {
+        if title.trim().is_empty() {
+            return Err(CommandError::new("empty_title", "title cannot be empty"));
+        }
+        self.next_id += 1;
+        self.state.items.push(Task { id: self.next_id, title, done: false });
+        self.state.remaining += 1;
+        Ok(self.next_id)
+    }
+
+    fn toggle(&mut self, id: i64) -> Result<(), CommandError> {
+        if let Some(task) = self.state.items.iter_mut().find(|t| t.id == id) {
+            task.done = !task.done;
+            self.state.remaining += if task.done { -1 } else { 1 };
+        }
+        Ok(())
+    }
+}
+
+impl tasks::Engine for TasksEngine {
+    fn state(&self) -> &State { &self.state }
+}
+```
+
+**3 · 界面（`tasks-ui/src/lib.rs`）**：在 Rust 里用 `ui!` 声明界面、局部草稿与多语言文案
+
+```rust
+#[bern::session]
+pub struct Draft {
+    pub title: String,
+    pub only_open: bool,
+}
+
+#[component]
+pub fn tasks_view(app: tasks::Client, #[session] draft: Draft) -> impl View {
+    ui! {
+        Form {
+            Section(title: tr! {
+                "zh-Hans" => "待办（剩余 {n} 项）",
+                "en" => "Tasks ({n} left)";
+                n: app.remaining
+            }) {
+                Row(gap: 8) {
+                    TextInput(
+                        id: new_task,
+                        label: tr! { "zh-Hans" => "新任务", "en" => "New task" },
+                        value: draft.title,
+                        prompt: tr! { "zh-Hans" => "写点要做的事…", "en" => "Add a task…" },
+                        submit: clear
+                    ) => app.add(draft.title)
+                    Button(
+                        id: add,
+                        label: tr! { "zh-Hans" => "添加", "en" => "Add" },
+                        prominence: prominent,
+                        clears: draft.title
+                    ) => app.add(draft.title)
+                }
+                Switch(
+                    id: only_open,
+                    label: tr! { "zh-Hans" => "只看未完成", "en" => "Only open" },
+                    value: draft.only_open
+                )
+                ForEach(items: app.items, key: id) |task| {
+                    if !draft.only_open || !task.done {
+                        Switch(
+                            id: done,
+                            label: task.title,
+                            checked: task.done,
+                            style: checkbox
+                        ) => app.toggle(task.id)
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+### 检查、运行与打包闭环
+
+同一个 `bern` 工具贯通编译期检查、多端运行、发布打包，并自动产出应用自己的 CLI：
+
+```sh
+bern check                          # 编译期校验类型、翻译完整性与布局入口覆盖
+bern run                            # 直接运行本机原生界面（SwiftUI / WinUI 3 / GTK 4）
+bern run --target web_app           # 或同一份代码切到 Android、iOS、GPUI、Web
+bern package                        # 打出各端 release 包（.dmg / 安装器 / .deb / .apk / .ipa / Web）
+
+# 因为每个界面操作都绑定了协议命令，编译出来的应用天然附带 CLI：
+tasks ui inspect
+tasks tasks add --title "发布 v1.0"
+```
+
+更多完整的多页应用见仓库示例：[控件展示应用](examples/showcase)（全部标准控件、引擎异步搜索、列表到详情导航、视频以及带关闭确认的设置窗口）、[计划应用](examples/planner)（模块化应用、样式覆盖、弹簧动效与 `Canvas`）、[图案集](examples/gallery)（海报墙、比例时间轴、四档自适应布局与文件拖入）、[原生控件示例](examples/native-controls)（六个后端紧邻嵌入 `NativeView`）、[手表端示例](examples/wearos)（手表目标）与[动画 SVG](examples/svg-animation)（纯 Rust 矢量动画）。
 
 ## 为 AI 而建
+
+正因为界面在编译期受严格约束、所有交互又全部经由命令目录派发，Bern 天生让 AI 既写不错界面，也能直接操控运行中的应用。
 
 ### AI 写代码：漏掉的，编译器替它记着
 
@@ -173,21 +353,6 @@ $ showcase window confirm-close --window settings#1 --confirmation settings#1:c1
 
 你也可以运行同样的命令，包括 `showcase showcase set-display-name --name Demo` 这样的业务命令，或用内置的 `window screenshot` 直接截取窗口画面。请使用与应用同一次构建生成的 CLI；远端操作时，用 SSH 登录控制通道所在的机器，以拥有该端点的账户运行。控件被禁用、被对话框挡住或不存在时，CLI 会返回明确的错误码。
 
-### 用 JavaScript 扩展：进程内 `bern.cli`
-
-未启用脚本的应用不链接任何 JS 运行时。当目标配置 `javascript = true` 后，每个 `bern::script::Context`（原生目标统一进程内 Boa，Web 目标为浏览器 Worker）都会默认注入 `globalThis.bern.cli(...)`，直通应用命令目录，并由 Rust 侧黑白名单控制权限（默认 `CliPolicy::allow_all()`）：
-
-```rust
-let js = bern::script::Context::with_policy(
-    bern::script::CliPolicy::allow_only(["media.*", "@queries", "state", "catalog"])
-        .deny("media.bind")
-        .with_label("example.plugin"),
-)?;
-js.eval(r#"await bern.cli("media seek --player-id main --position-ms 90000")"#).await?;
-```
-
-完整的调用形式、规则模式与动态拦截器见[JavaScript 与目标能力](Docs/zh-CN/Implementation/JavaScript.md)。
-
 ## 实测数据
 
 <picture>
@@ -207,7 +372,29 @@ js.eval(r#"await bern.cli("media seek --player-id main --position-ms 90000")"#).
 
 </details>
 
-## 更多能力
+## 谁使用了 Bern
+
+<table>
+<tr>
+<td width="33%" valign="top">
+<a href="https://github.com/AimesSoft/RustSend"><img src="Docs/Assets/projects/rustsend.png" width="56" height="56" alt="RustSend"></a>
+<h3><a href="https://github.com/AimesSoft/RustSend">RustSend</a></h3>
+<p>兼容 LocalSend 的局域网文件传输工具，支持文件、文件夹与文字互传。</p>
+</td>
+<td width="33%" valign="top">
+<a href="https://github.com/zhaohuaxs/lambda"><img src="Docs/Assets/projects/lambda.png" width="56" height="56" alt="Lambda"></a>
+<h3><a href="https://github.com/zhaohuaxs/lambda">Lambda</a></h3>
+<p>内置 7-Zip 的 Windows / Android 压缩包管理器，支持加密压缩、解压与内容预览。</p>
+</td>
+<td width="33%" valign="top">
+<a href="https://github.com/MCDFsteve/Enji"><img src="Docs/Assets/projects/enji.png" width="56" height="56" alt="Enji Music"></a>
+<h3><a href="https://github.com/MCDFsteve/Enji">Enji Music</a></h3>
+<p>网易云音乐第三方客户端，支持在线与本地音乐、同步歌词和歌单管理。</p>
+</td>
+</tr>
+</table>
+
+## 更多能力与扩展
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/more-dark.svg">
@@ -223,122 +410,24 @@ js.eval(r#"await bern.cli("media seek --player-id main --position-ms 90000")"#).
 - **默认骨架图、样式与动效**：`Query` 与 `skeleton: <bool>` 容器在编译期直接从真实界面树投影骨架图（120 ms 防闪烁、错峰轻浮入场、自动遵循减少动态效果）；`style!` 全局覆盖、弹簧动效与共享元素 Hero、纯 Rust 动画 `Svg`（零 WebView）、HDR `Image`、`Canvas` 自绘与比例轨道 `Rail`。
 - **媒体、异步查询与文件**：`Video` 接入各平台原生媒体栈或应用自带 `MediaKernel`，支持直读 `players.<id>.<field>`；`Query` 订阅管理加载、空态、失败与刷新；`Bern.toml` 随包资源；跨本地路径 / Android `content://` / Web `blob:` 统一的 `MediaSource`、系统打开方式 `[[app.opens]]` 与内存供图 `bern::files::serve`。
 - **桌面与系统集成**：系统托盘 `StatusItem`（单色 SVG 图标与登录时启动）、macOS `MenuBar`、浮层锚定工具窗、内置 `window.screenshot`、指针事件（`DoubleTap`、`ContextMenu`、`WheelUp`/`WheelDown`）、`Slider(hover:)` 与内嵌 `WebPage`。
-- **扩展能力**：模块化应用（`bern new --module`）、紧邻嵌入各平台原生代码的 `NativeView`（含强类型 props、`tr!` 检查、强制 CLI 入口与 `Fallback`，见[紧邻原生视图](Docs/zh-CN/Implementation/Native-Views.md)），以及按需启用的进程内 JavaScript 与 `bern.cli` 黑白名单（见[JavaScript 与目标能力](Docs/zh-CN/Implementation/JavaScript.md)）。
+- **扩展能力**：模块化应用（`bern new --module`）、紧邻嵌入各平台原生代码的 `NativeView`（含强类型 props、`tr!` 检查、强制 CLI 入口与 `Fallback`，见[紧邻原生视图](Docs/zh-CN/Topics/Native-Views.md)），以及按需启用的进程内 JavaScript 与 `bern.cli` 黑白名单（见[JavaScript 与目标能力](Docs/zh-CN/Topics/JavaScript.md)）。
 
 </details>
 
-## 工作原理
+### 用 JavaScript 扩展：进程内 `bern.cli`
 
-```mermaid
-flowchart LR
-    subgraph app["你的应用（Rust）"]
-        P["协议<br/>类型 · 状态 · 命令"]
-        U["界面声明<br/>component + ui!"]
-        E["引擎<br/>普通 Rust"]
-    end
-    P --> C{{"bern build<br/>编译器 + IR"}}
-    U --> C
-    C --> S["SwiftUI<br/>macOS · iOS · watchOS · tvOS"]
-    C --> W["WinUI 3 / Islands<br/>Windows"]
-    C --> G["GTK 4<br/>Linux"]
-    C --> A["Jetpack Compose<br/>Android · Wear OS"]
-    C --> P2["GPUI<br/>macOS · Windows · Linux"]
-    C --> B["DOM + WASM<br/>Web"]
-    E <--> K[["命令目录"]]
-    K <--> N["原生界面"]
-    K <--> L["应用 CLI"]
-    K <--> JS["JS · bern.cli"]
-    K <--> J["JSON 通道"]
-    K --> SK["SKILL.md"]
-```
-
-1. **协议**：`#[bern::protocol]` 声明值类型、只读状态，以及命令与查询 trait。
-2. **引擎**：用普通 Rust 实现这些 trait；它看不到窗口、控件和传输层。
-3. **界面**：`#[component]` 函数，主体是一个 `ui!` 声明。编译器把它们读入共享的中间表示（IR），各目标模块从 IR 生成原生代码。增加新目标不需要改动解析器、IR 或你的业务逻辑。
-
-## 代码一览
-
-**1 · 协议**：类型、状态与命令
+未启用脚本的应用不链接任何 JS 运行时。当目标配置 `javascript = true` 后，每个 `bern::script::Context`（原生目标统一进程内 Boa，Web 目标为浏览器 Worker）都会默认注入 `globalThis.bern.cli(...)`，直通应用命令目录，并由 Rust 侧黑白名单控制权限（默认 `CliPolicy::allow_all()`）：
 
 ```rust
-#[bern::protocol(namespace = "counter", version = 1)]
-pub mod counter {
-    use bern::prelude::*;
-
-    #[state]
-    pub struct State {
-        pub count: i64,
-    }
-
-    #[commands]
-    pub trait Commands {
-        /// Add to the count.
-        fn add(&mut self, by: i64) -> Result<(), CommandError>;
-    }
-}
+let js = bern::script::Context::with_policy(
+    bern::script::CliPolicy::allow_only(["media.*", "@queries", "state", "catalog"])
+        .deny("media.bind")
+        .with_label("example.plugin"),
+)?;
+js.eval(r#"await bern.cli("media seek --player-id main --position-ms 90000")"#).await?;
 ```
 
-**2 · 引擎**：普通 Rust，不依赖 UI
-
-```rust
-use bern::CommandError;
-
-pub struct Counter {
-    state: counter::State,
-}
-
-impl Default for Counter {
-    fn default() -> Self {
-        Self { state: counter::State { count: 0 } }
-    }
-}
-
-impl counter::Commands for Counter {
-    fn add(&mut self, by: i64) -> Result<(), CommandError> {
-        self.state.count += by;
-        Ok(())
-    }
-}
-
-impl counter::Engine for Counter {
-    fn state(&self) -> &counter::State {
-        &self.state
-    }
-}
-```
-
-**3 · 界面**：一个 `ui!` 声明
-
-```rust
-#[component]
-pub fn counter_view(app: counter::Client) -> impl View {
-    ui! {
-        Form {
-            Text(content: tr! {
-                "zh-Hans" => "已计数 {n} 次",
-                "en" => "Counted {n} times";
-                n: app.count
-            })
-            Button(
-                id: add,
-                label: tr! { "zh-Hans" => "加一", "en" => "Add one" },
-                prominence: prominent
-            ) => app.add(1)
-        }
-    }
-}
-```
-
-**4 · 所有入口驱动同一个引擎**
-
-```sh
-counter ui inspect
-counter ui activate --target counter_view.add
-counter counter add --by 5
-counter catalog
-```
-
-`Bern.toml` 声明语言、主题、源码、随包资源与构建目标。完整示例见[控件展示应用](examples/showcase)：侧边栏应用，包含文字层级、按钮、开关、滑块、输入框、由引擎查询驱动的搜索、列表到详情的导航、视频，以及带页签和关闭确认的设置窗口。[计划应用](examples/planner)演示模块化应用、样式覆盖、动效与 `Canvas`。[图案集](examples/gallery)演示媒体类应用的组件：海报墙的错开入场、时间轴的按比例摆放、音量浮层按钮、随四档尺寸变化的页边距与布局，以及拖入视频后由引擎读出文件名、格式与大小。[原生控件示例](examples/native-controls)演示通过 `NativeView` 在六个后端紧邻嵌入平台原生控件，[手表端示例](examples/wearos)演示手表目标，[动画 SVG](examples/svg-animation)演示纯 Rust 矢量动画。
+完整的调用形式、规则模式与动态拦截器见[JavaScript 与目标能力](Docs/zh-CN/Topics/JavaScript.md)。
 
 ## 支持的平台
 
@@ -347,7 +436,7 @@ counter catalog
 <img alt="支持的平台：macOS、Windows、Linux、Web 应用、WebUI、Android、Wear OS、watchOS、tvOS、iOS 与桌面端 GPUI" src="Docs/Assets/tables/platforms-light.svg" width="100%">
 </picture>
 
-实现记录：[macOS](Docs/zh-CN/Implementation/macOS-SwiftUI.md) · [iOS](Docs/zh-CN/Implementation/iOS-SwiftUI.md) · [watchOS](Docs/zh-CN/Implementation/watchOS-SwiftUI.md) · [tvOS](Docs/zh-CN/Implementation/tvOS-SwiftUI.md) · [Windows](Docs/zh-CN/Implementation/Windows-WinUI3.md) · [Linux](Docs/zh-CN/Implementation/Linux-GTK.md) · [Android 与 Wear OS](Docs/zh-CN/Implementation/Android-Compose.md) · [GPUI](Docs/zh-CN/Implementation/GPUI.md) · [Web 与 WebUI](Docs/zh-CN/Implementation/Web.md)；下一步的平台见[适配规范](Docs/zh-CN/Adaptation/README.md)。
+平台操作手册：[macOS](Docs/zh-CN/Platforms/macOS.md) · [iOS](Docs/zh-CN/Platforms/iOS.md) · [watchOS](Docs/zh-CN/Platforms/watchOS.md) · [tvOS](Docs/zh-CN/Platforms/tvOS.md) · [Windows](Docs/zh-CN/Platforms/Windows.md) · [Linux](Docs/zh-CN/Platforms/Linux.md) · [Android 与 Wear OS](Docs/zh-CN/Platforms/Android.md) · [GPUI](Docs/zh-CN/Platforms/GPUI.md) · [Web 与 WebUI](Docs/zh-CN/Platforms/Web.md)。
 
 不指定 UI 技术时使用平台的默认技术；默认技术不可用时直接报错，不会悄悄换成另一套技术。
 
@@ -376,7 +465,7 @@ frontends = ["winui3"]   # 没有运行时的系统上会提示安装
 frontends = ["swiftui"]  # 最低 iOS 17
 ```
 
-iOS 两个前端都留着时，写 `packages = "separate"` 可以打成两个 `.ipa`。选择规则见 [Windows](Docs/zh-CN/Implementation/Windows-WinUI3.md) 与 [iOS](Docs/zh-CN/Implementation/iOS-SwiftUI.md) 的实现记录，iOS 16 上有几项功能会降级，也写在那里。
+iOS 两个前端都留着时，写 `packages = "separate"` 可以打成两个 `.ipa`。选择规则与 iOS 16 上的降级项详见 [Windows](Docs/zh-CN/Platforms/Windows.md) 与 [iOS](Docs/zh-CN/Platforms/iOS.md) 平台手册。
 
 ## 与其他跨平台框架对比
 
@@ -478,7 +567,7 @@ bern run
 
 ```text
 $ bern doctor
-bern 0.2.1 on macOS (aarch64)
+bern 0.2.2 on macOS (aarch64)
 
 [✓] Rust: rustc 1.99.0, cargo 1.99.0
 [✓] macOS · SwiftUI: macOS SDK 26.5, Swift 6.3.2
@@ -517,7 +606,7 @@ bern eject --target macos --out ./native-macos                   # 离线 Rust �
 bern eject --target ios --engine prebuilt --release --out ./ios  # 预编译 XCFramework，无需安装 Rust
 ```
 
-`bern eject` 可随时导出标准原生 IDE 工程（`.xcodeproj`、Gradle、Visual Studio `.sln` + `.vcxproj`、独立 Cargo 或零打包器 ES 模块），按组件与窗口拆分成清晰文件，且不改动原 Bern 项目。默认 `--engine source` 会离线打包完整自包含的 Rust 工作区并与原生 IDE 构建联动；`--engine prebuilt` 会预编译并嵌入引擎二进制，让原生开发者无需安装 Rust 或 Bern 即可直接打开构建。详见[导出为独立纯原生项目](Docs/zh-CN/Implementation/Eject.md)。
+`bern eject` 可随时导出标准原生 IDE 工程（`.xcodeproj`、Gradle、Visual Studio `.sln` + `.vcxproj`、独立 Cargo 或零打包器 ES 模块），按组件与窗口拆分成清晰文件，且不改动原 Bern 项目。默认 `--engine source` 会离线打包完整自包含的 Rust 工作区并与原生 IDE 构建联动；`--engine prebuilt` 会预编译并嵌入引擎二进制，让原生开发者无需安装 Rust 或 Bern 即可直接打开构建。详见[导出为独立纯原生项目](Docs/zh-CN/Topics/Eject.md)。
 
 ### 运行展示应用
 
@@ -577,10 +666,10 @@ cargo test --workspace
 
 在线浏览可检索文档：**[bern.aimes-soft.com/docs/zh-CN](https://bern.aimes-soft.com/docs/zh-CN)**，或在仓库中直接阅读：
 
-- **接口参考**：[文档目录](Docs/zh-CN/README.md) · [当前组件用法](Docs/zh-CN/Reference/UI.md) · [完整属性表](Docs/zh-CN/Reference/Component-Properties.md) · [平台能力与验证范围](Docs/zh-CN/Reference/Platforms.md) · [性能追踪](Docs/zh-CN/Reference/Tracing.md)
-- **架构与设计**：[设计文档](Docs/zh-CN/Design.md) · [适配规范](Docs/zh-CN/Adaptation/README.md) · [React Native 研究](Docs/zh-CN/Research/ReactNative.md)
-- **专题文档**：[导出独立纯原生项目](Docs/zh-CN/Implementation/Eject.md) · [紧邻原生视图](Docs/zh-CN/Implementation/Native-Views.md) · [JavaScript 与 `bern.cli`](Docs/zh-CN/Implementation/JavaScript.md) · [动画 SVG](Docs/zh-CN/Implementation/Animated-SVG.md) · [按模块编译](Docs/zh-CN/Implementation/Module-Builds.md) · [应用浏览器扩展](Docs/zh-CN/Implementation/Web-Extensions.md)
-- **平台实现**：[macOS](Docs/zh-CN/Implementation/macOS-SwiftUI.md) · [iOS](Docs/zh-CN/Implementation/iOS-SwiftUI.md) · [watchOS](Docs/zh-CN/Implementation/watchOS-SwiftUI.md) · [tvOS](Docs/zh-CN/Implementation/tvOS-SwiftUI.md) · [Windows](Docs/zh-CN/Implementation/Windows-WinUI3.md) · [Linux](Docs/zh-CN/Implementation/Linux-GTK.md) · [Android 与 Wear OS](Docs/zh-CN/Implementation/Android-Compose.md) · [GPUI](Docs/zh-CN/Implementation/GPUI.md) · [Web 与 WebUI](Docs/zh-CN/Implementation/Web.md)
+- **开发指南**：[快速上手](Docs/zh-CN/Guides/Quick-Start.md) · [协议与引擎](Docs/zh-CN/Guides/Protocol-and-Engine.md) · [布局与导航](Docs/zh-CN/Guides/Layouts-and-Navigation.md) · [本地化与样式](Docs/zh-CN/Guides/Localization-and-Styling.md) · [窗口、资源与文件](Docs/zh-CN/Guides/Windows-Resources-and-Files.md) · [应用 CLI 与 Skill](Docs/zh-CN/Guides/App-CLI-and-Skills.md)
+- **平台手册**：[macOS](Docs/zh-CN/Platforms/macOS.md) · [iOS](Docs/zh-CN/Platforms/iOS.md) · [watchOS](Docs/zh-CN/Platforms/watchOS.md) · [tvOS](Docs/zh-CN/Platforms/tvOS.md) · [Windows](Docs/zh-CN/Platforms/Windows.md) · [Linux](Docs/zh-CN/Platforms/Linux.md) · [Android 与 Wear OS](Docs/zh-CN/Platforms/Android.md) · [GPUI](Docs/zh-CN/Platforms/GPUI.md) · [Web 与 WebUI](Docs/zh-CN/Platforms/Web.md)
+- **专题扩展**：[导出独立纯原生项目](Docs/zh-CN/Topics/Eject.md) · [紧邻原生视图](Docs/zh-CN/Topics/Native-Views.md) · [JavaScript 与 `bern.cli`](Docs/zh-CN/Topics/JavaScript.md) · [动画 SVG](Docs/zh-CN/Topics/Animated-SVG.md) · [按模块编译](Docs/zh-CN/Topics/Module-Builds.md) · [应用浏览器扩展](Docs/zh-CN/Topics/Web-Extensions.md)
+- **接口参考与架构**：[文档目录](Docs/zh-CN/README.md) · [架构总览](Docs/zh-CN/Architecture.md) · [当前组件用法](Docs/zh-CN/Reference/UI.md) · [完整属性表](Docs/zh-CN/Reference/Component-Properties.md) · [平台能力与验证范围](Docs/zh-CN/Reference/Platforms.md) · [性能追踪](Docs/zh-CN/Reference/Tracing.md)
 
 文档另有[英文版](Docs/README.md)（[在线版](https://bern.aimes-soft.com/docs)）。
 

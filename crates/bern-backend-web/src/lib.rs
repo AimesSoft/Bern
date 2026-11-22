@@ -3,7 +3,7 @@
 //! Generates a static page from the shared IR: HTML, the Bern Web
 //! stylesheet with theme variables from the Bern theme kernel, the
 //! JavaScript runtime and the generated application module. Windows are
-//! virtual windows inside the page. See `Docs/Adaptation/Web.md` for the
+//! virtual windows inside the page. See `Docs/Platforms/Web.md` for the
 //! visual spec it implements.
 //!
 //! * `web_mode = "app"`: the engine, the UI session runtime and the C ABI
