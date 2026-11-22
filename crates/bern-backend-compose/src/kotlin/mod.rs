@@ -837,7 +837,8 @@ impl<'a> Generator<'a> {
             "Table" => self.table(out, element, ctx),
             "Adaptive" => self.adaptive(out, element, ctx),
             "LanguagePicker" => self.language_picker(out, element, ctx),
-            "Detail" | "Destination" | "Tab" | "Sidebar" | "SidebarItem" | "SidebarHeader"
+            "Detail" | "DetailFooter" | "Destination" | "Tab" | "Sidebar" | "SidebarItem"
+            | "SidebarHeader"
             | "WindowSet" | "Window" | "Layout" | "MenuItem" | "AlertAction" | "TabAccessory"
             | "PickerOption" | "TableColumn" | "TableMenu" | "ContextMenu" | "DoubleTap"
             | "WheelUp" | "WheelDown"

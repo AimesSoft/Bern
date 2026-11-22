@@ -516,6 +516,13 @@ impl Generator<'_> {
         out.line(".formStyle(.grouped)");
         // Its fields are rows of the form, without boxes of their own.
         out.line(".environment(\\.bernInForm, true)");
+        if self.platform == Platform::Macos {
+            // Grouped forms on macOS paint an opaque window fill by default,
+            // hiding custom window backdrops behind them; hiding the scroll
+            // content background keeps native translucent section cards while
+            // letting the backdrop through, and stays identical on plain windows.
+            out.line(".bernScrollContentBackgroundHidden()");
+        }
         if let Some(style) = self.style_of(element) {
             out.line(format!(".bernFormStyle(BernStyles.{})", style.name));
         }

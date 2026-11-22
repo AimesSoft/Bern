@@ -783,6 +783,7 @@ pub struct SplitSpec {
     pub header: Option<Build>,
     /// Content at the foot of the sidebar, below the list.
     pub footer: Option<Build>,
+    pub detail_footer: Option<Build>,
     /// The sidebar's width, fixed.
     pub width: Option<f64>,
     /// While false, the detail's title bar leaves out the destination's
@@ -1024,7 +1025,19 @@ pub fn SplitView(p: &Parent, ctx: &Ctx, spec: SplitSpec, sidebar: Build, detail:
     content.set_vexpand(true);
     let detail_view = adw::ToolbarView::new();
     detail_view.add_top_bar(&header);
-    detail_view.set_content(Some(&content));
+    if let Some(detail_footer) = spec.detail_footer {
+        let detail_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        detail_box.set_vexpand(true);
+        detail_box.append(&content);
+        let footer_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        footer_box.add_css_class("bern-detail-footer");
+        footer_box.set_vexpand(false);
+        detail_footer(&Parent::of_box(&footer_box), ctx);
+        detail_box.append(&footer_box);
+        detail_view.set_content(Some(&detail_box));
+    } else {
+        detail_view.set_content(Some(&content));
+    }
     if let Some(style) = spec.detail_style {
         crate::style::pane_surface(style, &detail_view);
     }

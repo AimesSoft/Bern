@@ -90,7 +90,7 @@
    page's own room (a navigation page, a tab's page, the layout an
    `Adaptive` chose) is such a column: a stack holding a form or a scroll
    view fills it, as on the native targets. */
-:is(.bern-vstack, .bern-detail-body, .bern-nav-page, .bern-tabpanels, .bern-adaptive, .bern-window-content, .bern-modal-content, .bern-query, .bern-query-content, .bern-drop, .bern-gesture, .bern-inspector, .bern-popover-panel, .bern-search-results) > :is(.bern-fill-width, .bern-layout-width):not(.bern-inspector, .bern-sized-width) {
+:is(.bern-vstack, .bern-detail-body, .bern-detail-footer, .bern-nav-page, .bern-tabpanels, .bern-adaptive, .bern-window-content, .bern-modal-content, .bern-query, .bern-query-content, .bern-drop, .bern-gesture, .bern-inspector, .bern-popover-panel, .bern-search-results) > :is(.bern-fill-width, .bern-layout-width):not(.bern-inspector, .bern-sized-width) {
   align-self: stretch;
   width: auto;
 }
@@ -479,11 +479,20 @@
   overflow: clip;
 }
 
-.bern-detail .bern-detail-body {
+.bern-detail .bern-detail-body,
+.bern-detail .bern-detail-footer {
   transition: margin-inline-end 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.1);
 }
 
-.bern-detail.bern-inspecting .bern-detail-body {
+.bern-detail-footer {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.bern-detail.bern-inspecting .bern-detail-body,
+.bern-detail.bern-inspecting .bern-detail-footer {
   margin-inline-end: var(--bern-inspector-width);
 }
 
@@ -505,7 +514,8 @@
 }
 
 @container (max-width: 767px) {
-  .bern-detail.bern-inspecting .bern-detail-body {
+  .bern-detail.bern-inspecting .bern-detail-body,
+  .bern-detail.bern-inspecting .bern-detail-footer {
     margin-inline-end: 0;
   }
   .bern-inspector {

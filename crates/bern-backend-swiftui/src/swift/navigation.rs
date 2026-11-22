@@ -145,10 +145,24 @@ impl Generator<'_> {
         }
         // Outermost, so the header and footer follow too.
         out.line(".bernColumnFollowsInert()");
+        let detail_footer = detail.children.iter().find_map(|node| match node {
+            Node::Element(child) if child.kind == "DetailFooter" => Some(child),
+            _ => None,
+        });
+        let detail_content: Vec<Node> = detail
+            .children
+            .iter()
+            .filter(|node| !matches!(node, Node::Element(child) if child.kind == "DetailFooter"))
+            .cloned()
+            .collect();
         out.close("} detail: {");
         out.indent += 1;
-        out.open("SwiftUI.Group {");
-        self.nodes(out, &detail.children, ctx);
+        if detail_footer.is_some() {
+            out.open("BernDetailContent {");
+        } else {
+            out.open("SwiftUI.Group {");
+        }
+        self.nodes(out, &detail_content, ctx);
         out.close("}");
         out.line(".bernColumnFollowsInert()");
         if let Some(style) = self.style_of(detail) {
@@ -168,8 +182,17 @@ impl Generator<'_> {
                 out.line(".bernToolbarTitleHidden()");
             }
         }
-        self.toolbar(out, &detail.children, ctx);
-        self.inspector(out, &detail.children, ctx);
+        self.toolbar(out, &detail_content, ctx);
+        self.inspector(out, &detail_content, ctx);
+        if let Some(detail_footer) = detail_footer {
+            out.close("} footer: {");
+            out.indent += 1;
+            out.open("SwiftUI.VStack(alignment: .leading, spacing: 0) {");
+            self.nodes(out, &detail_footer.children, ctx);
+            out.close("}");
+            out.line(".frame(maxWidth: .infinity, alignment: .leading)");
+            self.motion_modifiers(out, detail_footer);
+        }
         out.close("}");
         // The sidebar is a control of the whole split view, which stays
         // mounted while a compact layout shows only the detail.
@@ -276,7 +299,12 @@ impl Generator<'_> {
                 Node::Element(element)
                     if matches!(
                         element.kind.as_str(),
-                        "Search" | "SidebarHeader" | "SidebarFooter" | "Toolbar" | "TabAccessory"
+                        "Search"
+                            | "SidebarHeader"
+                            | "SidebarFooter"
+                            | "DetailFooter"
+                            | "Toolbar"
+                            | "TabAccessory"
                     ) => {}
                 Node::Element(element) if element.kind == "ForEach" => {
                     let (Some(items), Some(template)) = (element.expr("items"), &element.template)
@@ -505,7 +533,9 @@ impl Generator<'_> {
             out.open(format!(
                 ".navigationDestination(for: {route_type}.self) {{ {var} in"
             ));
+            out.open("BernDetailContent {");
             self.nodes(out, &destination.children, &inner);
+            out.close("}");
             out.close("}");
         }
         self.toolbar(out, &content, &inner);

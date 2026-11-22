@@ -55,9 +55,25 @@ impl Generator<'_> {
             Some(header) => self.children(out, "header: Some(", &header.children, "),"),
             None => out.line("header: None,"),
         }
+        let detail_footer = detail.children.iter().find_map(|node| match node {
+            Node::Element(child) if child.kind == "DetailFooter" => Some(child),
+            _ => None,
+        });
+        let detail_content: Vec<Node> = detail
+            .children
+            .iter()
+            .filter(|node| !matches!(node, Node::Element(child) if child.kind == "DetailFooter"))
+            .cloned()
+            .collect();
         match footer {
             Some(footer) => self.children(out, "footer: Some(", &footer.children, "),"),
             None => out.line("footer: None,"),
+        }
+        match detail_footer {
+            Some(detail_footer) => {
+                self.children(out, "detail_footer: Some(", &detail_footer.children, "),")
+            }
+            None => out.line("detail_footer: None,"),
         }
         out.line(format!("width: {},", Self::number(sidebar, "width")));
         out.line(format!("titled: {},", self.value(detail, "titled")));
@@ -75,7 +91,7 @@ impl Generator<'_> {
         self.in_sidebar.set(true);
         self.children(out, "", &content, ",");
         self.in_sidebar.set(false);
-        self.children(out, "", &detail.children, "");
+        self.children(out, "", &detail_content, "");
         out.indent -= 1;
         out.line(");");
     }

@@ -1863,6 +1863,7 @@ fun BernSplitView(
     sidebar: @Composable (showDetail: () -> Unit) -> Unit,
     footer: (@Composable ColumnScope.() -> Unit)? = null,
     detail: @Composable () -> Unit,
+    detailFooter: (@Composable ColumnScope.() -> Unit)? = null,
 ) {
     var showingDetail by showingDetail
     val rail = LocalBernWindow.current.rail
@@ -1900,6 +1901,16 @@ fun BernSplitView(
             }
         }
     }
+    val detailPane: @Composable () -> Unit = if (detailFooter != null) {
+        {
+            Column(Modifier.fillMaxSize()) {
+                Box(Modifier.weight(1f).fillMaxWidth()) { detail() }
+                Column(Modifier.fillMaxWidth()) { detailFooter() }
+            }
+        }
+    } else {
+        detail
+    }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         if (maxWidth >= 600.dp) {
             val toggle: (@Composable RowScope.() -> Unit)? = onCollapsed?.let { change ->
@@ -1916,11 +1927,11 @@ fun BernSplitView(
                     Box(Modifier.width(if (rail) 96.dp else sidebarWidth).fillMaxHeight().then(sidebarBg)) { list {} }
                     VerticalDivider()
                 }
-                Box(Modifier.weight(1f).fillMaxHeight().then(detailBg)) { detail() }
+                Box(Modifier.weight(1f).fillMaxHeight().then(detailBg)) { detailPane() }
             }
         } else if (showingDetail) {
             BernChrome(title = title, back = { showingDetail = false })
-            Box(Modifier.fillMaxSize().then(detailBg)) { detail() }
+            Box(Modifier.fillMaxSize().then(detailBg)) { detailPane() }
         } else {
             Box(Modifier.fillMaxSize().then(sidebarBg)) { list { showingDetail = true } }
         }

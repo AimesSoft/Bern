@@ -262,6 +262,9 @@ impl Checker<'_> {
         if parts.kind == "Tabs" {
             self.tab_accessory(element, &children);
         }
+        if parts.kind == "Detail" {
+            self.detail_footer(element, &children);
+        }
         if parts.kind == "Table"
             && let Some(template) = &parts.template
         {
@@ -839,6 +842,43 @@ impl Checker<'_> {
             self.error(
                 element.span,
                 "write a `TabAccessory` directly in its `Tabs` and hide it with `shown:`, not inside `if` or `ForEach`",
+            );
+        }
+    }
+
+    /// A `Detail` keeps at most one `DetailFooter`, written directly in it:
+    /// conditional content belongs inside the footer rather than around it.
+    fn detail_footer(&mut self, element: &ast::Element, children: &[ir::Node]) {
+        let direct = children
+            .iter()
+            .filter(|node| matches!(node, ir::Node::Element(child) if child.kind == "DetailFooter"))
+            .count();
+        fn count(nodes: &[ir::Node]) -> usize {
+            nodes
+                .iter()
+                .map(|node| match node {
+                    ir::Node::Element(element) if element.kind == "DetailFooter" => 1,
+                    ir::Node::Element(element) if element.kind == "ForEach" => {
+                        count(&element.children)
+                    }
+                    ir::Node::Element(_) | ir::Node::Component(_) => 0,
+                    ir::Node::If(node) => {
+                        node.branches
+                            .iter()
+                            .map(|(_, body)| count(body))
+                            .sum::<usize>()
+                            + count(&node.otherwise)
+                    }
+                    ir::Node::IfLet(node) => count(&node.then) + count(&node.otherwise),
+                    ir::Node::Match(node) => node.arms.iter().map(|arm| count(&arm.body)).sum(),
+                })
+                .sum()
+        }
+        let all = count(children);
+        if all > direct {
+            self.error(
+                element.span,
+                "write a `DetailFooter` directly in its `Detail`, not inside `if`, `match` or `ForEach`",
             );
         }
     }

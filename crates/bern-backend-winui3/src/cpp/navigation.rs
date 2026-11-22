@@ -72,10 +72,26 @@ impl Generator<'_> {
             Some(footer) => self.children(out, "", &footer.children, ","),
             None => out.line("nullptr,"),
         }
+        let detail_footer = detail.children.iter().find_map(|node| match node {
+            Node::Element(child) if child.kind == "DetailFooter" => Some(child),
+            _ => None,
+        });
+        let detail_content: Vec<Node> = detail
+            .children
+            .iter()
+            .filter(|node| !matches!(node, Node::Element(child) if child.kind == "DetailFooter"))
+            .cloned()
+            .collect();
         self.in_sidebar.set(true);
         self.children(out, "", &content, ",");
         self.in_sidebar.set(false);
-        self.children(out, "", &detail.children, ");");
+        match detail_footer {
+            Some(detail_footer) => {
+                self.children(out, "", &detail_content, ",");
+                self.children(out, "", &detail_footer.children, ");");
+            }
+            None => self.children(out, "", &detail_content, ");"),
+        }
         out.indent -= 1;
     }
 

@@ -612,10 +612,10 @@ impl<'a> Generator<'a> {
             "Menu" => self.menu(out, element, ctx),
             "Table" => self.table(out, element, ctx),
             "LanguagePicker" => self.language_picker(out, element, ctx),
-            "Detail" | "Destination" | "Tab" | "Sidebar" | "SidebarItem" | "Toolbar"
-            | "WindowSet" | "Window" | "Layout" | "MenuItem" | "AlertAction" | "MenuBar"
-            | "StatusItem" | "TableColumn" | "TableMenu" | "ContextMenu" | "DoubleTap"
-            | "WheelUp" | "WheelDown" | "OnCommit" => {
+            "Detail" | "DetailFooter" | "Destination" | "Tab" | "Sidebar" | "SidebarItem"
+            | "Toolbar" | "WindowSet" | "Window" | "Layout" | "MenuItem" | "AlertAction"
+            | "MenuBar" | "StatusItem" | "TableColumn" | "TableMenu" | "ContextMenu"
+            | "DoubleTap" | "WheelUp" | "WheelDown" | "OnCommit" => {
                 // Realized by their parents.
             }
             other => out.line(format!("SwiftUI.EmptyView() // unsupported {other}")),

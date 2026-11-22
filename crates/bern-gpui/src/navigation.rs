@@ -380,6 +380,7 @@ pub fn detail(
     title: Option<String>,
     collapsed: Option<Field>,
     content: Vec<El>,
+    footer: Vec<El>,
     style: Option<&'static Style>,
 ) -> El {
     let toggle = collapsed.map(|field| {
@@ -464,6 +465,9 @@ pub fn detail(
                 .min_h(px(0.0))
                 .children(content),
         )
+        .when(!footer.is_empty(), |element| {
+            element.child(div().flex().flex_col().flex_none().children(footer))
+        })
         .into_any_element()
 }
 

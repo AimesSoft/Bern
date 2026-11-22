@@ -98,6 +98,7 @@
 | `SidebarHeader` | `role: content / title` | 可含子内容；无动作；直接位于 ["Sidebar"] |
 | `SidebarFooter` | 无专有属性 | 可含子内容；无动作；直接位于 ["Sidebar"] |
 | `Detail` | `titled: Bool` | 可含子内容；无动作；直接位于 ["SplitView"] |
+| `DetailFooter` | 无专有属性 | 可含子内容；无动作；直接位于 ["Detail"]，最多一个，不放在 `if`、`match` 或 `ForEach` 里。固定在详情列底部的内容，在详情列内推入子页面时仍保持可见 |
 | `SidebarItem` | **`value: SelectionValue`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`badge: NumberValue`<br>`variant: StyleVariant` | 不含子节点；无动作；直接位于 ["Sidebar", "Section"] |
 | `Section` | `title: DisplayText`<br>`footer: DisplayText`<br>`style: grouped / plain`<br>`padding_x: Length`<br>`padding_y: Length` | 可含子内容；无动作 |
 | `Slot` | **`id: SlotName`** | 不含子节点；无动作 |

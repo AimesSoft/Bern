@@ -943,6 +943,15 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         )
     },
     ComponentSpec {
+        placement: Placement::Within(&["Detail"]),
+        ..spec(
+            "DetailFooter",
+            &[],
+            Children::Any,
+            "Content pinned to the bottom of the detail column, staying visible across navigation pushes within it",
+        )
+    },
+    ComponentSpec {
         placement: Placement::Within(&["Sidebar", "Section"]),
         ..spec(
             "SidebarItem",
@@ -2919,6 +2928,12 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
         errors.push(ShapeError {
             prop: None,
             message: "a `Sidebar` has at most one `SidebarHeader`".into(),
+        });
+    }
+    if spec.name == "Detail" && count("DetailFooter") > 1 {
+        errors.push(ShapeError {
+            prop: None,
+            message: "a `Detail` has at most one `DetailFooter`".into(),
         });
     }
     if spec.name == "Table" && count("TableColumn") == 0 {

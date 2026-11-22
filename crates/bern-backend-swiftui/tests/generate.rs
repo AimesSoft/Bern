@@ -2991,3 +2991,191 @@ pub fn app(app: controls::Client, windows: AppWindows) -> impl View {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn detail_footer_and_macos_form_background_typecheck() {
+    let protocol = r#"
+#[bern::protocol(namespace = "nav_footer", version = 1)]
+pub mod nav_footer {
+    use bern::prelude::*;
+
+    #[value]
+    pub enum Section {
+        #[label(tr! { "en" => "Settings" })]
+        Settings,
+    }
+
+    #[value]
+    pub enum SubRoute {
+        Audio,
+    }
+
+    #[state]
+    pub struct State {
+        #[content]
+        pub title: String,
+    }
+
+    #[commands]
+    pub trait Commands {
+        fn ping(&mut self) -> Result<(), CommandError>;
+    }
+}
+"#;
+    let ui = r#"
+use bern::prelude::*;
+use nav_footer_protocol::nav_footer::{self, Section, SubRoute};
+
+#[bern::session]
+pub struct Draft {
+    pub tab: Section,
+    pub path: Vec<SubRoute>,
+    pub show_bar: bool,
+}
+
+#[component]
+pub fn main_view(app: nav_footer::Client, #[session] draft: Draft) -> impl View {
+    ui! {
+        SplitView {
+            Sidebar(selection: draft.tab) {
+                SidebarItem(value: Section::Settings, label: tr! { "en" => "Settings" })
+            }
+            Detail(titled: false) {
+                Navigation(path: draft.path) {
+                    Form(title: tr! { "en" => "Settings" }) {
+                        Section(title: tr! { "en" => "General" }) {
+                            NavLink(id: open_audio, route: SubRoute::Audio) {
+                                Text(content: tr! { "en" => "Audio" })
+                            }
+                        }
+                    }
+                    Destination |route| {
+                        match route {
+                            SubRoute::Audio => {
+                                Form(title: tr! { "en" => "Audio" }) {
+                                    Section {
+                                        Text(content: app.title)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                DetailFooter {
+                    if draft.show_bar {
+                        Divider
+                        Text(content: app.title)
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+pub fn app(app: nav_footer::Client, windows: AppWindows) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Stage" }, initial: open) {
+                main_view(app: app)
+            }
+        }
+    }
+}
+"#;
+    let root = workspace();
+    let dir =
+        std::env::temp_dir().join(format!("bern-swiftui-detail-footer-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    for (package, source) in [
+        ("nav-footer-protocol", protocol),
+        ("nav-footer-ui", ui),
+        ("nav-footer-core", ""),
+    ] {
+        std::fs::create_dir_all(dir.join(package).join("src")).unwrap();
+        std::fs::write(
+            dir.join(package).join("Cargo.toml"),
+            format!("[package]\nname = \"{package}\"\n"),
+        )
+        .unwrap();
+        std::fs::write(dir.join(package).join("src/lib.rs"), source).unwrap();
+    }
+    std::fs::write(
+        dir.join("Bern.toml"),
+        "[app]\nid = \"navfooter\"\nbundle_id = \"dev.bern.navfooter\"\nversion = \"0.1.0\"\nname = { \"en\" = \"NavFooter\" }\n[languages]\nsupported = [\"en\"]\ndefault = \"en\"\n[protocol]\npackage = \"nav-footer-protocol\"\nsource = \"nav-footer-protocol/src/lib.rs\"\n[engine]\npackage = \"nav-footer-core\"\ntype = \"nav_footer_core::Engine\"\n[ui]\npackage = \"nav-footer-ui\"\nsources = [\"nav-footer-ui/src/lib.rs\"]\nroot = \"app\"\n[targets.macos]\nplatform = \"macos\"\n",
+    )
+    .unwrap();
+    let config = bern_compiler::config::load(&dir.join("Bern.toml")).unwrap();
+    let compiled = bern_compiler::compile(&config).unwrap();
+    let target = config.targets.first().unwrap().clone();
+    let problems = SwiftUiMacos.check(&compiled.app, &target);
+    assert!(problems.is_empty(), "{problems:?}");
+    let output = dir.join("out");
+    let context = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: output.clone(),
+        target,
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    let files = SwiftUiMacos.generate(&compiled.app, &context).unwrap();
+    for file in &files {
+        let path = output.join(&file.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, &file.contents).unwrap();
+    }
+    let sources = output.join("Sources");
+    let generated = std::fs::read_to_string(sources.join("BernGenerated.swift")).unwrap();
+    for expected in [
+        "BernDetailContent {",
+        "} footer: {",
+        ".bernScrollContentBackgroundHidden()",
+    ] {
+        assert!(
+            generated.contains(expected),
+            "missing `{expected}`:\n{generated}"
+        );
+    }
+    assert!(
+        generated.matches("BernDetailContent {").count() >= 2,
+        "expected BernDetailContent on both Detail and Destination:\n{generated}"
+    );
+    #[cfg(target_os = "macos")]
+    {
+        let result = Command::new("xcrun")
+            .args([
+                "swiftc",
+                "-typecheck",
+                "-swift-version",
+                "6",
+                "-parse-as-library",
+            ])
+            .arg("-target")
+            .arg(format!("arm64-apple-macos{MINIMUM_MACOS}"))
+            .arg("-module-cache-path")
+            .arg(cache::module_cache(&root))
+            .arg("-import-objc-header")
+            .arg(sources.join("bern.h"))
+            .arg(sources.join("BernRuntime.swift"))
+            .arg(sources.join("BernMedia.swift"))
+            .arg(sources.join("BernStyle.swift"))
+            .arg(sources.join("BernAppKit.swift"))
+            .arg(sources.join("BernGenerated.swift"))
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "swiftc rejected the generated code:\n{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

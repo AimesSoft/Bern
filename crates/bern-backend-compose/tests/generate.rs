@@ -2270,6 +2270,9 @@ pub fn app(app: controls::Client, windows: AppWindows, #[session] draft: Draft) 
                                 Text(content: tr! { "en" => "Banner" })
                             }
                         }
+                        DetailFooter {
+                            Text(content: tr! { "en" => "Now playing" })
+                        }
                     }
                 }
             }
@@ -2315,6 +2318,7 @@ pub fn app(app: controls::Client, windows: AppWindows, #[session] draft: Draft) 
         "color = BernColor.Role(\"status.success\")",
         "color = BernColor.Role(\"status.error\")",
         "saturation = bernFloat((BernEngine.amount).toFloat(), BernMotion(0.45, 1.0))",
+        "detailFooter = {",
     ] {
         assert!(kotlin.contains(expected), "missing `{expected}`:\n{kotlin}");
     }
