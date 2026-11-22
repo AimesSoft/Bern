@@ -675,7 +675,7 @@ impl Generator<'_> {
             .expr("route")
             .map(|route| self.expr(route))
             .unwrap_or_default();
-        out.open(format!("SwiftUI.NavigationLink(value: {route}) {{"));
+        out.open(format!("BernNavLink(value: {route}) {{"));
         self.nodes(out, &element.children, ctx);
         out.close("}");
         if let Some(path) = &ctx.path {

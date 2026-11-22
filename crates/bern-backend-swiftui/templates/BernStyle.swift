@@ -7880,11 +7880,69 @@ private struct BernInFormKey: EnvironmentKey {
     static let defaultValue = false
 }
 
+private struct BernInListKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
 extension EnvironmentValues {
     /// Inside a form, whose rows frame its fields.
     var bernInForm: Bool {
         get { self[BernInFormKey.self] }
         set { self[BernInFormKey.self] = newValue }
+    }
+
+    /// Inside a list, whose rows frame navigation links.
+    var bernInList: Bool {
+        get { self[BernInListKey.self] }
+        set { self[BernInListKey.self] = newValue }
+    }
+}
+
+/// A navigation link: inside a `Form` or `List`, keeps SwiftUI's native row
+/// chrome and disclosure indicator; outside them on macOS and iOS, renders as
+/// a full-width borderless row with a trailing chevron so macOS does not draw
+/// a push button bezel and iOS does not tint its content like a text link.
+struct BernNavLink<Value: Hashable, Content: View>: View {
+    let value: Value
+    @ViewBuilder let content: () -> Content
+    @Environment(\.bernInForm) private var inForm
+    @Environment(\.bernInList) private var inList
+    #if os(macOS)
+    @State private var hovered = false
+    #endif
+
+    var body: some View {
+        #if os(watchOS) || os(tvOS)
+        NavigationLink(value: value, label: content)
+        #else
+        if inForm || inList {
+            NavigationLink(value: value, label: content)
+        } else {
+            NavigationLink(value: value) {
+                HStack(spacing: 8) {
+                    content()
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                #if os(macOS)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(hovered ? Color.primary.opacity(0.06) : Color.clear)
+                )
+                #endif
+            }
+            .buttonStyle(.plain)
+            #if os(macOS)
+            .bernHover { hovered = $0 }
+            #endif
+        }
+        #endif
     }
 }
 

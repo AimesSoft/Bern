@@ -838,6 +838,9 @@ impl Generator<'_> {
                 out.close("}");
             }
         }
+        if element.kind == "List" {
+            out.line(".environment(\\.bernInList, true)");
+        }
         self.toolbar(out, &element.children, ctx);
     }
 
