@@ -105,4 +105,13 @@ impl Target for ComposeWearos {
     ) -> Result<BuildPlan, Vec<Diagnostic>> {
         ComposeAndroid.package(app, context, signing)
     }
+
+    fn eject(
+        &self,
+        app: &Application,
+        context: &BuildContext,
+        options: &bern_target_api::EjectOptions,
+    ) -> Result<bern_target_api::EjectedProject, Vec<Diagnostic>> {
+        ComposeAndroid.eject(app, context, options)
+    }
 }

@@ -67,6 +67,59 @@ fn pack_rust(var: &str, ty: &Type) -> String {
 }
 
 impl Generator<'_> {
+    /// Emit per-view `pub(crate) mod native_<symbol>` modules referencing
+    /// local copied implementation files under `src/ui/native/`, returning
+    /// `(native_mod_rs, copied_impl_files)`.
+    pub(super) fn native_view_modules_split(&self) -> (String, Vec<(String, String)>) {
+        let views: Vec<CollectedNativeView<'_>> = collect_native_views(self.app)
+            .into_iter()
+            .filter(|v| v.info.file_for("gtk").is_some())
+            .collect();
+        if views.is_empty() {
+            return (String::new(), Vec::new());
+        }
+        let mut out = Out::default();
+        out.line("// Co-located native UI views.");
+        out.line("// Ejected from Bern — edit freely.");
+        out.line(
+            "#![allow(unused_imports, unused_variables, unused_parens, dead_code, clippy::all)]",
+        );
+        out.line("");
+        let mut emitted = std::collections::BTreeSet::new();
+        let mut extra_files = Vec::new();
+        for view in &views {
+            if !emitted.insert(view.symbol.clone()) {
+                continue;
+            }
+            let Some(path) = view.info.file_for("gtk") else {
+                continue;
+            };
+            let source = self
+                .project_dir
+                .map(|dir| dir.join(path))
+                .filter(|p| p.exists())
+                .and_then(|p| std::fs::read_to_string(p).ok())
+                .or_else(|| find_native_source(self.app, path).map(|def| def.source.clone()))
+                .unwrap_or_default();
+            let impl_rel = format!("native/{}.rs", view.symbol);
+            extra_files.push((impl_rel.clone(), source));
+            out.open(format!("pub(crate) mod native_{} {{", view.symbol));
+            out.line("use bern_gtk as b;");
+            out.line("use bern_gtk::gtk;");
+            out.line("use std::rc::Rc;");
+            self.emit_native_types(&mut out, &view.info);
+            out.line(format!(
+                "#[path = {}]",
+                string(&format!("{}.rs", view.symbol))
+            ));
+            out.line("mod impl_;");
+            out.line("pub use impl_::build;");
+            out.close("}");
+            out.line("");
+        }
+        (out.finish(), extra_files)
+    }
+
     /// Emit per-view `mod native_<symbol>` modules at the top of `app/src/ui.rs`.
     pub(super) fn native_view_modules(&self, out: &mut Out) {
         let views: Vec<CollectedNativeView<'_>> = collect_native_views(self.app)

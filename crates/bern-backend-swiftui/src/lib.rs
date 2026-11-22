@@ -16,6 +16,7 @@ mod style;
 mod swift;
 pub mod tvos;
 pub mod watchos;
+mod xcode;
 
 use bern_ir::spec::COMPONENTS;
 use bern_ir::{Application, IR_VERSION, Node, WindowInitial, WindowRole};
@@ -204,7 +205,7 @@ pub(crate) const FEATURES: &[&str] = &[
     bern_target_api::feature::NATIVE_VIEW,
 ];
 
-const RUNTIME: &str = include_str!("../templates/BernRuntime.swift");
+pub(crate) const RUNTIME: &str = include_str!("../templates/BernRuntime.swift");
 
 /// The runtime template with the extensions of each file kind from the
 /// shared table, so pickers, drops and the Info.plist agree.
@@ -232,9 +233,9 @@ pub(crate) fn runtime_with_svg(app: &Application, source: &str) -> String {
     }
     source
 }
-const MEDIA: &str = include_str!("../templates/BernMedia.swift");
-const STYLE: &str = include_str!("../templates/BernStyle.swift");
-const APPKIT: &str = include_str!("../templates/BernAppKit.swift");
+pub(crate) const MEDIA: &str = include_str!("../templates/BernMedia.swift");
+pub(crate) const STYLE: &str = include_str!("../templates/BernStyle.swift");
+pub(crate) const APPKIT: &str = include_str!("../templates/BernAppKit.swift");
 
 /// Swift sources compiled into the app, in order.
 const SOURCES: &[&str] = &[
@@ -244,7 +245,7 @@ const SOURCES: &[&str] = &[
     "BernAppKit.swift",
     "BernGenerated.swift",
 ];
-const HEADER: &str = include_str!("../templates/bern.h");
+pub(crate) const HEADER: &str = include_str!("../templates/bern.h");
 
 pub struct SwiftUiMacos;
 
@@ -342,7 +343,7 @@ pub(crate) fn native_libs_file(rust_output: &std::path::Path) -> PathBuf {
     rust_output.join("libbern_app.native-libs")
 }
 
-fn architecture() -> (&'static str, &'static str) {
+pub(crate) fn architecture() -> (&'static str, &'static str) {
     match std::env::consts::ARCH {
         "x86_64" => ("x86_64", "x86_64-apple-darwin"),
         _ => ("arm64", "aarch64-apple-darwin"),
@@ -1194,6 +1195,15 @@ impl Target for SwiftUiMacos {
             run: None,
             notes,
         })
+    }
+
+    fn eject(
+        &self,
+        app: &Application,
+        context: &BuildContext,
+        options: &bern_target_api::EjectOptions,
+    ) -> Result<bern_target_api::EjectedProject, Vec<Diagnostic>> {
+        xcode::eject_apple(app, context, options, Platform::Macos)
     }
 }
 

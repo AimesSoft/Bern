@@ -42,7 +42,7 @@ impl Generator<'_> {
         out.line("let border: Color");
         out.close("}");
         out.line("");
-        out.open("private struct BernNativeHost<Content: View>: View {");
+        out.open("struct BernNativeHost<Content: View>: View {");
         out.line("@Environment(\\.colorScheme) private var colorScheme");
         out.line("let content: (BernNativeTheme) -> Content");
         out.open("var body: some View {");

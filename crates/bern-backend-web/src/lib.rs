@@ -955,6 +955,353 @@ impl Target for WebBrowser {
             notes: Vec::new(),
         })
     }
+
+    fn eject(
+        &self,
+        app: &Application,
+        context: &BuildContext,
+        options: &bern_target_api::EjectOptions,
+    ) -> Result<bern_target_api::EjectedProject, Vec<Diagnostic>> {
+        use bern_target_api::eject::{
+            EjectEngine, EjectedProject, clean_generated_file, copy_declared_resources, readme,
+            sanitized_context,
+        };
+        let context = &sanitized_context(context, options);
+        let app = &bern_target_api::svg::prepare(app, &context.target);
+        bern_target_api::svg::validate(app, context)?;
+        let remote = context.target.web_mode.as_deref() == Some("ui");
+        let strings = strings::tables(app);
+        let version = "ejected";
+        let (icon_files, icon_links) = page_icons(app, context, version)?;
+        let (alternate_files, alternate_links) = alternate_page_icons(app, context, version)?;
+        let all_icon_links = format!("{icon_links}{alternate_links}");
+
+        let title = app
+            .app
+            .name
+            .get(&app.languages.default)
+            .unwrap_or(&app.app.id);
+        let index = format!(
+            r#"<!doctype html>
+<html lang="{lang}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title}</title>
+{icons}<link rel="stylesheet" href="styles/theme.css">
+<link rel="stylesheet" href="styles/bern.css">
+<script type="module" src="src/app.js"></script>
+</head>
+<body>
+<div id="bern-host" class="bern-host"></div>
+</body>
+</html>
+"#,
+            lang = html_escape(&app.languages.default),
+            title = html_escape(title),
+            icons = all_icon_links,
+        );
+
+        let features_js = format!(
+            "{}{}",
+            FEATURE_RUNTIME.replace("./bern.js?v=__BERN_VERSION__", "./bern.js"),
+            if bern_target_api::svg::used(app) {
+                include_str!("../templates/svg.js")
+            } else {
+                ""
+            }
+        );
+
+        let mut files: Vec<GeneratedFile> = vec![
+            GeneratedFile::text("index.html", index),
+            GeneratedFile::text("runtime/bern.js", RUNTIME),
+            GeneratedFile::text("runtime/features.js", features_js),
+            GeneratedFile::text("styles/bern.css", format!("{STYLES}\n{FEATURE_STYLES}")),
+            GeneratedFile::text("styles/theme.css", theme::stylesheet(app)),
+            GeneratedFile::text("THIRD_PARTY_NOTICES.txt", icons::NOTICES),
+        ];
+
+        // Split ES modules (`fingerprint = 0` relaxes catalog check).
+        for (rel, content) in
+            Generator::new(app).generate_split(0, &strings, WASM, if remote { "ui" } else { "app" })
+        {
+            files.push(GeneratedFile::text(rel, content));
+        }
+
+        // Copy co-located Web NativeView modules into `src/native/`.
+        for native in js::native::web_native_files(app, &context.project_dir) {
+            files.push(GeneratedFile {
+                path: PathBuf::from("src").join(native.path),
+                contents: native.contents,
+            });
+        }
+
+        // Page icons, declared resources, and SVG static assets.
+        files.extend(icon_files);
+        files.extend(alternate_files);
+        files.extend(copy_declared_resources(
+            app,
+            context,
+            Path::new("resources"),
+        )?);
+        for svg_file in bern_target_api::svg::static_files(app, context)? {
+            files.push(GeneratedFile {
+                path: PathBuf::from("resources").join(svg_file.path),
+                contents: svg_file.contents,
+            });
+        }
+
+        // Copy declared web extension if configured.
+        if let Some(extension) = &context.target.web_extension {
+            let src = context.project_dir.join(&extension.path);
+            if !src.join("index.js").is_file() {
+                return Err(vec![Diagnostic::error(
+                    "web_extension.path must contain index.js",
+                )]);
+            }
+            for (abs, rel) in
+                files_below(&src).map_err(|error| vec![Diagnostic::error(error.to_string())])?
+            {
+                let contents = std::fs::read(&abs).map_err(|error| {
+                    vec![Diagnostic::error(format!(
+                        "cannot read {}: {error}",
+                        abs.display()
+                    ))]
+                })?;
+                files.push(GeneratedFile {
+                    path: PathBuf::from("extension").join(rel),
+                    contents,
+                });
+            }
+            files.push(GeneratedFile::text(
+                "src/extension-loader.js",
+                "import { installWebExtension } from '../runtime/bern.js';\nimport setup from '../extension/index.js';\ninstallWebExtension(setup);\n",
+            ));
+            if let Some(app_js) = files
+                .iter_mut()
+                .find(|file| file.path == Path::new("src/app.js"))
+            {
+                let mut content = b"import './extension-loader.js';\n".to_vec();
+                content.extend_from_slice(&app_js.contents);
+                app_js.contents = content;
+            }
+        }
+
+        let mut executables = Vec::new();
+        let mut rust_manifests = Vec::new();
+        let mut prebuilt_staging = Vec::new();
+        let mut prebuilt_steps = Vec::new();
+
+        match options.engine {
+            EjectEngine::Source => {
+                files.push(GeneratedFile::text(
+                    "rust/page/Cargo.toml",
+                    glue::page_cargo_toml(context, app, remote),
+                ));
+                files.push(GeneratedFile::text(
+                    "rust/page/src/lib.rs",
+                    glue::page_lib_rs(context, app, remote),
+                ));
+                rust_manifests.push(PathBuf::from("rust/page/Cargo.toml"));
+                if remote {
+                    files.push(GeneratedFile::text(
+                        "rust/host/Cargo.toml",
+                        glue::host_cargo_toml(context, app),
+                    ));
+                    files.push(GeneratedFile::text(
+                        "rust/host/src/host.rs",
+                        glue::host_rs(context, app),
+                    ));
+                    files.push(GeneratedFile::text(
+                        "rust/host/src/cli.rs",
+                        glue::cli_rs(context, app),
+                    ));
+                    rust_manifests.push(PathBuf::from("rust/host/Cargo.toml"));
+                } else if options.with_cli && skill::listens(&context.target.channels) {
+                    let mut tools_app = app.clone();
+                    tools_app.app.bundle_id.push_str(".web");
+                    files.extend([
+                        GeneratedFile::text("control.js", include_str!("../templates/control.js")),
+                        GeneratedFile::text(
+                            "serve-bridge.py",
+                            include_str!("../templates/serve-bridge.py"),
+                        ),
+                        GeneratedFile::text(
+                            "control.json",
+                            serde_json::json!({"bundle_id": tools_app.app.bundle_id}).to_string(),
+                        ),
+                        GeneratedFile::text(
+                            "rust/control/Cargo.toml",
+                            glue::control_cargo_toml(context, app),
+                        ),
+                        GeneratedFile::text(
+                            "rust/control/src/cli.rs",
+                            glue::cli_rs(context, &tools_app),
+                        ),
+                    ]);
+                    rust_manifests.push(PathBuf::from("rust/control/Cargo.toml"));
+                }
+                let build_sh = PathBuf::from("scripts/build-wasm.sh");
+                files.push(GeneratedFile::text(
+                    build_sh.clone(),
+                    r#"#!/bin/sh
+# Build the vendored Rust engine to WebAssembly (app.wasm). Edit freely.
+set -eu
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PROFILE="debug"
+CARGO_ARGS=""
+if [ "${1:-}" = "--release" ]; then
+    PROFILE="release"
+    CARGO_ARGS="--release"
+fi
+
+cd "$ROOT/rust/page"
+# shellcheck disable=SC2086
+cargo build \
+    --manifest-path "$ROOT/rust/page/Cargo.toml" \
+    --target wasm32-unknown-unknown \
+    --target-dir "$ROOT/rust/target" \
+    $CARGO_ARGS
+
+cp "$ROOT/rust/target/wasm32-unknown-unknown/$PROFILE/bern_web_app.wasm" "$ROOT/app.wasm"
+echo "Updated $ROOT/app.wasm"
+"#,
+                ));
+                executables.push(build_sh);
+                files.push(GeneratedFile::text(
+                    "scripts/build-wasm.cmd",
+                    r#"@echo off
+rem Build the vendored Rust engine to WebAssembly (app.wasm). Edit freely.
+setlocal EnableExtensions
+set "ROOT=%~dp0.."
+set "PROFILE=debug"
+set "CARGO_ARGS="
+if /i "%~1"=="--release" (
+    set "PROFILE=release"
+    set "CARGO_ARGS=--release"
+)
+pushd "%ROOT%\rust\page" || exit /b 1
+cargo build --manifest-path "%ROOT%\rust\page\Cargo.toml" --target wasm32-unknown-unknown --target-dir "%ROOT%\rust\target" %CARGO_ARGS% || (popd & exit /b 1)
+popd
+copy /y "%ROOT%\rust\target\wasm32-unknown-unknown\%PROFILE%\bern_web_app.wasm" "%ROOT%\app.wasm" >nul || exit /b 1
+echo Updated %ROOT%\app.wasm
+"#
+                    .replace('\n', "\r\n"),
+                ));
+            }
+            EjectEngine::Prebuilt => {
+                prebuilt_staging.push(GeneratedFile::text(
+                    "page/Cargo.toml",
+                    glue::page_cargo_toml(context, app, remote),
+                ));
+                prebuilt_staging.push(GeneratedFile::text(
+                    "page/src/lib.rs",
+                    glue::page_lib_rs(context, app, remote),
+                ));
+                if let Ok(lock) = std::fs::read(context.workspace_dir.join("Cargo.lock")) {
+                    prebuilt_staging.push(GeneratedFile {
+                        path: "page/Cargo.lock".into(),
+                        contents: lock,
+                    });
+                }
+                bern_target_api::script::configure(&mut prebuilt_staging, context);
+
+                let staging = &options.staging_dir;
+                let profile = if options.release { "release" } else { "debug" };
+                let mode = if remote { "ui" } else { "app" };
+                let page_target = context
+                    .workspace_dir
+                    .join(format!("target/bern-web-glue/{mode}"));
+                let mut cargo = vec![
+                    "build".to_string(),
+                    "--manifest-path".into(),
+                    staging.join("page/Cargo.toml").display().to_string(),
+                    "--target".into(),
+                    RUST_TARGET.into(),
+                    "--target-dir".into(),
+                    page_target.display().to_string(),
+                ];
+                if options.release {
+                    cargo.push("--release".into());
+                }
+                prebuilt_steps.extend([
+                    BuildStep::Run {
+                        description: "Build prebuilt WebAssembly engine".into(),
+                        program: "cargo".into(),
+                        args: cargo,
+                        cwd: staging.join("page"),
+                        env: vec![],
+                    },
+                    BuildStep::WebAssembly {
+                        from: page_target
+                            .join(RUST_TARGET)
+                            .join(profile)
+                            .join("bern_web_app.wasm"),
+                        dir: context.output_dir.clone(),
+                    },
+                ]);
+            }
+        }
+
+        if options.with_cli && skill::listens(&context.target.channels) {
+            let cli_name = glue::program(app);
+            files.push(GeneratedFile::text(
+                skill::path(app),
+                skill::markdown(
+                    app,
+                    &skill::Place {
+                        cli: cli_name,
+                        installed: None,
+                        connect: None,
+                    },
+                ),
+            ));
+        }
+
+        bern_target_api::script::configure(&mut files, context);
+
+        let build_help = match options.engine {
+            EjectEngine::Source => {
+                "First compile the WebAssembly module (requires `rustup target add wasm32-unknown-unknown`):\n\n```sh\n./scripts/build-wasm.sh        # or scripts\\build-wasm.cmd on Windows\n```\n\nThen serve the folder with any static HTTP server (ES modules require HTTP, not `file://`):\n\n```sh\npython3 -m http.server 8080\n```"
+            }
+            EjectEngine::Prebuilt => {
+                "No Rust or bundler required — `app.wasm` is already compiled in this folder. Serve with any static HTTP server:\n\n```sh\npython3 -m http.server 8080\n```"
+            }
+        };
+        let layout_help = "- `index.html` — Entry HTML page\n- `src/app.js` — Application startup and window catalog\n- `src/models.js` — Protocol codecs, state cells, and command dispatchers\n- `src/styles.js` — Motion tokens, transitions, patterns, and style overrides\n- `src/views/` — One ES module per UI component\n- `src/windows/` — One ES module per window\n- `runtime/` & `styles/` — Self-contained Bern DOM runtime and CSS\n- `resources/` — Bundled application resources";
+        files.push(GeneratedFile::text(
+            "README.md",
+            readme(
+                title,
+                "Web · DOM + WebAssembly",
+                options.engine,
+                &[
+                    ("Running & Building", build_help),
+                    ("Project Layout", layout_help),
+                ],
+            ),
+        ));
+
+        let files = files.into_iter().map(clean_generated_file).collect();
+        let note = match options.engine {
+            EjectEngine::Source => {
+                "Run `./scripts/build-wasm.sh` then serve the folder with any static HTTP server."
+            }
+            EjectEngine::Prebuilt => {
+                "Serve the ejected folder with any static HTTP server (for example `python3 -m http.server`)."
+            }
+        };
+        Ok(EjectedProject {
+            files,
+            executables,
+            rust_manifests,
+            rust_root: PathBuf::from("rust"),
+            prebuilt_staging,
+            prebuilt_steps,
+            notes: vec![note.into()],
+        })
+    }
 }
 
 #[cfg(test)]

@@ -17,6 +17,7 @@ mod glue;
 mod icons;
 mod installer;
 mod style;
+mod vsproj;
 
 use bern_ir::spec::COMPONENTS;
 use bern_ir::{Application, IR_VERSION, Node};
@@ -31,7 +32,7 @@ pub use cpp::Generator;
 pub use glue::{MINIMUM_WINDOWS, PACKAGES, WINDOWS_APP_SDK};
 
 /// The C++ runtime, copied into every generated application.
-const RUNTIME: &[(&str, &str)] = &[
+pub(crate) const RUNTIME: &[(&str, &str)] = &[
     ("bern_base.h", include_str!("../templates/cpp/bern_base.h")),
     (
         "bern_base.cpp",
@@ -749,6 +750,15 @@ impl Target for WinUi3Windows {
             run: None,
             notes,
         })
+    }
+
+    fn eject(
+        &self,
+        app: &Application,
+        context: &BuildContext,
+        options: &bern_target_api::EjectOptions,
+    ) -> Result<bern_target_api::EjectedProject, Vec<Diagnostic>> {
+        vsproj::eject_windows(app, context, options)
     }
 }
 

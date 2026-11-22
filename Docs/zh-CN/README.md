@@ -2,7 +2,7 @@
 
 # Bern 文档
 
-更新：2026-11-21。安装 `bern` 并运行第一个应用请从根目录 [README 的快速开始](../../README.zh-CN.md#快速开始)入手；完整可构建示例在 [examples/](../../examples/)。
+更新：2026-11-22。安装 `bern` 并运行第一个应用请从根目录 [README 的快速开始](../../README.zh-CN.md#快速开始)入手；完整可构建示例在 [examples/](../../examples/)。
 
 ## 按场景快速查阅
 
@@ -10,6 +10,7 @@
 | --- | --- |
 | 用标准控件、自适应布局、默认骨架图或 `NativeView` 编写界面 | [当前组件用法](Reference/UI.md)与[完整组件属性表](Reference/Component-Properties.md) |
 | 核对各后端支持范围、构建证据与真机验证状态 | [平台能力与验证范围](Reference/Platforms.md) |
+| 随时脱离 Bern 导出独立可编译的各平台纯原生 IDE 项目 | [导出为独立纯原生项目](Implementation/Eject.md) |
 | 启用 JavaScript 脚本或用 `bern.cli` 与黑白名单做插件系统 | [JavaScript 与 `bern.cli`](Implementation/JavaScript.md) |
 | 在 Rust 声明旁紧邻嵌入各平台原生控件或自绘视图 | [紧邻原生视图](Implementation/Native-Views.md) |
 | 选用 GPUI 后端或排查特定平台细节 | [GPUI](Implementation/GPUI.md)或下方各平台实现记录 |
@@ -38,6 +39,7 @@
 
 ### 专题文档
 
+- [导出为独立纯原生项目](Implementation/Eject.md)：`bern eject` 导出独立可构建的 `.xcodeproj`、Gradle、Visual Studio `.sln`/`.vcxproj`、Cargo 与零打包器 ES 模块工程，支持完全离线自包含 Rust 后端源码（`--engine source`）与预编译引擎二进制（`--engine prebuilt`）两种模式。
 - [紧邻原生视图](Implementation/Native-Views.md)：在 Rust 声明同目录放置各平台原生 UI 文件的 `NativeView`，含强类型 `Props`/`Actions`/`Theme`、强制 CLI 入口、`tr!` 多语言检查与 `Fallback`。
 - [JavaScript 与 `bern.cli`](Implementation/JavaScript.md)：按需启用的 `javascript = true`（所有原生目标统一进程内 Boa，Web 目标为浏览器 Worker）、持久脚本上下文、进程内 `globalThis.bern.cli(...)`、Rust 侧黑白名单 `CliPolicy` 与 `window.webview` 编译期分支。
 - [动画 SVG](Implementation/Animated-SVG.md)：零 WebView 依赖的纯 Rust `BSVG` 字节码渲染、资源声明、静态回退与验证范围。

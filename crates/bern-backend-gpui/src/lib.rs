@@ -924,4 +924,156 @@ impl Target for Gpui {
             products,
         })
     }
+
+    fn supports_prebuilt_eject(&self) -> bool {
+        false
+    }
+
+    fn eject(
+        &self,
+        app: &Application,
+        context: &BuildContext,
+        options: &bern_target_api::EjectOptions,
+    ) -> Result<bern_target_api::EjectedProject, Vec<Diagnostic>> {
+        use bern_target_api::eject::{
+            EjectEngine, EjectedProject, clean_generated_file, copy_declared_resources, readme,
+            sanitized_context,
+        };
+        if options.engine == EjectEngine::Prebuilt {
+            return Err(vec![Diagnostic::error(
+                "the GPUI frontend is native Rust source code and always requires Cargo; eject with `--engine source`",
+            )]);
+        }
+        if matches!(context.framework, bern_target_api::Framework::Registry(_)) {
+            return Err(vec![Diagnostic::error(
+                "the GPUI runtime requires a Bern path or Git checkout with its patched desktop GPUI dependencies",
+            )]);
+        }
+        let context = &sanitized_context(context, options);
+        let app = &prepared(app, &context.target);
+        bern_target_api::svg::validate(app, context)?;
+        let product = product_name(app);
+        let exe = bern_target_api::glue::program(app);
+
+        let mut files: Vec<GeneratedFile> = vec![
+            GeneratedFile::text(
+                "Cargo.toml",
+                glue::cargo_toml_for(context, app, self.platform, options.with_cli, true),
+            ),
+            GeneratedFile::text("src/main.rs", glue::main_rs_for(context, app, 0, true)),
+        ];
+        if options.with_cli {
+            files.push(GeneratedFile::text(
+                "src/cli.rs",
+                glue::cli_rs(context, app),
+            ));
+        }
+
+        let generator = Generator::with_project_dir(app, self.platform, &context.project_dir);
+        for (rel, content) in
+            generator.generate_split(0, &bern_target_api::glue::descriptor_expr(context))
+        {
+            files.push(GeneratedFile::text(
+                PathBuf::from("src/ui").join(rel),
+                content,
+            ));
+        }
+
+        // Declared resources, SVG static files, and GPUI runtime icon pictures.
+        files.extend(copy_declared_resources(
+            app,
+            context,
+            std::path::Path::new("resources"),
+        )?);
+        for svg_file in bern_target_api::svg::static_files(app, context)? {
+            files.push(GeneratedFile {
+                path: PathBuf::from("resources").join(svg_file.path),
+                contents: svg_file.contents,
+            });
+        }
+        for (shipped, declared) in icon_pictures(app, self.platform) {
+            let src = context.project_dir.join(&declared);
+            let contents = std::fs::read(&src).map_err(|error| {
+                vec![Diagnostic::error(format!(
+                    "cannot read icon `{}` ({}): {error}",
+                    declared,
+                    src.display()
+                ))]
+            })?;
+            files.push(GeneratedFile {
+                path: PathBuf::from("resources").join(shipped),
+                contents,
+            });
+        }
+
+        // Platform packaging metadata.
+        if self.platform == "macos" {
+            for file in mac_bundle_files(app, context)? {
+                files.push(GeneratedFile {
+                    path: PathBuf::from("assets/macos").join(file.path),
+                    contents: file.contents,
+                });
+            }
+        }
+        if self.platform == "windows" {
+            for file in windows_resource_files(app, context)? {
+                let rel = file
+                    .path
+                    .strip_prefix("app")
+                    .unwrap_or(&file.path)
+                    .to_path_buf();
+                files.push(GeneratedFile {
+                    path: rel,
+                    contents: file.contents,
+                });
+            }
+        }
+
+        if options.with_cli && skill::listens(&context.target.channels) {
+            let cli_name = format!("{exe}-cli");
+            files.push(GeneratedFile::text(
+                skill::path(app),
+                skill::markdown(
+                    app,
+                    &skill::Place {
+                        cli: cli_name,
+                        installed: None,
+                        connect: None,
+                    },
+                ),
+            ));
+        }
+
+        bern_target_api::script::configure(&mut files, context);
+
+        let app_title = app.app.name.get(&app.languages.default).unwrap_or(&product);
+        let platform_label = format!("Desktop · GPUI ({})", self.platform);
+        let build_help = format!(
+            "Build and run directly with Cargo:\n\n```sh\ncargo run\n```\n\nFor an optimized binary, run `cargo build --release` (executable: `target/release/{exe}`)."
+        );
+        let layout_help = "- `src/main.rs` — Application entry point\n- `src/ui/mod.rs` — App definition, menus, and window registration\n- `src/ui/views/` — One Rust module per UI component\n- `src/ui/windows/` — One Rust module per window\n- `src/ui/styles.rs` & `src/ui/strings.rs` — Styles, motion tokens, icons, and strings\n- `resources/` — Bundled application resources\n- `crates/` & `vendor/bern/` — Self-contained application engine and patched GPUI runtime";
+        files.push(GeneratedFile::text(
+            "README.md",
+            readme(
+                app_title,
+                &platform_label,
+                EjectEngine::Source,
+                &[
+                    ("Building & Running", &build_help),
+                    ("Project Layout", layout_help),
+                ],
+            ),
+        ));
+
+        let files = files.into_iter().map(clean_generated_file).collect();
+        Ok(EjectedProject {
+            files,
+            executables: Vec::new(),
+            rust_manifests: vec![PathBuf::from("Cargo.toml")],
+            rust_root: PathBuf::from("."),
+            prebuilt_staging: Vec::new(),
+            prebuilt_steps: Vec::new(),
+            notes: vec!["Run `cargo run` inside the ejected folder to build and run.".into()],
+        })
+    }
 }

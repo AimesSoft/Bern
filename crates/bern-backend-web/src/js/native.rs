@@ -41,6 +41,20 @@ pub fn web_native_files(app: &Application, project_dir: &Path) -> Vec<GeneratedF
 }
 
 impl Generator<'_> {
+    /// Emit ES module imports for all `web` native views using a custom path prefix.
+    pub(super) fn native_imports_from(&self, out: &mut Out, prefix: &str) {
+        let mut emitted = std::collections::BTreeSet::new();
+        for view in collect_native_views(self.app) {
+            if view.info.file_for("web").is_none() || !emitted.insert(view.symbol.clone()) {
+                continue;
+            }
+            out.line(format!(
+                "import * as N_{} from \"{prefix}{}.js\";",
+                view.symbol, view.symbol
+            ));
+        }
+    }
+
     /// Emit top-level ES module imports for all `web` native views in `app.js`.
     pub(super) fn native_imports(&self, out: &mut Out, version: &str) {
         let mut emitted = std::collections::BTreeSet::new();

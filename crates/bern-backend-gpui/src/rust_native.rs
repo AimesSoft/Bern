@@ -68,6 +68,49 @@ fn pack_rust(var: &str, ty: &Type) -> String {
 }
 
 impl Generator<'_> {
+    pub(super) fn native_view_modules_split(&self) -> (String, Vec<(String, String)>) {
+        let views: Vec<CollectedNativeView<'_>> = collect_native_views(self.app)
+            .into_iter()
+            .filter(|v| v.info.file_for("gpui").is_some())
+            .collect();
+        if views.is_empty() {
+            return (String::new(), Vec::new());
+        }
+        let mut out = String::from(
+            "// Co-located native UI views.\n// Ejected from Bern — edit freely.\n#![allow(unused_imports, unused_variables, unused_mut, unused_parens, unused_braces, dead_code, clippy::all)]\n\n",
+        );
+        let mut emitted = std::collections::BTreeSet::new();
+        let mut extra = Vec::new();
+        for view in &views {
+            if !emitted.insert(view.symbol.clone()) {
+                continue;
+            }
+            let Some(path) = view.info.file_for("gpui") else {
+                continue;
+            };
+            let source = self
+                .project_dir
+                .map(|dir| dir.join(path))
+                .filter(|p| p.exists())
+                .and_then(|p| std::fs::read_to_string(p).ok())
+                .or_else(|| find_native_source(self.app, path).map(|def| def.source.clone()))
+                .unwrap_or_default();
+            extra.push((format!("native/{}.rs", view.symbol), source));
+            out.push_str(&format!("pub(crate) mod native_{} {{\n", view.symbol));
+            out.push_str("    use bern_gpui::gpui;\n");
+            out.push_str("    use std::rc::Rc;\n");
+            self.emit_native_types(&mut out, &view.info);
+            out.push_str(&format!(
+                "    #[path = {}]\n",
+                string(&format!("{}.rs", view.symbol))
+            ));
+            out.push_str("    mod impl_;\n");
+            out.push_str("    pub use impl_::render;\n");
+            out.push_str("}\n\n");
+        }
+        (out, extra)
+    }
+
     pub(super) fn native_view_modules(&self) -> String {
         let views: Vec<CollectedNativeView<'_>> = collect_native_views(self.app)
             .into_iter()

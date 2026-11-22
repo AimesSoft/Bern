@@ -574,6 +574,9 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
 /// declared names and that directory are installed as the process's
 /// [`Resources`] before the engine is constructed.
 ///
+/// Passing `0` for `fingerprint` disables the catalog fingerprint check so
+/// ejected standalone projects can evolve their protocol freely.
+///
 /// # Safety
 /// `resources` must point to `resources_len` readable bytes or be null with
 /// `resources_len == 0`. `error` must be null or point to writable memory
@@ -621,7 +624,7 @@ pub unsafe fn start_app<E: EngineProtocol>(
         bern_command::storage::Store::install_application(spec.bundle_id);
         let engine = make_engine();
         let actual = engine.descriptor().fingerprint();
-        if actual != fingerprint {
+        if fingerprint != 0 && actual != fingerprint {
             return Err(format!(
                 "the frontend was generated for catalog {fingerprint:016x}, the engine has {actual:016x}; rebuild"
             ));

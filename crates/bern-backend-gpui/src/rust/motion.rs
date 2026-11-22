@@ -36,7 +36,7 @@ impl Generator<'_> {
         let mut out = String::from("// Motion tokens: period and damping ratio of each spring.\n");
         for token in &sheet.motion {
             out.push_str(&format!(
-                "#[allow(dead_code)] const {}: b::Curve = ({}, {});\n",
+                "#[allow(dead_code)] pub(crate) const {}: b::Curve = ({}, {});\n",
                 constant("M", &token.name),
                 float(token.period),
                 float(token.damping)
@@ -45,7 +45,7 @@ impl Generator<'_> {
         for (name, period, damping) in bern_ir::style::BUILT_IN_MOTION {
             if sheet.token(name).is_none() {
                 out.push_str(&format!(
-                    "#[allow(dead_code)] const {}: b::Curve = ({}, {});\n",
+                    "#[allow(dead_code)] pub(crate) const {}: b::Curve = ({}, {});\n",
                     constant("M", name),
                     float(period),
                     float(damping)
@@ -69,7 +69,7 @@ impl Generator<'_> {
                 }
             };
             out.push_str(&format!(
-                "#[allow(dead_code)] static {}: b::Transition = b::Transition {{ kind: {kind}, motion: {} }};\n",
+                "#[allow(dead_code)] pub(crate) static {}: b::Transition = b::Transition {{ kind: {kind}, motion: {} }};\n",
                 constant("X", &transition.name),
                 self.curve(&transition.motion)
             ));

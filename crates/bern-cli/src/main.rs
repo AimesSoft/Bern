@@ -7,13 +7,17 @@
 //! generates.
 
 mod doctor;
+mod eject;
+mod eject_rust;
 mod framework;
 mod module;
 mod new;
 mod run;
 
 use bern_compiler::{Compiled, Config};
-use bern_target_api::{BuildContext, BuildStep, Diagnostic, Framework, Registry, Target};
+use bern_target_api::{
+    BuildContext, BuildStep, Diagnostic, EjectEngine, Framework, Registry, Target,
+};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -29,6 +33,7 @@ Usage:
   bern run    [--manifest PATH] [--target NAME] [--release] [--port PORT] [--trace RULES]
   bern build  [--manifest PATH] [--target NAME] [--release]
   bern package [--manifest PATH] [--target NAME]
+  bern eject  [--manifest PATH] [--target NAME] [--out DIR] [--engine source|prebuilt] [--release] [--with-cli] [--force]
   bern check  [--manifest PATH] [--target NAME]
   bern doctor [--manifest PATH]
   bern ir     [--manifest PATH]
@@ -40,6 +45,7 @@ Commands:
   run          Build one target and start it (default: this computer's)
   build        Build targets (default: every one this computer can build)
   package      Make release packages to install, in target/bern/dist
+  eject        Emit standalone native IDE projects that build without Bern
   check        Check declarations, translations and feature coverage
   doctor       Show what this computer needs to build each target
   ir           Print the compiled IR as JSON
@@ -47,6 +53,12 @@ Commands:
 Options:
   --manifest   Path to Bern.toml (default: search from the current directory)
   --target     Target name from [targets.<name>]
+  --out        Output directory for `bern eject` (default: ejected/<target>)
+  --engine     How `bern eject` ships the Rust engine: `source` (default,
+               offline self-contained Rust workspace) or `prebuilt` (compiled
+               engine binary; no Rust toolchain required)
+  --with-cli   Keep the application CLI, IPC channel, and SKILL.md in `bern eject`
+  --force      Overwrite a non-empty `--out` directory in `bern eject`
   --exclude-module  Omit module ids from compilation (comma-separated; repeatable)
   --release    Optimized build
   --port       Local HTTP port, 1–65535, for browser app runs;
@@ -83,6 +95,11 @@ struct Options {
     /// `bern new --module <id>`.
     module: Option<String>,
     exclude_modules: Vec<String>,
+    /// `bern eject` options.
+    out: Option<PathBuf>,
+    eject_engine: Option<EjectEngine>,
+    with_cli: bool,
+    force: bool,
 }
 
 fn parse() -> Result<Options, String> {
@@ -112,6 +129,16 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Options, String>
         ],
         "build" => &["--manifest", "--target", "--release", "--exclude-module"],
         "package" => &["--manifest", "--target", "--exclude-module"],
+        "eject" => &[
+            "--manifest",
+            "--target",
+            "--out",
+            "--engine",
+            "--release",
+            "--with-cli",
+            "--force",
+            "--exclude-module",
+        ],
         "check" => &["--manifest", "--target", "--exclude-module"],
         "doctor" => &["--manifest"],
         "ir" => &["--manifest", "--exclude-module"],
@@ -161,6 +188,20 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Options, String>
             }
             "--bern-path" => options.bern_path = Some(value()?.into()),
             "--module" => options.module = Some(value()?),
+            "--out" => options.out = Some(value()?.into()),
+            "--engine" => {
+                options.eject_engine = Some(match value()?.as_str() {
+                    "source" => EjectEngine::Source,
+                    "prebuilt" => EjectEngine::Prebuilt,
+                    other => {
+                        return Err(format!(
+                            "--engine must be `source` or `prebuilt`, not `{other}`"
+                        ));
+                    }
+                });
+            }
+            "--with-cli" => options.with_cli = true,
+            "--force" => options.force = true,
             "--exclude-module" => {
                 for id in value()?.split(',').map(str::trim) {
                     if !bern_syntax::valid_id(id) {
@@ -489,6 +530,7 @@ fn main() -> ExitCode {
     match options.command.as_str() {
         "new" => create(&options),
         "doctor" => doctor(&options),
+        "eject" => eject::run(&options),
         _ => build(&options),
     }
 }
@@ -1474,7 +1516,7 @@ mod module_option_tests {
     use super::*;
     #[test]
     fn every_compilation_command_accepts_repeated_and_comma_separated_exclusions() {
-        for command in ["run", "build", "package", "check", "ir"] {
+        for command in ["run", "build", "package", "eject", "check", "ir"] {
             let options = parse_args(
                 [
                     command,
@@ -1505,6 +1547,371 @@ mod module_option_tests {
                 )
                 .is_err()
             );
+        }
+    }
+
+    #[test]
+    fn eject_cli_arguments_parse_and_validate() {
+        let parsed = parse_args(
+            [
+                "eject",
+                "--target",
+                "macos",
+                "--out",
+                "/tmp/out-macos",
+                "--engine",
+                "prebuilt",
+                "--release",
+                "--with-cli",
+                "--force",
+            ]
+            .into_iter()
+            .map(str::to_string),
+        )
+        .unwrap();
+        assert_eq!(parsed.command, "eject");
+        assert_eq!(parsed.target.as_deref(), Some("macos"));
+        assert_eq!(parsed.out, Some(PathBuf::from("/tmp/out-macos")));
+        assert_eq!(parsed.eject_engine, Some(EjectEngine::Prebuilt));
+        assert!(parsed.release);
+        assert!(parsed.with_cli);
+        assert!(parsed.force);
+
+        assert!(
+            parse_args(
+                ["eject", "--engine", "invalid"]
+                    .into_iter()
+                    .map(str::to_string)
+            )
+            .unwrap_err()
+            .contains("--engine must be `source` or `prebuilt`")
+        );
+    }
+
+    #[test]
+    fn eject_source_produces_offline_self_contained_projects_for_all_backends() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .unwrap();
+        let manifest_path = repo.join("examples/hello/Bern.toml");
+        let config = bern_compiler::config::load(&manifest_path).unwrap();
+        let compiled = bern_compiler::compile(&config).unwrap();
+        let framework = Framework::Path(repo.join("crates"));
+        let reg = registry();
+        let scratch = std::env::temp_dir().join(format!("bern-eject-all-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&scratch);
+
+        // Include every backend: macOS (SwiftUI), Windows (WinUI 3), Linux (GTK 4),
+        // Android (Compose), Web (DOM + WASM), plus GPUI on macOS.
+        let mut target_configs = config.targets.clone();
+        target_configs.push(bern_target_api::TargetConfig {
+            name: "gpui_macos".into(),
+            platform: "macos".into(),
+            ui: Some("gpui".into()),
+            web_mode: None,
+            web_extension: None,
+            webview: None,
+            javascript: false,
+            android: None,
+            abis: Vec::new(),
+            channels: Vec::new(),
+            frontends: Vec::new(),
+            web_ui: None,
+            page_only: false,
+            separate_packages: false,
+        });
+
+        for target_config in &target_configs {
+            let target = reg.resolve(target_config).unwrap();
+            let out_dir = scratch.join(&target_config.name);
+            std::fs::create_dir_all(&out_dir).unwrap();
+            let mut ctx = context(&config, &compiled, &repo, target_config, &framework, false);
+            ctx.output_dir = out_dir.clone();
+            let app = compiled.app.on_platform(&target_config.platform);
+            let app = bern_target_api::style::for_platforms(&app, target.descriptor().platforms);
+            let opts = bern_target_api::EjectOptions {
+                engine: EjectEngine::Source,
+                with_cli: false,
+                release: false,
+                staging_dir: scratch.join("staging").join(&target_config.name),
+            };
+            let mut ejected = target.eject(&app, &ctx, &opts).unwrap();
+            modules::configure(&mut ejected.files, &config).unwrap();
+            for file in &ejected.files {
+                write_if_changed(&out_dir.join(&file.path), &file.contents).unwrap();
+            }
+            let report = eject_rust::bundle_offline_workspace(
+                &out_dir,
+                &ejected.rust_root,
+                &ejected.rust_manifests,
+                &config,
+                &repo,
+                &framework,
+            )
+            .unwrap();
+            assert!(
+                report.app_crates >= 2,
+                "{}: expected protocol + engine",
+                target_config.name
+            );
+            assert!(
+                report.bern_crates >= 1,
+                "{}: expected vendored Bern crates",
+                target_config.name
+            );
+
+            // Verify zero leftover `Do not edit` banners in generated project files
+            // and zero absolute references back to the original repository inside
+            // every ejected Cargo.toml.
+            let repo_slash = repo.display().to_string().replace('\\', "/");
+            for file in &ejected.files {
+                if let Ok(text) = std::str::from_utf8(&file.contents) {
+                    assert!(
+                        !text.contains("Do not edit."),
+                        "{}/{}: leftover generated banner",
+                        target_config.name,
+                        file.path.display()
+                    );
+                    if target_config.platform == "windows" {
+                        assert!(
+                            !text.to_ascii_lowercase().contains("powershell"),
+                            "Windows ejected output must never embed PowerShell commands: {}",
+                            file.path.display()
+                        );
+                    }
+                }
+            }
+            for manifest_rel in &ejected.rust_manifests {
+                let text = std::fs::read_to_string(out_dir.join(manifest_rel)).unwrap();
+                assert!(
+                    !text.contains(&repo_slash),
+                    "{}/{}: leaked absolute path to original repo:\n{text}",
+                    target_config.name,
+                    manifest_rel.display()
+                );
+                assert!(
+                    !text.contains("workspace = true"),
+                    "{}/{}: unexpanded workspace inheritance:\n{text}",
+                    target_config.name,
+                    manifest_rel.display()
+                );
+            }
+        }
+
+        // Verify platform-specific IDE entry files and split UI layouts.
+        assert!(
+            scratch
+                .join("macos/Hello.xcodeproj/project.pbxproj")
+                .is_file()
+        );
+        assert!(scratch.join("macos/Sources/App/AppEntry.swift").is_file());
+        assert!(
+            scratch
+                .join("macos/Sources/Windows/MainWindow.swift")
+                .is_file()
+        );
+        assert!(scratch.join("macos/scripts/build-rust.sh").is_file());
+
+        assert!(scratch.join("windows/Hello.sln").is_file());
+        assert!(scratch.join("windows/Hello.vcxproj").is_file());
+        assert!(scratch.join("windows/Hello.vcxproj.filters").is_file());
+        assert!(scratch.join("windows/scripts/prepare-sdk.cmd").is_file());
+        assert!(scratch.join("windows/scripts/build-rust.cmd").is_file());
+        assert!(scratch.join("windows/src/ui/app_ui.inl").is_file());
+
+        assert!(scratch.join("android/settings.gradle.kts").is_file());
+        assert!(scratch.join("android/app/build.gradle.kts").is_file());
+        assert!(
+            scratch
+                .join("android/gradle/wrapper/gradle-wrapper.properties")
+                .is_file()
+        );
+        assert!(
+            scratch
+                .join("android/app/src/main/kotlin/dev/bern/hello/MainActivity.kt")
+                .is_file()
+        );
+
+        assert!(scratch.join("linux/Cargo.toml").is_file());
+        assert!(scratch.join("linux/src/ui/mod.rs").is_file());
+        assert!(scratch.join("linux/src/ui/views/mod.rs").is_file());
+
+        assert!(scratch.join("gpui_macos/Cargo.toml").is_file());
+        assert!(scratch.join("gpui_macos/src/ui/mod.rs").is_file());
+        let gpui_toml = std::fs::read_to_string(scratch.join("gpui_macos/Cargo.toml")).unwrap();
+        assert!(
+            gpui_toml.contains("vendor/bern/bern-gpui/vendor/gpui-pre"),
+            "{gpui_toml}"
+        );
+
+        assert!(scratch.join("web_app/index.html").is_file());
+        assert!(scratch.join("web_app/src/app.js").is_file());
+        assert!(scratch.join("web_app/src/models.js").is_file());
+        assert!(scratch.join("web_app/scripts/build-wasm.sh").is_file());
+
+        let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    #[test]
+    fn eject_copies_native_views_without_external_paths() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .unwrap();
+        let manifest_path = repo.join("examples/native-controls/Bern.toml");
+        let config = bern_compiler::config::load(&manifest_path).unwrap();
+        let compiled = bern_compiler::compile(&config).unwrap();
+        let framework = Framework::Path(repo.join("crates"));
+        let reg = registry();
+        let scratch =
+            std::env::temp_dir().join(format!("bern-eject-native-views-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&scratch);
+        let repo_slash = repo.display().to_string().replace('\\', "/");
+
+        for target_config in &config.targets {
+            let target = reg.resolve(target_config).unwrap();
+            let out_dir = scratch.join(&target_config.name);
+            let mut ctx = context(&config, &compiled, &repo, target_config, &framework, false);
+            ctx.output_dir = out_dir.clone();
+            let app = compiled.app.on_platform(&target_config.platform);
+            let app = bern_target_api::style::for_platforms(&app, target.descriptor().platforms);
+            let opts = bern_target_api::EjectOptions {
+                engine: EjectEngine::Source,
+                with_cli: false,
+                release: false,
+                staging_dir: scratch.join("staging").join(&target_config.name),
+            };
+            let ejected = target.eject(&app, &ctx, &opts).unwrap();
+            for file in &ejected.files {
+                // Skip raw Cargo.toml before offline bundler rewrites them.
+                if file.path.file_name().is_some_and(|n| n == "Cargo.toml") {
+                    continue;
+                }
+                if let Ok(text) = std::str::from_utf8(&file.contents) {
+                    assert!(
+                        !text.contains(&repo_slash),
+                        "{}/{}: leaked external project path in native view output",
+                        target_config.name,
+                        file.path.display()
+                    );
+                }
+            }
+        }
+        let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    #[test]
+    fn eject_prebuilt_mode_excludes_rust_sources_and_rejects_rust_frontends() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .unwrap();
+        let manifest_path = repo.join("examples/hello/Bern.toml");
+        let config = bern_compiler::config::load(&manifest_path).unwrap();
+        let compiled = bern_compiler::compile(&config).unwrap();
+        let framework = Framework::Path(repo.join("crates"));
+        let reg = registry();
+        let scratch =
+            std::env::temp_dir().join(format!("bern-eject-prebuilt-{}", std::process::id()));
+
+        for name in ["macos", "windows", "web_app"] {
+            let tc = config.targets.iter().find(|t| t.name == name).unwrap();
+            let target = reg.resolve(tc).unwrap();
+            assert!(target.supports_prebuilt_eject(), "{name}");
+            let mut ctx = context(&config, &compiled, &repo, tc, &framework, true);
+            ctx.output_dir = scratch.join(name);
+            let app = compiled.app.on_platform(&tc.platform);
+            let app = bern_target_api::style::for_platforms(&app, target.descriptor().platforms);
+            let opts = bern_target_api::EjectOptions {
+                engine: EjectEngine::Prebuilt,
+                with_cli: false,
+                release: true,
+                staging_dir: scratch.join("staging").join(name),
+            };
+            let ejected = target.eject(&app, &ctx, &opts).unwrap();
+            assert!(
+                ejected.rust_manifests.is_empty(),
+                "{name}: prebuilt must not vendor rust manifests"
+            );
+            assert!(
+                !ejected.prebuilt_steps.is_empty(),
+                "{name}: prebuilt must provide build steps"
+            );
+            assert!(
+                ejected.files.iter().all(|f| !f.path.starts_with("rust")),
+                "{name}: prebuilt must not emit rust/ files into the ejected project"
+            );
+        }
+
+        let linux_tc = config.targets.iter().find(|t| t.name == "linux").unwrap();
+        let linux_target = reg.resolve(linux_tc).unwrap();
+        assert!(!linux_target.supports_prebuilt_eject());
+        let mut ctx = context(&config, &compiled, &repo, linux_tc, &framework, false);
+        ctx.output_dir = scratch.join("linux");
+        let app = compiled.app.on_platform(&linux_tc.platform);
+        let opts = bern_target_api::EjectOptions {
+            engine: EjectEngine::Prebuilt,
+            with_cli: false,
+            release: false,
+            staging_dir: scratch.join("staging/linux"),
+        };
+        assert!(linux_target.eject(&app, &ctx, &opts).is_err());
+    }
+
+    #[test]
+    fn eject_showcase_has_unique_swift_and_kotlin_basenames() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .unwrap();
+        let manifest_path = repo.join("examples/showcase/Bern.toml");
+        let config = bern_compiler::config::load(&manifest_path).unwrap();
+        let compiled = bern_compiler::compile(&config).unwrap();
+        let framework = Framework::Path(repo.join("crates"));
+        let reg = registry();
+        let scratch =
+            std::env::temp_dir().join(format!("bern-eject-showcase-names-{}", std::process::id()));
+
+        for (target_name, ext) in [("macos", "swift"), ("android", "kt")] {
+            let tc = config
+                .targets
+                .iter()
+                .find(|t| t.name == target_name)
+                .unwrap();
+            let target = reg.resolve(tc).unwrap();
+            let mut ctx = context(&config, &compiled, &repo, tc, &framework, false);
+            ctx.output_dir = scratch.join(target_name);
+            let app = compiled.app.on_platform(&tc.platform);
+            let app = bern_target_api::style::for_platforms(&app, target.descriptor().platforms);
+            let opts = bern_target_api::EjectOptions {
+                engine: EjectEngine::Source,
+                with_cli: false,
+                release: false,
+                staging_dir: scratch.join("staging").join(target_name),
+            };
+            let ejected = target.eject(&app, &ctx, &opts).unwrap();
+            let mut seen = BTreeSet::new();
+            for file in &ejected.files {
+                if file.path.extension().and_then(|e| e.to_str()) != Some(ext) {
+                    continue;
+                }
+                // For Android, skip `dev/bern/runtime/` which lives in a separate package.
+                if file.path.to_string_lossy().contains("dev/bern/runtime") {
+                    continue;
+                }
+                let basename = file
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_ascii_lowercase();
+                assert!(
+                    seen.insert(basename.clone()),
+                    "{target_name}: duplicate .{ext} basename `{basename}` ({})",
+                    file.path.display()
+                );
+            }
         }
     }
 }

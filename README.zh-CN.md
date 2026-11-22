@@ -510,6 +510,15 @@ bern package
 
 按 release 构建本机能构建的目标，在 `target/bern/dist/` 中生成安装包：macOS 的 `.dmg`，Windows 的安装程序（按当前用户安装，不需要管理员权限）与免安装的 `.zip`，Linux 的 `.deb` 与 `.tar.gz`，Android 的 `.apk` 与上架用的 `.aab`，Web 的静态站点压缩包。桌面和 WebUI 安装包带有应用 CLI，开启 IPC 时还带有 Skill。静态 Web 包只含站点文件；Android CLI 在开发电脑上运行，不打进 APK。签名用环境变量配置，证书不进仓库：`BERN_MACOS_SIGNING_IDENTITY` 与 `BERN_MACOS_NOTARY_PROFILE`（签名并公证），`BERN_WINDOWS_CERTIFICATE`（证书指纹或 `.pfx`），`BERN_ANDROID_KEYSTORE`、`BERN_ANDROID_KEYSTORE_PASSWORD` 与 `BERN_ANDROID_KEY_ALIAS`（发布密钥）。没有配置时照样生成，并提示未签名的后果。
 
+### 导出独立纯原生项目（无框架锁定）
+
+```sh
+bern eject --target macos --out ./native-macos                   # 离线 Rust 后端源码 + Xcode 工程
+bern eject --target ios --engine prebuilt --release --out ./ios  # 预编译 XCFramework，无需安装 Rust
+```
+
+`bern eject` 可随时导出标准原生 IDE 工程（`.xcodeproj`、Gradle、Visual Studio `.sln` + `.vcxproj`、独立 Cargo 或零打包器 ES 模块），按组件与窗口拆分成清晰文件，且不改动原 Bern 项目。默认 `--engine source` 会离线打包完整自包含的 Rust 工作区并与原生 IDE 构建联动；`--engine prebuilt` 会预编译并嵌入引擎二进制，让原生开发者无需安装 Rust 或 Bern 即可直接打开构建。详见[导出为独立纯原生项目](Docs/zh-CN/Implementation/Eject.md)。
+
 ### 运行展示应用
 
 Bern 仓库中的展示应用用到全部组件、两个窗口和视频播放器。在仓库目录中：
@@ -570,7 +579,7 @@ cargo test --workspace
 
 - **接口参考**：[文档目录](Docs/zh-CN/README.md) · [当前组件用法](Docs/zh-CN/Reference/UI.md) · [完整属性表](Docs/zh-CN/Reference/Component-Properties.md) · [平台能力与验证范围](Docs/zh-CN/Reference/Platforms.md) · [性能追踪](Docs/zh-CN/Reference/Tracing.md)
 - **架构与设计**：[设计文档](Docs/zh-CN/Design.md) · [适配规范](Docs/zh-CN/Adaptation/README.md) · [React Native 研究](Docs/zh-CN/Research/ReactNative.md)
-- **专题文档**：[紧邻原生视图](Docs/zh-CN/Implementation/Native-Views.md) · [JavaScript 与 `bern.cli`](Docs/zh-CN/Implementation/JavaScript.md) · [动画 SVG](Docs/zh-CN/Implementation/Animated-SVG.md) · [按模块编译](Docs/zh-CN/Implementation/Module-Builds.md) · [应用浏览器扩展](Docs/zh-CN/Implementation/Web-Extensions.md)
+- **专题文档**：[导出独立纯原生项目](Docs/zh-CN/Implementation/Eject.md) · [紧邻原生视图](Docs/zh-CN/Implementation/Native-Views.md) · [JavaScript 与 `bern.cli`](Docs/zh-CN/Implementation/JavaScript.md) · [动画 SVG](Docs/zh-CN/Implementation/Animated-SVG.md) · [按模块编译](Docs/zh-CN/Implementation/Module-Builds.md) · [应用浏览器扩展](Docs/zh-CN/Implementation/Web-Extensions.md)
 - **平台实现**：[macOS](Docs/zh-CN/Implementation/macOS-SwiftUI.md) · [iOS](Docs/zh-CN/Implementation/iOS-SwiftUI.md) · [watchOS](Docs/zh-CN/Implementation/watchOS-SwiftUI.md) · [tvOS](Docs/zh-CN/Implementation/tvOS-SwiftUI.md) · [Windows](Docs/zh-CN/Implementation/Windows-WinUI3.md) · [Linux](Docs/zh-CN/Implementation/Linux-GTK.md) · [Android 与 Wear OS](Docs/zh-CN/Implementation/Android-Compose.md) · [GPUI](Docs/zh-CN/Implementation/GPUI.md) · [Web 与 WebUI](Docs/zh-CN/Implementation/Web.md)
 
 文档另有[英文版](Docs/README.md)（[在线版](https://bern.aimes-soft.com/docs)）。

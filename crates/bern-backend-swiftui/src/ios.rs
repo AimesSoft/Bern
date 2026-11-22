@@ -28,8 +28,35 @@ pub const ICON_NAME: &str = "AppIcon";
 const RUNTIME: &str = include_str!("../templates/BernRuntime.swift");
 const MEDIA: &str = include_str!("../templates/BernMedia.swift");
 const STYLE: &str = include_str!("../templates/BernStyle.swift");
-const UIKIT: &str = include_str!("../templates/BernUIKit.swift");
+pub(crate) const UIKIT_TEMPLATE: &str = include_str!("../templates/BernUIKit.swift");
+const UIKIT: &str = UIKIT_TEMPLATE;
 const HEADER: &str = include_str!("../templates/bern.h");
+
+pub(crate) fn simulator_rust_target() -> &'static str {
+    architectures().1
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IosFrontendKind {
+    Current,
+    Ios16,
+}
+
+impl IosFrontendKind {
+    pub(crate) fn minimum(self) -> &'static str {
+        match self {
+            Self::Current => MINIMUM_IOS,
+            Self::Ios16 => ios16::MINIMUM,
+        }
+    }
+}
+
+pub(crate) fn frontends(target: &TargetConfig) -> IosFrontendKind {
+    match FrontEnds::of(target) {
+        FrontEnds::Ios16 => IosFrontendKind::Ios16,
+        FrontEnds::Current | FrontEnds::Both | FrontEnds::Separate => IosFrontendKind::Current,
+    }
+}
 
 /// Swift sources compiled into the app, in order.
 const SOURCES: &[&str] = &[
@@ -968,6 +995,15 @@ impl Target for SwiftUiIos {
                     .into(),
             ],
         })
+    }
+
+    fn eject(
+        &self,
+        app: &Application,
+        context: &BuildContext,
+        options: &bern_target_api::EjectOptions,
+    ) -> Result<bern_target_api::EjectedProject, Vec<Diagnostic>> {
+        crate::xcode::eject_apple(app, context, options, Platform::Ios)
     }
 }
 
