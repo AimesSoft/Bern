@@ -110,8 +110,12 @@ impl Generator<'_> {
         } else {
             ""
         };
+        let color = element
+            .keyword("color")
+            .map(|role| format!(", color = BernColor.Role({})", string(role)))
+            .unwrap_or_default();
         out.line(format!(
-            "BernLabel({title}, {}, {}{size}{icon_only})",
+            "BernLabel({title}, {}, {}{size}{icon_only}{color})",
             Self::icon(element.icon("icon")),
             self.text_style(element)
         ));
@@ -145,6 +149,17 @@ impl Generator<'_> {
         }
         if let Some(cap) = bern_target_api::svg::decode_max_side(self.app, element) {
             extra.push_str(&format!(", maxSide = {}.dp", float(cap)));
+        }
+        if let Some(saturation) = element.expr("saturation") {
+            let value = format!("({}).toFloat()", self.expr(saturation));
+            let animated = match element.keyword("animate") {
+                Some(token) => format!(
+                    "bernFloat({value}, {})",
+                    crate::style::motion(self.app, token)
+                ),
+                None => value,
+            };
+            extra.push_str(&format!(", saturation = {animated}"));
         }
         // A picture the engine gives, read at run time.
         if let Some(source) = element.expr("source") {

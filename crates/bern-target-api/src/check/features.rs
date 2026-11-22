@@ -569,7 +569,13 @@ fn capsule_controls(
         element.kind == "ControlGroup"
             || (matches!(
                 element.kind.as_str(),
-                "Button" | "IconButton" | "Menu" | "Picker" | "Switch" | "SplitButton"
+                "Button"
+                    | "IconButton"
+                    | "Menu"
+                    | "Picker"
+                    | "Switch"
+                    | "SplitButton"
+                    | "PopoverButton"
             ) && (element.prop("shape").is_some() || element.prop("height").is_some()))
     }) {
         diagnostics.push(

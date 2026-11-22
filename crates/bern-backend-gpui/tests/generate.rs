@@ -1187,3 +1187,147 @@ ui = "gpui"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn menu_checked_popover_shape_opacity_saturation_color_and_sidebar_collapsed_generate() {
+    let protocol = r#"
+#[bern::protocol(namespace = "controls", version = 1)]
+pub mod controls {
+    use bern::prelude::*;
+
+    #[value]
+    pub enum Section {
+        #[label(tr! { "en" => "Home" })]
+        Home,
+        #[label(tr! { "en" => "Library" })]
+        Library,
+    }
+
+    #[state]
+    pub struct State {
+        pub active: bool,
+        pub amount: f64,
+    }
+
+    #[commands]
+    pub trait Commands {
+        fn toggle(&mut self) -> Result<(), CommandError>;
+    }
+}
+"#;
+    let ui = r#"
+use bern::prelude::*;
+use controls_protocol::controls::{self, Section};
+
+#[bern::session]
+pub struct Draft {
+    pub tab: Section,
+    pub collapsed: bool,
+    pub picture: MediaSource,
+}
+
+#[component]
+pub fn main_view(app: controls::Client, #[session] draft: Draft) -> impl View {
+    ui! {
+        SplitView {
+            Sidebar(selection: draft.tab, collapsed: draft.collapsed) {
+                SidebarItem(value: Section::Home, label: tr! { "en" => "Home" })
+                SidebarItem(value: Section::Library, label: tr! { "en" => "Library" })
+            }
+            Detail {
+                Column(opacity: app.amount, animate: smooth, tint: status.warning) {
+                    Menu(id: sort, label: tr! { "en" => "Sort" }) {
+                        MenuItem(id: opt, label: tr! { "en" => "Active" }, checked: app.active) => app.toggle()
+                    }
+                    PopoverButton(id: pop, label: tr! { "en" => "Filter" }, icon: "slider.horizontal.3", shape: capsule, height: 32) {
+                        Text(content: tr! { "en" => "Filter body" })
+                    }
+                    Label(title: tr! { "en" => "OK" }, icon: "checkmark.circle.fill", color: status.success)
+                    IconButton(id: fav, icon: "heart.fill", label: tr! { "en" => "Like" }, color: status.error) => app.toggle()
+                    Image(source: draft.picture, width: 120, height: 80, saturation: app.amount, animate: smooth)
+                }
+            }
+        }
+    }
+}
+
+#[component]
+pub fn app(app: controls::Client, windows: AppWindows) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Main" }, initial: open) {
+                main_view(app: app)
+            }
+        }
+    }
+}
+"#;
+    let root = workspace();
+    let dir =
+        std::env::temp_dir().join(format!("bern-gpui-controls-sidebar-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    for (package, source) in [
+        ("controls-protocol", protocol),
+        ("controls-ui", ui),
+        ("controls-core", ""),
+    ] {
+        std::fs::create_dir_all(dir.join(package).join("src")).unwrap();
+        std::fs::write(
+            dir.join(package).join("Cargo.toml"),
+            format!("[package]\nname = \"{package}\"\n"),
+        )
+        .unwrap();
+        std::fs::write(dir.join(package).join("src/lib.rs"), source).unwrap();
+    }
+    std::fs::write(
+        dir.join("Bern.toml"),
+        "[app]\nid = \"controls\"\nbundle_id = \"dev.bern.controls\"\nversion = \"0.1.0\"\nname = { \"en\" = \"Controls\" }\n[languages]\nsupported = [\"en\"]\ndefault = \"en\"\n[protocol]\npackage = \"controls-protocol\"\nsource = \"controls-protocol/src/lib.rs\"\n[engine]\npackage = \"controls-core\"\ntype = \"controls_core::Engine\"\n[ui]\npackage = \"controls-ui\"\nsources = [\"controls-ui/src/lib.rs\"]\nroot = \"app\"\n[targets.macos]\nplatform = \"macos\"\nui = \"gpui\"\n",
+    )
+    .unwrap();
+    let config = bern_compiler::config::load(&dir.join("Bern.toml")).unwrap();
+    let compiled = bern_compiler::compile(&config).unwrap();
+    let target = config.targets.first().unwrap().clone();
+    let problems = Gpui::MACOS.check(&compiled.app, &target);
+    assert!(problems.is_empty(), "{problems:?}");
+    let files = Gpui::MACOS
+        .generate(
+            &compiled.app,
+            &BuildContext {
+                project_dir: config.dir.clone(),
+                workspace_dir: root.clone(),
+                output_dir: dir.join("out"),
+                target,
+                protocol_package: config.protocol_package.name.clone(),
+                protocol_path: config.protocol_package.dir.clone(),
+                protocol_module: compiled.protocol_module.clone(),
+                engine_package: config.engine_package.name.clone(),
+                engine_path: config.engine_package.dir.clone(),
+                engine_type: config.engine_type.clone(),
+                modules: Vec::new(),
+                framework: Framework::Path(root.join("crates")),
+                release: false,
+            },
+        )
+        .unwrap();
+    let generated = files
+        .iter()
+        .find(|f| f.path.ends_with("ui.rs"))
+        .map(|f| String::from_utf8_lossy(&f.contents).into_owned())
+        .unwrap();
+    for expected in [
+        "b::split_view(c, Some(b::Field {",
+        ".with_tint(\"status.warning\")",
+        "opacity: Some(b::eased(",
+        "b::menu_item(c, \"opt\",",
+        "shape: b::Shape::Capsule, height: Some(32.0)",
+        "Some(\"status.success\")",
+        "color: Some(\"status.error\")",
+        "b::image_url(c, rt::url(",
+    ] {
+        assert!(
+            generated.contains(expected),
+            "missing `{expected}`:\n{generated}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

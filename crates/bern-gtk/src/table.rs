@@ -586,11 +586,26 @@ fn row_menu(ctx: &Ctx, view: &gtk::Widget, items: Vec<Option<MenuItem>>) -> gtk:
             continue;
         };
         let name = format!("i{index}");
-        let action = gio::SimpleAction::new(&name, None);
+        let checked = bound_enabled(ctx, &item.checked);
+        let action = match &checked {
+            Some(_) => gio::SimpleAction::new_stateful(&name, None, &false.to_variant()),
+            None => gio::SimpleAction::new(&name, None),
+        };
         let (run, set_file) =
             crate::features::picking(ctx, item.pick.clone(), bound_action(ctx, &item.action));
         let run = crate::features::pasting(ctx, item.paste, run);
-        if let Some(run) = run.clone() {
+        if let Some(checked) = checked.clone() {
+            let shown = action.clone();
+            let check_after = Rc::clone(&checked);
+            effect(move || shown.set_state(&checked().to_variant()));
+            let run_act = run.clone();
+            action.connect_activate(move |act, _| {
+                if let Some(run) = &run_act {
+                    run();
+                }
+                act.set_state(&untrack(&*check_after).to_variant());
+            });
+        } else if let Some(run) = run.clone() {
             action.connect_activate(move |_, _| run());
         }
         let enabled = bound_enabled(ctx, &item.enabled);
@@ -604,6 +619,18 @@ fn row_menu(ctx: &Ctx, view: &gtk::Widget, items: Vec<Option<MenuItem>>) -> gtk:
             .as_ref()
             .map(|label| bound_text(ctx, label))
             .unwrap_or_else(|| Rc::new(String::new));
+        let value = checked.map(|checked| {
+            Rc::new(move || {
+                Some(
+                    if untrack(&*checked) {
+                        "checked"
+                    } else {
+                        "unchecked"
+                    }
+                    .to_string(),
+                )
+            }) as Rc<dyn Fn() -> Option<String>>
+        });
         controls::register(
             ctx,
             item.id,
@@ -614,6 +641,7 @@ fn row_menu(ctx: &Ctx, view: &gtk::Widget, items: Vec<Option<MenuItem>>) -> gtk:
                 activate: run,
                 set_file,
                 file_kinds: item.pick.map(|pick| pick.kinds),
+                value,
                 ..Actions::default()
             },
         );

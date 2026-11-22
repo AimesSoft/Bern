@@ -131,8 +131,17 @@ impl Generator<'_> {
         for item in items.iter().filter(|item| item.kind == "MenuItem") {
             let item_label = self.text_prop(item, "label").unwrap_or_default();
             let (action, file) = self.pressed(item);
+            let checked = item
+                .expr("checked")
+                .map(|expr| {
+                    format!(
+                        ", value = {{ if ({}) \"checked\" else \"unchecked\" }}",
+                        self.expr(expr)
+                    )
+                })
+                .unwrap_or_default();
             out.line(format!(
-                "BernControl({}, \"button\", {item_label}, {}, BernControlActions(activate = {{ {action} }}{file}))",
+                "BernControl({}, \"button\", {item_label}, {}, BernControlActions(activate = {{ {action} }}{file}{checked}))",
                 self.target(item, ctx),
                 self.enabled(item)
             ));
@@ -161,8 +170,12 @@ impl Generator<'_> {
             }
             let item_label = self.text_prop(item, "label").unwrap_or_default();
             let (action, _) = self.pressed(item);
+            let checked = item
+                .expr("checked")
+                .map(|expr| format!(", checked = {}", self.expr(expr)))
+                .unwrap_or_default();
             out.line(format!(
-                "BernMenuItem({item_label}, {}, {}, destructive = {}) {{ dismiss(); {action} }}",
+                "BernMenuItem({item_label}, {}, {}, destructive = {}{checked}) {{ dismiss(); {action} }}",
                 Self::icon(item.icon("icon")),
                 self.enabled(item),
                 item.keyword("role") == Some("destructive")
@@ -179,8 +192,17 @@ impl Generator<'_> {
         for item in items.iter().filter(|item| item.kind == "MenuItem") {
             let item_label = self.text_prop(item, "label").unwrap_or_default();
             let (action, file) = self.pressed(item);
+            let checked = item
+                .expr("checked")
+                .map(|expr| {
+                    format!(
+                        ", value = {{ if ({}) \"checked\" else \"unchecked\" }}",
+                        self.expr(expr)
+                    )
+                })
+                .unwrap_or_default();
             out.line(format!(
-                "BernControl({}, \"button\", {item_label}, {}, BernControlActions(activate = {{ {action} }}{file}))",
+                "BernControl({}, \"button\", {item_label}, {}, BernControlActions(activate = {{ {action} }}{file}{checked}))",
                 self.target(item, ctx),
                 self.enabled(item)
             ));
@@ -197,8 +219,12 @@ impl Generator<'_> {
             }
             let item_label = self.text_prop(item, "label").unwrap_or_default();
             let (action, _) = self.pressed(item);
+            let checked = item
+                .expr("checked")
+                .map(|expr| format!(", checked = {}", self.expr(expr)))
+                .unwrap_or_default();
             out.line(format!(
-                "BernMenuItem({item_label}, {}, {}, destructive = {}) {{ dismiss(); {action} }}",
+                "BernMenuItem({item_label}, {}, {}, destructive = {}{checked}) {{ dismiss(); {action} }}",
                 Self::icon(item.icon("icon")),
                 self.enabled(item),
                 item.keyword("role") == Some("destructive")

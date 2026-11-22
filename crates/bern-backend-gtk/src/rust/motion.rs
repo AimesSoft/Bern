@@ -127,6 +127,14 @@ impl Generator<'_> {
                 self.animate(element)
             ));
         }
+        if !bern_ir::spec::has_own_opacity(&element.kind)
+            && let Some(opacity) = self.num(element, "opacity")
+        {
+            entries.push(format!(
+                "opacity: Some(({opacity}, {}))",
+                self.animate(element)
+            ));
+        }
         if let Some(reduce) = element.expr("reduce_motion") {
             entries.push(format!("reduce_motion: Some({})", self.getter(reduce)));
         }

@@ -33,6 +33,9 @@ impl Generator<'_> {
             out.line(format!("id: {},", self.id(sidebar)));
         }
         out.line(format!("selection: {selection},"));
+        if let Some(collapsed) = self.field(sidebar, "collapsed") {
+            out.line(format!("collapsed: {collapsed},"));
+        }
         if let Some(width) = self.length(sidebar, "width") {
             out.line(format!("width: {width},"));
         }

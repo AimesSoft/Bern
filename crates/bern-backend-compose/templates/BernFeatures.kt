@@ -22,6 +22,7 @@ import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.ui.platform.LocalViewConfiguration
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.drop
@@ -617,6 +618,20 @@ fun bernLength(value: Dp, motion: BernMotion): Dp {
     return moving.coerceAtLeast(0.dp)
 }
 
+@Composable
+fun bernFloat(value: Float, motion: BernMotion): Float {
+    if (bernReduceMotion()) return value
+    val moving by androidx.compose.animation.core.animateFloatAsState(value, motion.spec(), label = "float")
+    return moving
+}
+
+@Composable
+fun Modifier.bernOpacity(value: Float, motion: BernMotion? = null): Modifier {
+    val clamped = value.coerceIn(0f, 1f)
+    val shown = if (motion != null) bernFloat(clamped, motion).coerceIn(0f, 1f) else clamped
+    return this.graphicsLayer { alpha = shown }
+}
+
 // MARK: - Shadows
 
 /// The look's shadow, as if lifted off the page, growing and settling with
@@ -1148,6 +1163,7 @@ fun BernImageURL(
     twice: Boolean = false,
     covers: Boolean = false,
     maxSide: Dp? = null,
+    saturation: Float? = null,
 ) {
     // A frame that fills its container's width is read at the width it
     // was laid out at, unless `maxSide` already bounds what is needed.
@@ -1199,12 +1215,19 @@ fun BernImageURL(
     }
     val shown = picture
     if (shown != null) {
+        val colorFilter = when {
+            template -> androidx.compose.ui.graphics.ColorFilter.tint(LocalContentColor.current, androidx.compose.ui.graphics.BlendMode.SrcIn)
+            saturation != null && saturation < 0.999f -> androidx.compose.ui.graphics.ColorFilter.colorMatrix(
+                androidx.compose.ui.graphics.ColorMatrix().apply { setToSaturation(saturation.coerceIn(0f, 1f)) }
+            )
+            else -> null
+        }
         Image(
             shown.bitmap,
             contentDescription = label,
             modifier = modifier,
             contentScale = fit,
-            colorFilter = if (template) androidx.compose.ui.graphics.ColorFilter.tint(LocalContentColor.current, androidx.compose.ui.graphics.BlendMode.SrcIn) else null,
+            colorFilter = colorFilter,
         )
     } else if (!url.isNullOrEmpty() && !finished && !covers) {
         val alpha = bernSkeletonAlpha(0.07f, true)
@@ -2936,6 +2959,7 @@ fun BernPopoverButton(
     windowTheme: Boolean = false,
     style: BernStyle? = null,
     iconSize: Float? = null,
+    shape: BernShape? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     var own by remember { mutableStateOf(false) }
@@ -2947,11 +2971,22 @@ fun BernPopoverButton(
         actions = BernControlActions(activate = { show(true) }, value = { if (showing) "open" else "closed" }),
     )
     if (shortcut != null) BernShortcut(shortcut) { show(true) }
+    val height = shape?.height
+    val form = if (shape?.capsule == true) CircleShape else ButtonDefaults.shape
+    val padding = if (height != null) PaddingValues(horizontal = 16.dp, vertical = 0.dp) else ButtonDefaults.ContentPadding
+    val buttonModifier = if (height != null) Modifier.height(height) else Modifier
     Box(Modifier.testTag(target)) {
         when {
-            icon != null -> IconButton(onClick = { show(!showing) }) { Icon(icon, contentDescription = label, modifier = iconModifier) }
-            plain -> TextButton(onClick = { show(!showing) }) { Text(label) }
-            else -> FilledTonalButton(onClick = { show(!showing) }) { Text(label) }
+            icon != null && (height != null || shape?.capsule == true) && !plain -> FilledTonalIconButton(
+                onClick = { show(!showing) },
+                modifier = if (height != null) Modifier.size(height) else Modifier,
+            ) { Icon(icon, contentDescription = label, modifier = iconModifier) }
+            icon != null -> IconButton(
+                onClick = { show(!showing) },
+                modifier = if (height != null) Modifier.size(height) else Modifier,
+            ) { Icon(icon, contentDescription = label, modifier = iconModifier) }
+            plain -> TextButton(onClick = { show(!showing) }, modifier = buttonModifier, shape = form, contentPadding = padding) { Text(label) }
+            else -> FilledTonalButton(onClick = { show(!showing) }, modifier = buttonModifier, shape = form, contentPadding = padding) { Text(label) }
         }
         val panelDark = if (windowTheme) when (BernThemeState.appearance?.lowercase()) {
             "dark" -> true

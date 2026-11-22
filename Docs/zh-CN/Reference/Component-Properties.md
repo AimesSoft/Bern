@@ -94,7 +94,7 @@
 | `Divider` | 无专有属性 | 不含子节点；无动作 |
 | `ScrollView` | `axis: vertical / horizontal`<br>`snap: start / center`<br>`position: PositionField`<br>`arrival: nudge`<br>`indicators: automatic / hidden / mouse`<br>`open_at: Number`<br>`open_center: NumberValue`<br>`anchor: Number`<br>`browsing: BoolField` | 可含子内容；无动作 |
 | `SplitView` | 无专有属性 | 仅含 ["Sidebar", "Detail"]；无动作 |
-| `Sidebar` | **`selection: SelectionField`**<br>`width: Length`<br>`id: Id`<br>`fallback: SelectionValue` | 仅含 ["Search", "Section", "SidebarItem", "Pages", "SidebarHeader", "SidebarFooter"]；无动作；直接位于 ["SplitView"] |
+| `Sidebar` | **`selection: SelectionField`**<br>`collapsed: BoolField`<br>`width: Length`<br>`id: Id`<br>`fallback: SelectionValue` | 仅含 ["Search", "Section", "SidebarItem", "Pages", "SidebarHeader", "SidebarFooter"]；无动作；直接位于 ["SplitView"]；`collapsed`（`false` 为展开）在宽窗口下双向同步，窄窗口自动折叠不覆盖用户偏好 |
 | `SidebarHeader` | `role: content / title` | 可含子内容；无动作；直接位于 ["Sidebar"] |
 | `SidebarFooter` | 无专有属性 | 可含子内容；无动作；直接位于 ["Sidebar"] |
 | `Detail` | `titled: Bool` | 可含子内容；无动作；直接位于 ["SplitView"] |
@@ -112,7 +112,7 @@
 | `TabAccessory` | `shown: Bool` | 可含子内容；无动作；直接位于 ["Tabs"]，最多一个，不放在 `if` 或 `ForEach` 里。各页之上常驻的一条，例如正在播放的小播放器；`shown` 为假时收起 |
 | `Tab` | **`value: SelectionValue`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`display: title_and_icon / icon` | 可含子内容；无动作；直接位于 ["Tabs"]。`display: icon` 只显示图标（必须写 `icon`），`label` 仍是可访问名称 |
 | `SplitButton` | **`id: Id`**<br>**`label: DisplayText`**<br>`value: BoolField`<br>`checked: Bool`<br>`icon: Icon`<br>`shape: capsule`<br>`height: Length`<br>`more_label: DisplayText`<br>`shortcut: Shortcut` | 可含子内容；`value` 与 `checked` 二选一，`checked` 须有动作，切换时执行 |
-| `PopoverButton` | `panel_appearance: inherit / window / surface`<br>**`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`font_size: Number`<br>`prominence: standard / plain`<br>`presented: BoolField`<br>`open: Bool`<br>`shortcut: Shortcut` | 可含子内容；`open` 必须绑定动作，与 `presented` 互斥；未使用 `open` 时无动作 |
+| `PopoverButton` | `panel_appearance: inherit / window / surface`<br>**`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`font_size: Number`<br>`shape: capsule`<br>`height: Length`<br>`prominence: standard / plain`<br>`presented: BoolField`<br>`open: Bool`<br>`shortcut: Shortcut` | 可含子内容；`open` 必须绑定动作，与 `presented` 互斥；未使用 `open` 时无动作 |
 | `Inspector` | **`presented: BoolField`**<br>`width: Number` | 可含子内容；无动作 |
 | `Toast` | **`content: DisplayText`**<br>`icon: Icon`<br>`key: KeyValue`<br>`duration: Number` | 不含子节点；无动作 |
 | `Pinch` | **`id: Id`**<br>**`label: DisplayText`**<br>**`value: NumberField`**<br>**`min: Number`**<br>**`max: Number`**<br>`feature: Feature` | 恰好一个子节点；动作可选 |
@@ -124,7 +124,7 @@
 | `Adaptive` | `id: Id` | 仅含 ["Layout"]；无动作 |
 | `Layout` | **`size: compact / medium / expanded / large / tv`** | 可含子内容；无动作；直接位于 ["Adaptive"] |
 | `Menu` | **`id: Id`**<br>**`label: DisplayText`**<br>`hide_disabled: Flag`<br>`icon: Icon`<br>`style: button / icon`<br>`shape: capsule`<br>`height: Length` | 仅含 ["MenuItem", "Divider"]；无动作 |
-| `MenuItem` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`role: normal / destructive`<br>`enabled: Bool`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`save: SaveFileField`<br>`suggested_name: DisplayText`<br>`files: FileKinds`<br>`paste: TextField` | 不含子节点；必须绑定动作；直接位于 ["Menu", "TableMenu", "ContextMenu"]；`pick`、`save` 与 `paste` 最多选一个 |
+| `MenuItem` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`role: normal / destructive`<br>`checked: Bool`<br>`enabled: Bool`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`save: SaveFileField`<br>`suggested_name: DisplayText`<br>`files: FileKinds`<br>`paste: TextField` | 不含子节点；必须绑定动作；直接位于 ["Menu", "TableMenu", "ContextMenu"]；`pick`、`save` 与 `paste` 最多选一个；`checked` 显示平台原生的勾选状态 |
 | `LanguagePicker` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag` | 不含子节点；无动作 |
 | `List` | `items: Items`<br>`key: KeyField` | 可含子内容；无动作 |
 | `ForEach` | **`items: Items`**<br>**`key: KeyField`** | 可含子内容；无动作 |
@@ -141,13 +141,13 @@
 | `Shape` | **`kind: rect / rounded / capsule / ellipse`**<br>`x: Number`<br>`y: Number`<br>`width: Number`<br>`height: Number`<br>`corner: Number`<br>`fill: ColorRole`<br>`fill_from: ImageResource`<br>`fade: up / down / left / right`<br>`stroke: ColorRole`<br>`stroke_width: Number`<br>`dash: Number`<br>`dash_gap: Number`<br>`opacity: Number` | 不含子节点；无动作；直接位于 ["Canvas"] |
 | `Series` | **`values: NumberList`**<br>`kind: area / line`<br>`max: NumberValue`<br>`fill: ColorRole`<br>`stroke: ColorRole`<br>`stroke_width: Number`<br>`opacity: Number` | 不含子节点；无动作；直接位于 ["Canvas"] |
 | `Pattern` | **`name: PatternName`**<br>`opacity: Number` | 不含子节点；无动作；直接位于 ["Canvas"] |
-| `Label` | **`title: DisplayText`**<br>**`icon: Icon`**<br>`style: large_title / title / title2 / title3 / headline / subheadline / body / callout / footnote / caption / caption2 / control / code`<br>`font_size: Number`<br>`display: title_and_icon / icon` | 不含子节点；无动作 |
+| `Label` | **`title: DisplayText`**<br>**`icon: Icon`**<br>`style: large_title / title / title2 / title3 / headline / subheadline / body / callout / footnote / caption / caption2 / control / code`<br>`color: ColorRole`<br>`font_size: Number`<br>`display: title_and_icon / icon` | 不含子节点；无动作 |
 | `Svg` | **`source: SvgResource`**<br>`static_source: SvgResource`<br>**`width: Length`**<br>**`height: Length`**<br>`label: DisplayText`<br>`fit: contain / cover / fill`<br>`playing: Bool`<br>`speed: NumberValue`<br>`restart: NumberValue`<br>`interactive: Flag`<br>`data: DisplayText`<br>`external_links: Flag` | 不含子节点；无动作 |
 | `WebPage` | **`url: DisplayText`**<br>`cookies_file: DisplayText`<br>`cookie_domain: DisplayText`<br>`user_agent: DisplayText`<br>`content_mode: auto / mobile / desktop`<br>`close_on: DisplayText`<br>`label: DisplayText` | 不含子节点；动作可选（点击匹配 CSS 选择器 `close_on` 的元素时触发）；tvOS、watchOS 与 Wear OS 不支持 |
-| `Image` | **`source: ImageResource`**<br>`label: DisplayText`<br>`width: Length`<br>`height: Length`<br>`fit: contain / cover / fill`<br>`corner: Length`<br>`rendering: original / template`<br>`aspect: Number` | 不含子节点；无动作 |
+| `Image` | **`source: ImageResource`**<br>`label: DisplayText`<br>`width: Length`<br>`height: Length`<br>`fit: contain / cover / fill`<br>`corner: Length`<br>`rendering: original / template`<br>`saturation: NumberValue`<br>`aspect: Number` | 不含子节点；无动作；`saturation` 取值 0（灰度）到 1（原色），可跟随状态并随 `animate` 动画过渡 |
 | `Progress` | `value: NumberValue`<br>`total: Number`<br>`label: DisplayText`<br>`style: bar / ring`<br>`width: Length`<br>`stroke_width: Number` | 不含子节点；无动作；`style: ring` 需要 `value`；`width` 与 `stroke_width` 只用于 `style: ring` |
 | `Button` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`shape: capsule / chip`<br>`height: Length`<br>`width: fill`<br>`role: normal / destructive / cancel`<br>`prominence: standard / prominent / plain`<br>`enabled: Bool`<br>`variant: StyleVariant`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`save: SaveFileField`<br>`suggested_name: DisplayText`<br>`files: FileKinds`<br>`default_focus: Flag`<br>`clears: TextField`<br>`paste: TextField` | 可含子内容；必须绑定动作；`pick` 打开单选或多选（`Vec<MediaSource>`）文件选择器，`save` 打开保存文件对话框（可配合 `suggested_name` 预填默认文件名），`paste` 先把剪贴板文字放进草稿再运行动作；三者最多选一个 |
-| `IconButton` | **`id: Id`**<br>**`icon: Icon`**<br>`font_size: Number`<br>`height: Length`<br>**`label: DisplayText`**<br>`prominence: standard / prominent / plain`<br>`enabled: Bool`<br>`variant: StyleVariant`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`save: SaveFileField`<br>`suggested_name: DisplayText`<br>`files: FileKinds`<br>`paste: TextField`<br>`default_focus: Flag`<br>`icon_progress: NumberValue`<br>`badge_icon: Icon`<br>`badge_visible: Bool` | 不含子节点；必须绑定动作；`pick`、`save` 与 `paste` 最多选一个 |
+| `IconButton` | **`id: Id`**<br>**`icon: Icon`**<br>`font_size: Number`<br>`height: Length`<br>**`label: DisplayText`**<br>`prominence: standard / prominent / plain`<br>`color: ColorRole`<br>`enabled: Bool`<br>`variant: StyleVariant`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`save: SaveFileField`<br>`suggested_name: DisplayText`<br>`files: FileKinds`<br>`paste: TextField`<br>`default_focus: Flag`<br>`icon_progress: NumberValue`<br>`badge_icon: Icon`<br>`badge_visible: Bool` | 不含子节点；必须绑定动作；`pick`、`save` 与 `paste` 最多选一个 |
 | `TextInput` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag`<br>`value: TextField`<br>`current: TextValue`<br>`prompt: DisplayText`<br>`kind: plain / secure / multiline`<br>`submit: clear`<br>`clear_key: NumberValue`<br>`feature: Feature` | 不含子节点；动作可选；`value` 与 `current` 二选一；`value` 时动作在提交时运行，`submit: clear` 在动作后清空草稿、交出焦点；`current` 时每次编辑都运行动作，动作参数里同一表达式就是输入的文字，编辑中引擎的文字不覆盖用户的输入；SwiftUI 的 `clear_key` 在数值变化时清空，供异步成功回执使用 |
 | `Search` | **`id: Id`**<br>**`value: TextField`**<br>`prompt: DisplayText`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`style: automatic / palette`<br>`display: automatic / icon`<br>`panel_prompt: DisplayText`<br>`width: Number`<br>`height: Number`<br>`font_size: Number`<br>`suggest: Flag` | 可含子内容；动作可选；`display: icon` 仅用于 `style: palette` |
 | `SearchItem` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`detail: DisplayText`<br>`hint: DisplayText`<br>`navigation: Bool`<br>`pick: FileField`<br>`files: FileKinds`<br>`feature: Feature` | 可含子内容；必须绑定动作 |
@@ -279,6 +279,7 @@ Query(id: results, query: app.search(draft.text, 20), presented: draft.show_resu
 | `glow` | `Number`：指针（鼠标悬停，或手指按住时）在元素范围内时跟着它的白光，半径为元素短边的这个倍数；上面叠着别的元素也亮 |
 | `glow_opacity` | `Number`：光中心的不透明度，大于 0、不超过 1，默认 0.4；需要 `glow` |
 | `blur` | `Length`：把元素的画面按这个半径（点）模糊，不越出元素的范围与圆角；可以跟随状态，配 `animate` 时按它的动效变化（`bound_blur`：六个目标都已实现） |
+| `opacity` | `NumberValue`：元素不透明度（0 到 1）；可以跟随状态，配 `animate` 时按它的动效变化（自带 `opacity` 属性的 `Marquee`、`Skeleton`、`Shape`、`Series`、`Pattern` 仍由组件自身处理） |
 | `stagger` | `Number` |
 | `idle_area` | `Number`：鼠标在此停住多少秒后窗口静置；有静置区时，鼠标停在别处不静置 |
 | `at` | `NumberValue` |

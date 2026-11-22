@@ -35,11 +35,12 @@ impl Generator<'_> {
 
     pub(super) fn label(&self, out: &mut Out, element: &Element) {
         out.line(format!(
-            "b::Label(p, c, b::LabelProps {{ title: {}, icon: {}, style: {}, font_size: {}, icon_only: {} }});",
+            "b::Label(p, c, b::LabelProps {{ title: {}, icon: {}, style: {}, font_size: {}, color: {}, icon_only: {} }});",
             some(self.text_prop(element, "title")),
             Self::icon(element, "icon"),
             Self::keyword(element, "style"),
             Self::number(element, "font_size"),
+            Self::keyword(element, "color"),
             element.keyword("display") == Some("icon"),
         ));
     }
@@ -78,7 +79,7 @@ impl Generator<'_> {
             .map(|cap| format!("Some({cap:.1})"))
             .unwrap_or_else(|| "None".into());
         let shared = format!(
-            "label: {}, width: {}, height: {}, fit: {}, animate: {}, corner: {}, template: {}, aspect: {}, decode_max: {decode_max}",
+            "label: {}, width: {}, height: {}, fit: {}, animate: {}, corner: {}, template: {}, aspect: {}, decode_max: {decode_max}, saturation: {}",
             some(self.text_prop(element, "label")),
             some(self.num(element, "width")),
             some(self.num(element, "height")),
@@ -87,6 +88,7 @@ impl Generator<'_> {
             some(self.num(element, "corner")),
             element.keyword("rendering") == Some("template"),
             Self::number(element, "aspect"),
+            some(self.num(element, "saturation")),
         );
         match element.expr("source") {
             Some(source) => out.line(format!(

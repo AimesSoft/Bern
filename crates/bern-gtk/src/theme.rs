@@ -831,11 +831,14 @@ pub(crate) fn use_tint(role: &'static str, dark: bool) -> String {
     } else {
         ".bern-appearance-light"
     };
-    let css = part_sheet(dark)
-        .replace(scope, &format!(".{class}"))
-        .replace("@accent_bg_color", &color)
-        .replace("@accent_color", &color)
-        .replace("@accent_fg_color", foreground);
+    let css = format!(
+        "{}\n.{class} {{ --accent-bg-color: {color}; --accent-color: {color}; --accent-fg-color: {foreground}; --accent-standalone-color: {color}; }}\n",
+        part_sheet(dark)
+            .replace(scope, &format!(".{class}"))
+            .replace("@accent_bg_color", &color)
+            .replace("@accent_color", &color)
+            .replace("@accent_fg_color", foreground)
+    );
     provider.load_from_string(&css);
     if let Some(display) = gtk::gdk::Display::default() {
         gtk::style_context_add_provider_for_display(
@@ -846,4 +849,38 @@ pub(crate) fn use_tint(role: &'static str, dark: bool) -> String {
     }
     TINTS.with(|tints| tints.borrow_mut().push((class.clone(), provider)));
     class
+}
+
+/// Color a widget's foreground (text and symbolic icons) with a theme role,
+/// updating with light/dark appearance and runtime accent or palette changes.
+pub(crate) fn apply_role_color(widget: &gtk::Widget, role: &'static str) {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let class = format!("bern-fg-{id}");
+    widget.add_css_class(&class);
+    let provider = gtk::CssProvider::new();
+    let Some(display) = gtk::gdk::Display::default() else {
+        return;
+    };
+    gtk::style_context_add_provider_for_display(
+        &display,
+        &provider,
+        gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 2,
+    );
+    let cleanup = provider.clone();
+    crate::reactive::on_cleanup(move || {
+        gtk::style_context_remove_provider_for_display(&display, &cleanup)
+    });
+    let weak = widget.downgrade();
+    crate::reactive::effect(move || {
+        track();
+        let Some(widget) = weak.upgrade() else {
+            return;
+        };
+        let part = part_of(&widget);
+        let value = css(&Color::Role(role), part);
+        provider.load_from_string(&format!(
+            ".{class}, .{class} label, .{class} image {{ color: {value}; }}"
+        ));
+    });
 }

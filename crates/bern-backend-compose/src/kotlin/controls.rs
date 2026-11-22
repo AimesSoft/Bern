@@ -144,6 +144,9 @@ impl Generator<'_> {
             if element.keyword("prominence").is_some() {
                 extra.push_str(&format!(", prominence = {prominence}"));
             }
+            if let Some(role) = element.keyword("color") {
+                extra.push_str(&format!(", color = BernColor.Role({})", string(role)));
+            }
             out.line(format!(
                 "BernIconButton({label}, {}, {enabled}, Modifier{start}.testTag({target}){style}{extra}) {{ {action} }}",
                 Self::icon(element.icon("icon"))
@@ -210,11 +213,12 @@ impl Generator<'_> {
             .map(|size| format!(", iconSize = {}", float(size)))
             .unwrap_or_default();
         out.open(format!(
-            "BernPopoverButton({}, {label}, {}, {presented}, {on_presented}, {shortcut}, {plain}, windowTheme = {}{}{icon_size}) {{",
+            "BernPopoverButton({}, {label}, {}, {presented}, {on_presented}, {shortcut}, {plain}, windowTheme = {}{}{icon_size}{}) {{",
             self.target(element, ctx),
             Self::icon(element.icon("icon")),
             bern_target_api::style::popover_window_theme(self.app, "android", element),
-            self.style_arg(element)
+            self.style_arg(element),
+            self.shape_arg(element)
         ));
         self.nodes(out, &element.children, &ctx.within(Scope::Column));
         out.close("}");

@@ -769,6 +769,10 @@ button:disabled {
   flex: none;
 }
 
+.bern-label-colored .bern-icon {
+  color: currentColor;
+}
+
 .bern-label-icon-only {
   display: inline-flex;
   justify-content: center;
@@ -1502,7 +1506,7 @@ button:disabled {
   border: 0;
   border-radius: var(--bern-radius-icon);
   background: transparent;
-  color: var(--bern-icon-primary);
+  color: var(--bern-icon-color, var(--bern-icon-primary));
   transition: color var(--bern-motion) ease-out, background-color var(--bern-motion) ease-out;
 }
 
@@ -1532,7 +1536,7 @@ button:disabled {
 .bern-icon-button:focus-visible {
   outline: none;
   box-shadow: none;
-  color: var(--bern-accent-text);
+  color: var(--bern-icon-color, var(--bern-accent-text));
 }
 
 .bern-icon-button:focus-visible .bern-icon {
@@ -1544,11 +1548,11 @@ button:disabled {
   height: 44px;
   border-radius: 12px;
   background: var(--bern-accent);
-  color: var(--bern-on-accent);
+  color: var(--bern-icon-color, var(--bern-on-accent));
 }
 .bern-icon-button.bern-icon-button-prominent:hover:not(:disabled) {
   background: var(--bern-button-prominent-hover);
-  color: var(--bern-on-accent);
+  color: var(--bern-icon-color, var(--bern-on-accent));
 }
 .bern-icon-button.bern-icon-button-prominent:focus-visible {
   outline: 2px solid var(--bern-focus-indicator);
@@ -2127,7 +2131,8 @@ textarea.bern-field {
   font-weight: 500;
 }
 
-.bern-menu-item[aria-selected="true"] .bern-menu-check {
+.bern-menu-item[aria-selected="true"] .bern-menu-check,
+.bern-menu-item[aria-checked="true"] .bern-menu-check {
   visibility: visible;
 }
 
@@ -2156,6 +2161,11 @@ button.bern-menu-item .bern-icon {
   width: var(--bern-glyph);
   height: var(--bern-glyph);
   color: var(--bern-icon-secondary);
+}
+
+button.bern-menu-item .bern-menu-check {
+  margin-inline-start: auto;
+  color: var(--bern-accent-text);
 }
 
 button.bern-menu-item:focus {

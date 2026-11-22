@@ -112,8 +112,22 @@ fun BernMenu(label: String, icon: ImageVector?, modifier: Modifier = Modifier, i
 }
 
 @Composable
-fun BernMenuItem(label: String, icon: ImageVector?, enabled: Boolean, destructive: Boolean, onClick: () -> Unit) =
-    BernButton(label, icon, BernProminence.Plain, destructive = destructive, enabled = enabled, fill = true, onClick = onClick)
+fun BernMenuItem(
+    label: String,
+    icon: ImageVector?,
+    enabled: Boolean,
+    destructive: Boolean,
+    checked: Boolean? = null,
+    onClick: () -> Unit,
+) = BernButton(
+    label,
+    icon ?: if (checked == true) BernIcons.get("checkmark") else null,
+    BernProminence.Plain,
+    destructive = destructive,
+    enabled = enabled,
+    fill = true,
+    onClick = onClick,
+)
 
 @Composable
 fun BernContextMenu(menu: @Composable (dismiss: () -> Unit) -> Unit, content: @Composable () -> Unit) {
@@ -175,17 +189,17 @@ fun BernSplitButton(target: String, label: String, icon: ImageVector?, more: Str
 @Composable
 fun BernPopoverButton(target: String, label: String, icon: ImageVector?, presented: Boolean?,
     onPresented: ((Boolean) -> Unit)?, shortcut: String?, plain: Boolean, windowTheme: Boolean = false,
-    style: BernStyle? = null, iconSize: Float? = null, content: @Composable ColumnScope.() -> Unit) {
+    style: BernStyle? = null, iconSize: Float? = null, shape: BernShape? = null, content: @Composable ColumnScope.() -> Unit) {
     var own by remember { mutableStateOf(false) }
     val showing = presented ?: own
     val show: (Boolean) -> Unit = { if (onPresented != null) onPresented(it) else own = it }
     BernControl(target, "popover_button", label, actions = BernControlActions(
         activate = { show(true) }, value = { if (showing) "open" else "closed" }))
     if (shortcut != null) BernShortcut(shortcut) { show(true) }
-    if (icon != null) BernIconButton(label, icon, true, Modifier.testTag(target), style, iconSize,
+    if (icon != null) BernIconButton(label, icon, true, Modifier.testTag(target), style, iconSize, diameter = shape?.height,
         prominence = if (plain) BernProminence.Plain else BernProminence.Standard) { show(true) }
     else BernButton(label, null, if (plain) BernProminence.Plain else BernProminence.Standard,
-        style = style, modifier = Modifier.testTag(target)) { show(true) }
+        style = style, shape = shape, modifier = Modifier.testTag(target)) { show(true) }
     val dark = if (windowTheme) BernThemeState.appearance?.lowercase() != "light" else bernDark()
     if (showing) BernAppearance(dark) {
         BernWearDialog(onDismiss = { show(false) }) {
@@ -209,6 +223,7 @@ val LocalBernBarTop = compositionLocalOf<State<Float>?> { null }
 @Composable
 fun BernSplitView(title: String, showingDetail: MutableState<Boolean>, sidebarWidth: Dp = 280.dp,
     sidebarStyle: BernStyle? = null, detailStyle: BernStyle? = null,
+    collapsed: Boolean = false, onCollapsed: ((Boolean) -> Unit)? = null,
     header: (@Composable () -> Unit)? = null, sidebar: @Composable (showDetail: () -> Unit) -> Unit,
     footer: (@Composable ColumnScope.() -> Unit)? = null, detail: @Composable () -> Unit) {
     if (showingDetail.value) {

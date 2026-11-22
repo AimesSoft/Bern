@@ -141,6 +141,11 @@ impl Generator<'_> {
                 self.curve("hero")
             ));
         }
+        if !bern_ir::spec::has_own_opacity(&element.kind)
+            && let Some(opacity) = self.length_value(element, "opacity")
+        {
+            entries.push(format!("opacity: Some({opacity})"));
+        }
         (!entries.is_empty())
             .then(|| format!("b::Motion {{ {}, ..b::Motion::NONE }}", entries.join(", ")))
     }

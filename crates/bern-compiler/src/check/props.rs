@@ -7,6 +7,25 @@ use bern_ir::spec::{self, PropKind};
 use bern_protocol::Type;
 use bern_syntax::{self as ast, Literal, UnaryOp};
 
+fn const_number(expr: &ast::Expr) -> Option<f64> {
+    match expr {
+        ast::Expr::Literal {
+            value: Literal::Int(value),
+            ..
+        } => Some(*value as f64),
+        ast::Expr::Literal {
+            value: Literal::Float(value),
+            ..
+        } => Some(*value),
+        ast::Expr::Unary {
+            op: UnaryOp::Neg,
+            expr,
+            ..
+        } => const_number(expr).map(|value| -value),
+        _ => None,
+    }
+}
+
 impl Checker<'_> {
     pub(super) fn id(&mut self, expr: &ast::Expr, scoped_to_native: bool) -> Option<String> {
         let (value, span) = match expr {
@@ -684,6 +703,13 @@ impl Checker<'_> {
         expr: &ast::Expr,
         scope: &Scope,
     ) -> Option<ir::Prop> {
+        if matches!(prop_name, "opacity" | "saturation")
+            && let Some(value) = const_number(expr)
+            && !(0.0..=1.0).contains(&value)
+        {
+            self.error(expr.span(), format!("`{prop_name}` must be from 0 to 1"));
+            return None;
+        }
         match self.expr(expr, scope) {
             Some(lowered) if matches!(lowered.ty, Type::Int | Type::Float) => {
                 Some(ir::Prop::Expr { expr: lowered })

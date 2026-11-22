@@ -848,7 +848,7 @@ export function applyStyle(node, style, { selected } = {}) {
       else shadows.push(shadow);
     }
     node.bernShadow = filter;
-    node.style.filter = [filter, node.bernBlur].filter(Boolean).join(" ");
+    writeFilter(node);
     if (look.indicator) shadows.push(`${INDICATOR[look.indicatorEdge ?? "leading"](look.indicatorWidth ?? 3)} ${cssColor(look.indicator)}`);
     node.style.boxShadow = shadows.join(", ");
     // The motion of the topmost state that moves; back at rest, `settle`.
@@ -920,9 +920,9 @@ let sidebarSequence = 0;
 /// of no declared width has a Window Splitter over its edge that drags or
 /// steps it between `SIDEBAR_WIDTHS`; a declared width stays fixed.
 export function SplitView(p, ctx, spec, sidebarContent, detail) {
-  const { selection, fallback, search, footer, header: sidebarHeader, width, titled, id, sidebarStyle, detailStyle } = spec;
+  const { selection, fallback, search, footer, header: sidebarHeader, width, titled, id, sidebarStyle, detailStyle, collapsed: collapsedField } = spec;
   const showingDetail = cell(false);
-  const collapsed = cell(false);
+  const collapsed = collapsedField ?? cell(false);
   const list = el("div", { class: "bern-sidebar-list", role: "listbox", tabindex: "0" });
   const sidebarId = `bern-sidebar-${++sidebarSequence}`;
   const sidebar = el("nav", { class: "bern-sidebar", id: sidebarId });
@@ -1006,7 +1006,6 @@ export function SplitView(p, ctx, spec, sidebarContent, detail) {
   B.bindAttr(toggle, "aria-label", toggleLabel);
   B.bindAttr(toggle, "title", toggleLabel);
   toggle.addEventListener("click", () => {
-    node.style.setProperty("--bern-sidebar-fold", `${reduceMotion() ? 0 : SIDEBAR_FOLD}s`);
     collapsed.set(!collapsed.peek());
   });
   header.prepend(toggle);
@@ -1019,7 +1018,13 @@ export function SplitView(p, ctx, spec, sidebarContent, detail) {
   if (width === undefined) node.append(splitter(node, sidebarId, dragged));
   node.append(column);
   effect(() => node.classList.toggle("bern-split-detail", showingDetail.get()));
-  effect(() => node.classList.toggle("bern-split-collapsed", collapsed.get()));
+  let firstFold = true;
+  effect(() => {
+    const folded = Boolean(collapsed.get());
+    if (firstFold) firstFold = false;
+    else node.style.setProperty("--bern-sidebar-fold", `${reduceMotion() ? 0 : SIDEBAR_FOLD}s`);
+    node.classList.toggle("bern-split-collapsed", folded);
+  });
   p.append(node);
 }
 
@@ -1469,6 +1474,7 @@ export function Decorate(p, ctx, spec, build) {
     if (spec.spin) spin(node, spec.spin, spec.spinPeriod ?? 1);
     if (spec.glow !== undefined) glow(node, spec.glow, spec.glowOpacity ?? 0.4);
     if (spec.blur !== undefined) blur(node, spec.blur, spec.blurMotion);
+    if (spec.opacity !== undefined) opacity(node, spec.opacity, spec.opacityMotion);
     if (spec.nudge) nudge(node, spec.nudge, spec.nudgeMotion);
     if (spec.nudgeKey) nudge(node, spec.nudgeKey, spec.nudgeMotion, spec.nudgeScale ?? 1.06, true);
     if (spec.scrollScale !== undefined || spec.scrollOpacity !== undefined) {
@@ -1768,6 +1774,12 @@ export function glow(node, radius, opacity) {
 
 // MARK: - Blur
 
+/// Combines the independent CSS filter terms a node may carry: style shadow,
+/// `blur`, and image `saturation`.
+function writeFilter(node) {
+  node.style.filter = [node.bernShadow, node.bernBlur, node.bernSaturation].filter(Boolean).join(" ");
+}
+
 /// `blur`: the node's picture blurred with `radius` points and cut to its
 /// box and corners, so the blur does not spread past them. A radius bound
 /// to state springs with `motion`. A style's shadow adds its filter to
@@ -1777,7 +1789,7 @@ export function blur(node, radius, motion) {
     // Kept apart from the style's shadow, which the browser's own copy of
     // the filter no longer spells out the same way.
     node.bernBlur = value > 0.01 ? `blur(${value}px)` : "";
-    node.style.filter = [node.bernShadow, node.bernBlur].filter(Boolean).join(" ");
+    writeFilter(node);
   });
   const clip = () => {
     node.style.clipPath = `inset(0 round ${getComputedStyle(node).borderRadius || "0px"})`;
@@ -1785,6 +1797,30 @@ export function blur(node, radius, motion) {
   const observer = new ResizeObserver(clip);
   observer.observe(node);
   onCleanup(() => observer.disconnect());
+}
+
+/// `opacity`: a node's opacity in 0…1, springing with `motion` when bound to
+/// state and multiplying with the other layers' opacities.
+export function opacity(node, value, motion) {
+  const layer = layers(node).layer("opacity");
+  const clamp = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 1;
+  };
+  if (typeof value !== "function") {
+    layer.opacity.set(clamp(value));
+    return;
+  }
+  layer.opacity.set(clamp(value()));
+  let first = true;
+  effect(() => {
+    const next = clamp(value());
+    if (first) {
+      first = false;
+      return;
+    }
+    untrack(() => layer.opacity.to(next, motion));
+  });
 }
 
 // MARK: - Nudges
@@ -2773,7 +2809,7 @@ function nudgeOnce(node, motion) {
 /// application's or its part's appearance) it shows `darkSource` when
 /// given. A picture larger than it shows is drawn down by the browser's
 /// own image filter.
-export function Image(p, ctx, { source, darkSource, url, label, width, height, fit, animate, corner, rendering, aspect, adaptive, covers }) {
+export function Image(p, ctx, { source, darkSource, url, label, width, height, fit, animate, corner, rendering, saturation, aspect, adaptive, covers }) {
   const template = rendering === "template";
   const intrinsicRatio = cell(aspect ?? 1);
   // What tells of a template's picture, which as a mask tells nothing.
@@ -2859,6 +2895,13 @@ export function Image(p, ctx, { source, darkSource, url, label, width, height, f
     bindLength(node, "height", () => Number(typeof width === "function" ? width() : width) / intrinsicRatio.get(), animate);
   }
   bindLength(node, "borderRadius", corner, animate);
+  if (saturation !== undefined) {
+    bindNumber(saturation, animate, (value) => {
+      const clamped = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 1));
+      node.bernSaturation = clamped < 0.999 ? `saturate(${clamped})` : "";
+      writeFilter(node);
+    });
+  }
   if (aspect) node.style.aspectRatio = String(aspect);
   if (adaptive || (aspect && width === undefined)) {
     node.classList.add("bern-fill-width");
@@ -3122,7 +3165,7 @@ export function Place(p, ctx, { at, from, to, motion }, build) {
 /// The children mount while the popover shows. `presented`, when given,
 /// follows the popover and opens or closes it; external entries open it
 /// with `activate`.
-export function PopoverButton(p, ctx, { id, label, icon: glyph, prominence, fontSize, presented, windowTheme = false, style }, content) {
+export function PopoverButton(p, ctx, { id, label, icon: glyph, prominence, fontSize, shape, height, presented, windowTheme = false, style }, content) {
   const panelId = `bern-popover-${Math.random().toString(36).slice(2)}`;
   const iconOnly = Boolean(glyph);
   const iconKind = prominence === "prominent" ? " bern-icon-button-prominent" : prominence === "plain" ? " bern-icon-button-plain" : "";
@@ -3135,6 +3178,16 @@ export function PopoverButton(p, ctx, { id, label, icon: glyph, prominence, font
     const text = el("span");
     B.bindText(text, label);
     trigger.append(text);
+    if (shape === "capsule") trigger.classList.add("bern-control-capsule");
+    else if (height != null) bindLength(trigger, "height", height);
+  } else {
+    if (height != null) {
+      bindNumber(height, null, (v) => {
+        const px = `${Math.max(0, v)}px`;
+        Object.assign(trigger.style, { width: px, height: px, minWidth: px, padding: "0" });
+      });
+    }
+    if (shape === "capsule") trigger.style.borderRadius = "50%";
   }
   B.bindAttr(trigger, "aria-label", label);
   B.bindAttr(trigger, "title", label);

@@ -1106,3 +1106,167 @@ fn pointer_events_attach_to_any_owner_without_rendering() {
         assert!(crate::FEATURES.contains(&feature), "{feature}");
     }
 }
+
+#[test]
+fn menu_checked_popover_shape_opacity_saturation_color_and_sidebar_collapsed() {
+    let mut app = app();
+    app.sessions.push(SessionDef {
+        name: "draft".into(),
+        fields: vec![
+            SessionFieldDef {
+                name: "tab".into(),
+                ty: Type::Text,
+                initial: Value::Text("a".into()),
+            },
+            SessionFieldDef {
+                name: "collapsed".into(),
+                ty: Type::Bool,
+                initial: Value::Bool(false),
+            },
+            SessionFieldDef {
+                name: "ratio".into(),
+                ty: Type::Float,
+                initial: Value::Float(0.5),
+            },
+        ],
+    });
+    let field_ref = |field: usize, ty: Type| Prop::Field {
+        field: FieldRef {
+            session: "draft".into(),
+            field,
+            ty,
+        },
+    };
+    let bool_expr = Expr {
+        ty: Type::Bool,
+        kind: ExprKind::Binding {
+            binding: Binding::Session {
+                session: "draft".into(),
+                field: 1,
+                path: Vec::new(),
+            },
+        },
+    };
+    let num_expr = Expr {
+        ty: Type::Float,
+        kind: ExprKind::Binding {
+            binding: Binding::Session {
+                session: "draft".into(),
+                field: 2,
+                path: Vec::new(),
+            },
+        },
+    };
+
+    let mut menu = element("Menu");
+    menu.id = Some("sort".into());
+    let mut item = element("MenuItem");
+    item.id = Some("opt".into());
+    item.props
+        .insert("checked".into(), Prop::Expr { expr: bool_expr });
+    menu.children = vec![Node::Element(item)];
+
+    let mut popover = element("PopoverButton");
+    popover.id = Some("pop".into());
+    popover.props.insert(
+        "icon".into(),
+        Prop::Icon {
+            name: "slider.horizontal.3".into(),
+        },
+    );
+    popover.props.insert(
+        "shape".into(),
+        Prop::Keyword {
+            value: "capsule".into(),
+        },
+    );
+    popover
+        .props
+        .insert("height".into(), Prop::Number { value: 32.0 });
+
+    let mut label = element("Label");
+    label.props.insert(
+        "color".into(),
+        Prop::Keyword {
+            value: "status.success".into(),
+        },
+    );
+
+    let mut icon_btn = element("IconButton");
+    icon_btn.id = Some("fav".into());
+    icon_btn.props.insert(
+        "icon".into(),
+        Prop::Icon {
+            name: "heart.fill".into(),
+        },
+    );
+    icon_btn.props.insert(
+        "color".into(),
+        Prop::Keyword {
+            value: "status.error".into(),
+        },
+    );
+
+    let mut image = element("Image");
+    image.props.insert(
+        "source".into(),
+        Prop::Resource {
+            name: "images/cover.png".into(),
+        },
+    );
+    image.props.insert(
+        "saturation".into(),
+        Prop::Expr {
+            expr: num_expr.clone(),
+        },
+    );
+
+    let mut col = element("Column");
+    col.props.insert(
+        "opacity".into(),
+        Prop::Expr {
+            expr: num_expr.clone(),
+        },
+    );
+    col.props.insert(
+        "animate".into(),
+        Prop::Keyword {
+            value: "smooth".into(),
+        },
+    );
+    col.children = vec![
+        Node::Element(menu),
+        Node::Element(popover),
+        Node::Element(label),
+        Node::Element(icon_btn),
+        Node::Element(image),
+    ];
+
+    let mut sidebar = element("Sidebar");
+    sidebar
+        .props
+        .insert("selection".into(), field_ref(0, Type::Text));
+    sidebar
+        .props
+        .insert("collapsed".into(), field_ref(1, Type::Bool));
+    let mut detail = element("Detail");
+    detail.children = vec![Node::Element(col)];
+    let mut split = element("SplitView");
+    split.children = vec![Node::Element(sidebar), Node::Element(detail)];
+
+    let mut out = Out::default();
+    Generator::new(&app).nodes(&mut out, &[Node::Element(split)]);
+    let code = out.finish();
+    for expected in [
+        "collapsed: ctx.s.draft.collapsed",
+        "opacity: () => (ctx.s.draft.ratio.get())",
+        "opacityMotion: M.smooth",
+        "checked: () => Boolean(ctx.s.draft.collapsed.get())",
+        "shape: \"capsule\", height: 32",
+        "color: \"status.success\"",
+        "color: \"status.error\"",
+        "saturation: () => (ctx.s.draft.ratio.get())",
+    ] {
+        assert!(code.contains(expected), "missing `{expected}`:\n{code}");
+    }
+}

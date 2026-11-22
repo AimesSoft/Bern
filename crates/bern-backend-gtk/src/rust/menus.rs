@@ -128,12 +128,13 @@ impl Generator<'_> {
     /// One item of a menu or of a table's row menu.
     pub(super) fn menu_item(&self, item: &Element) -> String {
         format!(
-            "Some(b::MenuItem {{ id: {}, label: {}, icon: {}, role: {}, enabled: {}, action: {}, pick: {}, paste: {} }})",
+            "Some(b::MenuItem {{ id: {}, label: {}, icon: {}, role: {}, enabled: {}, checked: {}, action: {}, pick: {}, paste: {} }})",
             self.id(item),
             some(self.text_prop(item, "label")),
             Self::icon(item, "icon"),
             Self::keyword(item, "role"),
             self.enabled(item),
+            some(item.expr("checked").map(|checked| self.getter(checked))),
             self.action(item),
             self.pick(item),
             some(self.field(item, "paste")),

@@ -424,6 +424,10 @@ pub const MOTION_PROPS: &[PropSpec] = &[
     // inside its bounds; it may follow state, with `animate` changing it
     // with that motion.
     opt("blur", PropKind::Length),
+    // Opacity from 0 to 1; follows state and animates with `animate`.
+    // Elements with their own `opacity` prop (`Marquee`, `Skeleton`,
+    // `Shape`, `Series`, `Pattern`) handle it themselves.
+    opt("opacity", PropKind::NumberValue),
     opt("stagger", PropKind::Number),
     // Seconds a mouse rests over the element, such as a player's picture,
     // before its window goes idle; with such areas on screen a mouse
@@ -448,6 +452,15 @@ pub const PLACEMENT_PROPS: &[PropSpec] = &[
 
 /// Containers that may stagger the appearing of their children.
 pub const STAGGERING: &[&str] = &["Column", "Row", "Grid", "Stack", "ForEach", "List"];
+
+/// Whether the component has its own `opacity` prop, so generic motion
+/// wrappers must not apply `opacity` a second time.
+pub fn has_own_opacity(kind: &str) -> bool {
+    matches!(
+        kind,
+        "Marquee" | "Skeleton" | "Shape" | "Series" | "Pattern"
+    )
+}
 
 const fn req(name: &'static str, kind: PropKind) -> PropSpec {
     PropSpec {
@@ -889,6 +902,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("width", PropKind::Length),
                 opt("id", PropKind::Id),
                 opt("fallback", PropKind::SelectionValue),
+                opt("collapsed", PropKind::BoolField),
             ],
             Children::Only(&[
                 "Search",
@@ -898,7 +912,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 "SidebarHeader",
                 "SidebarFooter",
             ]),
-            "Sidebar list selecting a destination",
+            "Sidebar list selecting a destination; `collapsed` binds a session flag that hides or collapses the sidebar in the platform's native way and follows user toggles",
         )
     },
     ComponentSpec {
@@ -1098,13 +1112,15 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 req("label", PropKind::DisplayText),
                 opt("icon", PropKind::Icon),
                 opt("font_size", PropKind::Number),
+                opt("shape", PropKind::Keyword(&["capsule"])),
+                opt("height", PropKind::Length),
                 opt("prominence", PropKind::Keyword(&["standard", "plain"])),
                 opt("presented", PropKind::BoolField),
                 opt("open", PropKind::Bool),
                 opt("shortcut", PropKind::Shortcut),
             ],
             Children::Any,
-            "A button that shows its children in a popover; `presented` binds a session field, or `open` follows engine state and commits opening and dismissal through its action; `prominence: plain` draws no background and `font_size` sizes the icon, as on an `IconButton`",
+            "A button that shows its children in a popover; `presented` binds a session field, or `open` follows engine state and commits opening and dismissal through its action; `prominence: plain` draws no background, `font_size` sizes the icon, and `height` / `shape: capsule` size and shape the trigger button as on `Menu` and `IconButton`",
         )
     },
     spec(
@@ -1245,6 +1261,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("icon", PropKind::Icon),
                 opt("role", PropKind::Keyword(&["normal", "destructive"])),
                 opt("enabled", PropKind::Bool),
+                opt("checked", PropKind::Bool),
                 FEATURE,
                 opt("shortcut", PropKind::Shortcut),
                 opt("pick", PropKind::FileField),
@@ -1254,7 +1271,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("paste", PropKind::TextField),
             ],
             Children::None,
-            "Menu command bound to a registered command; `pick` asks for file(s), `save` asks for a save destination, and `paste` reads the clipboard as `Button` does",
+            "Menu command bound to a registered command; checks the item with the platform's mark while `checked` holds; `pick` asks for file(s), `save` asks for a save destination, and `paste` reads the clipboard as `Button` does",
         )
     },
     ComponentSpec {
@@ -1496,10 +1513,11 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             req("icon", PropKind::Icon),
             opt("style", PropKind::Keyword(TEXT_STYLES)),
             opt("font_size", PropKind::Number),
+            opt("color", PropKind::ColorRole),
             opt("display", PropKind::Keyword(&["title_and_icon", "icon"])),
         ],
         Children::None,
-        "Icon and title; `display: icon` hides the title visually while preserving its accessible name",
+        "Icon and title; `color` draws both in that theme role; `display: icon` hides the title visually while preserving its accessible name",
     ),
     spec(
         "Svg",
@@ -1551,9 +1569,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             opt("corner", PropKind::Length),
             opt("rendering", PropKind::Keyword(&["original", "template"])),
             opt("aspect", PropKind::Number),
+            opt("saturation", PropKind::NumberValue),
         ],
         Children::None,
-        "Picture from a declared resource, sized by `width` and/or `height`, its corners rounded by `corner`; `rendering: template` uses its alpha as a mask for the inherited text color, otherwise it keeps its colors; `label` describes it, without one it is decorative",
+        "Picture from a declared resource, sized by `width` and/or `height`, its corners rounded by `corner`; `rendering: template` uses its alpha as a mask for the inherited text color, otherwise it keeps its colors; `saturation` scales color saturation from 0 (grayscale) to 1 (full color); `label` describes it, without one it is decorative",
     ),
     spec(
         "Progress",
@@ -1617,6 +1636,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("badge_icon", PropKind::Icon),
                 opt("badge_visible", PropKind::Bool),
                 opt("height", PropKind::Length),
+                opt("color", PropKind::ColorRole),
                 req("label", PropKind::DisplayText),
                 opt(
                     "prominence",
@@ -1634,7 +1654,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("default_focus", PropKind::Flag),
             ],
             Children::None,
-            "Icon-only button with an accessible name; `icon_progress` colors the actual icon in the theme accent from top to bottom (0–1, non-finite values treated as zero); `badge_icon` overlays a small icon at its bottom-right, shown unless `badge_visible` is false; these decorations never change layout or hit testing; `prominence: plain` draws no background, as the icons at the foot of a sidebar; `height` makes it a round system button of that diameter; `pick` asks for file(s), `save` asks for a save destination, and `paste` reads the clipboard as `Button` does; `default_focus: true` starts the focus on it as `Button` does",
+            "Icon-only button with an accessible name; `color` draws its icon in that theme role; `icon_progress` colors the actual icon in the theme accent from top to bottom (0–1, non-finite values treated as zero); `badge_icon` overlays a small icon at its bottom-right, shown unless `badge_visible` is false; these decorations never change layout or hit testing; `prominence: plain` draws no background, as the icons at the foot of a sidebar; `height` makes it a round system button of that diameter; `pick` asks for file(s), `save` asks for a save destination, and `paste` reads the clipboard as `Button` does; `default_focus: true` starts the focus on it as `Button` does",
         )
     },
     ComponentSpec {

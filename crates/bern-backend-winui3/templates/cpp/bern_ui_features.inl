@@ -1390,6 +1390,8 @@ struct PopoverButtonProps {
     bool plain = false;
     /// `font_size`: the size of the icon.
     std::optional<double> iconSize;
+    /// `shape: capsule` / `height`: sizes the trigger button like `Menu` and `IconButton`.
+    std::optional<ControlShape> shape;
 };
 
 /// A button that shows its children in a popover, such as a volume slider.
@@ -1400,19 +1402,25 @@ inline void PopoverButton(Parent const& p, Ctx const& ctx, PopoverButtonProps pr
     controls::Button button;
     auto text = Bound(ctx, props.label);
     if (props.icon) {
-        // As an `IconButton`: the icon with 10 on each side, no background
-        // until pointed at.
+        // As an `IconButton`: the icon with 10 on each side, or `height` × `height`,
+        // no background until pointed at.
         double size = props.iconSize.value_or(16);
         button.Content(Icons::Icon(props.icon, size));
         Styles::MakeSubtle(button);
-        button.Width(size + 20);
-        button.Height(size + 20);
-        button.MinWidth(0);
-        button.MinHeight(0);
-        button.Padding(xaml::Thickness{0, 0, 0, 0});
+        auto square = [button](double d) {
+            double side = (std::max)(0.0, d);
+            button.Width(side);
+            button.Height(side);
+            button.MinWidth(0);
+            button.MinHeight(0);
+            button.Padding(xaml::Thickness{0, 0, 0, 0});
+        };
+        if (props.shape && props.shape->height.Given()) BindLen(ctx, props.shape->height, nullptr, square);
+        else square(size + 20);
     } else {
         button.Content(TextOf(text));
         if (props.plain) Styles::MakeSubtle(button);
+        ShapeControl(ctx, button, props.shape);
     }
     if (text)
         Reactive::Run([button, text] {

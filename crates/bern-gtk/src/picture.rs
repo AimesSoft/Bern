@@ -27,6 +27,8 @@ mod imp {
         pub fill: Cell<Option<f64>>,
         /// It takes all the room its container gives.
         pub covers: Cell<bool>,
+        /// Optional color saturation from 0 (grayscale) to 1 (full color).
+        pub saturation: Cell<Option<f64>>,
     }
 
     #[glib::object_subclass]
@@ -97,6 +99,41 @@ mod imp {
                 };
                 child.allocate(w, h, baseline, None);
             }
+        }
+
+        fn snapshot(&self, snapshot: &gtk::Snapshot) {
+            if let Some(sat) = self.saturation.get() {
+                let s = sat.clamp(0.0, 1.0) as f32;
+                if s < 0.999 {
+                    let inv = 1.0 - s;
+                    let r = 0.2126 * inv;
+                    let g = 0.7152 * inv;
+                    let b = 0.0722 * inv;
+                    let matrix = gtk::graphene::Matrix::from_float([
+                        r + s,
+                        r,
+                        r,
+                        0.0,
+                        g,
+                        g + s,
+                        g,
+                        0.0,
+                        b,
+                        b,
+                        b + s,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0,
+                    ]);
+                    snapshot.push_color_matrix(&matrix, &gtk::graphene::Vec4::zero());
+                    self.parent_snapshot(snapshot);
+                    snapshot.pop();
+                    return;
+                }
+            }
+            self.parent_snapshot(snapshot);
         }
     }
 
@@ -213,6 +250,12 @@ impl Frame {
         self.set_hexpand(true);
         self.set_vexpand(true);
         self.queue_resize();
+    }
+
+    /// Scale color saturation from 0 (grayscale) to 1 (full color).
+    pub fn set_saturation(&self, saturation: f64) {
+        self.imp().saturation.set(Some(saturation.clamp(0.0, 1.0)));
+        self.queue_draw();
     }
 }
 

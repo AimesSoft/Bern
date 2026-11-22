@@ -91,6 +91,8 @@ pub struct Motion {
     /// the scale grows from, as fractions of its size
     /// (`scroll_scale`, `scroll_opacity`, `scroll_origin_x`, `_y`).
     pub scroll: Option<(f32, f32, (f32, f32))>,
+    /// Element opacity in 0…1 (`opacity`).
+    pub opacity: Option<f32>,
 }
 
 impl Motion {
@@ -104,6 +106,7 @@ impl Motion {
         reduce_motion: None,
         hero: None,
         scroll: None,
+        opacity: None,
     };
 }
 
@@ -689,6 +692,9 @@ pub fn moving(
             pose.scale *= 1.0 + (scale - 1.0) * near;
             pose.opacity *= opacity + (1.0 - opacity) * near;
             pose.origin = origin;
+        }
+        if let Some(opacity) = motion.opacity {
+            pose.opacity *= opacity.clamp(0.0, 1.0);
         }
         (fresh, pose, Rc::clone(&scene.sizes), measure)
     });

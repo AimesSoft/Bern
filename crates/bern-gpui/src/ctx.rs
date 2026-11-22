@@ -253,6 +253,8 @@ struct Inner {
     /// The color text and icons take where nothing names one: a style's
     /// foreground around them; the theme's primary text color without one.
     foreground: Option<gpui::Rgba>,
+    /// Semantic color role overriding the accent roles for this subtree (`tint`).
+    tint: Option<&'static str>,
     /// The scroll view whose items the rows of the next list are.
     scroll: Option<Rc<str>>,
     /// The scroll view this row is an item of.
@@ -332,6 +334,7 @@ impl Ctx {
             toolbar: false,
             reveal: false,
             foreground: None,
+            tint: None,
             scroll: None,
             item_of: None,
             scroller: None,
@@ -529,6 +532,11 @@ impl Ctx {
     /// The context inside something whose foreground is `color`.
     pub(crate) fn with_foreground(&self, color: gpui::Rgba) -> Self {
         self.with(|inner| inner.foreground = Some(color))
+    }
+
+    /// The context inside a subtree whose accent is overridden by `role` (`tint`).
+    pub fn with_tint(&self, role: &'static str) -> Self {
+        self.with(|inner| inner.tint = Some(role))
     }
 
     /// The context inside a surface with `style`, whose foreground its
@@ -733,6 +741,27 @@ impl Ctx {
     }
 
     pub(crate) fn color(&self, role: &str) -> Rgba {
+        if let Some(tint) = self.0.tint {
+            match role {
+                "accent" | "accent.text" | "focus.indicator" | "selection.background" => {
+                    return self.0.theme.color(tint);
+                }
+                "button.prominent.hover" => {
+                    let mut c = self.0.theme.color(tint);
+                    c.a *= 0.9;
+                    return c;
+                }
+                "button.prominent.pressed" => {
+                    let mut c = self.0.theme.color(tint);
+                    c.a *= 0.8;
+                    return c;
+                }
+                "on_accent" | "selection.foreground" => {
+                    return self.0.theme.color("surface.canvas");
+                }
+                _ => {}
+            }
+        }
         self.0.theme.color(role)
     }
 
@@ -743,14 +772,14 @@ impl Ctx {
 
     /// Resolve a Bern semantic color role in the hosting window's theme.
     pub fn theme_color(&self, role: &str) -> Rgba {
-        self.0.theme.color(role)
+        self.color(role)
     }
 
     /// The color of a recipe slot, such as the `background` of
     /// `button.prominent` at `hover`; the `rest` state's when the state
     /// does not name the slot.
     pub(crate) fn slot(&self, recipe: &str, state: &str, slot: &str) -> Rgba {
-        self.0.theme.slot(recipe, state, slot)
+        self.color(Theme::slot_role(recipe, state, slot))
     }
 
     /// List a control for external entries, while they look.

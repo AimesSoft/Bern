@@ -202,8 +202,12 @@ impl Generator<'_> {
             .style_of(detail)
             .map(|style| format!("detailStyle = BernStyles.{}, ", style.name))
             .unwrap_or_default();
+        let collapsed = self
+            .field(sidebar, "collapsed")
+            .map(|field| format!("collapsed = {field}, onCollapsed = {{ {field} = it }}, "))
+            .unwrap_or_default();
         out.open(format!(
-            "BernSplitView({title}, bernShowing, {width}{sidebar_style}{detail_style}header = "
+            "BernSplitView({title}, bernShowing, {width}{sidebar_style}{detail_style}{collapsed}header = "
         ));
         match header {
             Some(header) => {

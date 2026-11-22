@@ -58,6 +58,7 @@ impl Generator<'_> {
                 ("title", self.text_prop(element, "title")),
                 ("icon", element.icon("icon").map(string)),
                 ("style", Self::keyword(element, "style")),
+                ("color", Self::keyword(element, "color")),
                 ("fontSize", element.number("font_size").map(number)),
                 ("display", Self::keyword(element, "display")),
             ])
@@ -120,6 +121,13 @@ impl Generator<'_> {
                 ("animate", self.animate(element)),
                 ("corner", self.length(element, "corner")),
                 ("rendering", Self::keyword(element, "rendering")),
+                (
+                    "saturation",
+                    match element.prop("saturation") {
+                        Some(Prop::Expr { expr }) => Some(format!("() => ({})", self.expr(expr))),
+                        _ => element.number("saturation").map(number),
+                    },
+                ),
                 ("aspect", element.number("aspect").map(number)),
                 // Without a size it covers the room its container gives.
                 (

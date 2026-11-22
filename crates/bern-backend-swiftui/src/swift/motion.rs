@@ -237,6 +237,18 @@ impl Generator<'_> {
                 ));
             }
         }
+        if !bern_ir::spec::has_own_opacity(&element.kind)
+            && let Some(opacity) = element.expr("opacity")
+        {
+            let value = format!("min(max(Double({}), 0), 1)", self.expr(opacity));
+            out.line(format!(".opacity({value})"));
+            if let Some(token) = element.keyword("animate") {
+                out.line(format!(
+                    ".animation({}.animation, value: {value})",
+                    crate::style::motion(self.app, token)
+                ));
+            }
+        }
         if let Some(radius) = element.number("glow") {
             out.line(format!(
                 ".bernGlow({}, opacity: {}, corner: {})",

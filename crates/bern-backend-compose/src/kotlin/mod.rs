@@ -451,6 +451,18 @@ impl<'a> Generator<'a> {
                 if let Some(radius) = self.length(element, "blur") {
                     effects.push_str(&format!(".bernBlur({radius}, {corner})"));
                 }
+                if !bern_ir::spec::has_own_opacity(&element.kind)
+                    && let Some(opacity) = element.expr("opacity")
+                {
+                    let motion = element
+                        .keyword("animate")
+                        .map(|token| format!(", {}", crate::style::motion(self.app, token)))
+                        .unwrap_or_default();
+                    effects.push_str(&format!(
+                        ".bernOpacity(({}).toFloat(){motion})",
+                        self.expr(opacity)
+                    ));
+                }
                 if !effects.is_empty() {
                     let flex = self.element_flex(element, &own);
                     if flex.is_empty() {

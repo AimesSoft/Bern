@@ -642,6 +642,7 @@ fn button_of(
 pub struct IconButtonProps {
     pub label: String,
     pub prominence: Prominence,
+    pub color: Option<&'static str>,
     pub enabled: bool,
     /// The diameter of a round button with a background.
     pub height: Option<f32>,
@@ -690,9 +691,14 @@ pub fn icon_button(
         _ => "icon_button",
     };
     let side = props.height.unwrap_or(36.0);
-    let foreground = Colors::recipe(c, recipe, if enabled { "rest" } else { "disabled" }, false)
-        .with(c, style.map(|style| &style.base))
-        .foreground;
+    let foreground = match props.color {
+        Some(role) if enabled => c.color(role),
+        _ => {
+            Colors::recipe(c, recipe, if enabled { "rest" } else { "disabled" }, false)
+                .with(c, style.map(|style| &style.base))
+                .foreground
+        }
+    };
     let corner = if round {
         side / 2.0
     } else {

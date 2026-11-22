@@ -318,23 +318,41 @@ impl Generator<'_> {
             }
             let item_label = self.text_prop(item, "label").unwrap_or_default();
             let (action, _) = self.pressed(item);
-            let role = if item.keyword("role") == Some("destructive") {
-                "role: .destructive, "
-            } else {
-                ""
-            };
-            out.open(format!("SwiftUI.Button({role}action: {{"));
-            out.line(&action);
-            out.close("}) {");
-            out.indent += 1;
-            match item.icon("icon") {
-                Some(icon) => out.line(format!(
-                    "SwiftUI.Label({item_label}, systemImage: {})",
-                    string(icon)
-                )),
-                None => out.line(format!("SwiftUI.Text(verbatim: {item_label})")),
+            match item.expr("checked") {
+                Some(checked) => {
+                    out.open(format!(
+                        "SwiftUI.Toggle(isOn: SwiftUI.Binding(get: {{ {} }}, set: {{ _ in {action} }})) {{",
+                        self.expr(checked)
+                    ));
+                    match item.icon("icon") {
+                        Some(icon) => out.line(format!(
+                            "SwiftUI.Label({item_label}, systemImage: {})",
+                            string(icon)
+                        )),
+                        None => out.line(format!("SwiftUI.Text(verbatim: {item_label})")),
+                    }
+                    out.close("}");
+                }
+                None => {
+                    let role = if item.keyword("role") == Some("destructive") {
+                        "role: .destructive, "
+                    } else {
+                        ""
+                    };
+                    out.open(format!("SwiftUI.Button({role}action: {{"));
+                    out.line(&action);
+                    out.close("}) {");
+                    out.indent += 1;
+                    match item.icon("icon") {
+                        Some(icon) => out.line(format!(
+                            "SwiftUI.Label({item_label}, systemImage: {})",
+                            string(icon)
+                        )),
+                        None => out.line(format!("SwiftUI.Text(verbatim: {item_label})")),
+                    }
+                    out.close("}");
+                }
             }
-            out.close("}");
             if let Some(line) = self.shortcut_line(item, Some(&action)) {
                 out.line(line);
             }
@@ -440,8 +458,17 @@ impl Generator<'_> {
                 .expr("enabled")
                 .map(|expr| self.expr(expr))
                 .unwrap_or_else(|| "true".into());
+            let checked = item
+                .expr("checked")
+                .map(|expr| {
+                    format!(
+                        ", value: {{ ({}) ? \"checked\" : \"unchecked\" }}",
+                        self.expr(expr)
+                    )
+                })
+                .unwrap_or_default();
             out.line(format!(
-                ".bernControl({}, role: \"button\", label: {item_label}, enabled: {enabled}, actions: BernControlActions(activate: {{ {action} }}{file}))",
+                ".bernControl({}, role: \"button\", label: {item_label}, enabled: {enabled}, actions: BernControlActions(activate: {{ {action} }}{file}{checked}))",
                 self.target(item, ctx)
             ));
         }
@@ -498,12 +525,28 @@ impl Generator<'_> {
             out.line(&action);
             out.close("}) {");
             out.indent += 1;
-            match item.icon("icon") {
-                Some(icon) => out.line(format!(
-                    "SwiftUI.Label({item_label}, systemImage: {})",
-                    string(icon)
-                )),
-                None => out.line(format!("SwiftUI.Text(verbatim: {item_label})")),
+            if let Some(checked) = item.expr("checked") {
+                out.open("SwiftUI.HStack {");
+                match item.icon("icon") {
+                    Some(icon) => out.line(format!(
+                        "SwiftUI.Label({item_label}, systemImage: {})",
+                        string(icon)
+                    )),
+                    None => out.line(format!("SwiftUI.Text(verbatim: {item_label})")),
+                }
+                out.open(format!("if {} {{", self.expr(checked)));
+                out.line("SwiftUI.Spacer()");
+                out.line("SwiftUI.Image(systemName: \"checkmark\")");
+                out.close("}");
+                out.close("}");
+            } else {
+                match item.icon("icon") {
+                    Some(icon) => out.line(format!(
+                        "SwiftUI.Label({item_label}, systemImage: {})",
+                        string(icon)
+                    )),
+                    None => out.line(format!("SwiftUI.Text(verbatim: {item_label})")),
+                }
             }
             out.close("}");
             if let Some(enabled) = item.expr("enabled") {
@@ -542,8 +585,17 @@ impl Generator<'_> {
                 .expr("enabled")
                 .map(|expr| self.expr(expr))
                 .unwrap_or_else(|| "true".into());
+            let checked = item
+                .expr("checked")
+                .map(|expr| {
+                    format!(
+                        ", value: {{ ({}) ? \"checked\" : \"unchecked\" }}",
+                        self.expr(expr)
+                    )
+                })
+                .unwrap_or_default();
             out.line(format!(
-                ".bernControl({}, role: \"button\", label: {item_label}, enabled: {enabled}, actions: BernControlActions(activate: {{ {action} }}{file}))",
+                ".bernControl({}, role: \"button\", label: {item_label}, enabled: {enabled}, actions: BernControlActions(activate: {{ {action} }}{file}{checked}))",
                 self.target(item, ctx)
             ));
         }

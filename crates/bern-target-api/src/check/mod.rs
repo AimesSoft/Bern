@@ -223,6 +223,7 @@ fn check_motion(descriptor: &TargetDescriptor, app: &Application) -> Vec<Diagnos
                     && prop.name != "appearance"
                     && prop.name != "glass"
                     && prop.name != "tint"
+                    && prop.name != "opacity"
                     && prop.name != "spin_period"
                     && prop.name != "glow_opacity"
                     && prop.name != "skeleton"

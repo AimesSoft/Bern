@@ -1070,6 +1070,7 @@ pub fn avatar(c: &Ctx, props: AvatarProps) -> El {
             false,
             None,
             None,
+            None,
             false,
         )));
     } else if let Some(url) = props.url.filter(|u| !u.is_empty()) {
@@ -1081,6 +1082,7 @@ pub fn avatar(c: &Ctx, props: AvatarProps) -> El {
             Some(radius),
             crate::content::Fit::Cover,
             false,
+            None,
             None,
             false,
         )));

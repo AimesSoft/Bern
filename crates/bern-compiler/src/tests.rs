@@ -6161,3 +6161,67 @@ pub mod demo {
     );
     assert!(msg.contains("one child"), "{msg}");
 }
+
+#[test]
+fn menu_item_checked_popover_shape_opacity_saturation_color_and_sidebar_collapsed() {
+    let valid = wrap(
+        r#"SplitView {
+            Sidebar(selection: draft.mode, collapsed: draft.on) {
+                SidebarItem(value: Mode::Fast, label: tr! { "en" => "Fast", "ja" => "速い" })
+                SidebarItem(value: Mode::Slow, label: tr! { "en" => "Slow", "ja" => "遅い" })
+            }
+            Detail {
+                Column(opacity: 0.5, tint: status.warning) {
+                    Menu(id: sort, label: tr! { "en" => "Sort", "ja" => "並び替え" }) {
+                        MenuItem(id: a, label: tr! { "en" => "A", "ja" => "A" }, checked: draft.on) => app.add(1)
+                    }
+                    PopoverButton(id: filters, label: tr! { "en" => "Filters", "ja" => "絞り込み" }, icon: "slider.horizontal.3", shape: capsule, height: 32) {
+                        Text(content: tr! { "en" => "Inside", "ja" => "中" })
+                    }
+                    Label(title: tr! { "en" => "Done", "ja" => "完了" }, icon: "checkmark.circle.fill", color: status.success)
+                    IconButton(id: fav, icon: "heart.fill", label: tr! { "en" => "Favorite", "ja" => "お気に入り" }, color: status.error) => app.add(1)
+                    Image(source: draft.file, width: 120, height: 80, saturation: 0, opacity: draft.size, animate: smooth)
+                    Marquee(duration: 5, opacity: 0.7) {
+                        Text(content: tr! { "en" => "Ticker", "ja" => "ティッカー" })
+                    }
+                }
+            }
+        }"#,
+    );
+    let compiled = compile_ui(&valid).unwrap_or_else(|e| panic!("{e:?}"));
+    assert!(compiled.app.component("page").is_some());
+
+    let errs = |body: &str| {
+        compile_ui(&wrap(body))
+            .err()
+            .expect("expected compile error")
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    assert!(errs(r#"Column(opacity: 1.5) { Spacer }"#).contains("from 0 to 1"));
+    assert!(errs(r#"Column(opacity: -0.1) { Spacer }"#).contains("from 0 to 1"));
+    assert!(
+        errs(r#"Image(source: draft.file, width: 120, saturation: 1.2)"#).contains("from 0 to 1")
+    );
+    assert!(
+        errs(r#"Image(source: draft.file, width: 120, saturation: -0.5)"#).contains("from 0 to 1")
+    );
+    assert!(
+        errs(
+            r#"Menu(id: m, label: tr! { "en" => "M", "ja" => "M" }) { MenuItem(id: a, label: tr! { "en" => "A", "ja" => "A" }, checked: app.count) => app.add(1) }"#
+        )
+        .contains("bool")
+    );
+    assert!(
+        errs(
+            r#"SplitView { Sidebar(selection: draft.mode, collapsed: draft.name) { SidebarItem(value: Mode::Fast, label: tr! { "en" => "Fast", "ja" => "速い" }) } Detail { Spacer } }"#
+        )
+        .contains("bool")
+    );
+    assert!(
+        errs(r#"Label(title: tr! { "en" => "X", "ja" => "X" }, icon: "star", color: not_a_role)"#)
+            .contains("color")
+    );
+}

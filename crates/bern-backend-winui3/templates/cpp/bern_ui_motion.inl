@@ -812,6 +812,38 @@ inline winrt::Windows::UI::Color ColorOf(Win* win, bool dark, Paint const& paint
         color.A = static_cast<uint8_t>(std::lround(color.A * solid.Opacity()));
         return scaled(color);
     }
+    // Before the probe border enters layout, read the theme dictionary directly.
+    try {
+        auto resources = xaml::Application::Current().Resources();
+        auto boxedKey = winrt::box_value(key);
+        std::vector<std::wstring> names = dark ? std::vector<std::wstring>{L"Dark", L"Default"} : std::vector<std::wstring>{L"Light"};
+        auto findIn = [&](auto&& self, xaml::ResourceDictionary const& dict, std::wstring const& theme, int depth) -> std::optional<winrt::Windows::UI::Color> {
+            if (!dict || depth > 8) return std::nullopt;
+            try {
+                auto themes = dict.ThemeDictionaries();
+                auto boxedTheme = winrt::box_value(theme);
+                if (themes.HasKey(boxedTheme)) {
+                    if (auto inner = themes.Lookup(boxedTheme).try_as<xaml::ResourceDictionary>()) {
+                        if (inner.HasKey(boxedKey))
+                            if (auto brush = inner.Lookup(boxedKey).try_as<media::SolidColorBrush>()) {
+                                auto color = brush.Color();
+                                color.A = static_cast<uint8_t>(std::lround(color.A * brush.Opacity()));
+                                return color;
+                            }
+                        if (auto hit = self(self, inner, theme, depth + 1)) return hit;
+                    }
+                }
+                for (auto merged : dict.MergedDictionaries())
+                    if (auto hit = self(self, merged, theme, depth + 1)) return hit;
+            } catch (winrt::hresult_error const&) {
+            }
+            return std::nullopt;
+        };
+        for (auto const& name : names)
+            if (auto hit = findIn(findIn, resources, name, 0)) return scaled(*hit);
+    } catch (winrt::hresult_error const&) {
+    }
+    if (auto fallback = RoleFallback(role)) return scaled(Rgb(dark ? fallback->second : fallback->first));
     return scaled(Rgb(dark ? 0xFFFFFF : 0x000000));
 }
 
@@ -897,6 +929,118 @@ inline std::vector<AccentBrush> const& AccentBrushes() {
         {L"SystemControlBackgroundAccentRevealBorderBrush", 0, 0},
     };
     return kWinUI ? winui : system;
+}
+
+/// Control-level accent resource keys that WinUI 3's default templates bind
+/// through StaticResource aliases to the global AccentFillColor* brushes.
+/// Overriding them alongside `AccentBrushes()` on a subtree's `Resources`
+/// lets `tint:` recolor native Button, ToggleSwitch, ProgressBar, Slider,
+/// CheckBox, RadioButton, ToggleButton, SplitButton, Hyperlink and selection
+/// indicators inside that subtree without custom painting.
+inline std::vector<AccentBrush> const& TintBrushes() {
+    static std::vector<AccentBrush> const winui{
+        // Base accent brushes.
+        {L"AccentFillColorDefaultBrush", 0, 0},
+        {L"AccentFillColorSecondaryBrush", 0, 0, 0.9},
+        {L"AccentFillColorTertiaryBrush", 0, 0, 0.8},
+        {L"TextOnAccentFillColorPrimaryBrush", 0, 0, 1, true},
+        {L"TextOnAccentFillColorSecondaryBrush", 0, 0, 0.7, true},
+        {L"AccentFillColorSelectedTextBackgroundBrush", 0, 0},
+        {L"AccentTextFillColorPrimaryBrush", -2, 3},
+        {L"AccentTextFillColorSecondaryBrush", -3, 3},
+        {L"AccentTextFillColorTertiaryBrush", -1, 2},
+        {L"SystemControlHighlightAccentBrush", 0, 0},
+        {L"SystemControlBackgroundAccentBrush", 0, 0},
+        {L"SystemControlForegroundAccentBrush", 0, 0},
+        {L"SystemControlHighlightAltAccentBrush", 0, 0},
+        {L"SystemControlHighlightListAccentLowBrush", 0, 0, 0.6},
+        {L"SystemControlHighlightListAccentMediumBrush", 0, 0, 0.8},
+        {L"SystemControlHighlightListAccentHighBrush", 0, 0, 0.9},
+        // AccentButtonStyle (Button prominence: prominent).
+        {L"AccentButtonBackground", 0, 0},
+        {L"AccentButtonBackgroundPointerOver", 0, 0, 0.9},
+        {L"AccentButtonBackgroundPressed", 0, 0, 0.8},
+        {L"AccentButtonBorderBrush", 0, 0},
+        {L"AccentButtonForeground", 0, 0, 1, true},
+        {L"AccentButtonForegroundPointerOver", 0, 0, 1, true},
+        {L"AccentButtonForegroundPressed", 0, 0, 0.7, true},
+        // ToggleSwitch (Switch).
+        {L"ToggleSwitchFillOn", 0, 0},
+        {L"ToggleSwitchFillOnPointerOver", 0, 0, 0.9},
+        {L"ToggleSwitchFillOnPressed", 0, 0, 0.8},
+        {L"ToggleSwitchStrokeOn", 0, 0},
+        {L"ToggleSwitchStrokeOnPointerOver", 0, 0, 0.9},
+        {L"ToggleSwitchStrokeOnPressed", 0, 0, 0.8},
+        {L"ToggleSwitchKnobFillOn", 0, 0, 1, true},
+        {L"ToggleSwitchKnobFillOnPointerOver", 0, 0, 1, true},
+        {L"ToggleSwitchKnobFillOnPressed", 0, 0, 1, true},
+        // ProgressBar and ProgressRing (Progress).
+        {L"ProgressBarForeground", 0, 0},
+        {L"ProgressRingForegroundThemeBrush", 0, 0},
+        // Slider.
+        {L"SliderTrackValueFill", 0, 0},
+        {L"SliderTrackValueFillPointerOver", 0, 0, 0.9},
+        {L"SliderTrackValueFillPressed", 0, 0, 0.8},
+        {L"SliderThumbBackground", 0, 0},
+        {L"SliderThumbBackgroundPointerOver", 0, 0, 0.9},
+        {L"SliderThumbBackgroundPressed", 0, 0, 0.8},
+        // CheckBox (Switch style: checkbox).
+        {L"CheckBoxCheckBackgroundFillChecked", 0, 0},
+        {L"CheckBoxCheckBackgroundFillCheckedPointerOver", 0, 0, 0.9},
+        {L"CheckBoxCheckBackgroundFillCheckedPressed", 0, 0, 0.8},
+        {L"CheckBoxCheckBackgroundStrokeChecked", 0, 0},
+        {L"CheckBoxCheckBackgroundStrokeCheckedPointerOver", 0, 0, 0.9},
+        {L"CheckBoxCheckBackgroundStrokeCheckedPressed", 0, 0, 0.8},
+        {L"CheckBoxCheckGlyphForegroundChecked", 0, 0, 1, true},
+        {L"CheckBoxCheckGlyphForegroundCheckedPointerOver", 0, 0, 1, true},
+        {L"CheckBoxCheckGlyphForegroundCheckedPressed", 0, 0, 0.7, true},
+        // RadioButton.
+        {L"RadioButtonOuterEllipseCheckedFill", 0, 0},
+        {L"RadioButtonOuterEllipseCheckedFillPointerOver", 0, 0, 0.9},
+        {L"RadioButtonOuterEllipseCheckedFillPressed", 0, 0, 0.8},
+        {L"RadioButtonOuterEllipseCheckedStroke", 0, 0},
+        {L"RadioButtonOuterEllipseCheckedStrokePointerOver", 0, 0, 0.9},
+        {L"RadioButtonOuterEllipseCheckedStrokePressed", 0, 0, 0.8},
+        {L"RadioButtonCheckGlyphFill", 0, 0, 1, true},
+        {L"RadioButtonCheckGlyphFillPointerOver", 0, 0, 1, true},
+        {L"RadioButtonCheckGlyphFillPressed", 0, 0, 1, true},
+        // ToggleButton and SplitButton.
+        {L"ToggleButtonBackgroundChecked", 0, 0},
+        {L"ToggleButtonBackgroundCheckedPointerOver", 0, 0, 0.9},
+        {L"ToggleButtonBackgroundCheckedPressed", 0, 0, 0.8},
+        {L"ToggleButtonForegroundChecked", 0, 0, 1, true},
+        {L"ToggleButtonForegroundCheckedPointerOver", 0, 0, 1, true},
+        {L"ToggleButtonForegroundCheckedPressed", 0, 0, 0.7, true},
+        {L"SplitButtonBackgroundChecked", 0, 0},
+        {L"SplitButtonBackgroundCheckedPointerOver", 0, 0, 0.9},
+        {L"SplitButtonBackgroundCheckedPressed", 0, 0, 0.8},
+        {L"SplitButtonForegroundChecked", 0, 0, 1, true},
+        {L"SplitButtonForegroundCheckedPointerOver", 0, 0, 1, true},
+        {L"SplitButtonForegroundCheckedPressed", 0, 0, 0.7, true},
+        // Hyperlink, text focus/selection, indicators and badges.
+        {L"HyperlinkButtonForeground", -2, 3},
+        {L"HyperlinkButtonForegroundPointerOver", -3, 3},
+        {L"HyperlinkButtonForegroundPressed", -1, 2},
+        {L"HyperlinkForeground", -2, 3},
+        {L"HyperlinkForegroundPointerOver", -3, 3},
+        {L"HyperlinkForegroundPressed", -1, 2},
+        {L"TextControlBorderBrushFocused", 0, 0},
+        {L"TextControlSelectionHighlightColor", 0, 0},
+        {L"NavigationViewSelectionIndicatorForeground", 0, 0},
+        {L"SelectorBarItemPillFill", 0, 0},
+        {L"ComboBoxItemPillFillBrush", 0, 0},
+        {L"ListViewItemSelectionIndicatorBrush", 0, 0},
+        {L"ListViewItemSelectionIndicatorPointerOverBrush", 0, 0},
+        {L"ListViewItemSelectionIndicatorPressedBrush", 0, 0},
+        {L"TreeViewItemSelectionIndicatorForeground", 0, 0},
+        {L"TreeViewItemSelectionIndicatorForegroundPointerOver", 0, 0},
+        {L"TreeViewItemSelectionIndicatorForegroundPressed", 0, 0},
+        {L"InfoBadgeBackground", 0, 0},
+        {L"InfoBadgeForeground", 0, 0, 1, true},
+        {L"RatingControlSelectedForeground", 0, 0},
+        {L"RatingControlPointerOverSelectedForeground", 0, 0},
+    };
+    return kWinUI ? winui : AccentBrushes();
 }
 
 /// A shade of `rgb`: toward white for steps above 0, toward black below.
@@ -1657,6 +1801,9 @@ struct DecorateProps {
     Len blur;
     std::optional<double> blurCorner;
     Motion const* blurMotion = nullptr;
+    /// `opacity`: 0..1, written or following state with `animate`.
+    Len opacity;
+    Motion const* opacityMotion = nullptr;
     /// `appear_delay`: the entrance waits this much more, and plays on the
     /// first display too.
     std::optional<double> appearDelay;
@@ -1744,17 +1891,45 @@ inline void Decorate(Parent const& p, Ctx const& ctx, DecorateProps props, Build
             if (auto framework = element.try_as<xaml::FrameworkElement>()) framework.RequestedTheme(ThemeNamed(props.appearance));
         if (props.tint) {
             if (auto framework = element.try_as<xaml::FrameworkElement>()) {
-                bool dark = props.appearance ? std::string_view(props.appearance) == "dark" : framework.ActualTheme() == xaml::ElementTheme::Dark;
-                auto color = ColorOf(ctx.win, dark, Paint(props.tint));
-                uint32_t rgb = (uint32_t(color.R) << 16) | (uint32_t(color.G) << 8) | color.B;
-                for (auto const& entry : AccentBrushes()) {
-                    media::SolidColorBrush brush(entry.on ? OnAccent(rgb) : color);
+                auto brushes = std::make_shared<std::vector<std::pair<AccentBrush, media::SolidColorBrush>>>();
+                for (auto const& entry : TintBrushes()) {
+                    media::SolidColorBrush brush;
                     brush.Opacity(entry.opacity);
                     framework.Resources().Insert(winrt::box_value(entry.key), brush);
+                    brushes->emplace_back(entry, std::move(brush));
                 }
+                char const* tintRole = props.tint;
+                char const* forcedAppearance = props.appearance;
+                Win* win = ctx.win;
+                std::weak_ptr<bool> alive = win ? std::weak_ptr<bool>(win->life) : std::weak_ptr<bool>();
+                auto weakFramework = winrt::make_weak(framework);
+                auto refresh = [weakFramework, brushes, tintRole, forcedAppearance, win, alive] {
+                    auto fw = weakFramework.get();
+                    if (!fw) return;
+                    Win* liveWin = (win && !alive.expired()) ? win : nullptr;
+                    bool dark = forcedAppearance ? std::string_view(forcedAppearance) == "dark" : IsDark(fw);
+                    auto color = ColorOf(liveWin, dark, Paint(tintRole));
+                    uint32_t rgb = (uint32_t(color.R) << 16) | (uint32_t(color.G) << 8) | color.B;
+                    for (auto const& [entry, brush] : *brushes) {
+                        auto step = dark ? entry.dark : entry.light;
+                        brush.Color(entry.on ? OnAccent(rgb) : (step == 0 ? color : Shade(rgb, step)));
+                    }
+                };
+                Reactive::Run([refresh] {
+                    themeTick.Get();
+                    refresh();
+                });
+                framework.ActualThemeChanged([refresh](auto&&, auto&&) { refresh(); });
+                framework.Loaded([refresh](auto&&, auto&&) { refresh(); });
             }
         }
         xaml::UIElement shown = element;
+        if (props.opacity.Given()) {
+            shown = Wrap(shown);
+            BindLen(ctx, props.opacity, props.opacityMotion, [weak = winrt::make_weak(shown)](double value) {
+                if (auto target = weak.get()) target.Opacity((std::clamp)(value, 0.0, 1.0));
+            });
+        }
         if ((props.scrollScale || props.scrollOpacity) && ctx.scroll) {
             auto wrapper = Wrap(shown);
             ScrollEffect(wrapper, ctx.scroll, props.scrollScale.value_or(1), props.scrollOpacity.value_or(1),
