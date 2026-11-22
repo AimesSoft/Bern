@@ -1202,6 +1202,62 @@ inline void ShowTitleBarContent(controls::TitleBar const& bar, bool shown) {
 }
 #endif
 
+#if BERN_WINUI
+/// Whether the window's page header stands in its title bar.
+inline bool UnifiedHeader(Win const& win) { return win.titleBar && !win.owner && win.Def().unified; }
+
+/// The caption buttons as tall as the title bar, which is taller while it
+/// holds a page header.
+inline void FitCaptionHeight(Win& win) {
+    if (!win.window || !UnifiedHeader(win)) return;
+    using winrt::Microsoft::UI::Windowing::TitleBarHeightOption;
+    try {
+        auto bar = win.window.AppWindow().TitleBar();
+        auto wanted = win.titleBar.Content() || win.titleBar.RightHeader() ? TitleBarHeightOption::Tall : TitleBarHeightOption::Standard;
+        if (bar.PreferredHeightOption() != wanted) bar.PreferredHeightOption(wanted);
+    } catch (winrt::hresult_error const&) {
+    }
+}
+
+/// `chrome: unified`: the page header in the title bar, its leading part and
+/// title after the window's own title and its tools before the caption
+/// buttons; what lies between them still moves the window. While there is no
+/// header, or a page covers the window, the title bar holds nothing.
+inline void PlaceUnifiedHeader(Win& win, controls::Grid const& header, std::shared_ptr<Page> const& page) {
+    auto bar = win.titleBar;
+    // The template centers the content in the room left for it.
+    bar.Resources().Insert(winrt::box_value(L"TitleBarContentHorizontalAlignment"), winrt::box_value(xaml::HorizontalAlignment::Left));
+    header.Margin(xaml::Thickness{16, 0, 0, 0});
+    auto tools = page->tools;
+    uint32_t at = 0;
+    if (header.Children().IndexOf(tools, at)) header.Children().RemoveAt(at);
+    tools.Margin(xaml::Thickness{8, 0, 8, 0});
+    try {
+        // Controls come and go with the pages: what takes the pointer is
+        // found again after each layout.
+        bar.AutoRefreshDragRegions(true);
+    } catch (winrt::hresult_error const&) {
+    }
+    Win* raw = &win;
+    std::weak_ptr<Page> weak = page;
+    Reactive::Run([raw, bar, header, tools, weak] {
+        auto page = weak.lock();
+        if (!page) return;
+        page->version.Track();
+        bool shown = raw->covering.Get() == 0 && !page->HeaderHidden();
+        Reactive::Untrack([&] {
+            xaml::UIElement content{nullptr}, trailing{nullptr};
+            if (shown && !page->HeaderEmpty()) content = header;
+            if (shown && tools.Children().Size() > 0) trailing = tools;
+            if (bar.Content() != content) bar.Content(content);
+            if (bar.RightHeader() != trailing) bar.RightHeader(trailing);
+            FitCaptionHeight(*raw);
+            return 0;
+        });
+    });
+}
+#endif
+
 /// The page header's margins. While content is under the bars, the header
 /// stays below the title bar and its trailing end keeps clear of the
 /// caption buttons' column and 12 more, as a Fluent toolbar does over
@@ -1270,6 +1326,7 @@ inline void RestoreTitleBar(Win& win) {
     }
     ShowCaptionTheme(win);
     win.titleBarInsets = {-1, -1, 0};
+    FitCaptionHeight(win);
     if (win.titleBar) {
         FitTitleBarInsets(win.titleBar, win.window, win.titleBarInsets);
     }
@@ -1382,14 +1439,22 @@ inline void Mount(std::shared_ptr<Win> const& win, controls::Grid const& host, s
     });
     win->scope->Run([&] {
         auto header = Header(page, nullptr, false);
-        header.Margin(xaml::Thickness{16, kWinUI || win->owner ? 0.0 : 12.0, 16, 8});
-        body.Children().Append(header);
+        bool unified = false;
+#if BERN_WINUI
+        unified = UnifiedHeader(*win);
+        if (unified) PlaceUnifiedHeader(*win, header, page);
+#endif
+        if (!unified) {
+            header.Margin(xaml::Thickness{16, kWinUI || win->owner ? 0.0 : 12.0, 16, 8});
+            body.Children().Append(header);
+        }
         controls::Grid holder;
         controls::Grid::SetRow(holder, 1);
         body.Children().Append(holder);
         holder.Children().Append(content);
         raw->host = host;
-        raw->header = header;
+        // In the title bar the header has no row of its own to place.
+        if (!unified) raw->header = header;
         raw->holder = holder;
         // `under_bars`: while such a layer is shown the content spans the
         // header's row and, under the title bar, the window's; the bars
@@ -1399,7 +1464,7 @@ inline void Mount(std::shared_ptr<Win> const& win, controls::Grid const& host, s
             Reactive::Untrack([&] {
                 controls::Grid::SetRow(raw->holder, under ? 0 : 1);
                 controls::Grid::SetRowSpan(raw->holder, under ? 2 : 1);
-                controls::Canvas::SetZIndex(raw->header, under ? 1 : 0);
+                if (raw->header) controls::Canvas::SetZIndex(raw->header, under ? 1 : 0);
                 if (raw->root && raw->root.RowDefinitions().Size() > 1 && !raw->owner) {
                     controls::Grid::SetRow(raw->host, under ? 0 : 1);
                     controls::Grid::SetRowSpan(raw->host, under ? 2 : 1);

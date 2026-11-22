@@ -447,6 +447,34 @@ fn generate_example(name: &str) -> (Application, PathBuf) {
     (compiled.app, output)
 }
 
+/// `chrome: unified` reaches the runtime, which then puts the page header in
+/// WinUI 3's title bar; the system XAML has no such title bar.
+#[test]
+fn a_unified_window_keeps_its_page_header_in_the_title_bar() {
+    let windows = include_str!("../templates/cpp/bern_ui_windows.inl");
+    let start = windows
+        .find("inline bool UnifiedHeader(Win const& win)")
+        .expect("the runtime reads `unified`");
+    assert!(
+        windows[..start].trim_end().ends_with("title bar."),
+        "the helper is documented"
+    );
+    for part in [
+        "win.Def().unified",
+        "bar.Content(content)",
+        "bar.RightHeader(trailing)",
+        "raw->covering.Get() == 0",
+        "TitleBarHeightOption::Tall",
+        "if (unified) PlaceUnifiedHeader(*win, header, page);",
+        "if (raw->header) controls::Canvas::SetZIndex(raw->header",
+    ] {
+        assert!(windows[start..].contains(part), "{part}");
+    }
+    let (_, output) = generate_example("planner");
+    let generated = std::fs::read_to_string(output.join("app/app_ui.inl")).unwrap();
+    assert!(generated.contains("w.unified = true;"));
+}
+
 /// The planner: sidebar items that come and go, styled buttons and sidebar
 /// items, a drawing with a pattern and series, a marked text, shared
 /// elements, transitions and an immersive window that rests.

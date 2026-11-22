@@ -55,7 +55,7 @@ struct WindowDef {
     bool utility = false;
     /// `overlay: "..."`: anchors beside the named `bern::overlay`.
     std::string overlay;
-    /// `chrome: unified`: content under the title bar.
+    /// `chrome: unified`: in WinUI 3 the page header stands in the title bar.
     bool unified = false;
     std::optional<double> idleAfter;
     std::function<bool(Ctx const&)> immersive;
@@ -387,6 +387,10 @@ struct Page : std::enable_shared_from_this<Page> {
     std::function<void()> Back() const { return backs.empty() ? nullptr : backs.back().second; }
     xaml::UIElement TitleWidget() const { return titleWidgets.empty() ? nullptr : titleWidgets.back().second; }
     bool HeaderHidden() const { return !hidden.empty(); }
+    /// Whether the header has nothing to show.
+    bool HeaderEmpty() const {
+        return !Back() && !TitleWidget() && tools.Children().Size() == 0 && leadingTools.Children().Size() == 0 && Title().value_or(L"").empty();
+    }
 };
 
 // ---------------------------------------------------------------------------

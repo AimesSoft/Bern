@@ -59,7 +59,7 @@ frontends = ["winui3"]   # 或 ["xaml-islands"]；不写则两个都编译
 | 样式覆盖（`style!`）：`Button`、`IconButton`、`SidebarItem` | 完成 | 颜色与边框写成控件自己的轻量样式资源，状态由控件模板的视觉状态切换；圆角、内边距、尺寸档直接设置；阴影由 Direct2D 画成位图垫在按钮下；缩放、位移与透明度用运行时的弹簧。选中侧栏项的 `indicator` 不列出。见“样式覆盖” |
 | 动效：`appear`、`disappear`、`reflow`、`hero`、`animate`、`stagger`、`nudge`、`scroll_scale`、`scroll_opacity` | 完成 | 弹簧每帧在界面线程上推进，写到元素的 `Translation`、`Scale` 与 `Opacity`，不影响布局；滚动联动是 Composition 表达式动画。见“动效” |
 | 自绘：`Canvas`、`Shape`、`Series`、`Pattern`，`Text(mark:)`，`fill_from` 与 `fade` | 完成 | Direct2D 画进 WIC 位图后交给 `Image`，两种前端同一套代码；颜色按元素所在部分的主题解析 |
-| 窗口：`chrome`、`immersive`、`idle_after` 与 `window.idle`，`role: dialog`，`window.compact` 等尺寸档 | 完成 | 对话框窗口是主窗口上的 `ContentDialog`；标题栏显示窗口标题（`chrome: unified` 不改变它），Islands 下保留系统标题栏（盖住窗口的页面除外）。见“窗口外框、静置与对话框” |
+| 窗口：`chrome`、`immersive`、`idle_after` 与 `window.idle`，`role: dialog`，`window.compact` 等尺寸档 | 完成 | 对话框窗口是主窗口上的 `ContentDialog`；标题栏显示窗口标题，WinUI 3 下 `chrome: unified` 还在它后面放页头，Islands 下保留系统标题栏（盖住窗口的页面除外）。见“窗口外框、静置与对话框” |
 | 静置区 `idle_area` | 完成，未实测 | 鼠标停在静置区上才静置；两种前端经 MSVC 编译，未运行。见“窗口外框、静置与对话框” |
 | 可增减的侧栏项与页签 | 完成 | 侧栏项是 `NavigationView.MenuItems` 中的项，随 `if`、`match`、`ForEach` 增减；选中项离开时选中移到 `fallback` 或剩下的第一项 |
 | v0.29 的 `features` 与媒体类组件 | 完成 | `SidebarFooter`（`PaneFooter`）、`Inspector`（右侧的 `SplitView` 窗格）、`Toast`、`SplitButton`（`ToggleSplitButton`）、`PopoverButton`（`Flyout`）、`Drop`、`Pinch`、`Swipe`、`Rail`；工具栏搜索与结果、会话动作、开关按钮、绑定长度、`appearance`、快捷键（`KeyboardAccelerator`）、运行时强调色与明暗、运行时图片、取色填充、`pick`（`FileOpenPicker`/`FolderPicker`）、滚动停靠与位置；会话命令 `ui.focus`、`ui.set_file`。描述中列出 `features` 的全部 18 项 |
@@ -176,7 +176,7 @@ HDR 图片（PQ 或 HLG 的 PNG、带增益图的 JPEG）不经过 XAML 的 `Ima
 - `window_landscape`（2026-10-24）声明为不适用：桌面窗口没有方向；平板旋转的是整个屏幕，与 iPad 上 `landscape` 保持设备方向相同。检查不再警告。
 - Islands 下盖住窗口的页面（带自身控件的 `under_bars`）：系统标题栏下面放不了内容，所以这样的页面显示时窗口没有标题栏。`WM_NCCALCSIZE` 把标题栏的位置交给客户区，其他三边的边框不变，`WS_CAPTION` 保留，贴靠、阴影和系统菜单照常工作。页面和 WinUI 3 下一样到达窗口顶边，上面只留标题栏按钮：三个 XAML 按钮，大小和字形与系统一致，跟随页面的外观，名称取自系统菜单。顶部一条透明子窗口（`BernDragBar`，否则下面的 XAML Island 会收走所有消息）用来移动窗口，从顶边调整大小，双击最大化，右键打开系统菜单。写在窗口里的 `Stack` 的其他层下移标题栏的高度（`KeepBelowBars`），页面下面的内容不会跳动。全屏和 `immersive` 时不使用。
 - `immersive`：为真时隐藏标题栏与详情页头。WinUI 3 下 `TitleBar` 收起，`OverlappedPresenter.SetBorderAndTitleBar(true, false)` 去掉系统标题栏与标题按钮。活动窗口在沉浸且静置时，为鼠标下方的 XAML 元素设置透明的 `ProtectedCursor`；窗口唤醒或不再满足隐藏条件时，恢复元素原有的指针。窗口边框的指针仍由系统管理。Islands 下去掉 `WS_CAPTION`（保留可调整大小的边框），指针可见性仍使用 `ShowCursor`。
-- `chrome: unified`：WinUI 3 下内容本来就延伸到标题栏，标题栏在图标旁显示窗口标题（设计稿的 Fluent 窗口如此），`unified` 不改变它；Islands 下保留系统标题栏。
+- `chrome: unified`：WinUI 3 下内容本来就延伸到标题栏，标题栏在图标旁显示窗口标题（设计稿的 Fluent 窗口如此）。写了 `unified` 时，没有分栏的窗口的页头放进标题栏：返回、前端的工具栏项和标题控件（例如选项卡选择器）是 `TitleBar.Content`，靠前端；后端的工具栏项是 `TitleBar.RightHeader`。标题栏里有它们时，标题栏和窗口按钮高 48，其余部分仍能拖动窗口；盖住窗口的页面显示时标题栏清空。Islands 下保留系统标题栏，页头仍在内容里。
 - `role: dialog`：没有自己的顶层窗口，是主窗口（或打开时第一个普通窗口）上的 `ContentDialog`，宽度按声明的尺寸在对话框允许的范围内设置；对话框的关闭（包括 Esc）都经关闭协议。对话框窗口报告所属窗口的位置，`minimize`、`maximize`、`move`、`resize` 返回 `target_unavailable`。
 - 窗口尺寸档：窗口根元素的宽度按 `[layouts]` 的三个断点得到 `compact`、`medium`、`expanded`、`large`，表达式中的 `window.compact` 等读取它；`Adaptive` 四档各自选择，没有自己布局的档位显示下一个更大的已声明布局，没有更大的取更小的。
 - 运行时强调色与明暗：`WindowSet(accent:, appearance:)` 的表达式在每个窗口中求值。控件模板经主题字典（含别名与合并的字典）中的强调色画刷取色，运行时找到这些画刷（浅色与深色两套，各自对应强调色的哪一档）直接改它们的颜色，并更新 `SystemAccentColor` 与 `…Light1–3`、`…Dark1–3`，所以已有的控件立即换色；各档按与白色、黑色混合近似生成。明暗设在窗口根元素的 `RequestedTheme` 上；WinUI 3 的标题按钮经 `AppWindowTitleBar.PreferredTheme` 跟随，Islands 的系统标题栏经 DWM 跟随。
@@ -606,7 +606,7 @@ Windows App SDK 没有表格控件（DataGrid 在社区工具包里），`B::Tab
 - 同一个播放器同一时间只在最新附着的视图中显示画面，较早的视图只显示外框。
 - 页面工具放在页头，没有使用 `CommandBar`；`Menu` 的菜单项不呈现 `destructive` 角色。
 - 品牌色的浅色与深色档位按与白色、黑色混合近似生成。
-- `chrome: unified` 在 WinUI 3 下不改变标题栏（标题照常显示）；Islands 下仍是系统标题栏。
+- `chrome: unified` 在 WinUI 3 下把页头放进标题栏（标题照常显示）；Islands 下仍是系统标题栏。
 - 选中侧栏项的 `indicator` 不支持：`NavigationView` 只画自己前缘的指示条；侧栏项的样式也没有 `shadow`（与其他目标相同，检查时报错）。
 - `reflow` 只在 `Column`、`Row`、`Grid` 与 `ScrollView` 的面板中生效，其他容器中写了不起作用，构建时没有警告。
 - 系统 XAML 的导航项没有 `InfoBadge`，侧栏计数是名称后面的数字。
