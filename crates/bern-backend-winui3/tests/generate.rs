@@ -447,6 +447,212 @@ fn generate_example(name: &str) -> (Application, PathBuf) {
     (compiled.app, output)
 }
 
+/// `chrome: unified` reaches the runtime, which then puts the page header in
+/// WinUI 3's title bar; the system XAML has no such title bar.
+#[test]
+fn a_unified_window_keeps_its_page_header_in_the_title_bar() {
+    let windows = include_str!("../templates/cpp/bern_ui_windows.inl");
+    let core = include_str!("../templates/cpp/bern_ui_core.inl");
+    let start = windows
+        .find("inline bool UnifiedHeader(Win const& win)")
+        .expect("the runtime reads `unified`");
+    for part in [
+        "win.Def().unified",
+        "bool hasContent = !hidden && page->HasHeaderContent();",
+        "bool hasTrailing = !hidden && page->HasTools();",
+        "bar.Content(content)",
+        "bar.RightHeader(trailing)",
+        "double minHeight = covered && hasHeader ? 48.0 : 0.0;",
+        "bar.AutoRefreshDragRegions(shown);",
+        "TitleBarHeightOption::Tall",
+        "win.unifiedHasHeader.Peek()",
+        "if (unified) PlaceUnifiedHeader(*win, header, page);",
+        "if (raw->header) controls::Canvas::SetZIndex(raw->header",
+    ] {
+        assert!(windows[start..].contains(part), "{part}");
+    }
+    assert!(core.contains("static bool HasVisibleTools(controls::Panel const& panel)"));
+    let (_, output) = generate_example("planner");
+    let generated = std::fs::read_to_string(output.join("app/app_ui.inl")).unwrap();
+    assert!(generated.contains("w.unified = true;"));
+
+    // Also verify code generation for a split-less `chrome: unified` window
+    // with a leading toolbar `Text`, trailing toolbar button, and a dark
+    // `under_bars` layer.
+    let protocol = r#"
+#[bern::protocol(namespace = "unified_bar", version = 1)]
+pub mod unified_bar {
+    use bern::prelude::*;
+
+    #[state]
+    pub struct State {
+        pub count: i64,
+    }
+
+    #[commands]
+    pub trait Commands {
+        fn bump(&mut self) -> Result<(), CommandError>;
+    }
+}
+"#;
+    let ui = r#"
+use bern::prelude::*;
+use unified_bar_protocol::unified_bar;
+
+#[component]
+pub fn app(app: unified_bar::Client, windows: AppWindows) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Unified" }, initial: open, chrome: unified) {
+                Stack {
+                    Stack(under_bars: true, appearance: dark) {
+                        Text(content: tr! { "en" => "Hero" })
+                    }
+                    Column {
+                        Toolbar {
+                            Text(content: tr! { "en" => "Brand" })
+                            Spacer
+                            Button(id: add, label: tr! { "en" => "Add" }) => app.bump()
+                        }
+                        Text(content: tr! { "en" => "Body" })
+                    }
+                }
+            }
+        }
+    }
+}
+"#;
+    let root = workspace();
+    let dir = root.join("target/bern-test/winui3-unified-bar-src");
+    let out_dir = root.join("target/bern-test/winui3-unified-bar");
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&out_dir);
+    for (package, source) in [
+        ("unified-bar-protocol", protocol),
+        ("unified-bar-ui", ui),
+        ("unified-bar-core", ""),
+    ] {
+        std::fs::create_dir_all(dir.join(package).join("src")).unwrap();
+        std::fs::write(
+            dir.join(package).join("Cargo.toml"),
+            format!("[package]\nname = \"{package}\"\n"),
+        )
+        .unwrap();
+        std::fs::write(dir.join(package).join("src/lib.rs"), source).unwrap();
+    }
+    std::fs::write(
+        dir.join("Bern.toml"),
+        "[app]\nid = \"unified_bar\"\nbundle_id = \"dev.bern.unifiedbar\"\nversion = \"0.1.0\"\nname = { \"en\" = \"Unified\" }\n[languages]\nsupported = [\"en\"]\ndefault = \"en\"\n[protocol]\npackage = \"unified-bar-protocol\"\nsource = \"unified-bar-protocol/src/lib.rs\"\n[engine]\npackage = \"unified-bar-core\"\ntype = \"unified_bar_core::Engine\"\n[ui]\npackage = \"unified-bar-ui\"\nsources = [\"unified-bar-ui/src/lib.rs\"]\nroot = \"app\"\n[targets.windows]\nplatform = \"windows\"\n",
+    )
+    .unwrap();
+    let config = bern_compiler::config::load(&dir.join("Bern.toml")).unwrap();
+    let compiled = bern_compiler::compile(&config).unwrap();
+    let target = windows_target(&config);
+    let problems = WinUi3Windows.check(&compiled.app, &target);
+    assert!(problems.is_empty(), "{problems:?}");
+    let context = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: out_dir.clone(),
+        target,
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    let files = WinUi3Windows.generate(&compiled.app, &context).unwrap();
+    let app_ui = files
+        .iter()
+        .find(|f| f.path == Path::new("app/app_ui.inl"))
+        .map(|f| std::str::from_utf8(&f.contents).unwrap())
+        .unwrap();
+    for expected in [
+        "w.unified = true;",
+        "B::LeadingToolbar(p, c,",
+        "B::Toolbar(p, c,",
+        ".appearance = \"dark\"",
+        ".underBars = true",
+    ] {
+        assert!(app_ui.contains(expected), "missing `{expected}`:\n{app_ui}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&out_dir);
+}
+
+/// The title bar that holds the page header follows what it stands on: the
+/// appearance of a layer under the bars, and a text that names the window.
+#[test]
+fn a_unified_title_bar_follows_what_it_stands_on() {
+    let windows = include_str!("../templates/cpp/bern_ui_windows.inl");
+    let widgets = include_str!("../templates/cpp/bern_ui_widgets.inl");
+    for part in [
+        "inline std::string UnifiedLook(Win const& win)",
+        "!win.unifiedHasHeader.Peek()",
+        "bar.RequestedTheme(B::ThemeNamed(UnifiedLook(*raw)));",
+        "if (content && !page->Back())",
+        "prev.Margin(namedText->original);",
+        "bar.IconSource(names ? nullptr : raw->titleIcon);",
+    ] {
+        assert!(windows.contains(part), "{part}");
+    }
+    assert!(widgets.contains("if (!props.covers && !ctx.appearance.empty())"));
+    assert!(widgets.contains("win->barAppearances.emplace_back(token, ctx.appearance);"));
+    assert!(widgets.contains("inline Parent ToolsParent("));
+}
+
+/// The caption buttons' insets are asked for again while there are none, as
+/// the window leaves the full screen.
+#[test]
+fn missing_caption_insets_are_not_kept() {
+    let windows = include_str!("../templates/cpp/bern_ui_windows.inl");
+    for part in [
+        "if (left + right <= 0)",
+        "if (win.titleBar) win.titleBar.InvalidateMeasure();",
+        "if (!immersive) {",
+        "if (current->titleBarInsets != before) PlaceHeader(*current);",
+    ] {
+        assert!(windows.contains(part), "{part}");
+    }
+}
+
+/// A view that only scrolls across leaves the mouse wheel to the page.
+#[test]
+fn a_wheel_over_a_horizontal_view_scrolls_the_page() {
+    let features = include_str!("../templates/cpp/bern_ui_features.inl");
+    let widgets = include_str!("../templates/cpp/bern_ui_widgets.inl");
+    for part in [
+        "struct WheelTarget : winrt::implements<WheelTarget, IInspectable>",
+        "inline void PassWheel(controls::ScrollViewer const& scroller)",
+        "GetKeyState(VK_CONTROL) < 0",
+        "if (properties.IsHorizontalMouseWheel()) return;",
+        "winrt::get_self<WheelHook>(resources.Lookup(wheelKey))",
+        "if (horizontal) PassWheel(scroller);",
+    ] {
+        assert!(features.contains(part), "{part}");
+    }
+    assert!(widgets.contains("auto hook = winrt::make_self<WheelHook>();"));
+}
+
+/// A scroll view writes its position and browsing state after the layout that
+/// moved it, when content that follows them may come or go.
+#[test]
+fn a_scroll_position_is_written_after_layout() {
+    let features = include_str!("../templates/cpp/bern_ui_features.inl");
+    for part in [
+        "if (alive.expired() || *browseSeq != seq) return;",
+        "if (alive.expired() || *writeSeq != seq || travelling->get()) return;",
+        "if (!viewer || !viewer.IsLoaded()) return;",
+        "if (R::KeyText(ctx.Peek(*position)) == before) ctx.Write(*position, key);",
+    ] {
+        assert!(features.contains(part), "{part}");
+    }
+}
+
 /// The planner: sidebar items that come and go, styled buttons and sidebar
 /// items, a drawing with a pattern and series, a marked text, shared
 /// elements, transitions and an immersive window that rests.
