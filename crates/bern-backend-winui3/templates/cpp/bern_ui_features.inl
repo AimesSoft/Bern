@@ -809,7 +809,12 @@ inline void ScrollView(Parent const& p, Ctx const& ctx, ScrollProps props, Build
         if (position && R::KeyText(ctx.Peek(*position)) != item->first) {
             auto const& type = app->catalog.sessions[position->session].fields[position->field].second;
             Value key = type.kind == BType::Kind::Int ? Value::Int(std::strtoll(item->first.c_str(), nullptr, 10)) : Value::Text(item->first);
-            ctx.Write(*position, key);
+            // The view may say so while it is being arranged, when content
+            // that follows the position cannot come or go.
+            std::weak_ptr<bool> alive = ctx.win ? std::weak_ptr<bool>(ctx.win->life) : std::weak_ptr<bool>();
+            Host::Post([ctx, position, key, alive] {
+                if (!alive.expired()) ctx.Write(*position, key);
+            });
         }
     });
     if (!position) {

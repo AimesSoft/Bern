@@ -499,6 +499,14 @@ fn a_wheel_over_a_horizontal_view_scrolls_the_page() {
     }
 }
 
+/// A scroll view writes its position after the layout that moved it, when
+/// content that follows the position may come or go.
+#[test]
+fn a_scroll_position_is_written_after_layout() {
+    let features = include_str!("../templates/cpp/bern_ui_features.inl");
+    assert!(features.contains("if (!alive.expired()) ctx.Write(*position, key);"));
+}
+
 /// The planner: sidebar items that come and go, styled buttons and sidebar
 /// items, a drawing with a pattern and series, a marked text, shared
 /// elements, transitions and an immersive window that rests.
