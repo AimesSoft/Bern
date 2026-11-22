@@ -510,6 +510,15 @@ bern package
 
 以 release 建置本機能建置的目標，在 `target/bern/dist/` 中產生安裝套件：macOS 的 `.dmg`，Windows 的安裝程式（依目前使用者安裝，不需要系統管理員權限）與免安裝的 `.zip`，Linux 的 `.deb` 與 `.tar.gz`，Android 的 `.apk` 與上架用的 `.aab`，Web 的靜態網站壓縮檔。桌面和 WebUI 套件含有應用程式 CLI，啟用 IPC 時也包含 Skill。靜態 Web 套件只含網站檔案；Android CLI 在開發電腦上執行，不會包進 APK。簽署以環境變數設定，憑證不進儲存庫：`BERN_MACOS_SIGNING_IDENTITY` 與 `BERN_MACOS_NOTARY_PROFILE`（簽署並公證），`BERN_WINDOWS_CERTIFICATE`（憑證指紋或 `.pfx`），`BERN_ANDROID_KEYSTORE`、`BERN_ANDROID_KEYSTORE_PASSWORD` 與 `BERN_ANDROID_KEY_ALIAS`（發布金鑰）。沒有設定時照樣產生，並提示未簽署的後果。
 
+### 匯出獨立純原生專案（無框架鎖定）
+
+```sh
+bern eject --target macos --out ./native-macos                   # 離線 Rust 後端原始碼 + Xcode 專案
+bern eject --target ios --engine prebuilt --release --out ./ios  # 預編譯 XCFramework，無需安裝 Rust
+```
+
+`bern eject` 可隨時匯出標準原生 IDE 專案（`.xcodeproj`、Gradle、Visual Studio `.sln` + `.vcxproj`、獨立 Cargo 或零打包器 ES 模組），依元件與視窗拆分成清晰檔案，且不改動原 Bern 專案。預設 `--engine source` 會離線打包完整自包含的 Rust 工作區並與原生 IDE 建置聯動；`--engine prebuilt` 會預編譯並嵌入引擎二進位，讓原生開發者無需安裝 Rust 或 Bern 即可直接開啟建置。詳見[匯出為獨立純原生專案](Docs/zh-CN/Implementation/Eject.md)。
+
 ### 執行展示應用程式
 
 Bern 儲存庫中的展示應用程式用到全部元件、兩個視窗與影片播放器。在儲存庫目錄中：
@@ -570,7 +579,7 @@ cargo test --workspace
 
 - **介面參考**：[文件目錄](Docs/zh-CN/README.md) · [目前元件用法](Docs/zh-CN/Reference/UI.md) · [完整屬性表](Docs/zh-CN/Reference/Component-Properties.md) · [平台能力與驗證範圍](Docs/zh-CN/Reference/Platforms.md) · [效能追蹤](Docs/zh-CN/Reference/Tracing.md)（簡體中文）
 - **架構與設計**：[設計文件](Docs/zh-CN/Design.md) · [適配規範](Docs/zh-CN/Adaptation/README.md) · [React Native 研究](Docs/zh-CN/Research/ReactNative.md)
-- **專題文件**：[緊鄰原生視圖](Docs/zh-CN/Implementation/Native-Views.md) · [JavaScript 與 `bern.cli`](Docs/zh-CN/Implementation/JavaScript.md) · [動畫 SVG](Docs/zh-CN/Implementation/Animated-SVG.md) · [依模組編譯](Docs/zh-CN/Implementation/Module-Builds.md) · [應用瀏覽器擴充](Docs/zh-CN/Implementation/Web-Extensions.md)
+- **專題文件**：[匯出獨立純原生專案](Docs/zh-CN/Implementation/Eject.md) · [緊鄰原生視圖](Docs/zh-CN/Implementation/Native-Views.md) · [JavaScript 與 `bern.cli`](Docs/zh-CN/Implementation/JavaScript.md) · [動畫 SVG](Docs/zh-CN/Implementation/Animated-SVG.md) · [依模組編譯](Docs/zh-CN/Implementation/Module-Builds.md) · [應用瀏覽器擴充](Docs/zh-CN/Implementation/Web-Extensions.md)
 - **平台實作**：[macOS](Docs/zh-CN/Implementation/macOS-SwiftUI.md) · [iOS](Docs/zh-CN/Implementation/iOS-SwiftUI.md) · [watchOS](Docs/zh-CN/Implementation/watchOS-SwiftUI.md) · [tvOS](Docs/zh-CN/Implementation/tvOS-SwiftUI.md) · [Windows](Docs/zh-CN/Implementation/Windows-WinUI3.md) · [Linux](Docs/zh-CN/Implementation/Linux-GTK.md) · [Android 與 Wear OS](Docs/zh-CN/Implementation/Android-Compose.md) · [GPUI](Docs/zh-CN/Implementation/GPUI.md) · [Web 與 WebUI](Docs/zh-CN/Implementation/Web.md)
 
 設計與實作文件以簡體中文撰寫，另有[英文版](Docs/README.md)（[線上版](https://bern.aimes-soft.com/docs)）。

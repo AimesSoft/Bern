@@ -2248,6 +2248,7 @@ tvOS 暂不支持备用图标：绑定了 `icon` 的应用在电视上保持主�
 | `bern run` | 构建一个目标并启动它 |
 | `bern build` | 构建目标 |
 | `bern package` | 按 release 构建，并生成供安装与分发的包 |
+| `bern eject` | 导出独立的标准原生 IDE 工程（`.xcodeproj`、Gradle、Visual Studio `.sln`/`.vcxproj`、Cargo 或 ES 模块），支持离线 Rust 源码（`--engine source`）或预编译二进制（`--engine prebuilt`） |
 | `bern check` | 只做声明、本地化与功能覆盖检查，不生成、不调用工具链 |
 | `bern doctor` | 检查本机构建各目标需要的工具，给出缺少时的安装方法 |
 | `bern ir` | 输出编译得到的 IR |
@@ -2284,6 +2285,8 @@ tvOS 暂不支持备用图标：绑定了 `icon` 的应用在电视上保持主�
 签名所需的证书只留在构建的机器或 CI 服务中，经环境变量提供，不写入 `Bern.toml`：`BERN_MACOS_SIGNING_IDENTITY` 以强化运行时与安全时间戳签名应用、工具与磁盘映像，`BERN_MACOS_NOTARY_PROFILE` 再提交公证并装订；`BERN_WINDOWS_CERTIFICATE`（证书库中的指纹或 `.pfx`，密码取自 `BERN_WINDOWS_CERTIFICATE_PASSWORD`）以 `signtool` 签名应用、工具与安装程序并加 RFC 3161 时间戳。没有配置时仍生成包，并说明未签名的后果。`[app].publisher` 是可选的发布者名称，显示在安装程序、卸载项与 Debian 包中。`[app].files_folder = true` 让 iOS 上应用的 Documents 文件夹出现在「文件」App 中（`UIFileSharingEnabled` 与 `LSSupportsOpeningDocumentsInPlace`），用户放进去的文件由引擎自己读取，例如音乐应用的本地曲库；其他平台没有对应的东西。`[app].background_audio = true` 让应用在后台与锁屏时继续播放自己的声音（iOS 的 `audio` 后台模式；Android 的前台服务权限与 `BernPlaybackService`），`[app].overlays = true` 让 Android 应用可以请求显示悬浮文字（`SYSTEM_ALERT_WINDOW`），见“系统的正在播放”与“悬浮文字”。`[app].photos = true` 让引擎用 `bern::platform::save_image(path)` 把图片存到系统保存用户照片的地方，供其他应用选用，例如同一部手机上的另一个应用从相册扫的登录二维码：iOS 的 Info.plist 以 `NSPhotoLibraryAddUsageDescription` 按每种支持的语言说明原因，系统第一次只请用户允许向相册添加；Android 10 及以上放进“图片”中以应用命名的文件夹，不需要询问。调用会等系统的回答，引擎应在工作线程上调用；`refused` 表示用户没有允许，其他平台回答 `platform_unavailable`。
 
 直接写在 `Window` 中的控件以窗口 id 作为组件名，目标形如 `main.add_one`；写在组件中的控件仍为 `组件名.控件 id`。四个目标一致。
+
+`bern eject` 可将单个或全部已声明目标导出为独立的原生 IDE 工程，且不改动原 Bern 项目（默认输出至 `<应用>/ejected/<目标>`）。默认 `--engine source` 模式会打包完整离线自包含的 Rust 工作区并与各原生 IDE 构建联动，任意宿主系统均可跨平台导出所有目标；`--engine prebuilt` 模式（适用于非 Rust 前端）在导出时预编译并仅嵌入引擎二进制，导出的原生工程无需安装 Rust 或 Bern 即可直接构建。生成的界面源码按组件与窗口拆分，紧邻原生视图与声明资源直接拷贝且不保留任何回指原工作区的路径；默认剥离 CLI/IPC 脚手架（可用 `--with-cli` 保留），并通过 `fingerprint == 0` 放开严格目录指纹校验以便脱离后自由演进协议与界面。详见[导出为独立纯原生项目](Implementation/Eject.md)。
 
 ### 发布 Bern
 
