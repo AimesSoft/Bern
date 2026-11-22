@@ -1134,6 +1134,7 @@ inline void NavLink(Parent const& p, Ctx const& ctx, char const* id, Get route, 
         button.MinHeight(56);
     } else {
         Styles::MakeSubtle(button);
+        button.Padding(xaml::Thickness{16, 12, 16, 12});
     }
     auto text = Bound(ctx, label);
     BindName(button, text);

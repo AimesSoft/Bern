@@ -1837,9 +1837,10 @@ fun Modifier.bernMenuPress(open: () -> Unit): Modifier = pointerInput(Unit) {
 /// make it; elsewhere it keeps a list item's room above and below.
 @Composable
 fun BernNavLink(onClick: () -> Unit, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    val room = if (LocalBernInRows.current) 0.dp else 12.dp
+    val inRows = LocalBernInRows.current
     Row(
-        modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick).padding(vertical = room),
+        modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = if (inRows) 0.dp else 16.dp, vertical = if (inRows) 0.dp else 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f), content = content)
