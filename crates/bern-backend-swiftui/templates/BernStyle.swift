@@ -7765,7 +7765,56 @@ extension View {
     func bernDefaultFocus() -> some View {
         modifier(BernDefaultFocus())
     }
+
+    /// `cursor`: hover pointer style on desktop platforms.
+    @ViewBuilder
+    func bernCursor(_ cursor: String, enabled: Bool = true) -> some View {
+        #if os(macOS)
+        let active = enabled && cursor == "pointer"
+        if #available(macOS 15.0, *) {
+            self.pointerStyle(active ? .link : .default)
+        } else {
+            self.modifier(BernPointerCursor(active: active))
+        }
+        #else
+        self
+        #endif
+    }
 }
+
+#if os(macOS)
+private struct BernPointerCursor: ViewModifier {
+    let active: Bool
+    @State private var hovered = false
+    @State private var pushed = false
+
+    private func sync() {
+        let want = active && hovered
+        if want && !pushed {
+            NSCursor.pointingHand.push()
+            pushed = true
+        } else if !want && pushed {
+            NSCursor.pop()
+            pushed = false
+        }
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .onHover { inside in
+                hovered = inside
+                sync()
+            }
+            .onChange(of: active) { _, _ in
+                sync()
+            }
+            .onDisappear {
+                hovered = false
+                sync()
+            }
+    }
+}
+#endif
 
 private struct BernDefaultFocus: ViewModifier {
     @FocusState private var focused: Bool

@@ -332,6 +332,10 @@ pub trait Host: Send + Sync {
     fn lit(&self, id: &str, overlay: &Overlay) {
         self.show(id, overlay);
     }
+    /// Only line colors (and optionally how far they are lit) changed since `show_styled`.
+    fn color(&self, id: &str, overlay: &Overlay, style: TextStyle) {
+        self.show_styled(id, overlay, style);
+    }
     fn hide(&self, id: &str);
 }
 
@@ -380,6 +384,8 @@ enum Change {
     Nothing,
     /// Only how far a line is lit, or the route it follows.
     Lit,
+    /// Only line colors (and optionally lit progress/route) changed.
+    Color,
     All,
 }
 
@@ -390,20 +396,26 @@ impl Overlay {
         }
         // Text and ruby are layout, not timing: changing either must rebuild
         // the native surface even when only the clock also moved.
-        let same = |line: &Line, other: &Line| {
+        let same_layout = |line: &Line, other: &Line| {
             Line {
+                color: [0; 4],
                 lit: None,
                 route: None,
                 ..line.clone()
             } == Line {
+                color: [0; 4],
                 lit: None,
                 route: None,
                 ..other.clone()
             } && line.lit.is_some() == other.lit.is_some()
                 && line.route.is_some() == other.route.is_some()
         };
-        let lines = self.lines.len() == next.lines.len()
-            && self.lines.iter().zip(&next.lines).all(|(a, b)| same(a, b));
+        let layout_unchanged = self.lines.len() == next.lines.len()
+            && self
+                .lines
+                .iter()
+                .zip(&next.lines)
+                .all(|(a, b)| same_layout(a, b));
         let rest = Overlay {
             lines: Vec::new(),
             ..self.clone()
@@ -411,8 +423,17 @@ impl Overlay {
             lines: Vec::new(),
             ..next.clone()
         };
-        if lines && rest {
-            Change::Lit
+        if layout_unchanged && rest {
+            let same_color = self
+                .lines
+                .iter()
+                .zip(&next.lines)
+                .all(|(a, b)| a.color == b.color);
+            if same_color {
+                Change::Lit
+            } else {
+                Change::Color
+            }
         } else {
             Change::All
         }
@@ -452,8 +473,10 @@ pub fn show_styled(id: &str, overlay: &Overlay, style: TextStyle) {
     match (change, host()) {
         (Change::Nothing, _) => {}
         (Change::Lit, Some(host)) => host.lit(id, overlay),
+        (Change::Color, Some(host)) => host.color(id, overlay, style),
         (Change::All, Some(host)) => host.show_styled(id, overlay, style),
         (Change::Lit, None) => lit_here(id, overlay, style),
+        (Change::Color, None) => color_here(id, overlay, style),
         (Change::All, None) => show_here(id, overlay, style),
     }
 }
@@ -476,6 +499,18 @@ fn lit_here(id: &str, overlay: &Overlay, style: TextStyle) {
     win::lit(id.to_string(), overlay.clone(), style);
     #[cfg(target_os = "android")]
     let _ = crate::platform::request("overlay_lit", id, &as_json(overlay, style));
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "android")))]
+    let _ = (id, overlay, style);
+}
+
+/// Repaint line colors of an overlay in place without rebuilding its window or controls.
+fn color_here(id: &str, overlay: &Overlay, style: TextStyle) {
+    #[cfg(target_os = "macos")]
+    mac::color(id.to_string(), overlay.clone(), style);
+    #[cfg(target_os = "windows")]
+    win::show(id.to_string(), overlay.clone(), style);
+    #[cfg(target_os = "android")]
+    let _ = crate::platform::request("overlay_show", id, &as_json(overlay, style));
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "android")))]
     let _ = (id, overlay, style);
 }
@@ -689,6 +724,16 @@ mod mac {
         last_frame: Cell<NSRect>,
         /// What is lit of each line that shows, for those that light up.
         lit: Vec<Option<Lit>>,
+        /// The text fields painted for each visible line, updated in place on color changes.
+        fields: Vec<Vec<PaintField>>,
+    }
+
+    struct PaintField {
+        field: Retained<NSTextField>,
+        text: String,
+        size: f64,
+        bold: bool,
+        alpha: f64,
     }
 
     /// What is lit of a line: the view that cuts it off.
@@ -860,6 +905,54 @@ mod mac {
         });
     }
 
+    /// Only line colors (and optionally lit timing) changed: repaint existing text fields in place.
+    pub fn color(id: String, overlay: Overlay, style: TextStyle) {
+        DispatchQueue::main().exec_async(move || {
+            let Some(mtm) = MainThreadMarker::new() else {
+                return;
+            };
+            let fallback = PANELS.with(|panels| {
+                let mut panels = panels.borrow_mut();
+                let Some(shown) = panels.get_mut(&id) else {
+                    return Some(style);
+                };
+                let lines: Vec<&Line> = overlay
+                    .lines
+                    .iter()
+                    .filter(|line| !line.text.is_empty())
+                    .collect();
+                if shown.fields.len() != lines.len() || shown.lit.len() != lines.len() {
+                    return Some(style);
+                }
+                for ((fields, lit_slot), line) in
+                    shown.fields.iter().zip(shown.lit.iter_mut()).zip(lines)
+                {
+                    for paint in fields {
+                        let mut styled_line = line.clone();
+                        styled_line.size = paint.size;
+                        styled_line.bold = paint.bold;
+                        let text = attributed(&styled_line, &paint.text, style.effect, paint.alpha);
+                        paint.field.setAttributedStringValue(&text);
+                    }
+                    if let Some(lit) = lit_slot {
+                        let timing_changed =
+                            lit.line.lit != line.lit || lit.line.route != line.route;
+                        lit.line.color = line.color;
+                        if timing_changed {
+                            lit.line.lit = line.lit;
+                            lit.line.route = line.route.clone();
+                            lit.show(mtm);
+                        }
+                    }
+                }
+                None
+            });
+            if let Some(style) = fallback {
+                put(mtm, &id, &overlay, style);
+            }
+        });
+    }
+
     pub fn hide(id: String) {
         DispatchQueue::main().exec_async(move || {
             let parent = PANELS.with(|panels| panels.borrow().get(&id).map(|s| s.panel.clone()));
@@ -883,9 +976,9 @@ mod mac {
         line: &Line,
         style: TextStyle,
         mtm: MainThreadMarker,
-    ) -> (Retained<NSView>, Option<Lit>) {
+    ) -> (Retained<NSView>, Option<Lit>, Vec<PaintField>) {
         let lights = line.lights();
-        let base = annotated(
+        let (base, mut fields) = annotated(
             line,
             style.effect,
             if lights { super::FADED } else { 1.0 },
@@ -898,14 +991,15 @@ mod mac {
         label.setAlphaValue(style.opacity);
         label.addSubview(&base);
         if !lights {
-            return (label, None);
+            return (label, None, fields);
         }
         let clip = NSView::initWithFrame(NSView::alloc(mtm), frame);
         clip.setClipsToBounds(true);
         // The text, with its blurred shadow, is drawn once: moving the cut
         // only changes the bounds of a layer.
         clip.setWantsLayer(true);
-        let bright = annotated(line, style.effect, 1.0, mtm);
+        let (bright, bright_fields) = annotated(line, style.effect, 1.0, mtm);
+        fields.extend(bright_fields);
         bright.setWantsLayer(true);
         // SAFETY: `NSViewLayerContentsRedrawNever` is 0.
         let _: () = unsafe { msg_send![&*clip, setLayerContentsRedrawPolicy: 0isize] };
@@ -918,7 +1012,7 @@ mod mac {
             widths: HashMap::new(),
         };
         lit.show(mtm);
-        (label, Some(lit))
+        (label, Some(lit), fields)
     }
 
     /// Keep the original line as one shaped, accessible text field. Readings
@@ -929,11 +1023,18 @@ mod mac {
         effect: TextEffect,
         alpha: f64,
         mtm: MainThreadMarker,
-    ) -> Retained<NSView> {
+    ) -> (Retained<NSView>, Vec<PaintField>) {
         let base = styled(line, &line.text, effect, alpha, mtm);
+        let mut fields = vec![PaintField {
+            field: base.clone(),
+            text: line.text.clone(),
+            size: line.size,
+            bold: line.bold,
+            alpha,
+        }];
         let spans = line.ruby_spans();
         if spans.is_empty() {
-            return base.into_super().into_super();
+            return (base.into_super().into_super(), fields);
         }
         let size = base.frame().size;
         let band = line.size * 0.7 + 4.0;
@@ -973,18 +1074,23 @@ mod mac {
             // second traversal through the pronunciation decorations.
             let _: () = unsafe { msg_send![&*ruby, setAccessibilityElement: false] };
             view.addSubview(&ruby);
+            fields.push(PaintField {
+                field: ruby,
+                text: reading,
+                size: style.size,
+                bold: style.bold,
+                alpha,
+            });
         }
-        view
+        (view, fields)
     }
 
-    /// `text` in the style of `line`, its alpha scaled by `alpha`.
-    fn styled(
+    fn attributed(
         line: &Line,
         text: &str,
         effect: TextEffect,
         alpha: f64,
-        mtm: MainThreadMarker,
-    ) -> Retained<NSTextField> {
+    ) -> Retained<NSMutableAttributedString> {
         let attributes = NSMutableDictionary::<NSString, AnyObject>::new();
         let font = if line.bold {
             NSFont::boldSystemFontOfSize(line.size)
@@ -1026,13 +1132,24 @@ mod mac {
             }
         }
         // SAFETY: string attributes as AppKit takes them.
-        let text = unsafe {
+        unsafe {
             NSMutableAttributedString::initWithString_attributes(
                 NSMutableAttributedString::alloc(),
                 &NSString::from_str(text),
                 Some(&attributes),
             )
-        };
+        }
+    }
+
+    /// `text` in the style of `line`, its alpha scaled by `alpha`.
+    fn styled(
+        line: &Line,
+        text: &str,
+        effect: TextEffect,
+        alpha: f64,
+        mtm: MainThreadMarker,
+    ) -> Retained<NSTextField> {
+        let text = attributed(line, text, effect, alpha);
         let label = NSTextField::labelWithAttributedString(&text, mtm);
         label.sizeToFit();
         label
@@ -1130,12 +1247,15 @@ mod mac {
         } else {
             super::saved_place(id)
         };
-        let (labels, lit): (Vec<Retained<NSView>>, Vec<Option<Lit>>) = overlay
-            .lines
-            .iter()
-            .filter(|line| !line.text.is_empty())
-            .map(|line| label(line, style, mtm))
-            .unzip();
+        let mut labels = Vec::new();
+        let mut lit = Vec::new();
+        let mut fields = Vec::new();
+        for line in overlay.lines.iter().filter(|line| !line.text.is_empty()) {
+            let (view, line_lit, line_fields) = label(line, style, mtm);
+            labels.push(view);
+            lit.push(line_lit);
+            fields.push(line_fields);
+        }
         // None on the taskbar. Locked, only the buttons that unlock it, each
         // where it is when unlocked.
         let buttons: Vec<&super::Button> = if overlay.place == super::Place::Free {
@@ -1232,6 +1352,7 @@ mod mac {
             allows_sync,
             last_frame: Cell::new(frame),
             lit,
+            fields,
         };
         hover(&shown);
         PANELS.with(|panels| panels.borrow_mut().insert(id.to_string(), shown));
@@ -3402,6 +3523,13 @@ mod tests {
         assert_eq!(shown.change_to(&overlay("a", Some(1.5))), Change::Lit);
         assert_eq!(shown.change_to(&overlay("a", None)), Change::All);
         assert_eq!(shown.change_to(&overlay("b", Some(1.5))), Change::All);
+        let mut recolored = shown.clone();
+        recolored.lines[0].color = [255, 64, 128, 255];
+        assert_eq!(shown.change_to(&recolored), Change::Color);
+        recolored.lines[0].lit = Some(1.5);
+        assert_eq!(shown.change_to(&recolored), Change::Color);
+        recolored.lines[0].size = 12.0;
+        assert_eq!(shown.change_to(&recolored), Change::All);
     }
 
     fn ruby_line(text: &str, ruby: &str) -> Line {

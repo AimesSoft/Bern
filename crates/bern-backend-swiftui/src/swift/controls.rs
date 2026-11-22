@@ -148,6 +148,13 @@ impl Generator<'_> {
             if let Some(enabled) = &enabled {
                 out.line(format!(".disabled(!({enabled}))"));
             }
+            if let Some(cursor) = element.keyword("cursor") {
+                out.line(format!(
+                    ".bernCursor({}, enabled: {})",
+                    string(cursor),
+                    enabled.as_deref().unwrap_or("true")
+                ));
+            }
             out.line(format!(
                 ".bernControl({}, role: \"button\", label: {label}, enabled: {}, actions: BernControlActions(activate: {{ {action} }}{file}))",
                 self.target(element, ctx),
@@ -310,6 +317,13 @@ impl Generator<'_> {
         }
         if let Some(enabled) = &enabled {
             out.line(format!(".disabled(!({enabled}))"));
+        }
+        if let Some(cursor) = element.keyword("cursor") {
+            out.line(format!(
+                ".bernCursor({}, enabled: {})",
+                string(cursor),
+                enabled.as_deref().unwrap_or("true")
+            ));
         }
         out.line(format!(
             ".bernControl({}, role: \"button\", label: {label}, enabled: {}, actions: BernControlActions(activate: {{ {action} }}{file}))",

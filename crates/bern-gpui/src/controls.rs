@@ -64,6 +64,8 @@ pub struct ButtonProps {
     pub pick: Option<FilePrompt>,
     /// A key combination that presses the button, as `cmd+o`.
     pub shortcut: Option<String>,
+    /// Pointer cursor on desktop platforms (`"default"` or `"pointer"`).
+    pub cursor: Option<&'static str>,
 }
 
 /// A `MediaSource` value for a file.
@@ -614,6 +616,11 @@ fn button_of(
         )
     };
     let element = c.grow().apply(element);
+    let element = match (enabled, props.cursor) {
+        (true, Some("pointer")) => element.cursor_pointer(),
+        (_, Some("default")) => element.cursor_default(),
+        _ => element,
+    };
     if !enabled {
         return element.into_any_element();
     }

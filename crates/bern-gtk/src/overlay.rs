@@ -31,6 +31,11 @@ impl Host for Overlays {
         glib::MainContext::default().invoke(move || lit(&id, &overlay));
     }
 
+    fn color(&self, id: &str, overlay: &Overlay, _style: TextStyle) {
+        let (id, overlay) = (id.to_string(), overlay.clone());
+        glib::MainContext::default().invoke(move || color(&id, &overlay));
+    }
+
     fn hide(&self, id: &str) {
         let id = id.to_string();
         glib::MainContext::default().invoke(move || {
@@ -194,8 +199,7 @@ fn input_region(window: &gtk::Window, bar: &gtk::Box) {
     surface.set_input_region(Some(&region));
 }
 
-fn label(line: &Line) -> gtk::Label {
-    let label = gtk::Label::new(Some(&line.text));
+fn apply_attributes(label: &gtk::Label, line: &Line) {
     let attributes = gtk::pango::AttrList::new();
     attributes.insert(gtk::pango::AttrSize::new_size_absolute(
         (line.size * gtk::pango::SCALE as f64) as i32,
@@ -212,6 +216,11 @@ fn label(line: &Line) -> gtk::Label {
     ));
     attributes.insert(gtk::pango::AttrInt::new_foreground_alpha(wide(a)));
     label.set_attributes(Some(&attributes));
+}
+
+fn label(line: &Line) -> gtk::Label {
+    let label = gtk::Label::new(Some(&line.text));
+    apply_attributes(&label, line);
     label
 }
 
@@ -229,6 +238,30 @@ fn lit(id: &str, overlay: &Overlay) {
             } else if let Some(value) = line.lit {
                 shown.set(value);
             }
+        }
+        child = widget.next_sibling();
+    }
+}
+
+/// Only line colors (and optionally lit timing) changed: update labels in place without rebuilding buttons.
+fn color(id: &str, overlay: &Overlay) {
+    let Parts { lines, .. } = parts(id);
+    let mut child = lines.first_child();
+    for line in overlay.lines.iter().filter(|line| !line.text.is_empty()) {
+        let Some(widget) = child else { break };
+        if let Some(shown) = widget.downcast_ref::<RubyLine>() {
+            shown.update(line);
+        } else if let Some(shown) = widget.downcast_ref::<crate::lit::Lit>() {
+            if let Some(text) = shown.label() {
+                apply_attributes(&text, line);
+            }
+            if let Some(route) = &line.route {
+                shown.follow(route.clone());
+            } else if let Some(value) = line.lit {
+                shown.set(value);
+            }
+        } else if let Some(text) = widget.downcast_ref::<gtk::Label>() {
+            apply_attributes(text, line);
         }
         child = widget.next_sibling();
     }
@@ -479,6 +512,9 @@ impl RubyLine {
 
     fn update(&self, line: &Line) {
         self.imp().line.replace(Some(line.clone()));
+        if let Some(label) = self.imp().label.borrow().as_ref() {
+            apply_attributes(label, line);
+        }
         let moving = line.route.as_ref().is_some_and(|route| route.moving());
         let mut tick = self.imp().tick.borrow_mut();
         if moving && tick.is_none() {

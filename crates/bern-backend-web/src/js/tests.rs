@@ -1221,6 +1221,26 @@ fn menu_checked_popover_shape_opacity_saturation_color_and_sidebar_collapsed() {
         },
     );
 
+    let mut link_btn = element("Button");
+    link_btn.props.insert(
+        "id".into(),
+        Prop::Id {
+            value: "visit".into(),
+        },
+    );
+    link_btn.props.insert(
+        "label".into(),
+        Prop::Text {
+            value: TextValue::Plain("Visit".into()),
+        },
+    );
+    link_btn.props.insert(
+        "cursor".into(),
+        Prop::Keyword {
+            value: "pointer".into(),
+        },
+    );
+
     let mut col = element("Column");
     col.props.insert(
         "opacity".into(),
@@ -1239,6 +1259,7 @@ fn menu_checked_popover_shape_opacity_saturation_color_and_sidebar_collapsed() {
         Node::Element(popover),
         Node::Element(label),
         Node::Element(icon_btn),
+        Node::Element(link_btn),
         Node::Element(image),
     ];
 
@@ -1267,6 +1288,7 @@ fn menu_checked_popover_shape_opacity_saturation_color_and_sidebar_collapsed() {
         "shape: \"capsule\", height: 32",
         "color: \"status.success\"",
         "color: \"status.error\"",
+        "cursor: \"pointer\"",
         "saturation: () => (ctx.s.draft.ratio.get())",
         "detailFooter: (p, ctx) => {",
     ] {

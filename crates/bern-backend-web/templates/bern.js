@@ -1776,13 +1776,13 @@ export function startFocus(node) {
   });
 }
 
-export function Button(p, ctx, { id, label, icon: name, role, prominence, enabled, style, setFile, fileKinds, shape, height, fill, defaultFocus, menu, doubleTap }, action) {
+export function Button(p, ctx, { id, label, icon: name, role, prominence, cursor, enabled, style, setFile, fileKinds, shape, height, fill, defaultFocus, menu, doubleTap }, action) {
   const kind = prominence ?? "standard";
   const text = el("span");
   bindText(text, label);
   const node = el(
     "button",
-    { class: `bern-button bern-button-${kind}${role === "destructive" ? " bern-destructive" : ""}${fill ? " bern-button-fill" : ""}`, type: "button" },
+    { class: `bern-button bern-button-${kind}${role === "destructive" ? " bern-destructive" : ""}${fill ? " bern-button-fill" : ""}${cursor === "pointer" || cursor === "default" ? ` bern-cursor-${cursor}` : ""}`, type: "button" },
     name ? icon(name, 14) : null,
     text,
   );

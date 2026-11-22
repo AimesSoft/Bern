@@ -74,6 +74,7 @@ impl Generator<'_> {
             ),
             ("role", Self::keyword(element, "role")),
             ("prominence", Self::keyword(element, "prominence")),
+            ("cursor", Self::keyword(element, "cursor")),
             ("enabled", self.enabled(element)),
             ("action", self.action(element)),
             ("style", self.style(kind, element.keyword("variant"))),

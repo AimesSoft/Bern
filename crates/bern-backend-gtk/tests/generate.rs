@@ -2100,6 +2100,7 @@ pub fn app(app: controls::Client, windows: AppWindows, #[session] draft: Draft) 
                             }
                             Label(title: tr! { "en" => "OK" }, icon: "checkmark.circle.fill", color: status.success)
                             IconButton(id: fav, icon: "heart.fill", label: tr! { "en" => "Like" }, color: status.error) => app.toggle()
+                            Button(id: visit, label: tr! { "en" => "Visit" }, cursor: pointer) => app.toggle()
                             Image(source: draft.picture, width: 120, height: 80, saturation: app.amount, animate: smooth)
                             Marquee(duration: 5, opacity: 0.6) {
                                 Text(content: tr! { "en" => "Banner" })
@@ -2155,6 +2156,7 @@ pub fn app(app: controls::Client, windows: AppWindows, #[session] draft: Draft) 
         "shape: b::Shape { capsule: true, height: Some(b::Num::Fixed(32.0)) }",
         "color: Some(\"status.success\")",
         "color: Some(\"status.error\")",
+        "cursor: Some(\"pointer\")",
         "saturation: Some(b::Num::Bound(",
         "opacity: Some((b::Num::Bound(",
         "detail_footer: Some(",

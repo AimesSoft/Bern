@@ -22,7 +22,7 @@ impl Generator<'_> {
         self.children(
             out,
             &format!(
-                "b::ContentButton(p, c, b::ContentButtonProps {{ id: {}, label: {}, enabled: {}, style: {}, pick: {}, paste: {}, shape: {}, menu: {}, double_tap: {} }}, {}, ",
+                "b::ContentButton(p, c, b::ContentButtonProps {{ id: {}, label: {}, enabled: {}, style: {}, pick: {}, paste: {}, shape: {}, menu: {}, double_tap: {}, cursor: {} }}, {}, ",
                 self.id(element),
                 some(self.text_prop(element, "label")),
                 self.enabled(element),
@@ -32,6 +32,7 @@ impl Generator<'_> {
                 self.shape(element),
                 self.context_menu(element),
                 self.child_action(element, "DoubleTap"),
+                Self::keyword(element, "cursor"),
                 self.action(element),
             ),
             &element.children,
@@ -47,7 +48,7 @@ impl Generator<'_> {
 
     pub(super) fn button(&self, out: &mut Out, element: &Element) {
         out.line(format!(
-            "b::Button(p, c, b::ButtonProps {{ id: {}, label: {}, icon: {}, role: {}, prominence: {}, enabled: {}, style: {}, pick: {}, paste: {}, shape: {}, fill: {}, menu: {}, double_tap: {} }}, {});",
+            "b::Button(p, c, b::ButtonProps {{ id: {}, label: {}, icon: {}, role: {}, prominence: {}, enabled: {}, style: {}, pick: {}, paste: {}, shape: {}, fill: {}, menu: {}, double_tap: {}, cursor: {} }}, {});",
             self.id(element),
             some(self.text_prop(element, "label")),
             Self::icon(element, "icon"),
@@ -61,6 +62,7 @@ impl Generator<'_> {
             element.keyword("width") == Some("fill"),
             self.context_menu(element),
             self.child_action(element, "DoubleTap"),
+            Self::keyword(element, "cursor"),
             self.action(element),
         ));
         self.shortcut(

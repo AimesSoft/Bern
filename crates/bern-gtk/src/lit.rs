@@ -86,6 +86,10 @@ impl Lit {
         widget
     }
 
+    pub fn label(&self) -> Option<gtk::Label> {
+        self.imp().label.borrow().clone()
+    }
+
     /// As far through its characters as `lit`; below zero, all of it.
     pub fn set(&self, lit: f64) {
         self.imp().lit.set(lit);

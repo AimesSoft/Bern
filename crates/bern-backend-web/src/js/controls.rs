@@ -24,6 +24,7 @@ impl Generator<'_> {
             let props = Self::props(vec![
                 ("id", Some(self.id(element))),
                 ("label", self.text_prop(element, "label")),
+                ("cursor", Self::keyword(element, "cursor")),
                 ("enabled", enabled),
                 ("style", style),
                 ("shape", Self::keyword(element, "shape")),
@@ -50,6 +51,12 @@ impl Generator<'_> {
                     ("icon", element.icon("icon").map(string)),
                     ("role", Self::keyword(element, "role")),
                     ("prominence", Self::keyword(element, "prominence")),
+                    (
+                        "cursor",
+                        (element.kind == "Button")
+                            .then(|| Self::keyword(element, "cursor"))
+                            .flatten(),
+                    ),
                     (
                         "color",
                         (element.kind == "IconButton")

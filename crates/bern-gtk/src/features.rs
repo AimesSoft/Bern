@@ -565,6 +565,7 @@ pub struct ContentButtonProps {
     /// `ContextMenu`: what a secondary click or a long touch opens.
     pub menu: Vec<Option<crate::widgets::MenuItem>>,
     pub double_tap: Option<Act>,
+    pub cursor: Option<&'static str>,
 }
 
 /// A button showing its content instead of a label: no frame of its own,
@@ -604,7 +605,18 @@ pub fn ContentButton(
     let enabled = bound_enabled(ctx, &props.enabled);
     if let Some(enabled) = enabled.clone() {
         let shown = button.clone();
-        effect(move || shown.set_sensitive(enabled()));
+        let cursor = props.cursor;
+        effect(move || {
+            let sensitive = enabled();
+            shown.set_sensitive(sensitive);
+            match cursor {
+                Some("pointer") => shown.set_cursor_from_name(sensitive.then_some("pointer")),
+                Some("default") => shown.set_cursor_from_name(Some("default")),
+                _ => {}
+            }
+        });
+    } else if matches!(props.cursor, Some("pointer" | "default")) {
+        button.set_cursor_from_name(props.cursor);
     }
     let (run, set_file) = picking(ctx, props.pick.clone(), bound_action(ctx, &action));
     let run = pasting(ctx, props.paste, run);

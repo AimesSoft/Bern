@@ -2705,6 +2705,7 @@ pub fn main_view(app: controls::Client, #[session] draft: Draft) -> impl View {
                     }
                     Label(title: tr! { "en" => "OK" }, icon: "checkmark.circle.fill", color: status.success)
                     IconButton(id: fav, icon: "heart.fill", label: tr! { "en" => "Like" }, color: status.error) => app.toggle()
+                    Button(id: visit, label: tr! { "en" => "Visit" }, cursor: pointer) => app.toggle()
                     Image(source: draft.picture, width: 120, height: 80, saturation: app.amount, animate: smooth)
                     Marquee(duration: 5, opacity: 0.6) {
                         Text(content: tr! { "en" => "Banner" })
@@ -2787,6 +2788,7 @@ pub fn app(app: controls::Client, windows: AppWindows) -> impl View {
         ".shape = B::ControlShape{.capsule = true, .height = B::Len(32.0)}",
         ".color = \"status.success\"",
         ".color = \"status.error\"",
+        ".cursor = \"pointer\"",
         ".saturation = B::Len(Get(",
     ] {
         assert!(
