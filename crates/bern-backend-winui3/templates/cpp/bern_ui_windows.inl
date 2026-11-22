@@ -705,6 +705,7 @@ inline void SetWindowIcons(HWND hwnd, std::wstring const& file = {}) {
 /// for again.
 inline void FitTitleBarInsets(controls::TitleBar const& titleBar, xaml::Window const& window, std::array<double, 3>& fitted) {
     if (!titleBar.XamlRoot() || media::VisualTreeHelper::GetChildrenCount(titleBar) == 0) return;
+    if (titleBar.Visibility() != xaml::Visibility::Visible) return;
     auto grid = media::VisualTreeHelper::GetChild(titleBar, 0).try_as<controls::Grid>();
     if (!grid) return;
     auto columns = grid.ColumnDefinitions();
@@ -720,9 +721,13 @@ inline void FitTitleBarInsets(controls::TitleBar const& titleBar, xaml::Window c
         if (current.GridUnitType == xaml::GridUnitType::Pixel && std::abs(current.Value - width) > 0.5)
             column.Width(xaml::GridLength{width, xaml::GridUnitType::Pixel});
     };
-    fit(first, bar.LeftInset() / scale);
-    fit(last, bar.RightInset() / scale);
-    fitted = {first.Width().Value, last.Width().Value, scale};
+    double left = bar.LeftInset() / scale, right = bar.RightInset() / scale;
+    fit(first, left);
+    fit(last, right);
+    // Without caption buttons, as the window leaves the full screen or an
+    // immersive page, there are no insets yet: they are asked for again.
+    if (left + right > 0) fitted = {first.Width().Value, last.Width().Value, scale};
+    else fitted = {-1, -1, 0};
 }
 
 /// The application icon in the XAML title bar: the image of icon resource 1
@@ -1077,6 +1082,9 @@ inline void ShowChrome(Win& win, bool immersive) {
             presenter.SetBorderAndTitleBar(true, !immersive);
     } catch (winrt::hresult_error const&) {
     }
+    // The caption buttons go or come back, and their insets with them.
+    win.titleBarInsets = {-1, -1, 0};
+    if (win.titleBar) win.titleBar.InvalidateMeasure();
 #else
     LONG_PTR style = GetWindowLongPtrW(win.hwnd, GWL_STYLE);
     LONG_PTR next = immersive ? (style & ~WS_CAPTION) | WS_THICKFRAME : style | WS_CAPTION;

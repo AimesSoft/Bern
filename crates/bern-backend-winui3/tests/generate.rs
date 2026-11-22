@@ -475,6 +475,17 @@ fn a_unified_window_keeps_its_page_header_in_the_title_bar() {
     assert!(generated.contains("w.unified = true;"));
 }
 
+/// The caption buttons' insets are asked for again while there are none, as
+/// the window leaves the full screen.
+#[test]
+fn missing_caption_insets_are_not_kept() {
+    let windows = include_str!("../templates/cpp/bern_ui_windows.inl");
+    assert!(windows.contains(
+        "if (left + right > 0) fitted = {first.Width().Value, last.Width().Value, scale};"
+    ));
+    assert!(windows.contains("if (win.titleBar) win.titleBar.InvalidateMeasure();"));
+}
+
 /// The planner: sidebar items that come and go, styled buttons and sidebar
 /// items, a drawing with a pattern and series, a marked text, shared
 /// elements, transitions and an immersive window that rests.
