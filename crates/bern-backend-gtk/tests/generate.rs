@@ -2006,7 +2006,7 @@ fn pointer_events_slider_hover_and_player_state_reach_the_runtime() {
         // event is no content.
         "b::PointerProps { double_tap: None, menu: vec![], wheel_up: None, wheel_down: Some(",
         "b::Button(p, c, b::ButtonProps { id: \"wheel\", ",
-        "menu: vec![], double_tap: None }, Some(b::act(",
+        "menu: vec![], double_tap: None, cursor: None }, Some(b::act(",
         "capture_wheel: true }",
         "label_hidden: false, continuous: false, hover: Some(b::Field { session: 0, field: 1 }) }",
         "b::player_state(\"preview\", \"progress\")",
