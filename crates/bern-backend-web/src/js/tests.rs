@@ -1222,18 +1222,7 @@ fn menu_checked_popover_shape_opacity_saturation_color_and_sidebar_collapsed() {
     );
 
     let mut link_btn = element("Button");
-    link_btn.props.insert(
-        "id".into(),
-        Prop::Id {
-            value: "visit".into(),
-        },
-    );
-    link_btn.props.insert(
-        "label".into(),
-        Prop::Text {
-            value: TextValue::Plain("Visit".into()),
-        },
-    );
+    link_btn.id = Some("visit".into());
     link_btn.props.insert(
         "cursor".into(),
         Prop::Keyword {
