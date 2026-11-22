@@ -62,8 +62,21 @@ impl Generator<'_> {
         if let Some(header) = header {
             self.children(out, "header: ", &header.children, ",");
         }
+        let detail_footer = detail.children.iter().find_map(|node| match node {
+            Node::Element(child) if child.kind == "DetailFooter" => Some(child),
+            _ => None,
+        });
+        let detail_content: Vec<Node> = detail
+            .children
+            .iter()
+            .filter(|node| !matches!(node, Node::Element(child) if child.kind == "DetailFooter"))
+            .cloned()
+            .collect();
         if let Some(footer) = footer {
             self.children(out, "footer: ", &footer.children, ",");
+        }
+        if let Some(detail_footer) = detail_footer {
+            self.children(out, "detailFooter: ", &detail_footer.children, ",");
         }
         out.close("}, (p, ctx) => {");
         out.indent += 1;
@@ -72,7 +85,7 @@ impl Generator<'_> {
         self.in_sidebar.set(false);
         out.close("}, (p, ctx) => {");
         out.indent += 1;
-        self.nodes(out, &detail.children);
+        self.nodes(out, &detail_content);
         out.close("});");
     }
 

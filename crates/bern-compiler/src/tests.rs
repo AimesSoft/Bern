@@ -2847,6 +2847,44 @@ fn sidebar_footers_and_toolbar_searches_are_checked() {
     }
     let outside = errors(footer);
     assert!(outside.contains("SidebarFooter"), "{outside}");
+
+    let detail_window = |detail_footer: &str| {
+        wrap(&format!(
+            r#"SplitView {{
+                Sidebar(selection: draft.mode) {{
+                    SidebarItem(value: Mode::Fast, label: tr! {{ "en" => "Fast", "ja" => "速い" }})
+                }}
+                Detail {{
+                    Spacer
+                    {detail_footer}
+                }}
+            }}"#
+        ))
+    };
+    let detail_footer = "DetailFooter { Text(content: app.title) }";
+    compile_ui(&detail_window(detail_footer)).unwrap_or_else(|errors| panic!("{errors:?}"));
+    for (body, expected) in [
+        (
+            format!("{detail_footer} {detail_footer}"),
+            "at most one `DetailFooter`",
+        ),
+        (
+            format!("if draft.on {{ {detail_footer} }}"),
+            "directly in its `Detail`",
+        ),
+    ] {
+        let message = match compile_ui(&detail_window(&body)) {
+            Ok(_) => panic!("expected `{body}` to fail"),
+            Err(errors) => errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        };
+        assert!(message.contains(expected), "{body}: {message}");
+    }
+    let detail_outside = errors(detail_footer);
+    assert!(detail_outside.contains("DetailFooter"), "{detail_outside}");
 }
 
 #[test]

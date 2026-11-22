@@ -920,7 +920,7 @@ let sidebarSequence = 0;
 /// of no declared width has a Window Splitter over its edge that drags or
 /// steps it between `SIDEBAR_WIDTHS`; a declared width stays fixed.
 export function SplitView(p, ctx, spec, sidebarContent, detail) {
-  const { selection, fallback, search, footer, header: sidebarHeader, width, titled, id, sidebarStyle, detailStyle, collapsed: collapsedField } = spec;
+  const { selection, fallback, search, footer, detailFooter, header: sidebarHeader, width, titled, id, sidebarStyle, detailStyle, collapsed: collapsedField } = spec;
   const showingDetail = cell(false);
   const collapsed = collapsedField ?? cell(false);
   const list = el("div", { class: "bern-sidebar-list", role: "listbox", tabindex: "0" });
@@ -1014,6 +1014,11 @@ export function SplitView(p, ctx, spec, sidebarContent, detail) {
   const column = el("div", { class: "bern-detail" }, header, body);
   if (detailStyle?.base?.background) column.style.background = cssColor(detailStyle.base.background);
   detail(body, inner);
+  if (detailFooter) {
+    const footerEl = el("div", { class: "bern-detail-footer" });
+    detailFooter(footerEl, ctx);
+    column.append(footerEl);
+  }
   const node = el("div", { class: "bern-split" }, sidebar);
   if (width === undefined) node.append(splitter(node, sidebarId, dragged));
   node.append(column);

@@ -273,7 +273,9 @@ private struct BernPopoverPresentation<Panel: View>: ViewModifier {
         content.sheet(isPresented: $presented, content: panel)
         #elseif os(macOS)
         content.popover(isPresented: $presented, arrowEdge: .bottom) {
-            panel().onExitCommand {
+            panel()
+                .environment(\.bernDetailFooter, nil)
+                .onExitCommand {
                 presented = false
                 requested = false
                 release()
@@ -4407,20 +4409,83 @@ private struct BernColumnFollowsInert: ViewModifier {
     }
 }
 
+#if os(macOS)
+/// Shared geometry between a macOS `SplitView`'s persistent `DetailFooter`
+/// and the detail column (including pushed `NavigationStack` destinations).
+@MainActor
+@Observable
+final class BernDetailFooterState {
+    var height: CGFloat = 0
+    var trailing: CGFloat = 0
+}
+
+private struct BernDetailFooterKey: EnvironmentKey {
+    static let defaultValue: BernDetailFooterState? = nil
+}
+
+extension EnvironmentValues {
+    var bernDetailFooter: BernDetailFooterState? {
+        get { self[BernDetailFooterKey.self] }
+        set { self[BernDetailFooterKey.self] = newValue }
+    }
+}
+#endif
+
+/// The detail column's main body (and pushed navigation destinations inside
+/// it): on macOS, when the enclosing `SplitView` has a `DetailFooter`, leaves
+/// room for it at the bottom and tracks any trailing inspector inset; on other
+/// platforms, passes the content straight through.
+struct BernDetailContent<Content: View>: View {
+    #if os(macOS)
+    @Environment(\.bernDetailFooter) private var footer
+    #endif
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        #if os(macOS)
+        if let footer {
+            VStack(spacing: 0) {
+                content()
+            }
+            .padding(.bottom, footer.height)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.trailing } action: { trailing in
+                if abs(footer.trailing - trailing) > 0.5 {
+                    footer.trailing = trailing
+                }
+            }
+        } else {
+            content()
+        }
+        #else
+        content()
+        #endif
+    }
+}
+
 /// A split view whose sidebar column collapses without animation while a
 /// covering layer hides it on macOS, so the sidebar's tracking separator
 /// does not push the covering page's toolbar items inward; the previous
 /// column visibility returns when the cover leaves.
-struct BernSplitView<Sidebar: View, Detail: View>: View {
+///
+/// An optional `DetailFooter` stays pinned at the bottom of the detail column
+/// even when a `NavigationStack` inside it pushes a destination (on macOS,
+/// `NavigationSplitView` replaces the whole detail column on push, so the
+/// footer sits alongside the split view and reserves room via the environment).
+struct BernSplitView<Sidebar: View, Detail: View, Footer: View>: View {
     var collapsed: Binding<Bool>? = nil
+    let hasFooter: Bool
     @ViewBuilder let sidebar: () -> Sidebar
     @ViewBuilder let detail: () -> Detail
+    @ViewBuilder let footer: () -> Footer
     @State private var visibility: NavigationSplitViewVisibility
     #if os(macOS)
     @Environment(\.bernWindowCovered) private var windowCovered
     @Environment(\.bernInert) private var inert
     @State private var savedVisibility: NavigationSplitViewVisibility
     @State private var holding = false
+    @State private var sidebarWidth: CGFloat = 0
+    @State private var detailFooter = BernDetailFooterState()
     private var covered: Bool { windowCovered || inert }
     #elseif os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -4429,11 +4494,31 @@ struct BernSplitView<Sidebar: View, Detail: View>: View {
     init(
         collapsed: Binding<Bool>? = nil,
         @ViewBuilder sidebar: @escaping () -> Sidebar,
-        @ViewBuilder detail: @escaping () -> Detail
+        @ViewBuilder detail: @escaping () -> Detail,
+        @ViewBuilder footer: @escaping () -> Footer
     ) {
         self.collapsed = collapsed
+        self.hasFooter = true
         self.sidebar = sidebar
         self.detail = detail
+        self.footer = footer
+        let initial: NavigationSplitViewVisibility = collapsed?.wrappedValue == true ? .detailOnly : .all
+        _visibility = State(initialValue: initial)
+        #if os(macOS)
+        _savedVisibility = State(initialValue: initial)
+        #endif
+    }
+
+    init(
+        collapsed: Binding<Bool>? = nil,
+        @ViewBuilder sidebar: @escaping () -> Sidebar,
+        @ViewBuilder detail: @escaping () -> Detail
+    ) where Footer == EmptyView {
+        self.collapsed = collapsed
+        self.hasFooter = false
+        self.sidebar = sidebar
+        self.detail = detail
+        self.footer = { EmptyView() }
         let initial: NavigationSplitViewVisibility = collapsed?.wrappedValue == true ? .detailOnly : .all
         _visibility = State(initialValue: initial)
         #if os(macOS)
@@ -4444,13 +4529,39 @@ struct BernSplitView<Sidebar: View, Detail: View>: View {
     var body: some View {
         #if os(macOS)
         ZStack {
-            NavigationSplitView(
-                columnVisibility: $visibility,
-                sidebar: sidebar,
-                detail: {
-                    detail().toolbar(removing: covered ? .sidebarToggle : nil)
+            ZStack(alignment: .bottomLeading) {
+                NavigationSplitView(
+                    columnVisibility: $visibility,
+                    sidebar: {
+                        if hasFooter {
+                            sidebar()
+                                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+                                    if abs(sidebarWidth - width) > 0.5 {
+                                        sidebarWidth = width
+                                    }
+                                }
+                        } else {
+                            sidebar()
+                        }
+                    },
+                    detail: {
+                        detail().toolbar(removing: covered ? .sidebarToggle : nil)
+                    }
+                )
+                .environment(\.bernDetailFooter, hasFooter ? detailFooter : nil)
+                if hasFooter {
+                    footer()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                            if abs(detailFooter.height - height) > 0.5 {
+                                detailFooter.height = height
+                            }
+                        }
+                        .bernColumnFollowsInert()
+                        .padding(.leading, visibility == .detailOnly ? 0 : sidebarWidth)
+                        .padding(.trailing, detailFooter.trailing)
                 }
-            )
+            }
             .opacity(holding ? 0 : 1)
             .onChange(of: collapsed?.wrappedValue) { _, want in
                 guard let want else { return }
@@ -4490,7 +4601,18 @@ struct BernSplitView<Sidebar: View, Detail: View>: View {
             .ignoresSafeArea(.container)
         }
         #else
-        NavigationSplitView(columnVisibility: $visibility, sidebar: sidebar, detail: detail)
+        NavigationSplitView(columnVisibility: $visibility, sidebar: sidebar) {
+            if hasFooter {
+                VStack(alignment: .leading, spacing: 0) {
+                    detail()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    footer()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else {
+                detail()
+            }
+        }
             .onChange(of: collapsed?.wrappedValue) { _, want in
                 guard let want else { return }
                 let target: NavigationSplitViewVisibility = want ? .detailOnly : .all

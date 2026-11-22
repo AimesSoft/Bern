@@ -2504,6 +2504,9 @@ pub fn main_view(app: controls::Client, #[session] draft: Draft) -> impl View {
                         Text(content: tr! { "en" => "Banner" })
                     }
                 }
+                DetailFooter {
+                    Text(content: tr! { "en" => "Now playing" })
+                }
             }
         }
     }

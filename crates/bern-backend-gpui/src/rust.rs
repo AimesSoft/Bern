@@ -599,6 +599,7 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
     ("SidebarHeader", &["role"]),
     ("SidebarFooter", &[]),
     ("Detail", &["titled"]),
+    ("DetailFooter", &[]),
     ("Tooltip", &["content"]),
     (
         "Banner",
@@ -776,6 +777,7 @@ pub const COMPONENT_NAMES: &[&str] = &[
     "SidebarFooter",
     "ContextMenu",
     "Detail",
+    "DetailFooter",
     "Tooltip",
     "Banner",
     "Disclosure",
@@ -4072,14 +4074,34 @@ pub fn app() -> b::AppDef {{
                     ),
                     None => "None".into(),
                 };
+                let detail_footer: Vec<Node> = detail
+                    .children
+                    .iter()
+                    .filter_map(|node| match node {
+                        Node::Element(child) if child.kind == "DetailFooter" => {
+                            Some(child.children.clone())
+                        }
+                        _ => None,
+                    })
+                    .flatten()
+                    .collect();
+                let detail_content: Vec<Node> = detail
+                    .children
+                    .iter()
+                    .filter(|node| {
+                        !matches!(node, Node::Element(child) if child.kind == "DetailFooter")
+                    })
+                    .cloned()
+                    .collect();
                 format!(
-                    "b::split_view(c, {collapsed}, {{ let c = &c.in_sidebar({selection_ref}); b::sidebar(c, {}, {}, {}, {}, {}) }}, b::detail(c, {title}, {collapsed}, {}, {}))",
+                    "b::split_view(c, {collapsed}, {{ let c = &c.in_sidebar({selection_ref}); b::sidebar(c, {}, {}, {}, {}, {}) }}, b::detail(c, {title}, {collapsed}, {}, {}, {}))",
                     self.optional_length(sidebar, "width"),
                     column(&part("SidebarHeader")),
                     column(&items),
                     column(&part("SidebarFooter")),
                     self.surface_style("Sidebar", sidebar),
-                    column(&detail.children),
+                    column(&detail_content),
+                    column(&detail_footer),
                     self.surface_style("Detail", detail),
                 )
             }

@@ -1246,6 +1246,9 @@ pub fn main_view(app: controls::Client, #[session] draft: Draft) -> impl View {
                     IconButton(id: fav, icon: "heart.fill", label: tr! { "en" => "Like" }, color: status.error) => app.toggle()
                     Image(source: draft.picture, width: 120, height: 80, saturation: app.amount, animate: smooth)
                 }
+                DetailFooter {
+                    Text(content: tr! { "en" => "Now playing" })
+                }
             }
         }
     }

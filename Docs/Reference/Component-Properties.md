@@ -98,6 +98,7 @@ Fixed enums list the allowed keywords directly. The table does not repeat every 
 | `SidebarHeader` | `role: content / title` | May contain children; no action; directly inside ["Sidebar"] |
 | `SidebarFooter` | No own properties | May contain children; no action; directly inside ["Sidebar"] |
 | `Detail` | `titled: Bool` | May contain children; no action; directly inside ["SplitView"] |
+| `DetailFooter` | No own properties | May contain children; no action; directly inside ["Detail"], at most one, and not placed in `if`, `match` or `ForEach`. Content pinned to the bottom of the detail column, staying visible across navigation pushes within it |
 | `SidebarItem` | **`value: SelectionValue`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`badge: NumberValue`<br>`variant: StyleVariant` | No children; no action; directly inside ["Sidebar", "Section"] |
 | `Section` | `title: DisplayText`<br>`footer: DisplayText`<br>`style: grouped / plain`<br>`padding_x: Length`<br>`padding_y: Length` | May contain children; no action |
 | `Slot` | **`id: SlotName`** | No children; no action |

@@ -437,7 +437,8 @@ impl Generator<'_> {
                     out.line(format!("B::ScreenBrightness(c, {available});"));
                 }
             }
-            "Detail" | "Destination" | "Tab" | "Sidebar" | "SidebarHeader" | "SidebarFooter"
+            "Detail" | "DetailFooter" | "Destination" | "Tab" | "Sidebar" | "SidebarHeader"
+            | "SidebarFooter"
             | "WindowSet" | "Window" | "Layout" | "MenuItem" | "Inspector" | "TabAccessory"
             // Windows applications of this kind keep no menu bar.
             | "MenuBar" | "CommandMenu" | "CommandItem"

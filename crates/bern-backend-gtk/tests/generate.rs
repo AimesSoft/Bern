@@ -2105,6 +2105,9 @@ pub fn app(app: controls::Client, windows: AppWindows, #[session] draft: Draft) 
                                 Text(content: tr! { "en" => "Banner" })
                             }
                         }
+                        DetailFooter {
+                            Text(content: tr! { "en" => "Now playing" })
+                        }
                     }
                 }
             }
@@ -2154,6 +2157,7 @@ pub fn app(app: controls::Client, windows: AppWindows, #[session] draft: Draft) 
         "color: Some(\"status.error\")",
         "saturation: Some(b::Num::Bound(",
         "opacity: Some((b::Num::Bound(",
+        "detail_footer: Some(",
     ] {
         assert!(
             generated.contains(expected),

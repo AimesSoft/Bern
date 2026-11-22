@@ -1249,8 +1249,10 @@ fn menu_checked_popover_shape_opacity_saturation_color_and_sidebar_collapsed() {
     sidebar
         .props
         .insert("collapsed".into(), field_ref(1, Type::Bool));
+    let mut detail_footer = element("DetailFooter");
+    detail_footer.children = vec![Node::Element(element("Divider"))];
     let mut detail = element("Detail");
-    detail.children = vec![Node::Element(col)];
+    detail.children = vec![Node::Element(col), Node::Element(detail_footer)];
     let mut split = element("SplitView");
     split.children = vec![Node::Element(sidebar), Node::Element(detail)];
 
@@ -1266,6 +1268,7 @@ fn menu_checked_popover_shape_opacity_saturation_color_and_sidebar_collapsed() {
         "color: \"status.success\"",
         "color: \"status.error\"",
         "saturation: () => (ctx.s.draft.ratio.get())",
+        "detailFooter: (p, ctx) => {",
     ] {
         assert!(code.contains(expected), "missing `{expected}`:\n{code}");
     }

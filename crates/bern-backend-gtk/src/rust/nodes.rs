@@ -390,7 +390,8 @@ impl Generator<'_> {
             "Adaptive" => self.adaptive(out, element),
             "Menu" => self.menu(out, element),
             "Table" => self.table(out, element),
-            "Detail" | "Destination" | "Sidebar" | "SidebarHeader" | "SidebarFooter"
+            "Detail" | "DetailFooter" | "Destination" | "Sidebar" | "SidebarHeader"
+            | "SidebarFooter"
             | "WindowSet" | "Window" | "Layout" | "MenuItem" | "Inspector" | "Shape" | "Series"
             // GNOME applications keep no menu bar.
             | "MenuBar" | "CommandMenu" | "CommandItem"
@@ -410,7 +411,7 @@ impl Generator<'_> {
             component.name
         ));
         out.open(format!(
-            "fn c_{}(p: &b::Parent, c: &b::Ctx) {{",
+            "pub(crate) fn c_{}(p: &b::Parent, c: &b::Ctx) {{",
             component.name
         ));
         self.nodes(out, std::slice::from_ref(&component.body));
@@ -421,7 +422,10 @@ impl Generator<'_> {
     pub(super) fn window(&self, out: &mut Out, window: &WindowDef) {
         *self.current_scope.borrow_mut() = window.id.clone();
         out.line(format!("/// Root of the `{}` window.", window.id));
-        out.open(format!("fn w_{}(p: &b::Parent, c: &b::Ctx) {{", window.id));
+        out.open(format!(
+            "pub(crate) fn w_{}(p: &b::Parent, c: &b::Ctx) {{",
+            window.id
+        ));
         self.nodes(out, std::slice::from_ref(&window.content));
         out.close("}");
         out.line("");
@@ -441,7 +445,7 @@ impl Generator<'_> {
                 window.id
             ));
             out.open(format!(
-                "fn close_{}(c: &b::Ctx) -> b::CloseCheck {{",
+                "pub(crate) fn close_{}(c: &b::Ctx) -> b::CloseCheck {{",
                 window.id
             ));
             out.open("b::CloseCheck {");

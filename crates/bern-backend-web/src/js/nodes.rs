@@ -340,7 +340,8 @@ impl Generator<'_> {
             "Menu" => self.menu(out, element),
             "Table" => self.table(out, element),
             "LanguagePicker" => self.language_picker(out, element),
-            "Detail" | "Destination" | "TabAccessory" | "Sidebar" | "SidebarHeader"
+            "Detail" | "DetailFooter" | "Destination" | "TabAccessory" | "Sidebar"
+            | "SidebarHeader"
             | "SidebarFooter" | "WindowSet" | "Window" | "Layout" | "MenuItem" | "AlertAction"
             | "PickerOption"
             | "TableColumn" | "TableMenu" | "ContextMenu" | "DoubleTap" | "WheelUp" | "WheelDown"

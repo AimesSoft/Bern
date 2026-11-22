@@ -798,7 +798,7 @@ inline xaml::FrameworkElement PaneSizer(controls::NavigationView const& view) {
 /// view's strip of icons; a pane of no declared width takes the width its
 /// edge is dragged to.
 inline void SplitView(Parent const& p, Ctx const& ctx, SplitViewProps props, Build const& header, Build const& footer, Build const& sidebar,
-    Build const& detail) {
+    Build const& detail, Build const& detailFooter = nullptr) {
     if (ctx.page) ctx.page->HideHeader();
     controls::NavigationView view;
     view.IsBackButtonVisible(controls::NavigationViewBackButtonVisible::Collapsed);
@@ -1000,12 +1000,24 @@ inline void SplitView(Parent const& p, Ctx const& ctx, SplitViewProps props, Bui
     auto content = MakeFlex();
     controls::Grid::SetRow(content.as<xaml::FrameworkElement>(), 1);
     body.Children().Append(content);
+    controls::Panel footerHost = nullptr;
+    if (detailFooter) {
+        controls::RowDefinition bottom;
+        bottom.Height(AutoLength());
+        body.RowDefinitions().Append(bottom);
+        footerHost = MakeFlex(false, 0);
+        controls::Grid::SetRow(footerHost.as<xaml::FrameworkElement>(), 2);
+        body.Children().Append(footerHost);
+    }
     if (props.detailStyle && props.detailStyle->base.background) {
         PaintWith<controls::Grid>(body, L"Grid", L"Background", *props.detailStyle->base.background,
             +[](controls::Grid const& grid, media::Brush const& brush) { grid.Background(brush); });
     }
     view.Content(body);
     detail(Parent::Of(content), ctx.WithPage(page));
+    if (detailFooter && footerHost) {
+        detailFooter(Parent::Aligned(footerHost, xaml::HorizontalAlignment::Stretch, std::nullopt), ctx);
+    }
 
     if (props.id)
         Controls::Register(ctx, props.id, "sidebar", selectedLabel, nullptr,

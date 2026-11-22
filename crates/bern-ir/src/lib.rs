@@ -1915,8 +1915,8 @@ fn scrolls_inside(element: &Element, scrolling: bool) -> bool {
         "ScrollView" => element.keyword("axis") != Some("horizontal"),
         // A layer or page of its own, shown apart from the scroll view.
         "Modal" | "Alert" | "PopoverButton" | "Menu" | "ContextMenu" | "Toolbar" | "SplitView"
-        | "Sidebar" | "Detail" | "Tabs" | "Tab" | "TabAccessory" | "Navigation" | "Destination"
-        | "Window" | "WindowSet" | "Form" | "Table" => false,
+        | "Sidebar" | "Detail" | "DetailFooter" | "Tabs" | "Tab" | "TabAccessory"
+        | "Navigation" | "Destination" | "Window" | "WindowSet" | "Form" | "Table" => false,
         _ => scrolling,
     }
 }

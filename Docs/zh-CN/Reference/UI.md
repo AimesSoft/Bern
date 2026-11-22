@@ -173,6 +173,7 @@ SwiftUI 目标可在 `style!` 中用 `Sidebar { background: color(light: "#FAFAF
 | `Text(color:)` | 用强调色或状态色画文字：`accent`、`status.success`、`status.warning`、`status.error`，各平台用自己的文字颜色；与 `emphasis` 二选一。`mark` 是文字下的底纹，不改变文字颜色 |
 | `Accordion(count:, selected:, collapsed_width:, height:, gap:, corner:)` | 一列展开，其余列固定折叠宽度；selected 从 0 开始，animate 驱动列宽及位置；height 可省略，此时填满父布局剩余高度，应放在有高度约束的容器中（如窗口内的 Column） |
 | `Sidebar(width:)` | 固定列宽。`SidebarHeader` 固定在列表上方，`SidebarFooter` 固定在下方。`SidebarHeader(role: title)` 表示头部只用应用的图标与名称给窗口命名：标题栏本身就显示应用名称的平台（Windows 的两种前端与 Linux GTK）不显示它，其他平台照常显示。iOS 与 tvOS 的标题头部会替代自动生成的侧栏导航标题；普通内容头部仍保留该标题 |
+| `DetailFooter` | 直接位于 `Detail` 内，最多一个；将内容（例如状态栏或播放栏）固定在详情列底部，即使详情列里的 `Navigation` 推入子页面也保持可见。若仅在部分状态下显示，将条件写在 `DetailFooter` 内部 |
 | `SidebarItem(badge:)` | 显示正数计数；模块页面清单的 badge 可绑定模块状态字段 |
 | `Search(style: palette)` | 从工具栏入口打开命令面板；`panel_prompt`、`width`、`height` 设置提示与面板尺寸 |
 | `SearchItem(id:, label:) => command()` | 面板结果，可带 icon、detail、hint 或自定义子内容；`navigation: false` 不参与方向键选择，仍可点击与 Tab 聚焦 |

@@ -224,9 +224,24 @@ impl Generator<'_> {
             out.indent += 1;
             self.nodes(out, &footer.children, &ctx.within(Scope::Column));
         }
+        let detail_footer = detail.children.iter().find_map(|node| match node {
+            Node::Element(child) if child.kind == "DetailFooter" => Some(child),
+            _ => None,
+        });
+        let detail_content: Vec<Node> = detail
+            .children
+            .iter()
+            .filter(|node| !matches!(node, Node::Element(child) if child.kind == "DetailFooter"))
+            .cloned()
+            .collect();
         out.close("}, detail = {");
         out.indent += 1;
-        self.nodes(out, &detail.children, &ctx.within(Scope::Other));
+        self.nodes(out, &detail_content, &ctx.within(Scope::Other));
+        if let Some(detail_footer) = detail_footer {
+            out.close("}, detailFooter = {");
+            out.indent += 1;
+            self.nodes(out, &detail_footer.children, &ctx.within(Scope::Column));
+        }
         out.close("},");
         out.close(")");
         out.close("}");

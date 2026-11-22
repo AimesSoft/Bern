@@ -225,10 +225,18 @@ fun BernSplitView(title: String, showingDetail: MutableState<Boolean>, sidebarWi
     sidebarStyle: BernStyle? = null, detailStyle: BernStyle? = null,
     collapsed: Boolean = false, onCollapsed: ((Boolean) -> Unit)? = null,
     header: (@Composable () -> Unit)? = null, sidebar: @Composable (showDetail: () -> Unit) -> Unit,
-    footer: (@Composable ColumnScope.() -> Unit)? = null, detail: @Composable () -> Unit) {
+    footer: (@Composable ColumnScope.() -> Unit)? = null, detail: @Composable () -> Unit,
+    detailFooter: (@Composable ColumnScope.() -> Unit)? = null) {
     if (showingDetail.value) {
         BernChrome(title = title, back = { showingDetail.value = false })
-        detail()
+        if (detailFooter != null) {
+            Column(Modifier.fillMaxSize()) {
+                Box(Modifier.weight(1f).fillMaxWidth()) { detail() }
+                Column(Modifier.fillMaxWidth()) { detailFooter() }
+            }
+        } else {
+            detail()
+        }
     } else BernWearColumn {
         header?.invoke()
         sidebar { showingDetail.value = true }
