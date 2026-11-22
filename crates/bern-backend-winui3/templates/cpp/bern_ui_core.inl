@@ -387,10 +387,23 @@ struct Page : std::enable_shared_from_this<Page> {
     std::function<void()> Back() const { return backs.empty() ? nullptr : backs.back().second; }
     xaml::UIElement TitleWidget() const { return titleWidgets.empty() ? nullptr : titleWidgets.back().second; }
     bool HeaderHidden() const { return !hidden.empty(); }
-    /// Whether the header has nothing to show.
-    bool HeaderEmpty() const {
-        return !Back() && !TitleWidget() && tools.Children().Size() == 0 && leadingTools.Children().Size() == 0 && Title().value_or(L"").empty();
+    static bool HasVisibleTools(controls::Panel const& panel) {
+        for (auto const& child : panel.Children()) {
+            if (child.Visibility() != xaml::Visibility::Visible) continue;
+            if (auto holder = child.try_as<controls::Panel>(); holder && holder.Children().Size() > 0) return true;
+        }
+        return false;
     }
+    bool HasLeadingTools() const { return HasVisibleTools(leadingTools); }
+    bool HasTools() const { return HasVisibleTools(tools); }
+    /// Whether the leading/title part of the header has anything to show
+    /// (excluding trailing `tools`, which move to `TitleBar.RightHeader` in
+    /// unified windows).
+    bool HasHeaderContent() const {
+        return Back() || TitleWidget() || HasLeadingTools() || !Title().value_or(L"").empty();
+    }
+    /// Whether the header has nothing to show.
+    bool HeaderEmpty() const { return !HasHeaderContent() && !HasTools(); }
 };
 
 // ---------------------------------------------------------------------------
@@ -912,6 +925,13 @@ struct Children {
 /// stays in its place until `leave` calls `done`, then goes.
 struct LeaveHook : winrt::implements<LeaveHook, IInspectable> {
     std::function<void(std::function<void()> done)> leave;
+};
+
+/// A vertical wheel handler attached by `PointerEvents`, so a horizontal
+/// scroll view that intercepts the wheel before its own handler can still
+/// forward turns to its own or an enclosing `WheelUp` / `WheelDown`.
+struct WheelHook : winrt::implements<WheelHook, IInspectable> {
+    std::function<bool(int32_t)> turn;
 };
 
 inline winrt::com_ptr<LeaveHook> LeaveHookOf(xaml::UIElement const& element) {
@@ -1619,11 +1639,13 @@ struct Win {
     /// in the appearance of the page shown last ("" for the window's).
     Cell<int> covering{0};
     std::vector<std::pair<uint64_t, std::string>> coverings;
-    /// The appearances of the layers under the bars that have one, the one
-    /// shown last at the end: a title bar that holds the page header stands
-    /// on them. `barLook` counts their changes.
+    /// The appearances of non-covering `under_bars` layers that declare one,
+    /// the one shown last at the end: a title bar that holds the page header
+    /// stands on them. `barLook` counts their changes.
     std::vector<std::pair<uint64_t, std::string>> barAppearances;
     Cell<int> barLook{0};
+    /// Whether a unified window's title bar currently owns a page header.
+    Cell<bool> unifiedHasHeader{false};
     /// The page header in the title bar opens with a text, which names the
     /// window in place of the title bar's own icon and title.
     Cell<bool> headerNames{false};

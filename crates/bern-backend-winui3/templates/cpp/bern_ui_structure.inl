@@ -427,7 +427,7 @@ inline controls::Grid Header(std::shared_ptr<Page> page, TextFn fallback, bool s
             title.Text(text.value_or(L""));
             if (holder.Content() != title) holder.Content(title);
         }
-        bool empty = !page->Back() && !page->TitleWidget() && page->tools.Children().Size() == 0 && page->leadingTools.Children().Size() == 0 &&
+        bool empty = !page->Back() && !page->TitleWidget() && !page->HasTools() && !page->HasLeadingTools() &&
             title.Text().empty();
         // An immersive window shows no title bar or toolbar.
         bool immersive = page->win && page->win->immersive.Get();

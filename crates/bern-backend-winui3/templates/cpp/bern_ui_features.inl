@@ -592,35 +592,82 @@ inline void LazyGrid(Parent const& p, Ctx const& ctx, GridProps props, EachProps
     Place(p, panel);
 }
 
+/// In-flight wheel target stored on an enclosing vertical `ScrollViewer` so
+/// consecutive wheel notches across sibling horizontal views accumulate smoothly.
+struct WheelTarget : winrt::implements<WheelTarget, IInspectable> {
+    double target = 0;
+    double lastOffset = 0;
+    uint64_t at = 0;
+};
+
 /// A mouse wheel turned over a view that only scrolls across scrolls the
 /// page around it, as it does on the other targets; with Shift held, and on
 /// a wheel that tilts, it still scrolls the view.
 inline void PassWheel(controls::ScrollViewer const& scroller) {
-    struct Turning {
-        double target = 0;
-        uint64_t at = 0;
-    };
-    auto turning = std::make_shared<Turning>();
-    auto wheel = xaml::Input::PointerEventHandler([weak = winrt::make_weak(scroller), turning](IInspectable const&, xaml::Input::PointerRoutedEventArgs const& args) {
+    auto wheel = xaml::Input::PointerEventHandler([weak = winrt::make_weak(scroller)](IInspectable const&, xaml::Input::PointerRoutedEventArgs const& args) {
         auto viewer = weak.get();
         if (!viewer || args.Handled()) return;
         using winrt::Windows::System::VirtualKeyModifiers;
-        if ((args.KeyModifiers() & (VirtualKeyModifiers::Shift | VirtualKeyModifiers::Control)) != VirtualKeyModifiers::None) return;
+        auto modifiers = args.KeyModifiers();
+        // A touchpad pinch arrives as a wheel with Control, which the key
+        // state shows even where the event's modifiers do not.
+        bool shift = (modifiers & VirtualKeyModifiers::Shift) == VirtualKeyModifiers::Shift || GetKeyState(VK_SHIFT) < 0;
+        bool control = (modifiers & VirtualKeyModifiers::Control) == VirtualKeyModifiers::Control || GetKeyState(VK_CONTROL) < 0;
+        if (shift || control) return;
         auto properties = args.GetCurrentPoint(viewer).Properties();
         if (properties.IsHorizontalMouseWheel()) return;
-        args.Handled(true);
-        controls::ScrollViewer page{nullptr};
-        for (auto at = media::VisualTreeHelper::GetParent(viewer); at && !page; at = media::VisualTreeHelper::GetParent(at))
-            if (auto outer = at.try_as<controls::ScrollViewer>(); outer && outer.VerticalScrollMode() != controls::ScrollMode::Disabled && outer.ScrollableHeight() > 0) page = outer;
-        if (!page) return;
         int32_t delta = properties.MouseWheelDelta();
+        if (delta == 0) return;
+        controls::ScrollViewer page{nullptr};
+        auto wheelKey = winrt::box_value(L"bern.wheel");
+        for (xaml::DependencyObject at = viewer; at; at = media::VisualTreeHelper::GetParent(at)) {
+            if (auto fw = at.try_as<xaml::FrameworkElement>()) {
+                auto resources = fw.Resources();
+                if (resources.HasKey(wheelKey)) {
+                    if (auto hook = winrt::get_self<WheelHook>(resources.Lookup(wheelKey)); hook && hook->turn && hook->turn(delta)) {
+                        args.Handled(true);
+                        return;
+                    }
+                }
+            }
+            if (at != viewer) {
+                if (auto outer = at.try_as<controls::ScrollViewer>(); outer && outer.VerticalScrollMode() != controls::ScrollMode::Disabled && outer.ScrollableHeight() > 0) {
+                    double off = outer.VerticalOffset();
+                    bool canScroll = delta > 0 ? off > 0.5 : off < outer.ScrollableHeight() - 0.5;
+                    if (canScroll) {
+                        page = outer;
+                        break;
+                    }
+                }
+            }
+        }
+        if (!page) {
+            if (viewer.ScrollableWidth() > 0) args.Handled(true);
+            return;
+        }
+        args.Handled(true);
+        auto targetKey = winrt::box_value(L"bern.wheelTarget");
+        auto resources = page.Resources();
+        winrt::com_ptr<WheelTarget> turning;
+        if (resources.HasKey(targetKey)) {
+            turning = winrt::get_self<WheelTarget>(resources.Lookup(targetKey))->get_strong();
+        } else {
+            turning = winrt::make_self<WheelTarget>();
+            resources.Insert(targetKey, turning.as<IInspectable>());
+        }
         UINT lines = 3;
         SystemParametersInfoW(SPI_GETWHEELSCROLLLINES, 0, &lines, 0);
         double notch = lines == WHEEL_PAGESCROLL ? page.ViewportHeight() : lines * 32.0;
         // Notches that follow one another add up, though the view is still
-        // on its way to where the last one sent it.
+        // on its way to where the last one sent it; drop the cached target if
+        // the view was moved elsewhere in the meantime.
         uint64_t now = GetTickCount64();
-        double from = now - turning->at < 300 ? turning->target : page.VerticalOffset();
+        double offset = page.VerticalOffset();
+        double lo = (std::min)(turning->lastOffset, turning->target) - 2.0;
+        double hi = (std::max)(turning->lastOffset, turning->target) + 2.0;
+        bool continuing = now - turning->at < 300 && offset >= lo && offset <= hi;
+        double from = continuing ? turning->target : offset;
+        turning->lastOffset = offset;
         turning->target = (std::clamp)(from - notch * delta / WHEEL_DELTA, 0.0, page.ScrollableHeight());
         turning->at = now;
         page.ChangeView(nullptr, turning->target, nullptr, std::abs(delta) < WHEEL_DELTA || Reduced());
@@ -711,10 +758,21 @@ inline void ScrollView(Parent const& p, Ctx const& ctx, ScrollProps props, Build
     // Scrolled by hand: the view moves, and not because it was asked to.
     if (props.browsing) {
         auto field = *props.browsing;
-        scroller.ViewChanged([scroll, ctx, field](auto&&, controls::ScrollViewerViewChangedEventArgs const& args) {
+        auto browseSeq = std::make_shared<uint64_t>(0);
+        std::weak_ptr<bool> alive = ctx.win ? std::weak_ptr<bool>(ctx.win->life) : std::weak_ptr<bool>();
+        scroller.ViewChanged([scroll, ctx, field, browseSeq, alive](auto&&, controls::ScrollViewerViewChangedEventArgs const& args) {
             bool byHand = args.IsIntermediate() && !scroll->byCode;
             if (!args.IsIntermediate()) scroll->byCode = false;
-            if (R::Truthy(ctx.Peek(field)) != byHand) ctx.Write(field, Value::Bool(byHand));
+            if (R::Truthy(ctx.Peek(field)) == byHand) return;
+            uint64_t seq = ++*browseSeq;
+            // `ViewChanged` may arrive during measure/arrange, when content
+            // bound to `browsing` cannot modify child collections.
+            Host::Post([scroll, ctx, field, byHand, browseSeq, seq, alive] {
+                if (alive.expired() || *browseSeq != seq) return;
+                auto viewer = scroll->viewer.get();
+                if (!viewer || !viewer.IsLoaded()) return;
+                if (R::Truthy(ctx.Peek(field)) != byHand) ctx.Write(field, Value::Bool(byHand));
+            });
         });
     }
     if (!props.snap && !props.position) return;
@@ -781,10 +839,11 @@ inline void ScrollView(Parent const& p, Ctx const& ctx, ScrollProps props, Build
     // rests where the person leaves it.
     auto travelling = std::make_shared<winrt::weak_ref<xaml::UIElement>>();
     auto placed = std::make_shared<bool>(false);
+    auto writeSeq = std::make_shared<uint64_t>(0);
     auto position = props.position;
     bool nudges = props.arrival && std::string_view(props.arrival) == "nudge";
     auto nudgeMotion = props.nudgeMotion;
-    scroller.ViewChanged([scroll, nearest, scrollTo, travelling, placed, position, ctx, nudges, nudgeMotion, fraction, snaps = props.snap || !props.anchor](auto&&, controls::ScrollViewerViewChangedEventArgs const& args) {
+    scroller.ViewChanged([scroll, nearest, scrollTo, travelling, placed, writeSeq, position, ctx, nudges, nudgeMotion, fraction, snaps = props.snap || !props.anchor](auto&&, controls::ScrollViewerViewChangedEventArgs const& args) {
         if (args.IsIntermediate() || !*placed) return;
         auto item = nearest();
         if (!item) return;
@@ -809,11 +868,16 @@ inline void ScrollView(Parent const& p, Ctx const& ctx, ScrollProps props, Build
         if (position && R::KeyText(ctx.Peek(*position)) != item->first) {
             auto const& type = app->catalog.sessions[position->session].fields[position->field].second;
             Value key = type.kind == BType::Kind::Int ? Value::Int(std::strtoll(item->first.c_str(), nullptr, 10)) : Value::Text(item->first);
+            std::string before = R::KeyText(ctx.Peek(*position));
+            uint64_t seq = ++*writeSeq;
             // The view may say so while it is being arranged, when content
             // that follows the position cannot come or go.
             std::weak_ptr<bool> alive = ctx.win ? std::weak_ptr<bool>(ctx.win->life) : std::weak_ptr<bool>();
-            Host::Post([ctx, position, key, alive] {
-                if (!alive.expired()) ctx.Write(*position, key);
+            Host::Post([scroll, ctx, position, key, before, travelling, writeSeq, seq, alive] {
+                if (alive.expired() || *writeSeq != seq || travelling->get()) return;
+                auto viewer = scroll->viewer.get();
+                if (!viewer || !viewer.IsLoaded()) return;
+                if (R::KeyText(ctx.Peek(*position)) == before) ctx.Write(*position, key);
             });
         }
     });
@@ -822,9 +886,10 @@ inline void ScrollView(Parent const& p, Ctx const& ctx, ScrollProps props, Build
         return;
     }
     // Setting the field scrolls to its item.
-    Reactive::Run([scroll, position, ctx, placed, travelling, scrollTo, nearest] {
+    Reactive::Run([scroll, position, ctx, placed, travelling, writeSeq, scrollTo, nearest] {
         auto key = R::KeyText(ctx.Read(*position));
         Reactive::Untrack([&] {
+            ++*writeSeq;
             if (!*placed) return 0;
             for (auto const& [itemKey, item] : ItemsOf(*scroll)) {
                 if (itemKey != key) continue;

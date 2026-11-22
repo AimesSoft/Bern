@@ -1374,21 +1374,10 @@ inline void PointerEvents(Parent const& p, Ctx const& ctx, PointerEventsProps pr
         if (!props.menu.empty()) ContextMenuOn(ctx, element, props.menu);
         if (!up && !down) continue;
         auto rest = std::make_shared<int32_t>(0);
-        element.AddHandler(xaml::UIElement::PointerWheelChangedEvent(), winrt::box_value(xaml::Input::PointerEventHandler([live, up, down, rest](IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args) {
-            if (!*live) return;
-            // A touchpad pinch arrives as a wheel with Control, which is
-            // `Pinch`'s; the key state shows it where the modifiers do not.
-            bool control = (args.KeyModifiers() & winrt::Windows::System::VirtualKeyModifiers::Control) == winrt::Windows::System::VirtualKeyModifiers::Control ||
-                GetKeyState(VK_CONTROL) < 0;
-            auto properties = args.GetCurrentPoint(sender.as<xaml::UIElement>()).Properties();
-            if (control || properties.IsHorizontalMouseWheel()) return;
-            int32_t delta = properties.MouseWheelDelta();
-            if (delta == 0) return;
+        auto takeWheel = [live, up, down, rest](int32_t delta) -> bool {
+            if (!*live || delta == 0) return false;
             auto const& action = delta > 0 ? up : down;
-            if (!action) return;
-            // The element takes the turn: an enclosing scroll view does not
-            // scroll as well.
-            args.Handled(true);
+            if (!action) return false;
             if ((delta > 0) != (*rest > 0)) *rest = 0;
             *rest += delta;
             // A touchpad turns in small steps; a notch of a wheel is one
@@ -1401,6 +1390,30 @@ inline void PointerEvents(Parent const& p, Ctx const& ctx, PointerEventsProps pr
                 *rest += WHEEL_DELTA;
                 if (down) down();
             }
+            return true;
+        };
+        if (!own) {
+            if (auto framework = element.try_as<xaml::FrameworkElement>()) {
+                auto key = winrt::box_value(L"bern.wheel");
+                auto resources = framework.Resources();
+                std::function<bool(int32_t)> prev;
+                if (resources.HasKey(key))
+                    if (auto existing = winrt::get_self<WheelHook>(resources.Lookup(key))) prev = existing->turn;
+                auto hook = winrt::make_self<WheelHook>();
+                hook->turn = [prev, takeWheel](int32_t delta) { return (prev && prev(delta)) || takeWheel(delta); };
+                resources.Insert(key, hook.as<IInspectable>());
+            }
+        }
+        element.AddHandler(xaml::UIElement::PointerWheelChangedEvent(), winrt::box_value(xaml::Input::PointerEventHandler([takeWheel](IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args) {
+            // A touchpad pinch arrives as a wheel with Control, which is
+            // `Pinch`'s; the key state shows it where the modifiers do not.
+            bool control = (args.KeyModifiers() & winrt::Windows::System::VirtualKeyModifiers::Control) == winrt::Windows::System::VirtualKeyModifiers::Control ||
+                GetKeyState(VK_CONTROL) < 0;
+            auto properties = args.GetCurrentPoint(sender.as<xaml::UIElement>()).Properties();
+            if (control || properties.IsHorizontalMouseWheel()) return;
+            // The element takes the turn: an enclosing scroll view does not
+            // scroll as well.
+            if (takeWheel(properties.MouseWheelDelta())) args.Handled(true);
         })), own);
     }
 }
@@ -3826,7 +3839,7 @@ inline void Layers(Parent const& p, Ctx const& ctx, LayersProps props, Build con
         Reactive::OnCleanup([win] { win->underBars.Set(win->underBars.Peek() - 1); });
         static uint64_t serial = 0;
         uint64_t token = ++serial;
-        if (!ctx.appearance.empty()) {
+        if (!props.covers && !ctx.appearance.empty()) {
             win->barAppearances.emplace_back(token, ctx.appearance);
             win->barLook.Set(win->barLook.Peek() + 1);
             Reactive::OnCleanup([win, token] {
@@ -5227,12 +5240,38 @@ inline void Section(Parent const& p, Ctx const& ctx, Str const& title, Str const
     p.Add(group);
 }
 
+/// A parent for a toolbar holder that bumps `page->version` whenever items
+/// are inserted or removed, including through conditional branches.
+inline Parent ToolsParent(controls::Panel const& holder, std::weak_ptr<Page> weakPage) {
+    auto items = Children::Of(holder);
+    auto origInsert = items->insert;
+    auto origRemove = items->remove;
+    items->insert = [origInsert, weakPage](uint32_t at, xaml::UIElement const& element) {
+        origInsert(at, element);
+        if (auto page = weakPage.lock()) page->version.Bump();
+    };
+    items->remove = [origRemove, weakPage](uint32_t at) {
+        origRemove(at);
+        if (auto page = weakPage.lock()) page->version.Bump();
+    };
+    Parent parent = Parent::Of(holder);
+    parent.list = std::move(items);
+    return parent;
+}
+
 /// Toolbar items for the enclosing page's header.
 inline void Toolbar(Parent const&, Ctx const& ctx, Build const& children) {
     if (!ctx.page) return;
     auto holder = ctx.page->AddTools();
-    Reactive::Run([holder, ctx] { holder.Visibility(ctx.Shown() ? xaml::Visibility::Visible : xaml::Visibility::Collapsed); });
-    children(Parent::Of(holder), ctx.Toolbar());
+    std::weak_ptr<Page> weak = ctx.page;
+    Reactive::Run([holder, ctx, weak] {
+        auto next = ctx.Shown() ? xaml::Visibility::Visible : xaml::Visibility::Collapsed;
+        if (holder.Visibility() != next) {
+            holder.Visibility(next);
+            if (auto page = weak.lock()) page->version.Bump();
+        }
+    });
+    children(ToolsParent(holder, weak), ctx.Toolbar());
 }
 
 /// Toolbar items before a `Spacer`: at the leading end of the header,
@@ -5242,10 +5281,15 @@ inline void LeadingToolbar(Parent const&, Ctx const& ctx, Build const& children)
     if (!ctx.page) return;
     auto holder = ctx.page->AddTools(true);
     if (auto framework = holder.try_as<xaml::FrameworkElement>()) Styles::Restyle(framework, Styles::SubtleXaml());
-    Reactive::Run([holder, ctx] { holder.Visibility(ctx.Shown() ? xaml::Visibility::Visible : xaml::Visibility::Collapsed); });
-    children(Parent::Of(holder), ctx.Toolbar());
-    // What it opens with may name the window, now that it is there.
-    ctx.page->version.Bump();
+    std::weak_ptr<Page> weak = ctx.page;
+    Reactive::Run([holder, ctx, weak] {
+        auto next = ctx.Shown() ? xaml::Visibility::Visible : xaml::Visibility::Collapsed;
+        if (holder.Visibility() != next) {
+            holder.Visibility(next);
+            if (auto page = weak.lock()) page->version.Bump();
+        }
+    });
+    children(ToolsParent(holder, weak), ctx.Toolbar());
 }
 
 inline void LanguagePicker(Parent const& p, Ctx const& ctx, char const* id, Str const& label, bool labelHidden = false) {
