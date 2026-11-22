@@ -475,6 +475,22 @@ fn a_unified_window_keeps_its_page_header_in_the_title_bar() {
     assert!(generated.contains("w.unified = true;"));
 }
 
+/// The title bar that holds the page header follows what it stands on: the
+/// appearance of a layer under the bars, and a text that names the window.
+#[test]
+fn a_unified_title_bar_follows_what_it_stands_on() {
+    let windows = include_str!("../templates/cpp/bern_ui_windows.inl");
+    let widgets = include_str!("../templates/cpp/bern_ui_widgets.inl");
+    for part in [
+        "inline std::string UnifiedLook(Win const& win)",
+        "bar.RequestedTheme(B::ThemeNamed(UnifiedLook(*raw)));",
+        "bar.IconSource(names ? nullptr : raw->titleIcon);",
+    ] {
+        assert!(windows.contains(part), "{part}");
+    }
+    assert!(widgets.contains("win->barAppearances.emplace_back(token, ctx.appearance);"));
+}
+
 /// The caption buttons' insets are asked for again while there are none, as
 /// the window leaves the full screen.
 #[test]

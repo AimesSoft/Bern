@@ -3824,9 +3824,17 @@ inline void Layers(Parent const& p, Ctx const& ctx, LayersProps props, Build con
         Win* win = ctx.win;
         win->underBars.Set(win->underBars.Peek() + 1);
         Reactive::OnCleanup([win] { win->underBars.Set(win->underBars.Peek() - 1); });
+        static uint64_t serial = 0;
+        uint64_t token = ++serial;
+        if (!ctx.appearance.empty()) {
+            win->barAppearances.emplace_back(token, ctx.appearance);
+            win->barLook.Set(win->barLook.Peek() + 1);
+            Reactive::OnCleanup([win, token] {
+                std::erase_if(win->barAppearances, [token](auto const& layer) { return layer.first == token; });
+                win->barLook.Set(win->barLook.Peek() + 1);
+            });
+        }
         if (props.covers) {
-            static uint64_t serial = 0;
-            uint64_t token = ++serial;
             win->coverings.emplace_back(token, ctx.appearance);
             win->covering.Set(win->covering.Peek() + 1);
             Reactive::OnCleanup([win, token] {
@@ -5236,6 +5244,8 @@ inline void LeadingToolbar(Parent const&, Ctx const& ctx, Build const& children)
     if (auto framework = holder.try_as<xaml::FrameworkElement>()) Styles::Restyle(framework, Styles::SubtleXaml());
     Reactive::Run([holder, ctx] { holder.Visibility(ctx.Shown() ? xaml::Visibility::Visible : xaml::Visibility::Collapsed); });
     children(Parent::Of(holder), ctx.Toolbar());
+    // What it opens with may name the window, now that it is there.
+    ctx.page->version.Bump();
 }
 
 inline void LanguagePicker(Parent const& p, Ctx const& ctx, char const* id, Str const& label, bool labelHidden = false) {

@@ -733,7 +733,8 @@ inline void FitTitleBarInsets(controls::TitleBar const& titleBar, xaml::Window c
 /// The application icon in the XAML title bar: the image of icon resource 1
 /// closest to the title bar's size. A PNG image is decoded as it is; a
 /// bitmap image is wrapped in a one-image `.ico`, which XAML also decodes.
-inline winrt::fire_and_forget ShowTitleIcon(controls::TitleBar titleBar, int side) {
+inline winrt::fire_and_forget ShowTitleIcon(std::shared_ptr<Win> win, int side) {
+    auto titleBar = win->titleBar;
     auto instance = GetModuleHandleW(nullptr);
     HRSRC group = FindResourceW(instance, MAKEINTRESOURCEW(1), RT_GROUP_ICON);
     if (!group) co_return;
@@ -782,7 +783,8 @@ inline winrt::fire_and_forget ShowTitleIcon(controls::TitleBar titleBar, int sid
         co_await bitmap.SetSourceAsync(stream);
         controls::ImageIconSource icon;
         icon.ImageSource(bitmap);
-        titleBar.IconSource(icon);
+        win->titleIcon = icon;
+        if (!win->headerNames.Peek()) titleBar.IconSource(icon);
     } catch (winrt::hresult_error const& error) {
         Report("title bar icon: " + Utf8(error.message()));
     }
@@ -1099,13 +1101,24 @@ inline void ShowChrome(Win& win, bool immersive) {
 inline int shownAccent = -1;
 
 #if BERN_WINUI
+/// The appearance of the title bar that holds the page header: that of the
+/// layer under the bars it stands on, "" without one of its own or while a
+/// page covers the window.
+inline std::string UnifiedLook(Win const& win) {
+    if (!win.titleBar || win.owner || !win.Def().unified || win.barAppearances.empty() || win.covering.Peek() > 0) return "";
+    return win.barAppearances.back().second;
+}
+
 /// The caption buttons in the window's appearance, or, while a page covers
 /// the window, in the page's: they stand on it.
 inline void ShowCaptionTheme(Win& win) {
     if (!win.window || win.owner) return;
     std::string mode = win.appearanceMode;
-    if (win.covering.Peek() > 0 && !win.coverings.empty() && !win.coverings.back().second.empty())
-        mode = win.coverings.back().second;
+    if (win.covering.Peek() > 0) {
+        if (!win.coverings.empty() && !win.coverings.back().second.empty()) mode = win.coverings.back().second;
+    } else if (std::string under = UnifiedLook(win); !under.empty()) {
+        mode = under;
+    }
     try {
         using winrt::Microsoft::UI::Windowing::TitleBarTheme;
         win.window.AppWindow().TitleBar().PreferredTheme(mode == "dark" ? TitleBarTheme::Dark
@@ -1230,7 +1243,9 @@ inline void FitCaptionHeight(Win& win) {
 /// `chrome: unified`: the page header in the title bar, its leading part and
 /// title after the window's own title and its tools before the caption
 /// buttons; what lies between them still moves the window. While there is no
-/// header, or a page covers the window, the title bar holds nothing.
+/// header, or a page covers the window, the title bar holds nothing. A
+/// header that opens with a text names the window itself, in place of the
+/// title bar's icon and title.
 inline void PlaceUnifiedHeader(Win& win, controls::Grid const& header, std::shared_ptr<Page> const& page) {
     auto bar = win.titleBar;
     // The template centers the content in the room left for it.
@@ -1260,6 +1275,28 @@ inline void PlaceUnifiedHeader(Win& win, controls::Grid const& header, std::shar
             if (bar.Content() != content) bar.Content(content);
             if (bar.RightHeader() != trailing) bar.RightHeader(trailing);
             FitCaptionHeight(*raw);
+            // A text the header opens with names the window.
+            bool names = false;
+            if (content && page->leadingTools.Children().Size() > 0)
+                if (auto holder = page->leadingTools.Children().GetAt(0).try_as<controls::Panel>(); holder && holder.Children().Size() > 0)
+                    if (auto name = Unwrapped(holder.Children().GetAt(0)).try_as<controls::TextBlock>()) {
+                        names = true;
+                        name.Margin(xaml::Thickness{0, 0, 20, 0});
+                    }
+            if (names != raw->headerNames.Peek()) {
+                raw->headerNames.Set(names);
+                bar.IconSource(names ? nullptr : raw->titleIcon);
+            }
+            return 0;
+        });
+    });
+    // The bar in the appearance of the layer it stands on.
+    Reactive::Run([raw, bar] {
+        raw->barLook.Get();
+        raw->covering.Get();
+        Reactive::Untrack([&] {
+            bar.RequestedTheme(B::ThemeNamed(UnifiedLook(*raw)));
+            ShowCaptionTheme(*raw);
             return 0;
         });
     });
@@ -1766,7 +1803,7 @@ inline std::string Open(std::string const& kindId) {
 #endif
     SetWindowIcons(win->hwnd);
 #if BERN_WINUI
-    ShowTitleIcon(titleBar, static_cast<int>(std::lround(16 * win->Scale())));
+    ShowTitleIcon(win, static_cast<int>(std::lround(16 * win->Scale())));
 #endif
     auto appearance = Dev::Appearance();
     if (appearance == "dark") root.RequestedTheme(xaml::ElementTheme::Dark);
@@ -1782,10 +1819,10 @@ inline std::string Open(std::string const& kindId) {
 #if BERN_WINUI
         // The title bar names the window beside its icon, as Fluent
         // windows do, unified or not.
-        Reactive::Run([window, titleBar, titleKey] {
+        Reactive::Run([raw = win.get(), window, titleBar, titleKey] {
             auto title = bern::Text::Tr(titleKey);
             window.Title(title);
-            titleBar.Title(title);
+            titleBar.Title(raw->headerNames.Get() ? winrt::hstring() : winrt::hstring(title));
         });
 #else
         HWND hwnd = win->hwnd;

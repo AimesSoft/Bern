@@ -1559,6 +1559,7 @@ struct Win {
     xaml::Window window{nullptr};
     controls::TitleBar titleBar{nullptr};
     std::array<double, 3> titleBarInsets{-1, -1, 0};
+    controls::IconSource titleIcon{nullptr};
     xaml::IUIElementProtected idleCursorTarget{nullptr};
     winrt::Microsoft::UI::Input::InputCursor idleCursor{nullptr}, previousCursor{nullptr};
 #else
@@ -1618,6 +1619,14 @@ struct Win {
     /// in the appearance of the page shown last ("" for the window's).
     Cell<int> covering{0};
     std::vector<std::pair<uint64_t, std::string>> coverings;
+    /// The appearances of the layers under the bars that have one, the one
+    /// shown last at the end: a title bar that holds the page header stands
+    /// on them. `barLook` counts their changes.
+    std::vector<std::pair<uint64_t, std::string>> barAppearances;
+    Cell<int> barLook{0};
+    /// The page header in the title bar opens with a text, which names the
+    /// window in place of the title bar's own icon and title.
+    Cell<bool> headerNames{false};
     /// `WindowSet(appearance:)` as last chosen: "light", "dark" or "".
     std::string appearanceMode;
     /// A dialog window's content dialog, and the window it shows over.
