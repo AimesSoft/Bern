@@ -2006,7 +2006,7 @@ fn pointer_events_slider_hover_and_player_state_reach_the_runtime() {
         // event is no content.
         "b::PointerProps { double_tap: None, menu: vec![], wheel_up: None, wheel_down: Some(",
         "b::Button(p, c, b::ButtonProps { id: \"wheel\", ",
-        "menu: vec![], double_tap: None }, Some(b::act(",
+        "menu: vec![], double_tap: None, cursor: None }, Some(b::act(",
         "capture_wheel: true }",
         "label_hidden: false, continuous: false, hover: Some(b::Field { session: 0, field: 1 }) }",
         "b::player_state(\"preview\", \"progress\")",
@@ -2100,6 +2100,7 @@ pub fn app(app: controls::Client, windows: AppWindows, #[session] draft: Draft) 
                             }
                             Label(title: tr! { "en" => "OK" }, icon: "checkmark.circle.fill", color: status.success)
                             IconButton(id: fav, icon: "heart.fill", label: tr! { "en" => "Like" }, color: status.error) => app.toggle()
+                            Button(id: visit, label: tr! { "en" => "Visit" }, cursor: pointer) => app.toggle()
                             Image(source: draft.picture, width: 120, height: 80, saturation: app.amount, animate: smooth)
                             Marquee(duration: 5, opacity: 0.6) {
                                 Text(content: tr! { "en" => "Banner" })
@@ -2155,6 +2156,7 @@ pub fn app(app: controls::Client, windows: AppWindows, #[session] draft: Draft) 
         "shape: b::Shape { capsule: true, height: Some(b::Num::Fixed(32.0)) }",
         "color: Some(\"status.success\")",
         "color: Some(\"status.error\")",
+        "cursor: Some(\"pointer\")",
         "saturation: Some(b::Num::Bound(",
         "opacity: Some((b::Num::Bound(",
         "detail_footer: Some(",

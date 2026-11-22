@@ -3047,6 +3047,10 @@ pub fn main_view(app: nav_footer::Client, #[session] draft: Draft) -> impl View 
                             NavLink(id: open_audio, route: SubRoute::Audio) {
                                 Text(content: tr! { "en" => "Audio" })
                             }
+                            Button(id: credit_link, label: tr! { "en" => "Framework" }, cursor: pointer) {
+                                Text(content: tr! { "en" => "Framework" })
+                            } => app.ping()
+                            Button(id: plain_link, label: tr! { "en" => "More" }, cursor: pointer) => app.ping()
                         }
                     }
                     Destination |route| {
@@ -3147,6 +3151,13 @@ pub fn app(app: nav_footer::Client, windows: AppWindows) -> impl View {
     assert!(
         generated.matches("BernDetailContent {").count() >= 2,
         "expected BernDetailContent on both Detail and Destination:\n{generated}"
+    );
+    assert!(
+        generated
+            .matches(".bernCursor(\"pointer\", enabled: true)")
+            .count()
+            == 2,
+        "expected .bernCursor on both content and standard buttons:\n{generated}"
     );
     #[cfg(target_os = "macos")]
     {

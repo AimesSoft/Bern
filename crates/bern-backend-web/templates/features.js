@@ -2166,11 +2166,12 @@ function listenForLaunches() {
 
 /// A button showing its content instead of a label: no frame of its own,
 /// the content as it is; a style's corner clips it.
-export function ContentButton(p, ctx, { id, label, enabled, style, shape, height, setFile, fileKinds: kinds, defaultFocus, menu, doubleTap }, action, content) {
+export function ContentButton(p, ctx, { id, label, cursor, enabled, style, shape, height, setFile, fileKinds: kinds, defaultFocus, menu, doubleTap }, action, content) {
   // A capsule is the platform's button around the content, as it is around
   // a label; otherwise the content is all there is.
   const framed = shape === "capsule";
-  const node = el("button", { class: framed ? "bern-button bern-button-standard" : "bern-content-button", type: "button" });
+  const cursorClass = cursor === "pointer" || cursor === "default" ? ` bern-cursor-${cursor}` : "";
+  const node = el("button", { class: `${framed ? "bern-button bern-button-standard" : "bern-content-button"}${cursorClass}`, type: "button" });
   B.bindAttr(node, "aria-label", label);
   content(node, ctx);
   const isEnabled = enabled ?? (() => true);

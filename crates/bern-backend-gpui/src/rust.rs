@@ -206,6 +206,7 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "icon",
             "role",
             "prominence",
+            "cursor",
             "enabled",
             "width",
             "pick",
@@ -3324,7 +3325,7 @@ pub fn app() -> b::AppDef {{
                     })
                     .unwrap_or_else(|| "None".into());
                 let props = format!(
-                    "b::ButtonProps {{ double_tap: {double_tap}, label: {}, icon: {}, prominence: b::Prominence::{prominence}, role: b::Role::{role}, enabled: {}, shape: {}, height: {}, style: {}, pick: {}, shortcut: {} }}",
+                    "b::ButtonProps {{ double_tap: {double_tap}, label: {}, icon: {}, prominence: b::Prominence::{prominence}, role: b::Role::{role}, enabled: {}, shape: {}, height: {}, style: {}, pick: {}, shortcut: {}, cursor: {} }}",
                     text("label"),
                     self.icon(element.icon("icon")),
                     self.enabled(element),
@@ -3333,6 +3334,10 @@ pub fn app() -> b::AppDef {{
                     self.control_style(element),
                     self.pick(element),
                     self.shortcut(element),
+                    match element.keyword("cursor") {
+                        Some(cursor) => format!("Some({})", string(cursor)),
+                        None => "None".into(),
+                    },
                 );
                 // A `ContextMenu` is not part of what the button shows; its
                 // wheel turns stand around it (`pointer_events`).

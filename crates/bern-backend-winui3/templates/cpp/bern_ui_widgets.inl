@@ -1424,6 +1424,7 @@ struct ButtonProps {
     char const* icon = nullptr;
     char const* role = nullptr;
     char const* prominence = nullptr;
+    char const* cursor = nullptr;
     Get enabled;
     Act action;
     StyleDef const* style = nullptr;
@@ -1614,8 +1615,24 @@ inline void DefaultFocus(Ctx const& ctx, char const* id) {
     });
 }
 
+inline void ApplyButtonCursor(controls::Button const& button, char const* cursor) {
+    if (!cursor || std::string_view(cursor) != "pointer") return;
+#if BERN_WINUI
+    button.as<xaml::IUIElementProtected>().ProtectedCursor(
+        winrt::Microsoft::UI::Input::InputSystemCursor::Create(winrt::Microsoft::UI::Input::InputSystemCursorShape::Hand));
+#else
+    auto weak = winrt::make_weak(button);
+    auto hand = [weak](auto&&, auto&&) {
+        if (auto current = weak.get(); current && current.IsEnabled()) SetCursor(LoadCursorW(nullptr, IDC_HAND));
+    };
+    button.PointerEntered(hand);
+    button.PointerMoved(hand);
+#endif
+}
+
 inline void Button(Parent const& p, Ctx const& ctx, ButtonProps props) {
     controls::Button button;
+    ApplyButtonCursor(button, props.cursor);
     auto text = Bound(ctx, props.label);
     button.Content(Content(text, props.icon));
     std::string_view prominence = props.prominence ? props.prominence : "";
@@ -1665,6 +1682,7 @@ inline double BorderWidth(StyleDef const& style) {
 /// the content as it is; a style's corner clips it.
 inline void ContentButton(Parent const& p, Ctx const& ctx, ButtonProps props, Build const& content) {
     controls::Button button;
+    ApplyButtonCursor(button, props.cursor);
     auto holder = MakeFlex();
     content(Parent::Of(holder), ctx);
     button.Content(holder);

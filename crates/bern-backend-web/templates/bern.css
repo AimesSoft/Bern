@@ -96,6 +96,14 @@ button:disabled {
   cursor: default;
 }
 
+.bern-cursor-pointer:not(:disabled) {
+  cursor: pointer;
+}
+
+.bern-cursor-default {
+  cursor: default;
+}
+
 [hidden] {
   display: none !important;
 }

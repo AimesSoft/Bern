@@ -1244,6 +1244,7 @@ pub fn main_view(app: controls::Client, #[session] draft: Draft) -> impl View {
                     }
                     Label(title: tr! { "en" => "OK" }, icon: "checkmark.circle.fill", color: status.success)
                     IconButton(id: fav, icon: "heart.fill", label: tr! { "en" => "Like" }, color: status.error) => app.toggle()
+                    Button(id: visit, label: tr! { "en" => "Visit" }, cursor: pointer) => app.toggle()
                     Image(source: draft.picture, width: 120, height: 80, saturation: app.amount, animate: smooth)
                 }
                 DetailFooter {
@@ -1325,6 +1326,7 @@ pub fn app(app: controls::Client, windows: AppWindows) -> impl View {
         "shape: b::Shape::Capsule, height: Some(32.0)",
         "Some(\"status.success\")",
         "color: Some(\"status.error\")",
+        "cursor: Some(\"pointer\")",
         "b::image_url(c, rt::url(",
     ] {
         assert!(

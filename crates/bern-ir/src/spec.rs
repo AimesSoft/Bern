@@ -1617,6 +1617,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                     PropKind::Keyword(&["standard", "prominent", "plain"]),
                 ),
                 opt("enabled", PropKind::Bool),
+                opt("cursor", PropKind::Keyword(&["default", "pointer"])),
                 opt("variant", PropKind::StyleVariant),
                 FEATURE,
                 opt("shortcut", PropKind::Shortcut),
