@@ -35,8 +35,13 @@ pub const ICON_NAME: &str = brand_assets::NAME;
 const RUNTIME: &str = include_str!("../templates/BernRuntime.swift");
 const MEDIA: &str = include_str!("../templates/BernMedia.swift");
 const STYLE: &str = include_str!("../templates/BernStyle.swift");
-const UIKIT: &str = include_str!("../templates/BernUIKit.swift");
+pub(crate) const UIKIT_TEMPLATE: &str = include_str!("../templates/BernUIKit.swift");
+const UIKIT: &str = UIKIT_TEMPLATE;
 const HEADER: &str = include_str!("../templates/bern.h");
+
+pub(crate) fn simulator_rust_target() -> &'static str {
+    architectures().1
+}
 
 /// Swift sources compiled into the app, in order.
 const SOURCES: &[&str] = &[
@@ -668,6 +673,15 @@ impl Target for SwiftUiTvos {
                     .into(),
             ],
         })
+    }
+
+    fn eject(
+        &self,
+        app: &Application,
+        context: &BuildContext,
+        options: &bern_target_api::EjectOptions,
+    ) -> Result<bern_target_api::EjectedProject, Vec<Diagnostic>> {
+        crate::xcode::eject_apple(app, context, options, Platform::Tvos)
     }
 }
 

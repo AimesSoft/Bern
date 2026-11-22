@@ -1256,3 +1256,13 @@ fn engine_window_host_dispatches_open_and_close_and_overlay_rect_reports_absent(
     host.open("main");
     host.close("main");
 }
+
+#[test]
+fn zero_fingerprint_skips_catalog_check_for_ejected_projects() {
+    let frontend = Box::new(Frontend::default());
+    let mismatch = start(&frontend, descriptor().fingerprint().wrapping_add(1)).unwrap_err();
+    assert!(mismatch.contains("rebuild"), "{mismatch}");
+
+    let app = start(&frontend, 0).expect("fingerprint 0 skips strict catalog check");
+    unsafe { bern_app_stop(app) };
+}

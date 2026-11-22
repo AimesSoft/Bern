@@ -75,6 +75,48 @@ fn pack_cpp(var: &str, ty: &Type) -> String {
 }
 
 impl Generator<'_> {
+    /// Emit per-view `namespace native_<symbol>` definitions that include
+    /// ejected relative files under `../native/<symbol>.inl`, returning both
+    /// the wrapper header content and the copied native files.
+    pub(super) fn native_view_namespaces_split(&self) -> (String, Vec<(String, String)>) {
+        let views: Vec<CollectedNativeView<'_>> = collect_native_views(self.app)
+            .into_iter()
+            .filter(|v| v.info.file_for("winui3").is_some())
+            .collect();
+        if views.is_empty() {
+            return (String::new(), Vec::new());
+        }
+        let mut out = Out::default();
+        out.line("// Co-located native UI views.");
+        out.line("// Ejected from Bern — edit freely.");
+        out.line("");
+        let mut emitted = std::collections::BTreeSet::new();
+        let mut native_files = Vec::new();
+        for view in &views {
+            if !emitted.insert(view.symbol.clone()) {
+                continue;
+            }
+            let Some(path) = view.info.file_for("winui3") else {
+                continue;
+            };
+            let source = self
+                .project_dir
+                .map(|dir| dir.join(path))
+                .filter(|p| p.exists())
+                .and_then(|p| std::fs::read_to_string(p).ok())
+                .or_else(|| find_native_source(self.app, path).map(|def| def.source.clone()))
+                .unwrap_or_default();
+            let rel = format!("native/{}.inl", view.symbol);
+            native_files.push((rel.clone(), source));
+            out.open(format!("namespace native_{} {{", view.symbol));
+            self.emit_native_types(&mut out, &view.info);
+            out.line(format!("#include \"../{rel}\""));
+            out.close("}");
+            out.line("");
+        }
+        (out.finish(), native_files)
+    }
+
     /// Emit per-view `namespace native_<symbol>` definitions at the top of
     /// `app_ui.inl` for every `NativeView` providing a `winui3` file.
     pub(super) fn native_view_namespaces(&self, out: &mut Out) {

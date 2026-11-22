@@ -69,6 +69,101 @@ android.nonTransitiveRClass=true
 kotlin.code.style=official
 ";
 
+/// Gradle wrapper metadata so Android Studio imports the ejected project
+/// with the exact Gradle release AGP requires.
+pub const GRADLE_WRAPPER_PROPERTIES: &str = "distributionBase=GRADLE_USER_HOME
+distributionPath=wrapper/dists
+distributionUrl=https\\://services.gradle.org/distributions/gradle-9.4.0-bin.zip
+networkTimeout=10000
+validateDistributionUrl=true
+zipStoreBase=GRADLE_USER_HOME
+zipStorePath=wrapper/dists
+";
+
+/// Gradle tasks appended to `app/build.gradle.kts` when ejecting with
+/// `--engine source`, so Android Studio / Gradle builds `rust/glue` via the
+/// active Android NDK before packaging `jniLibs`.
+pub fn rust_gradle_tasks(abis: &[(&str, &str, &str)], min_sdk: u32) -> String {
+    let entries: Vec<String> = abis
+        .iter()
+        .map(|(abi, rust, clang)| format!("    Triple(\"{abi}\", \"{rust}\", \"{clang}\")"))
+        .collect();
+    format!(
+        r#"
+// Build the vendored Rust engine with Cargo + the Android NDK before merging JNI libraries.
+val bernRustAbis = listOf(
+{entries}
+)
+
+fun registerRustBuildTask(variantName: String, release: Boolean) {{
+    val cap = variantName.replaceFirstChar {{ it.uppercase() }}
+    val task = tasks.register("buildRustEngine$cap") {{
+        doLast {{
+            val ndkDir = android.ndkDirectory
+            require(ndkDir.isDirectory) {{
+                "Android NDK not found; install NDK via Android Studio SDK Manager"
+            }}
+            val os = System.getProperty("os.name").lowercase()
+            val hostTag = when {{
+                os.contains("mac") -> "darwin-x86_64"
+                os.contains("win") -> "windows-x86_64"
+                else -> "linux-x86_64"
+            }}
+            val isWin = os.contains("win")
+            val llvmBin = ndkDir.resolve("toolchains/llvm/prebuilt/$hostTag/bin")
+            val manifest = rootProject.file("rust/glue/Cargo.toml")
+            val targetDir = rootProject.file("rust/target")
+            val profile = if (release) "release" else "debug"
+            val cargoHome = System.getProperty("user.home") + "/.cargo/bin"
+            val basePath = System.getenv("PATH") ?: ""
+            val pathSep = if (isWin) ";" else ":"
+
+            for ((abi, rustTarget, clangPrefix) in bernRustAbis) {{
+                val ext = if (isWin) ".cmd" else ""
+                val clang = llvmBin.resolve("$clangPrefix{min_sdk}-clang$ext").absolutePath
+                val clangxx = llvmBin.resolve("$clangPrefix{min_sdk}-clang++$ext").absolutePath
+                val ar = llvmBin.resolve(if (isWin) "llvm-ar.exe" else "llvm-ar").absolutePath
+                val envTarget = rustTarget.replace('-', '_')
+                val args = mutableListOf(
+                    "cargo", "build",
+                    "--manifest-path", manifest.absolutePath,
+                    "--target", rustTarget,
+                    "--target-dir", targetDir.absolutePath,
+                )
+                if (release) args.add("--release")
+                val pb = ProcessBuilder(args)
+                    .directory(manifest.parentFile)
+                    .inheritIO()
+                val env = pb.environment()
+                env["PATH"] = "$cargoHome$pathSep$basePath"
+                env["CARGO_TARGET_${{envTarget.uppercase()}}_LINKER"] = clang
+                env["CC_$envTarget"] = clang
+                env["CXX_$envTarget"] = clangxx
+                env["AR_$envTarget"] = ar
+                val exit = pb.start().waitFor()
+                require(exit == 0) {{ "cargo build failed for $abi (exit $exit)" }}
+
+                val built = targetDir.resolve("$rustTarget/$profile/libbern_app.so")
+                val dest = file("src/main/jniLibs/$abi/libbern_app.so")
+                dest.parentFile.mkdirs()
+                built.copyTo(dest, overwrite = true)
+            }}
+        }}
+    }}
+    tasks.matching {{ it.name == "merge${{cap}}JniLibFolders" }}.configureEach {{
+        dependsOn(task)
+    }}
+}}
+
+afterEvaluate {{
+    registerRustBuildTask("debug", release = false)
+    registerRustBuildTask("release", release = true)
+}}
+"#,
+        entries = entries.join(",\n")
+    )
+}
+
 /// The app's baseline profile, which the Android Gradle plugin compiles
 /// into the APK and the bundle: the Bern runtime and the generated
 /// interface are compiled ahead of time when a store installs the app, or

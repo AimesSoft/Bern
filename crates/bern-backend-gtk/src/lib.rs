@@ -831,6 +831,148 @@ impl Target for GtkLinux {
             notes,
         })
     }
+
+    fn supports_prebuilt_eject(&self) -> bool {
+        false
+    }
+
+    fn eject(
+        &self,
+        app: &Application,
+        context: &BuildContext,
+        options: &bern_target_api::EjectOptions,
+    ) -> Result<bern_target_api::EjectedProject, Vec<Diagnostic>> {
+        use bern_target_api::eject::{
+            EjectEngine, EjectedProject, clean_generated_file, copy_declared_resources, readme,
+            sanitized_context,
+        };
+        if options.engine == EjectEngine::Prebuilt {
+            return Err(vec![Diagnostic::error(
+                "the GTK 4 frontend is native Rust source code and always requires Cargo; eject with `--engine source`",
+            )]);
+        }
+        let context = &sanitized_context(context, options);
+        let generated = self.generate(app, context)?;
+        let app = &bern_target_api::svg::prepare(app, &context.target);
+        let product = product_name(app);
+        let exe = executable(app);
+
+        let mut files: Vec<GeneratedFile> = Vec::new();
+        for file in generated {
+            if file.path == Path::new("build.json")
+                || file.path == Path::new("app/Cargo.toml")
+                || file.path == Path::new("app/src/main.rs")
+                || file.path == Path::new("app/src/ui.rs")
+                || file.path == Path::new("app/src/cli.rs")
+                || file.path == Path::new("app/Cargo.lock")
+            {
+                continue;
+            }
+            if let Ok(rel) = file.path.strip_prefix("app/src/status") {
+                files.push(GeneratedFile {
+                    path: PathBuf::from("src/ui/status").join(rel),
+                    contents: file.contents,
+                });
+            } else if let Ok(rel) = file.path.strip_prefix(&product) {
+                if rel.extension().is_some_and(|ext| ext == "desktop") {
+                    files.push(GeneratedFile::text(
+                        PathBuf::from("assets").join(rel),
+                        glue::desktop_entry(app, Path::new(&exe), Path::new(&app.app.bundle_id)),
+                    ));
+                } else {
+                    files.push(GeneratedFile {
+                        path: PathBuf::from("assets").join(rel),
+                        contents: file.contents,
+                    });
+                }
+            } else {
+                // Static SVG assets sit under `resources/`.
+                files.push(GeneratedFile {
+                    path: PathBuf::from("resources").join(&file.path),
+                    contents: file.contents,
+                });
+            }
+        }
+
+        files.push(GeneratedFile::text(
+            "Cargo.toml",
+            glue::cargo_toml_for(context, app, options.with_cli, true),
+        ));
+        files.push(GeneratedFile::text(
+            "src/main.rs",
+            glue::main_rs_for(context, app, 0, true),
+        ));
+        if options.with_cli {
+            files.push(GeneratedFile::text(
+                "src/cli.rs",
+                glue::cli_rs(context, app),
+            ));
+        }
+
+        let split = Generator::with_project_dir(app, &context.project_dir)
+            .generate_split(0, &bern_target_api::glue::descriptor_expr(context));
+        for (rel, content) in split {
+            files.push(GeneratedFile::text(
+                PathBuf::from("src/ui").join(rel),
+                content,
+            ));
+        }
+
+        files.extend(copy_declared_resources(
+            app,
+            context,
+            Path::new("resources"),
+        )?);
+
+        if options.with_cli && skill::listens(&context.target.channels) {
+            let cli_name = format!("{exe}-cli");
+            files.push(GeneratedFile::text(
+                skill::path(app),
+                skill::markdown(
+                    app,
+                    &skill::Place {
+                        cli: cli_name,
+                        installed: None,
+                        connect: None,
+                    },
+                ),
+            ));
+        }
+
+        bern_target_api::script::configure(&mut files, context);
+
+        let app_title = app.app.name.get(&app.languages.default).unwrap_or(&product);
+        let build_help = format!(
+            "Install GTK 4 (`libgtk-4-dev`), libadwaita (`libadwaita-1-dev`), and libsoup 3 (`libsoup-3.0-dev`), then run:\n\n```sh\ncargo run\n```\n\nFor a release binary, run `cargo build --release` (the executable is `target/release/{exe}`)."
+        );
+        let layout_help = "- `src/main.rs` — Application entry point\n- `src/ui/mod.rs` — App definition and window registration\n- `src/ui/views/` — One Rust module per UI component\n- `src/ui/windows/` — One Rust module per window\n- `src/ui/styles.rs` & `src/ui/strings.rs` — Styles and localized strings\n- `resources/` — Bundled application resources\n- `crates/` & `vendor/bern/` — Self-contained application engine and Bern GTK runtime";
+        files.push(GeneratedFile::text(
+            "README.md",
+            readme(
+                app_title,
+                "Linux · GTK 4 + libadwaita",
+                EjectEngine::Source,
+                &[
+                    ("Building & Running", &build_help),
+                    ("Project Layout", layout_help),
+                ],
+            ),
+        ));
+
+        let files = files.into_iter().map(clean_generated_file).collect();
+        Ok(EjectedProject {
+            files,
+            executables: Vec::new(),
+            rust_manifests: vec![PathBuf::from("Cargo.toml")],
+            rust_root: PathBuf::from("."),
+            prebuilt_staging: Vec::new(),
+            prebuilt_steps: Vec::new(),
+            notes: vec![
+                "Run `cargo run` inside the ejected folder on Linux with GTK 4 + libadwaita."
+                    .into(),
+            ],
+        })
+    }
 }
 
 #[cfg(test)]

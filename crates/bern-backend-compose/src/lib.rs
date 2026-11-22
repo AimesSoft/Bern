@@ -959,6 +959,243 @@ impl Target for ComposeAndroid {
             notes,
         })
     }
+
+    fn eject(
+        &self,
+        app: &Application,
+        context: &BuildContext,
+        options: &bern_target_api::EjectOptions,
+    ) -> Result<bern_target_api::EjectedProject, Vec<Diagnostic>> {
+        use bern_target_api::eject::{
+            EjectEngine, EjectedProject, clean_generated_file, copy_declared_resources, readme,
+            sanitized_context,
+        };
+        let context = &sanitized_context(context, options);
+        let generated = self.generate(app, context)?;
+        let app = &bern_target_api::svg::prepare(app, &context.target);
+        let watch = context.target.platform == "wearos";
+        let product = product_name(app);
+        let package = names::package(&app.app.bundle_id);
+        let pkg_dir = PathBuf::from("app/src/main/kotlin").join(package.replace('.', "/"));
+        let generated_kt_rel = PathBuf::from("project")
+            .join(&pkg_dir)
+            .join("BernGenerated.kt");
+
+        let mut files: Vec<GeneratedFile> = Vec::new();
+        let mut rust_manifests = Vec::new();
+        let mut prebuilt_staging = Vec::new();
+        let mut prebuilt_steps = Vec::new();
+        let abis = build_abis(context);
+        let min_sdk = if watch {
+            project::WEAR_MINIMUM_SDK
+        } else {
+            MINIMUM_SDK
+        };
+
+        for file in generated {
+            if file.path == std::path::Path::new("build.json") || file.path == generated_kt_rel {
+                continue;
+            }
+            if let Ok(rel) = file.path.strip_prefix("project") {
+                if rel == std::path::Path::new("app/build.gradle.kts")
+                    && options.engine == EjectEngine::Source
+                {
+                    let mut text = String::from_utf8_lossy(&file.contents).into_owned();
+                    let abi_triples: Vec<(&str, &str, &str)> = abis
+                        .iter()
+                        .map(|abi| (abi.name, abi.rust, abi.clang))
+                        .collect();
+                    text.push_str(&project::rust_gradle_tasks(&abi_triples, min_sdk));
+                    files.push(GeneratedFile::text(rel, text));
+                } else {
+                    files.push(GeneratedFile {
+                        path: rel.to_path_buf(),
+                        contents: file.contents,
+                    });
+                }
+            } else if file.path.starts_with("glue") || file.path.starts_with("tools") {
+                match options.engine {
+                    EjectEngine::Source => {
+                        if file.path.starts_with("tools") && !options.with_cli {
+                            continue;
+                        }
+                        if file.path.file_name().is_some_and(|n| n == "Cargo.lock") {
+                            continue;
+                        }
+                        let dest = PathBuf::from("rust").join(&file.path);
+                        if dest.file_name().is_some_and(|n| n == "Cargo.toml") {
+                            rust_manifests.push(dest.clone());
+                        }
+                        files.push(GeneratedFile {
+                            path: dest,
+                            contents: file.contents,
+                        });
+                    }
+                    EjectEngine::Prebuilt => {
+                        if file.path.starts_with("glue") {
+                            prebuilt_staging.push(file);
+                        }
+                    }
+                }
+            } else {
+                // Static SVG assets sit at `app/src/main/assets/bern/resources/...`.
+                files.push(GeneratedFile {
+                    path: PathBuf::from("app/src/main/assets/bern/resources").join(&file.path),
+                    contents: file.contents,
+                });
+            }
+        }
+
+        // Split generated Kotlin sources (`fingerprint = 0` relaxes catalog check).
+        let split = Generator::new(app)
+            .with_watch(watch)
+            .with_multicast(
+                context
+                    .target
+                    .android
+                    .as_ref()
+                    .is_some_and(|android| android.multicast),
+            )
+            .generate_split(&package, 0);
+        for (rel, content) in split {
+            files.push(GeneratedFile::text(pkg_dir.join(rel), content));
+        }
+
+        // Bundle declared application resources into assets.
+        files.extend(copy_declared_resources(
+            app,
+            context,
+            std::path::Path::new("app/src/main/assets/bern/resources"),
+        )?);
+
+        // Gradle wrapper configuration for Android Studio.
+        files.push(GeneratedFile::text(
+            "gradle/wrapper/gradle-wrapper.properties",
+            project::GRADLE_WRAPPER_PROPERTIES,
+        ));
+
+        if options.engine == EjectEngine::Prebuilt {
+            let tools = toolchain::find().map_err(|message| vec![Diagnostic::error(message)])?;
+            let bin = toolchain::ndk_bin(&tools.ndk);
+            let glue_target = context.workspace_dir.join("target/bern-glue");
+            let profile = if options.release { "release" } else { "debug" };
+            let staging = &options.staging_dir;
+            for abi in &abis {
+                let compiler = |suffix: &str| {
+                    bin.join(format!("{}{min_sdk}-{suffix}", abi.clang))
+                        .display()
+                        .to_string()
+                };
+                let env_target = abi.rust.replace('-', "_");
+                let env = vec![
+                    (
+                        format!("CARGO_TARGET_{}_LINKER", env_target.to_uppercase()),
+                        compiler("clang"),
+                    ),
+                    (format!("CC_{env_target}"), compiler("clang")),
+                    (format!("CXX_{env_target}"), compiler("clang++")),
+                    (
+                        format!("AR_{env_target}"),
+                        bin.join("llvm-ar").display().to_string(),
+                    ),
+                ];
+                let mut cargo = vec![
+                    "build".to_string(),
+                    "--manifest-path".into(),
+                    staging.join("glue/Cargo.toml").display().to_string(),
+                    "--target".into(),
+                    abi.rust.into(),
+                    "--target-dir".into(),
+                    glue_target.display().to_string(),
+                ];
+                if options.release {
+                    cargo.push("--release".into());
+                }
+                let jni_dir = context
+                    .output_dir
+                    .join("app/src/main/jniLibs")
+                    .join(abi.name);
+                prebuilt_steps.extend([
+                    BuildStep::Run {
+                        description: format!("Build prebuilt Rust engine for {}", abi.name),
+                        program: "cargo".into(),
+                        args: cargo,
+                        cwd: staging.join("glue"),
+                        env,
+                    },
+                    BuildStep::CreateDir {
+                        path: jni_dir.clone(),
+                    },
+                    BuildStep::Copy {
+                        from: glue_target
+                            .join(abi.rust)
+                            .join(profile)
+                            .join("libbern_app.so"),
+                        to: jni_dir.join("libbern_app.so"),
+                    },
+                ]);
+            }
+        }
+
+        if options.with_cli && skill::listens(&context.target.channels) {
+            let cli_name = app.app.id.replace('_', "-");
+            files.push(GeneratedFile::text(
+                skill::path(app),
+                skill::markdown(
+                    app,
+                    &skill::Place {
+                        cli: cli_name,
+                        installed: None,
+                        connect: None,
+                    },
+                ),
+            ));
+        }
+
+        let app_title = app.app.name.get(&app.languages.default).unwrap_or(&product);
+        let platform_label = if watch {
+            "Wear OS · Jetpack Compose"
+        } else {
+            "Android · Jetpack Compose"
+        };
+        let build_help = match options.engine {
+            EjectEngine::Source => {
+                "Open this folder in **Android Studio** and click **Run**, or run `gradle assembleDebug`.\n\nGradle automatically runs `buildRustEngineDebug` / `buildRustEngineRelease` against the self-contained Rust workspace in `rust/` using Android Studio's NDK."
+            }
+            EjectEngine::Prebuilt => {
+                "Open this folder in **Android Studio** and click **Run**, or run `gradle assembleDebug`.\n\nNo Rust toolchain is required: pre-compiled `libbern_app.so` binaries are bundled under `app/src/main/jniLibs/`."
+            }
+        };
+        let layout_help = format!(
+            "- `app/src/main/kotlin/{}/MainActivity.kt` — Application entry point\n- `app/src/main/kotlin/{}/views/` — One Compose file per UI component\n- `app/src/main/kotlin/{}/windows/` — One Compose file per window\n- `app/src/main/kotlin/dev/bern/runtime/` — Self-contained Bern Compose runtime\n- `app/src/main/assets/bern/resources/` — Bundled application resources",
+            package.replace('.', "/"),
+            package.replace('.', "/"),
+            package.replace('.', "/"),
+        );
+        files.push(GeneratedFile::text(
+            "README.md",
+            readme(
+                app_title,
+                platform_label,
+                options.engine,
+                &[
+                    ("Opening & Building", build_help),
+                    ("Project Layout", &layout_help),
+                ],
+            ),
+        ));
+
+        let files = files.into_iter().map(clean_generated_file).collect();
+        Ok(EjectedProject {
+            files,
+            executables: Vec::new(),
+            rust_manifests,
+            rust_root: PathBuf::from("rust"),
+            prebuilt_staging,
+            prebuilt_steps,
+            notes: vec!["Open the ejected folder in Android Studio to build and edit.".into()],
+        })
+    }
 }
 
 /// The launcher icon `name` from a square PNG: the image itself for

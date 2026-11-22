@@ -2,7 +2,7 @@
 
 # Bern documentation
 
-Updated: 2026-11-21. To install `bern` and build your first app, start from the [quick start in the root README](../README.md#quick-start); complete buildable apps live in [examples/](../examples/).
+Updated: 2026-11-22. To install `bern` and build your first app, start from the [quick start in the root README](../README.md#quick-start); complete buildable apps live in [examples/](../examples/).
 
 ## Where to start
 
@@ -10,6 +10,7 @@ Updated: 2026-11-21. To install `bern` and build your first app, start from the 
 | --- | --- |
 | Build a UI with standard controls, layouts, skeletons or `NativeView` | [Component usage](Reference/UI.md) and [Component property table](Reference/Component-Properties.md) |
 | Check what each backend supports and how it has been verified | [Platform capabilities and verification scope](Reference/Platforms.md) |
+| Eject to standalone native IDE projects with zero Bern lock-in | [Ejecting to standalone native projects](Implementation/Eject.md) |
 | Embed JavaScript plugins or script automation with `bern.cli` | [JavaScript and `bern.cli`](Implementation/JavaScript.md) |
 | Embed platform-specific native controls beside Rust UI files | [Co-located native views](Implementation/Native-Views.md) |
 | Target GPUI or a specific OS backend | [GPUI](Implementation/GPUI.md) or the platform notes below |
@@ -38,6 +39,7 @@ Updated: 2026-11-21. To install `bern` and build your first app, start from the 
 
 ### Focused topics
 
+- [Ejecting to standalone native projects](Implementation/Eject.md): `bern eject` emits standalone `.xcodeproj`, Gradle, Visual Studio `.sln`/`.vcxproj`, Cargo, and zero-bundler ES module projects with either an offline self-contained Rust workspace (`--engine source`) or prebuilt engine binaries (`--engine prebuilt`).
 - [Co-located native views](Implementation/Native-Views.md): `NativeView` for placing per-backend native UI files beside Rust declarations with typed `Props`/`Actions`/`Theme`, mandatory CLI entries, `tr!` localization linting and `Fallback`.
 - [JavaScript and `bern.cli`](Implementation/JavaScript.md): opt-in `javascript = true` targets (in-process Boa on all native targets, Web Worker on the Web), persistent script contexts, in-process `globalThis.bern.cli(...)`, host-side allowlist/denylist `CliPolicy` rules and `window.webview` branches.
 - [Animated SVG](Implementation/Animated-SVG.md): pure-Rust `BSVG` bytecode rendering with zero WebView dependency, resource declarations, static fallback and verification scope.

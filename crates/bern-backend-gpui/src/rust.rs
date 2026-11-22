@@ -963,6 +963,125 @@ impl<'a> Generator<'a> {
         self.diagnostics.take()
     }
 
+    /// Generate the ejected, multi-module GPUI Rust UI tree under `src/ui/`
+    /// (`mod.rs`, `styles.rs`, `strings.rs`, `views/*.rs`, `windows/*.rs`,
+    /// and copied `native/*`).
+    pub fn generate_split(&self, fingerprint: u64, descriptor: &str) -> Vec<(String, String)> {
+        let app = self.app;
+        let mut files: Vec<(String, String)> = Vec::new();
+        let allow_line = "#![allow(unused_imports, unused_variables, unused_mut, unused_parens, unused_braces, dead_code, clippy::all)]";
+
+        // styles.rs
+        {
+            let mut out = String::new();
+            out.push_str(
+                "// Styles, motion tokens, and icon table.\n// Ejected from Bern — edit freely.\n",
+            );
+            out.push_str(allow_line);
+            out.push_str("\n\nuse bern_gpui as b;\n\n");
+            out.push_str(&self.motion_tables());
+            out.push('\n');
+            out.push_str(&self.styles());
+            out.push('\n');
+            out.push_str(&self.icon_table());
+            out.push('\n');
+            files.push(("styles.rs".into(), out));
+        }
+
+        // strings.rs
+        {
+            let mut out = String::new();
+            out.push_str("// Localized string tables.\n// Ejected from Bern — edit freely.\n");
+            out.push_str(allow_line);
+            out.push_str("\n\nuse bern_gpui as b;\n\n");
+            out.push_str("/// Strings of every supported language.\npub(crate) static STRINGS: b::text::StringTable = &[\n");
+            for (language, table) in bern_target_api::texts::tables(app) {
+                out.push_str(&format!("    ({}, &[\n", string(&language)));
+                for (key, text) in table {
+                    out.push_str(&format!("        ({}, {}),\n", string(&key), string(&text)));
+                }
+                out.push_str("    ]),\n");
+            }
+            out.push_str("];\n");
+            files.push(("strings.rs".into(), out));
+        }
+
+        // native/mod.rs + native/<symbol>.rs
+        let (native_mod, native_impls) = self.native_view_modules_split();
+        let has_native = !native_mod.is_empty();
+        if has_native {
+            files.push(("native/mod.rs".into(), native_mod));
+            for (rel, content) in native_impls {
+                files.push((rel, content));
+            }
+        }
+
+        // views/mod.rs + views/<component>.rs
+        let view_stems = bern_target_api::eject::unique_stems(
+            app.components.iter().map(|c| c.name.as_str()),
+            bern_target_api::eject::snake_filename,
+        );
+        let mut views_mod =
+            String::from("// UI view components.\n// Ejected from Bern — edit freely.\n\n");
+        for (component, stem) in app.components.iter().zip(&view_stems) {
+            views_mod.push_str(&format!("mod {stem};\npub(crate) use {stem}::*;\n"));
+            let mut out = format!(
+                "// View component: {}\n// Ejected from Bern — edit freely.\n{allow_line}\n\nuse super::super::*;\n\n",
+                component.name
+            );
+            out.push_str(&self.component(component));
+            files.push((format!("views/{stem}.rs"), out));
+        }
+        files.push(("views/mod.rs".into(), views_mod));
+
+        // windows/mod.rs + windows/<window>.rs
+        let window_stems = bern_target_api::eject::unique_stems(
+            app.windows.windows.iter().map(|w| w.id.as_str()),
+            bern_target_api::eject::snake_filename,
+        );
+        let mut windows_mod =
+            String::from("// Application windows.\n// Ejected from Bern — edit freely.\n\n");
+        for (window, stem) in app.windows.windows.iter().zip(&window_stems) {
+            windows_mod.push_str(&format!("mod {stem};\npub(crate) use {stem}::*;\n"));
+            let mut out = format!(
+                "// Window: {}\n// Ejected from Bern — edit freely.\n{allow_line}\n\nuse super::super::*;\n\n",
+                window.id
+            );
+            out.push_str(&self.window_content(window));
+            files.push((format!("windows/{stem}.rs"), out));
+        }
+        files.push(("windows/mod.rs".into(), windows_mod));
+
+        // ui/mod.rs
+        {
+            let mut out = format!(
+                "// Application UI entry point.\n// Ejected from Bern — edit freely.\n{allow_line}\n\n"
+            );
+            out.push_str("pub(crate) use bern_gpui as b;\n");
+            out.push_str("pub(crate) use bern_gpui::protocol::Value as V;\n");
+            out.push_str("pub(crate) use bern_gpui::value as rt;\n\n");
+            out.push_str("mod strings;\nmod styles;\n");
+            if has_native {
+                out.push_str("mod native;\n");
+            }
+            out.push_str("mod views;\nmod windows;\n\n");
+            out.push_str("pub(crate) use strings::*;\npub(crate) use styles::*;\n");
+            if has_native {
+                out.push_str("pub(crate) use native::*;\n");
+            }
+            out.push_str("pub(crate) use views::*;\npub(crate) use windows::*;\n\n");
+            out.push_str(&self.window_theme());
+            out.push('\n');
+            out.push_str(&self.menu_bar());
+            out.push('\n');
+            out.push_str(&self.app_def(fingerprint, descriptor));
+            self.window_catalog();
+            files.push(("mod.rs".into(), out));
+        }
+
+        files
+    }
+
     pub fn generate(&self, fingerprint: u64, descriptor: &str) -> String {
         let app = self.app;
         let mut out = String::new();
@@ -1030,7 +1149,7 @@ impl<'a> Generator<'a> {
     fn window_content(&self, window: &WindowDef) -> String {
         *self.current_scope.borrow_mut() = window.id.clone();
         let mut out = format!(
-            "fn window_{}(c: &b::Ctx) -> b::El {{\n    ({}).unwrap_or_else(|| b::column(c, b::Flex::default(), Vec::new()))\n}}\n",
+            "pub(crate) fn window_{}(c: &b::Ctx) -> b::El {{\n    ({}).unwrap_or_else(|| b::column(c, b::Flex::default(), Vec::new()))\n}}\n",
             window.id,
             self.root(&window.content)
         );
@@ -1040,7 +1159,7 @@ impl<'a> Generator<'a> {
         ] {
             if let Some(expr) = expr {
                 out.push_str(&format!(
-                    "fn window_{}_{name}(c: &b::Ctx) -> bool {{\n    {}\n}}\n",
+                    "pub(crate) fn window_{}_{name}(c: &b::Ctx) -> bool {{\n    {}\n}}\n",
                     window.id,
                     self.condition(expr)
                 ));
@@ -1221,7 +1340,7 @@ impl<'a> Generator<'a> {
             }
         }
         format!(
-            "/// The icons the application shows.\nstatic ICONS: &[(&str, &str)] = &[\n{}\n];\n",
+            "/// The icons the application shows.\npub(crate) static ICONS: &[(&str, &str)] = &[\n{}\n];\n",
             entries.join("\n")
         )
     }
@@ -1515,7 +1634,7 @@ pub fn app() -> b::AppDef {{
             }
             fields.push("..b::Style::NONE".into());
             out.push_str(&format!(
-                "static STYLE_{index}: b::Style = b::Style {{ {} }};\n",
+                "pub(crate) static STYLE_{index}: b::Style = b::Style {{ {} }};\n",
                 fields.join(", ")
             ));
         }
@@ -1561,7 +1680,7 @@ pub fn app() -> b::AppDef {{
             }
             fields.push("..b::ControlStyle::NONE".into());
             out.push_str(&format!(
-                "static CONTROL_STYLE_{index}: b::ControlStyle = b::ControlStyle {{ {} }};\n",
+                "pub(crate) static CONTROL_STYLE_{index}: b::ControlStyle = b::ControlStyle {{ {} }};\n",
                 fields.join(", ")
             ));
         }

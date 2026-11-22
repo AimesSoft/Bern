@@ -7,6 +7,7 @@
 //! buildable.
 
 pub mod brand_assets;
+pub mod eject;
 pub mod glue;
 pub mod icon;
 pub mod icon_set;
@@ -21,6 +22,7 @@ mod plan;
 mod report;
 
 pub use check::check_common;
+pub use eject::{EjectEngine, EjectOptions, EjectedProject};
 pub use plan::{
     BuildPlan, BuildStep, Run, SimulatedSystem, archive, dist_dir, files_below,
     package_architecture,
@@ -696,6 +698,26 @@ pub trait Target: Send + Sync {
     ) -> Result<BuildPlan, Vec<Diagnostic>> {
         Err(vec![Diagnostic::error(format!(
             "target `{}` cannot make packages yet",
+            self.descriptor().id
+        ))])
+    }
+
+    /// Whether this target supports `--engine prebuilt` ejection (non-Rust
+    /// front ends do; Rust front ends such as GTK and GPUI are always source).
+    fn supports_prebuilt_eject(&self) -> bool {
+        true
+    }
+
+    /// Emit a standalone native IDE project into `context.output_dir` that
+    /// builds without `bern-cli`.
+    fn eject(
+        &self,
+        _app: &Application,
+        _context: &BuildContext,
+        _options: &EjectOptions,
+    ) -> Result<EjectedProject, Vec<Diagnostic>> {
+        Err(vec![Diagnostic::error(format!(
+            "target `{}` does not support `bern eject` yet",
             self.descriptor().id
         ))])
     }

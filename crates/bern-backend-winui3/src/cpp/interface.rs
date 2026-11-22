@@ -57,6 +57,94 @@ impl Generator<'_> {
         }
     }
 
+    /// The application's ejected interface, split into `ui/app_ui.inl`,
+    /// `ui/styles.inl`, `ui/views/<Component>.inl`, `ui/windows/<Window>.inl`,
+    /// and copied `native/<symbol>.inl` files (paths relative to `src/`).
+    pub fn interface_split(&self) -> Vec<(String, String)> {
+        let app = self.app;
+        let mut files: Vec<(String, String)> = Vec::new();
+        let mut entry = Out::default();
+        entry.line("// Application UI entry point.");
+        entry.line("// Ejected from Bern — edit freely.");
+        entry.line("// Included once per active front end (WinUI 3 / XAML Islands).");
+        entry.line("");
+
+        // Styles & theme helpers.
+        {
+            let mut styles = Out::default();
+            styles.line("// Styles and theme helpers.");
+            styles.line("// Ejected from Bern — edit freely.");
+            styles.line("");
+            self.style_tables(&mut styles);
+            self.theme_functions(&mut styles);
+            self.accent_colors(&mut styles);
+            files.push(("ui/styles.inl".into(), styles.finish()));
+            entry.line("#include \"styles.inl\"");
+        }
+
+        // Co-located native views (copied locally; zero external paths).
+        let (native_header, native_files) = self.native_view_namespaces_split();
+        if !native_header.is_empty() {
+            files.push(("ui/native_views.inl".into(), native_header));
+            for (rel, content) in native_files {
+                files.push((rel, content));
+            }
+            entry.line("#include \"native_views.inl\"");
+        }
+        entry.line("");
+
+        // Forward declarations so split view files can reference each other freely.
+        entry.line("// Component forward declarations.");
+        for component in &app.components {
+            entry.line(format!(
+                "static void c_{}(Parent const& p, Ctx const& c);",
+                component.name
+            ));
+        }
+        entry.line("");
+
+        // One file per component.
+        let view_stems = bern_target_api::eject::unique_stems(
+            app.components.iter().map(|c| c.name.as_str()),
+            bern_target_api::eject::pascal_filename,
+        );
+        entry.line("// Components.");
+        for (component, stem) in app.components.iter().zip(view_stems) {
+            let mut view = Out::default();
+            view.line(format!("// Component: {}", component.name));
+            view.line("// Ejected from Bern — edit freely.");
+            view.line("");
+            self.component(&mut view, component);
+            let rel = format!("ui/views/{stem}.inl");
+            files.push((rel, view.finish()));
+            entry.line(format!("#include \"views/{stem}.inl\""));
+        }
+        entry.line("");
+
+        // One file per window.
+        let window_stems = bern_target_api::eject::unique_stems(
+            app.windows.windows.iter().map(|w| w.id.as_str()),
+            |id| format!("{}Window", bern_target_api::eject::pascal_filename(id)),
+        );
+        entry.line("// Windows.");
+        for (window, stem) in app.windows.windows.iter().zip(window_stems) {
+            let mut win = Out::default();
+            win.line(format!("// Window: {}", window.id));
+            win.line("// Ejected from Bern — edit freely.");
+            win.line("");
+            self.window(&mut win, window);
+            let rel = format!("ui/windows/{stem}.inl");
+            files.push((rel, win.finish()));
+            entry.line(format!("#include \"windows/{stem}.inl\""));
+        }
+        entry.line("");
+        self.window_table(&mut entry);
+        entry.line("");
+        self.status_item(&mut entry);
+        files.push(("ui/app_ui.inl".into(), entry.finish()));
+        files
+    }
+
     /// The application's interface, `app_ui.inl`: its components, windows
     /// and their close checks, included once per front end.
     pub fn interface(&self) -> String {

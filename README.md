@@ -510,6 +510,15 @@ bern package
 
 Builds every target this computer can in release and writes packages to `target/bern/dist/`: a `.dmg` for macOS, an installer (per user, no administrator rights) and a `.zip` for Windows, a `.deb` and a `.tar.gz` for Linux, an `.apk` and an `.aab` for stores for Android, and an archive of the static site for the Web. Desktop and WebUI packages carry the app CLI and, when IPC is enabled, its skill. A static Web package contains only the site; the Android CLI runs on the development computer, not inside the APK. Signing comes from the environment, so certificates stay out of the repository: `BERN_MACOS_SIGNING_IDENTITY` and `BERN_MACOS_NOTARY_PROFILE` (sign and notarize), `BERN_WINDOWS_CERTIFICATE` (a certificate thumbprint or a `.pfx`), `BERN_ANDROID_KEYSTORE`, `BERN_ANDROID_KEYSTORE_PASSWORD` and `BERN_ANDROID_KEY_ALIAS` (the release key). Without them the packages are still made, with a note on what being unsigned means.
 
+### Eject to standalone native projects (no lock-in)
+
+```sh
+bern eject --target macos --out ./native-macos                   # offline Rust source + Xcode project
+bern eject --target ios --engine prebuilt --release --out ./ios  # prebuilt XCFramework, no Rust required
+```
+
+`bern eject` exports standard platform-native IDE projects (`.xcodeproj`, Gradle, Visual Studio `.sln` + `.vcxproj`, standalone Cargo, or zero-bundler ES modules) with UI sources split per component and window, leaving the original Bern project untouched. Choose `--engine source` (default) to vendor a complete offline Rust workspace wired into the native IDE build, or `--engine prebuilt` to embed pre-compiled engine binaries so native developers can open and build without installing Rust or Bern. See [Ejecting to standalone native projects](Docs/Implementation/Eject.md).
+
 ### Run the showcase
 
 The showcase in the Bern repository uses every component, two windows and a video player. From the repository directory:
@@ -570,7 +579,7 @@ Browse the searchable docs online at **[bern.aimes-soft.com/docs](https://bern.a
 
 - **Reference**: [Documentation index](Docs/README.md) · [Component guide](Docs/Reference/UI.md) · [Property table](Docs/Reference/Component-Properties.md) · [Platform capabilities](Docs/Reference/Platforms.md) · [Performance tracing](Docs/Reference/Tracing.md)
 - **Architecture**: [Design document](Docs/Design.md) · [Adaptation specs](Docs/Adaptation/README.md) · [React Native study](Docs/Research/ReactNative.md)
-- **Topics**: [Co-located native views](Docs/Implementation/Native-Views.md) · [JavaScript & `bern.cli`](Docs/Implementation/JavaScript.md) · [Animated SVG](Docs/Implementation/Animated-SVG.md) · [Module builds](Docs/Implementation/Module-Builds.md) · [Web extensions](Docs/Implementation/Web-Extensions.md)
+- **Topics**: [Ejecting to native projects](Docs/Implementation/Eject.md) · [Co-located native views](Docs/Implementation/Native-Views.md) · [JavaScript & `bern.cli`](Docs/Implementation/JavaScript.md) · [Animated SVG](Docs/Implementation/Animated-SVG.md) · [Module builds](Docs/Implementation/Module-Builds.md) · [Web extensions](Docs/Implementation/Web-Extensions.md)
 - **Backends**: [macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [watchOS](Docs/Implementation/watchOS-SwiftUI.md) · [tvOS](Docs/Implementation/tvOS-SwiftUI.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Android & Wear OS](Docs/Implementation/Android-Compose.md) · [GPUI](Docs/Implementation/GPUI.md) · [Web & WebUI](Docs/Implementation/Web.md)
 
 The documentation is also available in [Simplified Chinese](Docs/zh-CN/README.md) ([online](https://bern.aimes-soft.com/docs/zh-CN)).
