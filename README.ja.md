@@ -510,6 +510,15 @@ bern package
 
 このコンピューターでビルドできるターゲットを release でビルドし、`target/bern/dist/` にパッケージを書き出します。macOS は `.dmg`、Windows はインストーラー（ユーザーごと、管理者権限不要）と `.zip`、Linux は `.deb` と `.tar.gz`、Android は `.apk` とストア向けの `.aab`、Web は静的サイトのアーカイブです。デスクトップと WebUI のパッケージにはアプリの CLI が入り、IPC が有効ならスキルも入ります。静的 Web パッケージにはサイトのファイルだけが入り、Android の CLI は APK の中ではなく開発用コンピューターで動作します。署名は環境変数で設定し、証明書はリポジトリに入れません：`BERN_MACOS_SIGNING_IDENTITY` と `BERN_MACOS_NOTARY_PROFILE`（署名と公証）、`BERN_WINDOWS_CERTIFICATE`（証明書の拇印または `.pfx`）、`BERN_ANDROID_KEYSTORE`・`BERN_ANDROID_KEYSTORE_PASSWORD`・`BERN_ANDROID_KEY_ALIAS`（リリース鍵）。設定がなくてもパッケージは作られ、未署名の影響を知らせます。
 
+### 独立した純ネイティブプロジェクトへ書き出す（ロックインなし）
+
+```sh
+bern eject --target macos --out ./native-macos                   # オフライン Rust ソース + Xcode プロジェクト
+bern eject --target ios --engine prebuilt --release --out ./ios  # ビルド済み XCFramework（Rust 不要）
+```
+
+`bern eject` は元の Bern プロジェクトを変更せず、コンポーネントやウィンドウ単位に分割された標準のネイティブ IDE プロジェクト（`.xcodeproj`、Gradle、Visual Studio `.sln` + `.vcxproj`、独立 Cargo、バンドラー不要の ES モジュール）を書き出します。既定の `--engine source` は完全オフラインで自己完結した Rust ワークスペースを同梱してネイティブ IDE のビルドに組み込み、`--engine prebuilt` はコンパイル済みエンジンバイナリを埋め込むため、Rust や Bern を入れていない環境でもそのまま開いてビルドできます。詳しくは [Ejecting to standalone native projects](Docs/Implementation/Eject.md) を参照してください。
+
 ### ショーケースを動かす
 
 Bern リポジトリのショーケースは、すべてのコンポーネント、2 つのウィンドウ、ビデオプレーヤーを使います。リポジトリのディレクトリで：
@@ -570,7 +579,7 @@ cargo test --workspace
 
 - **リファレンス**：[ドキュメント索引](Docs/README.md) · [現在のコンポーネントガイド](Docs/Reference/UI.md) · [プロパティ一覧](Docs/Reference/Component-Properties.md) · [プラットフォーム対応と検証範囲](Docs/Reference/Platforms.md) · [パフォーマンストレース](Docs/Reference/Tracing.md)
 - **設計**：[設計ドキュメント](Docs/Design.md) · [適応仕様](Docs/Adaptation/README.md) · [React Native 調査](Docs/Research/ReactNative.md)
-- **トピック**：[隣接ネイティブビュー](Docs/Implementation/Native-Views.md) · [JavaScript と `bern.cli`](Docs/Implementation/JavaScript.md) · [アニメーション SVG](Docs/Implementation/Animated-SVG.md) · [モジュール別ビルド](Docs/Implementation/Module-Builds.md) · [ブラウザー拡張](Docs/Implementation/Web-Extensions.md)
+- **トピック**：[独立ネイティブプロジェクト書き出し](Docs/Implementation/Eject.md) · [隣接ネイティブビュー](Docs/Implementation/Native-Views.md) · [JavaScript と `bern.cli`](Docs/Implementation/JavaScript.md) · [アニメーション SVG](Docs/Implementation/Animated-SVG.md) · [モジュール別ビルド](Docs/Implementation/Module-Builds.md) · [ブラウザー拡張](Docs/Implementation/Web-Extensions.md)
 - **バックエンド**：[macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [watchOS](Docs/Implementation/watchOS-SwiftUI.md) · [tvOS](Docs/Implementation/tvOS-SwiftUI.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Android と Wear OS](Docs/Implementation/Android-Compose.md) · [GPUI](Docs/Implementation/GPUI.md) · [Web と WebUI](Docs/Implementation/Web.md)
 
 ドキュメントは英語で書かれています。[簡体字中国語版](Docs/zh-CN/README.md)（[オンライン](https://bern.aimes-soft.com/docs/zh-CN)）もあります。
