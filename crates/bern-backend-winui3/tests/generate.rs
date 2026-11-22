@@ -486,6 +486,19 @@ fn missing_caption_insets_are_not_kept() {
     assert!(windows.contains("if (win.titleBar) win.titleBar.InvalidateMeasure();"));
 }
 
+/// A view that only scrolls across leaves the mouse wheel to the page.
+#[test]
+fn a_wheel_over_a_horizontal_view_scrolls_the_page() {
+    let features = include_str!("../templates/cpp/bern_ui_features.inl");
+    for part in [
+        "inline void PassWheel(controls::ScrollViewer const& scroller)",
+        "if (properties.IsHorizontalMouseWheel()) return;",
+        "if (horizontal) PassWheel(scroller);",
+    ] {
+        assert!(features.contains(part), "{part}");
+    }
+}
+
 /// The planner: sidebar items that come and go, styled buttons and sidebar
 /// items, a drawing with a pattern and series, a marked text, shared
 /// elements, transitions and an immersive window that rests.

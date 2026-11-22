@@ -592,6 +592,51 @@ inline void LazyGrid(Parent const& p, Ctx const& ctx, GridProps props, EachProps
     Place(p, panel);
 }
 
+/// A mouse wheel turned over a view that only scrolls across scrolls the
+/// page around it, as it does on the other targets; with Shift held, and on
+/// a wheel that tilts, it still scrolls the view.
+inline void PassWheel(controls::ScrollViewer const& scroller) {
+    struct Turning {
+        double target = 0;
+        uint64_t at = 0;
+    };
+    auto turning = std::make_shared<Turning>();
+    auto wheel = xaml::Input::PointerEventHandler([weak = winrt::make_weak(scroller), turning](IInspectable const&, xaml::Input::PointerRoutedEventArgs const& args) {
+        auto viewer = weak.get();
+        if (!viewer || args.Handled()) return;
+        using winrt::Windows::System::VirtualKeyModifiers;
+        if ((args.KeyModifiers() & (VirtualKeyModifiers::Shift | VirtualKeyModifiers::Control)) != VirtualKeyModifiers::None) return;
+        auto properties = args.GetCurrentPoint(viewer).Properties();
+        if (properties.IsHorizontalMouseWheel()) return;
+        args.Handled(true);
+        controls::ScrollViewer page{nullptr};
+        for (auto at = media::VisualTreeHelper::GetParent(viewer); at && !page; at = media::VisualTreeHelper::GetParent(at))
+            if (auto outer = at.try_as<controls::ScrollViewer>(); outer && outer.VerticalScrollMode() != controls::ScrollMode::Disabled && outer.ScrollableHeight() > 0) page = outer;
+        if (!page) return;
+        int32_t delta = properties.MouseWheelDelta();
+        UINT lines = 3;
+        SystemParametersInfoW(SPI_GETWHEELSCROLLLINES, 0, &lines, 0);
+        double notch = lines == WHEEL_PAGESCROLL ? page.ViewportHeight() : lines * 32.0;
+        // Notches that follow one another add up, though the view is still
+        // on its way to where the last one sent it.
+        uint64_t now = GetTickCount64();
+        double from = now - turning->at < 300 ? turning->target : page.VerticalOffset();
+        turning->target = (std::clamp)(from - notch * delta / WHEEL_DELTA, 0.0, page.ScrollableHeight());
+        turning->at = now;
+        page.ChangeView(nullptr, turning->target, nullptr, std::abs(delta) < WHEEL_DELTA || Reduced());
+    });
+    // Inside the view, so that it comes before the view's own handling.
+    auto watched = std::make_shared<bool>(false);
+    scroller.Loaded([wheel, watched](IInspectable const& sender, auto&&) {
+        auto viewer = sender.as<controls::ScrollViewer>();
+        if (*watched || media::VisualTreeHelper::GetChildrenCount(viewer) == 0) return;
+        if (auto inside = media::VisualTreeHelper::GetChild(viewer, 0).try_as<xaml::UIElement>()) {
+            *watched = true;
+            inside.AddHandler(xaml::UIElement::PointerWheelChangedEvent(), winrt::box_value(wheel), false);
+        }
+    });
+}
+
 /// A scrolling container. With `snap`, scrolling comes to rest with an item
 /// at the start or center; `position` follows the item at rest and scrolls
 /// to the item it is set to, with a nudge on arrival for `arrival: nudge`.
@@ -609,6 +654,7 @@ inline void ScrollView(Parent const& p, Ctx const& ctx, ScrollProps props, Build
     scroller.HorizontalScrollMode(horizontal ? controls::ScrollMode::Enabled : controls::ScrollMode::Disabled);
     scroller.VerticalScrollMode(horizontal ? controls::ScrollMode::Disabled : controls::ScrollMode::Enabled);
     SetRole(scroller, horizontal ? L"bern-fill-width" : L"bern-fill");
+    if (horizontal) PassWheel(scroller);
     if (props.mouseIndicators) {
         // `Auto` shows the bar as a mouse moves over the view; touch and
         // pen hide it before panning would show their thin indicator.
