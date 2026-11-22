@@ -989,6 +989,7 @@ struct LabelProps {
     char const* style = nullptr;
     /// The size of the title and the icon.
     std::optional<double> fontSize;
+    char const* color = nullptr;
     /// `display: icon`: the icon alone, the title its accessible name.
     bool iconOnly = false;
 };
@@ -1003,7 +1004,7 @@ inline void Label(Parent const& p, Ctx const& ctx, LabelProps props) {
                 xaml::Automation::AutomationProperties::SetName(icon, name);
                 controls::ToolTipService::SetToolTip(icon, winrt::box_value(name));
             });
-        Place(p, icon);
+        Place(p, Colored(icon, props.color));
         return;
     }
     // The icon scales with the text, as a symbol in a label does, and
@@ -1022,7 +1023,7 @@ inline void Label(Parent const& p, Ctx const& ctx, LabelProps props) {
         row.Children().Append(icon);
     }
     row.Children().Append(block);
-    Place(p, row);
+    Place(p, Colored(row, props.color));
 }
 
 inline xaml::UIElement Content(TextFn const& text, char const* icon) {
@@ -1141,6 +1142,7 @@ struct MenuItemDef {
     char const* icon = nullptr;
     char const* role = nullptr;
     Get enabled;
+    Get checked;
     Act action;
     std::optional<Field> pick;
     std::optional<Field> save;
@@ -1758,10 +1760,11 @@ struct IconButtonProps {
     Get iconProgress;
     char const* badgeIcon = nullptr;
     Get badgeVisible;
+    char const* color = nullptr;
 };
 
 /// Decorations share the native glyph's bounds without changing its measurement.
-inline xaml::UIElement IconGlyph(Ctx const& ctx, IconButtonProps const& props) {
+inline xaml::FrameworkElement IconGlyph(Ctx const& ctx, IconButtonProps const& props) {
     double size = props.iconSize.value_or(16);
     auto base = Icons::Icon(props.icon, size);
     controls::Grid layers;
@@ -1816,8 +1819,10 @@ inline xaml::UIElement IconGlyph(Ctx const& ctx, IconButtonProps const& props) {
 /// button of that diameter (the design's play button).
 inline void IconButton(Parent const& p, Ctx const& ctx, IconButtonProps props) {
     controls::Button button;
-    if (props.iconProgress || props.badgeIcon) button.Content(IconGlyph(ctx, props));
-    else button.Content(Icons::Icon(props.icon, props.iconSize.value_or(16)));
+    xaml::FrameworkElement glyph = (props.iconProgress || props.badgeIcon)
+        ? IconGlyph(ctx, props)
+        : xaml::FrameworkElement(Icons::Icon(props.icon, props.iconSize.value_or(16)));
+    button.Content(Colored(glyph, props.color));
     std::string_view prominence = props.prominence ? props.prominence : "";
     bool sized = props.shape && props.shape->height.Given();
     bool accent = prominence == "prominent";
@@ -3950,7 +3955,31 @@ struct PictureProps {
     std::optional<double> decodeMax;
     /// The display's pixels per DIP where it shows.
     double scale = 1;
+    /// Optional saturation (0..1) applied to the image's own pixels.
+    std::shared_ptr<Cell<double>> saturation;
 };
+
+inline std::shared_ptr<Scope> LaterScope();
+
+/// Desaturate premultiplied BGRA8 bytes in place from `src` into `dst`
+/// without touching alpha or underlying background pixels.
+inline void ApplySaturation(uint8_t const* src, uint8_t* dst, size_t size, double saturation) {
+    float s = static_cast<float>((std::clamp)(saturation, 0.0, 1.0));
+    if (s >= 0.999f) {
+        std::memcpy(dst, src, size);
+        return;
+    }
+    for (size_t i = 0; i + 3 < size; i += 4) {
+        float b = src[i + 0];
+        float g = src[i + 1];
+        float r = src[i + 2];
+        float y = 0.0722f * b + 0.7152f * g + 0.2126f * r;
+        dst[i + 0] = static_cast<uint8_t>((std::clamp)(std::lround(y + s * (b - y)), 0L, 255L));
+        dst[i + 1] = static_cast<uint8_t>((std::clamp)(std::lround(y + s * (g - y)), 0L, 255L));
+        dst[i + 2] = static_cast<uint8_t>((std::clamp)(std::lround(y + s * (r - y)), 0L, 255L));
+        dst[i + 3] = src[i + 3];
+    }
+}
 
 /// The size in DIPs a picture of `width` × `height` pixels shows at.
 inline std::pair<double, double> ShownSize(PictureProps const& props, double width, double height) {
@@ -3993,7 +4022,8 @@ inline winrt::fire_and_forget LoadPicture(media::Imaging::BitmapImage bitmap, st
 /// down from a much larger picture by the compositor alone, its edges
 /// would break up; decoded whole by XAML, a page of posters holds the
 /// window still.
-inline winrt::fire_and_forget DecodePicture(winrt::weak_ref<controls::Image> weak, std::vector<uint8_t> bytes, std::string name, PictureProps shown) {
+inline winrt::fire_and_forget DecodePicture(winrt::weak_ref<controls::Image> weak, std::vector<uint8_t> bytes, std::string name, PictureProps shown,
+    std::shared_ptr<Scope> owner = nullptr) {
     namespace imaging = winrt::Windows::Graphics::Imaging;
     winrt::apartment_context ui;
     co_await winrt::resume_background();
@@ -4032,8 +4062,28 @@ inline winrt::fire_and_forget DecodePicture(winrt::weak_ref<controls::Image> wea
         co_return;
     }
     auto image = weak.get();
-    if (!image) co_return;
+    if (!image || (owner && owner->disposed)) co_return;
     try {
+        if (shown.saturation) {
+            int32_t pw = pixels.PixelWidth(), ph = pixels.PixelHeight();
+            if (pw <= 0 || ph <= 0) co_return;
+            media::Imaging::WriteableBitmap wb(pw, ph);
+            pixels.CopyToBuffer(wb.PixelBuffer());
+            size_t len = static_cast<size_t>(pw) * static_cast<size_t>(ph) * 4;
+            uint8_t* dst = wb.PixelBuffer().data();
+            auto raw = std::make_shared<std::vector<uint8_t>>(dst, dst + len);
+            image.Source(wb);
+            auto sat = shown.saturation;
+            auto bind = [wb, raw, sat, len] {
+                Reactive::Run([wb, raw, sat, len] {
+                    ApplySaturation(raw->data(), wb.PixelBuffer().data(), len, sat->Get());
+                    wb.Invalidate();
+                });
+            };
+            if (owner) owner->Run(bind);
+            else bind();
+            co_return;
+        }
         media::Imaging::SoftwareBitmapSource source;
         image.Source(source);
         co_await source.SetBitmapAsync(pixels);
@@ -4060,8 +4110,8 @@ inline controls::Image SdrImage(PictureProps const& props, std::vector<uint8_t> 
         image.HorizontalAlignment(xaml::HorizontalAlignment::Left);
         image.VerticalAlignment(xaml::VerticalAlignment::Top);
     }
-    if ((props.fixed || props.decodeMax) && !bytes.empty()) {
-        DecodePicture(winrt::make_weak(image), std::move(bytes), props.source, props);
+    if ((props.fixed || props.decodeMax || props.saturation) && !bytes.empty()) {
+        DecodePicture(winrt::make_weak(image), std::move(bytes), props.source, props, props.saturation ? LaterScope() : nullptr);
     } else {
         media::Imaging::BitmapImage bitmap;
         image.Source(bitmap);
@@ -4324,6 +4374,16 @@ struct View : std::enable_shared_from_this<View> {
         tone->SetValue(D2D1_HDRTONEMAP_PROP_DISPLAY_MODE, display.hdr ? D2D1_HDRTONEMAP_DISPLAY_MODE_HDR : D2D1_HDRTONEMAP_DISPLAY_MODE_SDR);
         winrt::com_ptr<ID2D1Image> output;
         tone->GetOutput(output.put());
+        winrt::com_ptr<ID2D1Effect> satEffect;
+        if (props.saturation) {
+            float sat = static_cast<float>((std::clamp)(props.saturation->Peek(), 0.0, 1.0));
+            if (sat < 0.999f && SUCCEEDED(context->CreateEffect(CLSID_D2D1Saturation, satEffect.put()))) {
+                satEffect->SetInputEffect(0, tone.get());
+                satEffect->SetValue(D2D1_SATURATION_PROP_SATURATION, sat);
+                output = nullptr;
+                satEffect->GetOutput(output.put());
+            }
+        }
 
         // `cover` crops the picture to the panel; otherwise the panel has
         // the picture's shape or is stretched by `fill`.
@@ -4421,6 +4481,13 @@ inline void Show(controls::Grid const& frame, Ctx const& ctx, std::shared_ptr<st
     view->panel.CompositionScaleChanged([weak](auto&&, auto&&) {
         if (auto view = weak.lock()) view->Render();
     });
+    if (props.saturation) {
+        auto sat = props.saturation;
+        Reactive::Run([weak, sat] {
+            sat->Get();
+            if (auto view = weak.lock()) view->Render();
+        });
+    }
     auto token = nextView++;
     views[token] = view;
     if (!timer) timer = SetTimer(nullptr, 0, 1000, Tick);
@@ -4480,6 +4547,8 @@ struct ImageProps {
     bool covers = false;
     /// Upper bound in DIPs on the longer side needed when decoded.
     std::optional<double> decodeMax;
+    /// Color saturation from 0 (grayscale) to 1 (full color).
+    Len saturation;
 };
 
 /// A frame as wide as its container and `aspect` as tall.
@@ -4784,6 +4853,11 @@ inline void Image(Parent const& p, Ctx const& ctx, ImageProps props) {
     picture.fixed = !props.flies && !props.animate && !picture.fills && (picture.width || picture.height);
     if (!props.flies) picture.decodeMax = props.decodeMax;
     picture.scale = ctx.win ? ctx.win->Scale() : 1.0;
+    if (props.saturation.Given()) {
+        auto sat = std::make_shared<Cell<double>>(1.0);
+        picture.saturation = sat;
+        BindLen(ctx, props.saturation, props.animate, [sat](double v) { sat->Set((std::clamp)(v, 0.0, 1.0)); });
+    }
     // A template: the alpha of a declared picture in the text's color.
     if (props.templated && props.source) {
         controls::BitmapIcon icon;
@@ -5246,6 +5320,7 @@ struct MenuEntry {
     Ctx ctx;
     TextFn label;
     std::function<bool()> enabled;
+    std::function<bool()> checked;
     ButtonRun run;
 };
 
@@ -5261,9 +5336,13 @@ inline std::vector<std::optional<MenuEntry>> MenuPlan(Ctx const& ctx, std::vecto
         }
         auto label = item->label ? Bound(ctx, item->label) : TextFn([] { return winrt::hstring(); });
         auto enabled = Enabled(ctx, item->enabled);
+        std::function<bool()> checked;
+        if (item->checked) checked = [ctx, get = item->checked] { return R::Truthy(get(ctx)); };
         auto run = RunOf(ctx, item->pick, item->files, item->action, item->paste, item->save, item->suggestedName);
-        Controls::Register(ctx, item->id, "button", label, enabled, Actions{.activate = run.activate, .setFile = run.give, .files = item->files});
-        plan.emplace_back(MenuEntry{*item, ctx, std::move(label), std::move(enabled), std::move(run)});
+        Actions actions{.activate = run.activate, .setFile = run.give, .files = item->files};
+        if (checked) actions.value = [checked] { return std::optional<std::string>(checked() ? "checked" : "unchecked"); };
+        Controls::Register(ctx, item->id, "button", label, enabled, std::move(actions));
+        plan.emplace_back(MenuEntry{*item, ctx, std::move(label), std::move(enabled), std::move(checked), std::move(run)});
     }
     return plan;
 }
@@ -5276,21 +5355,36 @@ inline void MenuItems(controls::MenuFlyout const& flyout, std::vector<std::optio
             continue;
         }
         auto const& item = *planned;
-        controls::MenuFlyoutItem entry;
-        if (item.def.icon) entry.Icon(Icons::Icon(item.def.icon));
-        Reactive::Run([entry, label = item.label] { entry.Text(label()); });
-        if (item.enabled) Reactive::Run([entry, isEnabled = item.enabled, hideDisabled] {
-            bool enabled = isEnabled();
-            entry.IsEnabled(enabled);
-            if (hideDisabled) entry.Visibility(enabled ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
-        });
-        if (item.run.activate) entry.Click([activate = item.run.activate](auto&&, auto&&) { activate(); });
-        if (item.def.shortcut) entry.KeyboardAcceleratorTextOverride(ShortcutText(item.def.shortcut));
-        if (item.def.boundShortcut)
-            Reactive::Run([entry, ctx = item.ctx, keys = item.def.boundShortcut] {
-                entry.KeyboardAcceleratorTextOverride(ShortcutText(Utf8(keys(ctx)).c_str()));
+        auto wire = [&](auto const& entry) {
+            if (item.def.icon) entry.Icon(Icons::Icon(item.def.icon));
+            Reactive::Run([entry, label = item.label] { entry.Text(label()); });
+            if (item.enabled) Reactive::Run([entry, isEnabled = item.enabled, hideDisabled] {
+                bool enabled = isEnabled();
+                entry.IsEnabled(enabled);
+                if (hideDisabled) entry.Visibility(enabled ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
             });
-        flyout.Items().Append(entry);
+            if (item.def.shortcut) entry.KeyboardAcceleratorTextOverride(ShortcutText(item.def.shortcut));
+            if (item.def.boundShortcut)
+                Reactive::Run([entry, ctx = item.ctx, keys = item.def.boundShortcut] {
+                    entry.KeyboardAcceleratorTextOverride(ShortcutText(Utf8(keys(ctx)).c_str()));
+                });
+        };
+        if (item.checked) {
+            controls::ToggleMenuFlyoutItem entry;
+            wire(entry);
+            Reactive::Run([entry, isChecked = item.checked] { entry.IsChecked(isChecked()); });
+            entry.Click([activate = item.run.activate, isChecked = item.checked, weak = winrt::make_weak(entry)](auto&&, auto&&) {
+                if (activate) activate();
+                // WinUI toggles `IsChecked` on click even when a radio-like action keeps the state unchanged; resync to the source of truth.
+                if (auto toggle = weak.get()) toggle.IsChecked(Reactive::Untrack([&] { return isChecked(); }));
+            });
+            flyout.Items().Append(entry);
+        } else {
+            controls::MenuFlyoutItem entry;
+            wire(entry);
+            if (item.run.activate) entry.Click([activate = item.run.activate](auto&&, auto&&) { activate(); });
+            flyout.Items().Append(entry);
+        }
     }
 }
 

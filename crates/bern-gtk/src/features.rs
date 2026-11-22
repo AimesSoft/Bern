@@ -859,6 +859,7 @@ pub struct PopoverButtonProps {
     pub plain: bool,
     /// The size of the icon in points.
     pub font_size: Option<f64>,
+    pub shape: crate::widgets::Shape,
 }
 
 fn popover_look(popover: &gtk::Popover, window_theme: bool, style: Option<&'static StyleDef>) {
@@ -951,6 +952,19 @@ pub fn PopoverButton(p: &Parent, ctx: &Ctx, props: PopoverButtonProps, content: 
     }
     if props.plain {
         button.set_has_frame(false);
+    }
+    if props.icon.is_some() && (props.shape.capsule || props.shape.height.is_some()) {
+        button.add_css_class("circular");
+        if let Some(height) = &props.shape.height {
+            button.add_css_class("bern-sized-control");
+            let sized = button.clone();
+            crate::motion::bind_number(ctx, height, None, &button, move |value| {
+                let side = value.round().max(0.0) as i32;
+                sized.set_size_request(side, side);
+            });
+        }
+    } else {
+        crate::widgets::shape(ctx, button.upcast_ref(), &props.shape);
     }
     button.set_valign(gtk::Align::Center);
     if let Some(label) = label.clone() {
@@ -2403,6 +2417,7 @@ pub struct RuntimeImageProps {
     pub template: bool,
     pub aspect: Option<f64>,
     pub decode_max: Option<f64>,
+    pub saturation: Option<Num>,
 }
 
 /// A picture from a `MediaSource` in state: a file the user chose or an
@@ -2464,6 +2479,7 @@ pub fn RuntimeImage(p: &Parent, ctx: &Ctx, props: RuntimeImageProps) {
             animate: props.animate,
             corner: &props.corner,
             aspect: props.aspect,
+            saturation: &props.saturation,
         },
         Rc::clone(&ratio),
     );

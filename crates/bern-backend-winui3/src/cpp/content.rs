@@ -57,6 +57,7 @@ impl Generator<'_> {
                 ("icon", Self::icon(element, "icon")),
                 ("style", Self::keyword(element, "style")),
                 ("fontSize", Self::number(element, "font_size")),
+                ("color", Self::keyword(element, "color")),
                 (
                     "iconOnly",
                     (element.keyword("display") == Some("icon")).then(|| "true".to_string()),
@@ -144,6 +145,7 @@ impl Generator<'_> {
                     bern_target_api::svg::decode_max_side(self.app, element)
                         .map(|cap| format!("{cap:.1}"))
                 ),
+                ("saturation", self.len(element, "saturation")),
             ])
         ));
     }

@@ -38,6 +38,8 @@ struct Picture {
     pixels: Arc<image::RgbaImage>,
 }
 
+type SpinFrame = (f64, (u32, u32), u16, Arc<RenderImage>);
+
 /// Where one turning picture stands.
 #[derive(Default)]
 struct Spinner {
@@ -47,9 +49,9 @@ struct Spinner {
     last: Option<Instant>,
     /// The shape's SVG, and the key GPUI keeps its mask by.
     shape: Option<(String, Arc<[u8]>)>,
-    /// The latest frame turned on the CPU, its turn and the size of the
-    /// frame it was fitted into.
-    frame: Option<(f64, (u32, u32), Arc<RenderImage>)>,
+    /// The latest frame turned on the CPU, its turn, the size of the
+    /// frame it was fitted into, and quantized saturation.
+    frame: Option<SpinFrame>,
     /// A frame is being turned.
     pending: bool,
 }
@@ -72,6 +74,7 @@ pub(crate) fn picture(
     corner: Option<f32>,
     fit: Fit,
     aspect: Option<f32>,
+    saturation: Option<f32>,
     spin: Spin,
 ) -> El {
     let Some(picture) = read(path) else {
@@ -84,7 +87,16 @@ pub(crate) fn picture(
         sides => sides,
     };
     let key = format!("{:p}{}", Rc::as_ptr(c.win()), c.key(element));
-    let color = template.or(picture.color);
+    let sat = saturation.map(|s| s.clamp(0.0, 1.0)).unwrap_or(1.0);
+    let color = template.or(picture.color).map(|mut c| {
+        if sat < 0.999 {
+            let luma = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+            c.r = (luma + (c.r - luma) * sat).clamp(0.0, 1.0);
+            c.g = (luma + (c.g - luma) * sat).clamp(0.0, 1.0);
+            c.b = (luma + (c.b - luma) * sat).clamp(0.0, 1.0);
+        }
+        c
+    });
     let corner = corner.unwrap_or(0.0);
     let path = path.to_path_buf();
     let mut frame = div().flex_none().relative().child(
@@ -100,7 +112,9 @@ pub(crate) fn picture(
                     Some(color) => shape(
                         &key, &path, &picture, color, bounds, fit, corner, turn, window, cx,
                     ),
-                    None => turned(&key, &picture, bounds, fit, corner, turn, turning, window),
+                    None => turned(
+                        &key, &picture, bounds, fit, corner, turn, sat, turning, window,
+                    ),
                 }
             },
         )
@@ -281,12 +295,14 @@ struct Job {
     fit: Fit,
     corner: f32,
     turn: f64,
+    saturation: f32,
 }
 
 /// A turned frame: a square as wide as the frame's diagonal, BGRA.
 struct Done {
     turn: f64,
     fitted: (u32, u32),
+    sat: u16,
     side: u32,
     bgra: Vec<u8>,
 }
@@ -321,12 +337,16 @@ fn work(inbox: mpsc::Receiver<Job>) {
         let side = (f64::from(job.width).hypot(f64::from(job.height))).ceil() as u32;
         let mut bgra = vec![0; (side * side * 4) as usize];
         rotate(base, job.width, job.height, &mut bgra, side, job.turn);
+        if job.saturation < 0.999 {
+            crate::filters::desaturate(&mut bgra, job.saturation);
+        }
         if let Ok(mut done) = DONE.lock() {
             done.get_or_insert_with(HashMap::new).insert(
                 job.key,
                 Done {
                     turn: job.turn,
                     fitted: (job.width, job.height),
+                    sat: (job.saturation.clamp(0.0, 1.0) * 1000.0).round() as u16,
                     side,
                     bgra,
                 },
@@ -452,10 +472,12 @@ fn turned(
     fit: Fit,
     corner: f32,
     turn: f64,
+    saturation: f32,
     turning: bool,
     window: &mut Window,
 ) {
     let scale = window.scale_factor();
+    let sat = (saturation.clamp(0.0, 1.0) * 1000.0).round() as u16;
     let finished = DONE
         .lock()
         .ok()
@@ -469,7 +491,11 @@ fn turned(
                 let image = Arc::new(RenderImage::new(smallvec::smallvec![image::Frame::new(
                     frame
                 )]));
-                if let Some((_, _, old)) = spinner.frame.replace((done.turn, done.fitted, image)) {
+                if let Some((_, _, _, old)) =
+                    spinner
+                        .frame
+                        .replace((done.turn, done.fitted, done.sat, image))
+                {
                     let _ = window.drop_image(old);
                 }
             }
@@ -478,10 +504,9 @@ fn turned(
             ((f32::from(bounds.size.width) * scale).round() as u32).max(1),
             ((f32::from(bounds.size.height) * scale).round() as u32).max(1),
         );
-        let current = spinner
-            .frame
-            .as_ref()
-            .is_some_and(|(at, made, _)| (at - turn).abs() < 1e-9 && *made == fitted);
+        let current = spinner.frame.as_ref().is_some_and(|(at, made, s, _)| {
+            (at - turn).abs() < 1e-9 && *made == fitted && *s == sat
+        });
         if !spinner.pending && (turning || !current) {
             spinner.pending = true;
             send(Job {
@@ -492,12 +517,13 @@ fn turned(
                 fit,
                 corner: corner * scale,
                 turn,
+                saturation,
             });
         }
         if spinner.pending {
             window.request_animation_frame();
         }
-        spinner.frame.as_ref().map(|(_, _, frame)| frame.clone())
+        spinner.frame.as_ref().map(|(_, _, _, frame)| frame.clone())
     });
     let Some(frame) = frame else {
         return;

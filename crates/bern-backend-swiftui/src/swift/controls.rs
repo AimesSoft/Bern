@@ -184,6 +184,12 @@ impl Generator<'_> {
                 if let Some(size) = element.number("font_size") {
                     out.line(format!(".font(.system(size: {}))", double(size)));
                 }
+                if let Some(role) = element.keyword("color") {
+                    out.line(format!(
+                        ".foregroundStyle(BernColor.role({}).color)",
+                        string(role)
+                    ));
+                }
             }
             // The design's capsule (6.3): the symbol in a 16-point box,
             // 14 on a 30-point chip, 6 before the words.
@@ -408,8 +414,17 @@ impl Generator<'_> {
                 .expr("enabled")
                 .map(|expr| self.expr(expr))
                 .unwrap_or_else(|| "true".into());
+            let checked = item
+                .expr("checked")
+                .map(|expr| {
+                    format!(
+                        ", value: {{ ({}) ? \"checked\" : \"unchecked\" }}",
+                        self.expr(expr)
+                    )
+                })
+                .unwrap_or_default();
             out.line(format!(
-                ".bernControl({}, role: \"button\", label: {item_label}, enabled: {enabled}, actions: BernControlActions(activate: {{ {action} }}{file}))",
+                ".bernControl({}, role: \"button\", label: {item_label}, enabled: {enabled}, actions: BernControlActions(activate: {{ {action} }}{file}{checked}))",
                 self.target(item, ctx)
             ));
         }
@@ -445,12 +460,33 @@ impl Generator<'_> {
         self.nodes(out, &element.children, ctx);
         out.close("}");
         if !ctx.toolbar {
-            // `plain` draws no background, as a plain `IconButton` beside it.
-            out.line(match element.keyword("prominence") {
-                Some("plain") => ".bernButtonLook(.flat)",
-                _ if element.icon("icon").is_some() => ".bernButtonLook(.icon)",
-                _ => ".bernButtonLook(.secondary)",
-            });
+            let height = self.length(element, "height");
+            if element.icon("icon").is_some()
+                && (element.keyword("shape") == Some("capsule") || height.is_some())
+            {
+                let diameter = height.unwrap_or_else(|| "32.0".into());
+                if element.keyword("prominence") == Some("plain") {
+                    out.line(format!(
+                        ".bernCircleControl(diameter: {diameter}, prominent: false, plain: true)"
+                    ));
+                } else {
+                    out.line(format!(
+                        ".bernCircleControl(diameter: {diameter}, prominent: false)"
+                    ));
+                }
+            } else if element.keyword("shape") == Some("capsule") {
+                self.capsule_control(out, element, None);
+            } else {
+                // `plain` draws no background, as a plain `IconButton` beside it.
+                out.line(match element.keyword("prominence") {
+                    Some("plain") => ".bernButtonLook(.flat)",
+                    _ if element.icon("icon").is_some() => ".bernButtonLook(.icon)",
+                    _ => ".bernButtonLook(.secondary)",
+                });
+                if let Some(height) = height {
+                    out.line(format!(".frame(height: {height})"));
+                }
+            }
         }
         if let Some(line) = self.shortcut_line(element, None) {
             out.line(line);

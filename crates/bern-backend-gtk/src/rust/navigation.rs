@@ -66,6 +66,10 @@ impl Generator<'_> {
             self.style("Sidebar", sidebar)
         ));
         out.line(format!("detail_style: {},", self.style("Detail", detail)));
+        out.line(format!(
+            "collapsed: {},",
+            some(self.field(sidebar, "collapsed"))
+        ));
         out.close("},");
         out.indent += 1;
         self.in_sidebar.set(true);

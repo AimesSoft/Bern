@@ -155,15 +155,25 @@ fn panel_with(
 }
 
 /// The button a popover or menu opens from: a label, an icon or both.
+#[allow(clippy::too_many_arguments)]
 fn opener(
     c: &Ctx,
     id: &str,
     label: String,
     icon: Option<&'static str>,
     chevron: bool,
+    shape: crate::look::Shape,
+    height: Option<f32>,
     open: bool,
 ) -> gpui::Stateful<gpui::Div> {
     let recipe = "button.standard";
+    let (default_height, padding, text) = crate::look::metrics(None, shape);
+    let height = height.unwrap_or(default_height);
+    let corner = if shape == crate::look::Shape::Default {
+        8.0
+    } else {
+        height / 2.0
+    };
     let foreground = c.slot(recipe, "rest", "foreground");
     let hover = c.slot(recipe, "hover", "background");
     div()
@@ -173,9 +183,9 @@ fn opener(
         .flex_none()
         .items_center()
         .gap(px(6.0))
-        .h(px(36.0))
-        .px(px(12.0))
-        .rounded(px(8.0))
+        .h(px(height))
+        .px(px(padding))
+        .rounded(px(corner))
         .border_1()
         .border_color(c.slot(recipe, "rest", "border"))
         .bg(if open {
@@ -184,7 +194,7 @@ fn opener(
             c.slot(recipe, "rest", "background")
         })
         .text_color(foreground)
-        .text_size(px(13.5))
+        .text_size(px(text))
         .font_weight(FontWeight::MEDIUM)
         .hover(move |style| style.bg(hover))
         .children(icon.map(|icon| icons::icon(icon, 16.0, foreground)))
@@ -197,12 +207,15 @@ fn opener(
 /// A button of only an icon `size` points large, the label being its
 /// accessible name: square on the standard button's surface, or with
 /// `plain`, without one, as an `IconButton(prominence: plain)`.
+#[allow(clippy::too_many_arguments)]
 fn icon_opener(
     c: &Ctx,
     id: &str,
     icon: &'static str,
     plain: bool,
     size: Option<f32>,
+    shape: crate::look::Shape,
+    height: Option<f32>,
     open: bool,
 ) -> gpui::Stateful<gpui::Div> {
     let recipe = if plain {
@@ -214,7 +227,12 @@ fn icon_opener(
     let foreground = c.slot(recipe, state, "foreground");
     let hover_foreground = c.slot(recipe, "hover", "foreground");
     let hover = c.slot(recipe, "hover", "background");
-    let side = 36.0;
+    let side = height.unwrap_or(36.0);
+    let corner = if shape == crate::look::Shape::Capsule {
+        side / 2.0
+    } else {
+        8.0
+    };
     let button = div()
         .id(c.element_id(id))
         .flex()
@@ -222,7 +240,7 @@ fn icon_opener(
         .items_center()
         .justify_center()
         .size(px(side))
-        .rounded(px(8.0))
+        .rounded(px(corner))
         .bg(c.slot(recipe, state, "background"))
         .text_color(foreground)
         .hover(move |style| style.bg(hover).text_color(hover_foreground))
@@ -278,8 +296,17 @@ pub fn popover_button(
     });
     // With an icon the label is only its accessible name.
     let button = match icon {
-        Some(icon) => icon_opener(c, id, icon, props.plain, props.size, open),
-        None => opener(c, id, label, None, false, open),
+        Some(icon) => icon_opener(
+            c,
+            id,
+            icon,
+            props.plain,
+            props.size,
+            props.shape,
+            props.height,
+            open,
+        ),
+        None => opener(c, id, label, None, false, props.shape, props.height, open),
     };
     let pressed = Rc::clone(&toggle);
     let button = if enabled {
@@ -322,6 +349,10 @@ pub struct PopoverProps {
     pub plain: bool,
     /// The size of its icon in points (`font_size`).
     pub size: Option<f32>,
+    /// The shape of the trigger button (`shape: capsule`).
+    pub shape: crate::look::Shape,
+    /// The trigger button's height / diameter (`height`).
+    pub height: Option<f32>,
 }
 
 /// An item of a menu: its label, whether it is checked and what choosing
@@ -334,7 +365,16 @@ pub(crate) fn menu_button(c: &Ctx, id: &'static str, label: String, items: Vec<E
     let target = c.key(id);
     let open = is_open(&target);
     let enabled = c.enabled();
-    let button = opener(c, id, label, None, true, open);
+    let button = opener(
+        c,
+        id,
+        label,
+        None,
+        true,
+        crate::look::Shape::Default,
+        None,
+        open,
+    );
     let button = if enabled {
         let target = target.clone();
         button.on_click(move |_, _, cx| {

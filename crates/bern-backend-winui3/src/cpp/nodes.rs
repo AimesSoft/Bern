@@ -137,6 +137,18 @@ impl Generator<'_> {
                 "blurMotion",
                 element.expr("blur").and_then(|_| Self::animate(element)),
             ),
+            (
+                "opacity",
+                (!bern_ir::spec::has_own_opacity(&element.kind))
+                    .then(|| self.len(element, "opacity"))
+                    .flatten(),
+            ),
+            (
+                "opacityMotion",
+                (!bern_ir::spec::has_own_opacity(&element.kind))
+                    .then(|| element.expr("opacity").and_then(|_| Self::animate(element)))
+                    .flatten(),
+            ),
             ("appearDelay", Self::number(element, "appear_delay")),
             (
                 "reduceMotion",

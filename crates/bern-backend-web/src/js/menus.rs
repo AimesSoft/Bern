@@ -98,12 +98,16 @@ impl Generator<'_> {
                 let enabled = item
                     .expr("enabled")
                     .map(|expr| format!("() => {}", self.expr(expr)));
+                let checked = item
+                    .expr("checked")
+                    .map(|expr| format!("() => Boolean({})", self.expr(expr)));
                 let (action, set_file, kinds) = self.file_actions(item);
                 Self::props(vec![
                     ("id", Some(self.id(item))),
                     ("label", self.text_prop(item, "label")),
                     ("icon", item.icon("icon").map(string)),
                     ("role", Self::keyword(item, "role")),
+                    ("checked", checked),
                     ("enabled", enabled),
                     ("action", Some(action)),
                     ("setFile", set_file),
@@ -140,6 +144,9 @@ impl Generator<'_> {
             let enabled = item
                 .expr("enabled")
                 .map(|expr| format!("() => {}", self.expr(expr)));
+            let checked = item
+                .expr("checked")
+                .map(|expr| format!("() => Boolean({})", self.expr(expr)));
             let (action, set_file, kinds) = self.file_actions(item);
             if item.prop("shortcut").is_some() {
                 shortcuts.push((item, action.clone()));
@@ -151,6 +158,7 @@ impl Generator<'_> {
                     ("label", self.text_prop(item, "label")),
                     ("icon", item.icon("icon").map(string)),
                     ("role", Self::keyword(item, "role")),
+                    ("checked", checked),
                     ("enabled", enabled),
                     ("action", Some(action)),
                     ("setFile", set_file),
@@ -243,6 +251,9 @@ impl Generator<'_> {
             let enabled = item
                 .expr("enabled")
                 .map(|expr| format!("() => {}", self.expr(expr)));
+            let checked = item
+                .expr("checked")
+                .map(|expr| format!("() => Boolean({})", self.expr(expr)));
             let (action, set_file, kinds) = self.file_actions(item);
             if item.prop("shortcut").is_some() {
                 shortcuts.push((item, action.clone()));
@@ -254,6 +265,7 @@ impl Generator<'_> {
                     ("label", self.text_prop(item, "label")),
                     ("icon", item.icon("icon").map(string)),
                     ("role", Self::keyword(item, "role")),
+                    ("checked", checked),
                     ("enabled", enabled),
                     ("action", Some(action)),
                     ("setFile", set_file),

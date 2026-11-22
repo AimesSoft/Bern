@@ -88,6 +88,16 @@ impl Generator<'_> {
         if element.prop("blur").is_some() {
             entries.push(("blurMotion", self.animate(element)));
         }
+        if !bern_ir::spec::has_own_opacity(&element.kind) && element.prop("opacity").is_some() {
+            entries.push((
+                "opacity",
+                match element.prop("opacity") {
+                    Some(Prop::Expr { expr }) => Some(format!("() => ({})", self.expr(expr))),
+                    _ => element.number("opacity").map(number),
+                },
+            ));
+            entries.push(("opacityMotion", self.animate(element)));
+        }
         entries.push(("reduceMotion", self.value_prop(element, "reduce_motion")));
         entries.push(("scrollScale", element.number("scroll_scale").map(number)));
         entries.push((

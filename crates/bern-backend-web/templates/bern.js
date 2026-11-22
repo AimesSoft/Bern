@@ -1749,10 +1749,11 @@ export function textColor(node, color) {
   if (color) node.style.color = `var(--bern-${color.replace(/[._]/g, "-")})`;
 }
 
-export function Label(p, ctx, { title, icon: name, style, fontSize, display }) {
+export function Label(p, ctx, { title, icon: name, style, color, fontSize, display }) {
   const text = el("span");
   bindText(text, title);
-  const node = el("span", { class: `bern-label bern-${STYLE_CLASS[style] ?? "body"}${display === "icon" ? " bern-label-icon-only" : ""}` }, icon(name), display === "icon" ? null : text);
+  const node = el("span", { class: `bern-label bern-${STYLE_CLASS[style] ?? "body"}${display === "icon" ? " bern-label-icon-only" : ""}${color ? " bern-label-colored" : ""}` }, icon(name), display === "icon" ? null : text);
+  textColor(node, color);
   length(node, "fontSize", fontSize);
   if (display === "icon") {
     node.setAttribute("role", "img");
@@ -1903,13 +1904,16 @@ export function contextMenu(node, ctx, label, items) {
     }
     const itemText = el("span", { class: "bern-menu-text" });
     bindText(itemText, item.label);
+    const check = item.checked ? icon("checkmark", 16) : null;
+    if (check) check.classList.add("bern-menu-check");
     const button = el("button", {
       class: `bern-menu-item${item.role === "destructive" ? " bern-destructive" : ""}`, type: "button",
-      role: "menuitem", tabindex: "-1",
-    }, item.icon ? icon(item.icon, 16) : null, itemText);
+      role: item.checked ? "menuitemcheckbox" : "menuitem", tabindex: "-1",
+    }, item.icon ? icon(item.icon, 16) : null, itemText, check);
     const isEnabled = enabledOf(item.enabled);
     effect(() => {
       button.disabled = !isEnabled();
+      if (item.checked) button.setAttribute("aria-checked", item.checked() ? "true" : "false");
     });
     mark(button, ctx, item.id);
     button.addEventListener("click", () => {
@@ -1922,7 +1926,11 @@ export function contextMenu(node, ctx, label, items) {
     });
     control(ctx, {
       target: () => target(ctx, item.id), role: "button", label: item.label, enabled: isEnabled,
-      actions: { activate: item.action, ...(item.setFile ? { setFile: item.setFile, fileKinds: item.fileKinds } : {}) },
+      actions: {
+        activate: item.action,
+        ...(item.checked ? { value: () => (item.checked() ? "checked" : "unchecked") } : {}),
+        ...(item.setFile ? { setFile: item.setFile, fileKinds: item.fileKinds } : {}),
+      },
     });
     list.append(button);
     buttons.push(button);
@@ -1995,8 +2003,9 @@ export function contextMenu(node, ctx, label, items) {
   onCleanup(() => list.remove());
 }
 
-export function IconButton(p, ctx, { id, icon: name, label, enabled, style, setFile, fileKinds, fontSize, prominence, diameter, defaultFocus, iconProgress, badgeIcon, badgeVisible }, action) {
+export function IconButton(p, ctx, { id, icon: name, label, enabled, style, setFile, fileKinds, fontSize, prominence, color, diameter, defaultFocus, iconProgress, badgeIcon, badgeVisible }, action) {
   const node = el("button", { class: `bern-icon-button${prominence === "prominent" ? " bern-icon-button-prominent" : prominence === "plain" ? " bern-icon-button-plain" : ""}`, type: "button" }, icon(name, fontSize ?? 16));
+  if (color) node.style.setProperty("--bern-icon-color", `var(--bern-${color.replace(/[._]/g, "-")})`);
   if (fontSize != null) { node.firstElementChild.style.width = `${fontSize}px`; node.firstElementChild.style.height = `${fontSize}px`; }
   if (iconProgress != null || badgeIcon != null) {
     const base = node.firstElementChild;
@@ -4484,14 +4493,17 @@ export function Menu(p, ctx, { id, label, icon: name, style, shape, height, hide
     }
     const itemText = el("span", { class: "bern-menu-text" });
     bindText(itemText, item.label);
+    const check = item.checked ? icon("checkmark", 16) : null;
+    if (check) check.classList.add("bern-menu-check");
     const button = el("button", {
       class: `bern-menu-item${item.role === "destructive" ? " bern-destructive" : ""}`, type: "button",
-      role: "menuitem", tabindex: "-1",
-    }, item.icon ? icon(item.icon, 16) : null, itemText);
+      role: item.checked ? "menuitemcheckbox" : "menuitem", tabindex: "-1",
+    }, item.icon ? icon(item.icon, 16) : null, itemText, check);
     const isEnabled = enabledOf(item.enabled);
     effect(() => {
       button.disabled = !isEnabled();
       if (hideDisabled) button.style.display = button.disabled ? "none" : "";
+      if (item.checked) button.setAttribute("aria-checked", item.checked() ? "true" : "false");
     });
     mark(button, ctx, item.id);
     button.addEventListener("click", () => {
@@ -4504,7 +4516,11 @@ export function Menu(p, ctx, { id, label, icon: name, style, shape, height, hide
     });
     control(ctx, {
       target: () => target(ctx, item.id), role: "button", label: item.label, enabled: isEnabled,
-      actions: { activate: item.action, ...(item.setFile ? { setFile: item.setFile, fileKinds: item.fileKinds } : {}) },
+      actions: {
+        activate: item.action,
+        ...(item.checked ? { value: () => (item.checked() ? "checked" : "unchecked") } : {}),
+        ...(item.setFile ? { setFile: item.setFile, fileKinds: item.fileKinds } : {}),
+      },
     });
     list.append(button);
     buttons.push(button);
@@ -4732,13 +4748,16 @@ export function Table(p, ctx, { id, label, selection, items, key }, columns, men
     }
     const itemText = el("span", { class: "bern-menu-text" });
     bindText(itemText, item.label);
+    const check = item.checked ? icon("checkmark", 16) : null;
+    if (check) check.classList.add("bern-menu-check");
     const button = el("button", {
       class: `bern-menu-item${item.role === "destructive" ? " bern-destructive" : ""}`, type: "button",
-      role: "menuitem", tabindex: "-1",
-    }, item.icon ? icon(item.icon, 16) : null, itemText);
+      role: item.checked ? "menuitemcheckbox" : "menuitem", tabindex: "-1",
+    }, item.icon ? icon(item.icon, 16) : null, itemText, check);
     const isEnabled = enabledOf(item.enabled);
     effect(() => {
       button.disabled = !isEnabled();
+      if (item.checked) button.setAttribute("aria-checked", item.checked() ? "true" : "false");
     });
     mark(button, ctx, item.id);
     button.addEventListener("click", () => {
@@ -4751,7 +4770,11 @@ export function Table(p, ctx, { id, label, selection, items, key }, columns, men
     });
     control(ctx, {
       target: () => target(ctx, item.id), role: "button", label: item.label, enabled: isEnabled,
-      actions: { activate: item.action, ...(item.setFile ? { setFile: item.setFile, fileKinds: item.fileKinds } : {}) },
+      actions: {
+        activate: item.action,
+        ...(item.checked ? { value: () => (item.checked() ? "checked" : "unchecked") } : {}),
+        ...(item.setFile ? { setFile: item.setFile, fileKinds: item.fileKinds } : {}),
+      },
     });
     list.append(button);
     buttons.push(button);

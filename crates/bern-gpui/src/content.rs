@@ -592,6 +592,7 @@ pub fn label(
     title: String,
     icon: Option<&'static str>,
     style: TextStyle,
+    color: Option<&'static str>,
     font_size: Option<f32>,
     icon_only: bool,
 ) -> El {
@@ -600,7 +601,9 @@ pub fn label(
         Some(custom) => (custom, (custom * line / size).round()),
         None => (size, line),
     };
-    let color = c.foreground();
+    let color = color
+        .map(|role| c.color(role))
+        .unwrap_or_else(|| c.foreground());
     if icon_only {
         return match icon {
             Some(icon) => crate::icons::icon(icon, size + 2.0, color),
@@ -634,6 +637,7 @@ pub fn image(
     fit: Fit,
     template: bool,
     aspect: Option<f32>,
+    saturation: Option<f32>,
     spin: Option<(&str, crate::spin::Spin)>,
     covers: bool,
 ) -> El {
@@ -646,7 +650,7 @@ pub fn image(
     if let Some((element, spin)) = spin {
         let template = template.then(|| c.color("text.primary"));
         let picture = crate::spin::picture(
-            c, element, &path, template, width, height, corner, fit, aspect, spin,
+            c, element, &path, template, width, height, corner, fit, aspect, saturation, spin,
         );
         return if covers {
             div()
@@ -706,36 +710,44 @@ pub fn image(
         c,
         element,
         covers,
-        Blurred {
+        Filtered {
             key: resource,
             picture,
             fit,
             corner,
+            saturation: saturation.unwrap_or(1.0).clamp(0.0, 1.0),
         },
     )
 }
 
-/// What a picture is drawn from when it is blurred.
-struct Blurred<'a> {
+/// What a picture is drawn from when it is blurred or desaturated.
+struct Filtered<'a> {
     key: &'a str,
     picture: crate::filters::Picture,
     fit: Fit,
     corner: Option<f32>,
+    saturation: f32,
 }
 
 /// A picture placed: at its own size, or covering the room its container
 /// gives without asking for any, as a layer of a `Stack` under the rest.
-/// Blurred, it keeps that place and draws itself blurred there.
-fn framed(c: &Ctx, element: gpui::Img, covers: bool, blurred: Blurred<'_>) -> El {
+/// Blurred or desaturated, it keeps that place and draws itself filtered there.
+fn framed(c: &Ctx, element: gpui::Img, covers: bool, filtered: Filtered<'_>) -> El {
     let blur = c.blur();
-    if blur > 0.05 {
-        let corners = match blurred.corner {
+    if blur > 0.05 || filtered.saturation < 0.999 {
+        let corners = match filtered.corner {
             Some(corner) => [corner; 4],
             None => c.round(),
         };
-        let key = format!("{}/{}", c.key(blurred.key), blurred.key);
-        let painted =
-            crate::filters::blurred_picture(key, blurred.picture, blurred.fit, blur, corners);
+        let key = format!("{}/{}", c.key(filtered.key), filtered.key);
+        let painted = crate::filters::filtered_picture(
+            key,
+            filtered.picture,
+            filtered.fit,
+            blur,
+            filtered.saturation,
+            corners,
+        );
         let element = element.opacity(0.0);
         return if covers {
             div()
@@ -818,6 +830,7 @@ pub fn image_url(
     fit: Fit,
     template: bool,
     aspect: Option<f32>,
+    saturation: Option<f32>,
     covers: bool,
 ) -> El {
     let sized = |element: gpui::Div| {
@@ -894,11 +907,12 @@ pub fn image_url(
         c,
         element,
         covers,
-        Blurred {
+        Filtered {
             key: &key,
             picture,
             fit,
             corner,
+            saturation: saturation.unwrap_or(1.0).clamp(0.0, 1.0),
         },
     )
 }

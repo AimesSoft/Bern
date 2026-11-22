@@ -3142,3 +3142,83 @@ test("M4 controls: TreeView, SplitPane, Reorderable, BottomSheet, Refreshable", 
 
   scope.dispose();
 });
+
+test("SplitView collapsed, MenuItem checked, PopoverButton shape/height, Label/IconButton color, opacity and Image saturation", () => {
+  const { B, F, Element } = runtime();
+  const root = new Element("root");
+  const scope = new B.Scope();
+  const ctx = { win: "main", comp: "demo" };
+  const collapsed = B.cell(true);
+  const checked = B.cell(true);
+  const alpha = B.cell(0.4);
+  const sat = B.cell(0);
+
+  const find = (node, predicate) => {
+    if (predicate(node)) return node;
+    for (const child of node.childNodes ?? []) {
+      const hit = find(child, predicate);
+      if (hit) return hit;
+    }
+    return null;
+  };
+
+  B.within(scope, () => {
+    F.SplitView(root, ctx, { selection: B.cell(0), collapsed, titled: () => false }, () => {}, (body, inner) => {
+      F.Decorate(body, inner, { opacity: () => alpha.get() }, (p, c) => {
+        B.Label(p, c, { title: () => "Done", icon: "checkmark", color: "status.success" });
+        B.IconButton(p, c, { id: "fav", icon: "heart.fill", label: () => "Fav", color: "status.error" }, () => {});
+        B.Menu(p, c, { id: "sort", label: () => "Sort" }, [
+          { id: "opt", label: () => "Active", checked: () => checked.get(), action: () => checked.set(!checked.peek()) },
+        ]);
+        F.PopoverButton(p, c, { id: "pop", label: () => "Filter", icon: "slider.horizontal.3", shape: "capsule", height: 32 }, () => {});
+        F.Image(p, c, { source: "images/cover.png", saturation: () => sat.get() });
+      });
+    });
+  });
+
+  // SplitView starts collapsed from the bound session cell and toggles it bidirectionally.
+  const split = root.children[0];
+  assert.equal(split.classes.has("bern-split-collapsed"), true);
+  const toggle = find(split, (n) => n.classes?.has("bern-split-toggle"));
+  toggle.dispatch("click");
+  assert.equal(collapsed.peek(), false);
+  assert.equal(split.classes.has("bern-split-collapsed"), false);
+  collapsed.set(true);
+  assert.equal(split.classes.has("bern-split-collapsed"), true);
+
+  // Opacity applies to each decorated node and updates reactively.
+  const label = find(split, (n) => n.classes?.has("bern-label"));
+  assert.equal(label.style.opacity, "0.4");
+  assert.equal(label.style.color, "var(--bern-status-success)");
+  assert.equal(label.classes.has("bern-label-colored"), true);
+  alpha.set(0.8);
+  assert.equal(label.style.opacity, "0.8");
+
+  // IconButton color custom property.
+  const fav = find(split, (n) => n.classes?.has("bern-icon-button") && n.attributes?.["aria-label"] === "Fav");
+  assert.equal(fav.style["--bern-icon-color"], "var(--bern-status-error)");
+
+  // MenuItem checked sets role, aria-checked, and control value.
+  const menuItem = find(split, (n) => n.classes?.has("bern-menu-item"));
+  assert.equal(menuItem.attributes.role, "menuitemcheckbox");
+  assert.equal(menuItem.attributes["aria-checked"], "true");
+  const itemCtrl = B.controlEntries().find((e) => e.target() === "demo.opt");
+  assert.equal(itemCtrl.actions.value(), "checked");
+  checked.set(false);
+  assert.equal(menuItem.attributes["aria-checked"], "false");
+  assert.equal(itemCtrl.actions.value(), "unchecked");
+
+  // PopoverButton icon + shape: capsule + height: 32 becomes a 32px circle.
+  const pop = find(split, (n) => n.classes?.has("bern-popover-button"));
+  assert.equal(pop.style.width, "32px");
+  assert.equal(pop.style.height, "32px");
+  assert.equal(pop.style.borderRadius, "50%");
+
+  // Image saturation sets CSS saturate(...) and clears at 1.
+  const img = find(split, (n) => n.classes?.has("bern-image"));
+  assert.equal(img.style.filter, "saturate(0)");
+  sat.set(1);
+  assert.equal(img.style.filter, "");
+
+  scope.dispose();
+});

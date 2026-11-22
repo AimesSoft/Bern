@@ -125,18 +125,36 @@ pub(crate) fn gaussian(pixels: &mut [u8], width: usize, height: usize, sigma: f3
     }
 }
 
+/// Adjust the saturation of straight-alpha BGRA `pixels` in place
+/// (`0.0` grayscale, `1.0` unchanged), using Rec. 709 luminance.
+pub(crate) fn desaturate(pixels: &mut [u8], saturation: f32) {
+    let s = saturation.clamp(0.0, 1.0);
+    if s >= 0.999 {
+        return;
+    }
+    for p in pixels.as_chunks_mut::<4>().0 {
+        let b = f32::from(p[0]);
+        let g = f32::from(p[1]);
+        let r = f32::from(p[2]);
+        let luma = 0.0722 * b + 0.7152 * g + 0.2126 * r;
+        p[0] = (luma + (b - luma) * s).round().clamp(0.0, 255.0) as u8;
+        p[1] = (luma + (g - luma) * s).round().clamp(0.0, 255.0) as u8;
+        p[2] = (luma + (r - luma) * s).round().clamp(0.0, 255.0) as u8;
+    }
+}
+
 // MARK: - Pictures
 
-/// A picture to blur: from a file or an address, or already decoded.
+/// A picture to filter: from a file or an address, or already decoded.
 #[derive(Clone)]
 pub(crate) enum Picture {
     Source(gpui::Resource),
     Rendered(Arc<RenderImage>),
 }
 
-/// What a blurred picture last painted, by element.
+/// What a filtered picture last painted, by element.
 struct Painted {
-    key: (usize, u32, u32, u32, u8),
+    key: (usize, u32, u32, u32, u16, u8),
     image: Arc<RenderImage>,
 }
 
@@ -200,16 +218,18 @@ fn placed(
     Some(canvas.into_raw())
 }
 
-/// A picture blurred with `radius` points, painting the box it is laid
-/// out in, cut to `corners`. `key` tells it apart from the other blurred
-/// pictures of the window.
-pub(crate) fn blurred_picture(
+/// A picture filtered with `radius` blur points and `saturation` (0…1),
+/// painting the box it is laid out in, cut to `corners`. `key` tells it apart
+/// from the other filtered pictures of the window.
+pub(crate) fn filtered_picture(
     key: String,
     picture: Picture,
     fit: crate::content::Fit,
     radius: f32,
+    saturation: f32,
     corners: [f32; 4],
 ) -> impl IntoElement {
+    let saturation = saturation.clamp(0.0, 1.0);
     gpui::canvas(
         |_, _, _| {},
         move |bounds, (), window, cx| {
@@ -242,9 +262,9 @@ pub(crate) fn blurred_picture(
                 return;
             }
             // A wide blur keeps no detail: worked smaller, by as much.
-            let sigma = radius * scale;
+            let sigma = if radius > 0.05 { radius * scale } else { 0.0 };
             let reduce = (sigma / 2.5).floor().max(1.0);
-            let largest = 1024.0;
+            let largest = if sigma > 0.2 { 1024.0 } else { 2048.0 };
             let reduce = reduce.max((bw.max(bh) / largest).ceil());
             let (w, h) = ((bw / reduce).ceil() as u32, (bh / reduce).ceil() as u32);
             let sigma = sigma / reduce;
@@ -253,6 +273,7 @@ pub(crate) fn blurred_picture(
                 w,
                 h,
                 (sigma * 20.0).round() as u32,
+                (saturation * 1000.0).round() as u16,
                 fit_code(fit),
             );
             let held = PICTURES.with(|pictures| {
@@ -268,7 +289,12 @@ pub(crate) fn blurred_picture(
                     let Some(mut pixels) = placed(&original, w, h, fit) else {
                         return;
                     };
-                    gaussian(&mut pixels, w as usize, h as usize, sigma);
+                    if saturation < 0.999 {
+                        desaturate(&mut pixels, saturation);
+                    }
+                    if sigma >= 0.2 {
+                        gaussian(&mut pixels, w as usize, h as usize, sigma);
+                    }
                     let Some(buffer) = image::RgbaImage::from_raw(w, h, pixels) else {
                         return;
                     };

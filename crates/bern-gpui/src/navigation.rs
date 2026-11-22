@@ -196,9 +196,14 @@ pub fn nav_link(c: &Ctx, id: &'static str, label: String, route: Value, children
         .into_any_element()
 }
 
-/// `SplitView`: the sidebar, then the detail taking the rest.
-pub fn split_view(c: &Ctx, sidebar: El, detail: El) -> El {
-    let element = div().flex().flex_row().child(sidebar).child(detail);
+/// `SplitView`: the sidebar (hidden while `collapsed` holds), then the detail taking the rest.
+pub fn split_view(c: &Ctx, collapsed: Option<Field>, sidebar: El, detail: El) -> El {
+    let folded = collapsed.is_some_and(|field| c.read(field) == Value::Bool(true));
+    let element = div()
+        .flex()
+        .flex_row()
+        .when(!folded, |row| row.child(sidebar))
+        .child(detail);
     c.grow().apply(element.size_full()).into_any_element()
 }
 
@@ -368,13 +373,58 @@ pub fn sidebar_title(selection: &Value, items: Vec<(Value, String)>) -> Option<S
         .map(|(_, label)| label)
 }
 
-/// `Detail`: the page beside the sidebar, under its title.
+/// `Detail`: the page beside the sidebar, under its title (and a sidebar toggle
+/// button when `collapsed` is bound).
 pub fn detail(
     c: &Ctx,
     title: Option<String>,
+    collapsed: Option<Field>,
     content: Vec<El>,
     style: Option<&'static Style>,
 ) -> El {
+    let toggle = collapsed.map(|field| {
+        let folded = c.read(field) == Value::Bool(true);
+        let label = crate::text::tr(if folded {
+            "bern.navigation.show_sidebar"
+        } else {
+            "bern.navigation.hide_sidebar"
+        });
+        let flip: crate::ctx::Press = {
+            let c = c.clone();
+            Rc::new(move |_| {
+                let now = c.read(field) == Value::Bool(true);
+                c.write(field, Value::Bool(!now));
+            })
+        };
+        c.list(Control {
+            target: c.target("sidebar_toggle"),
+            window: c.win().id.clone(),
+            role: "button",
+            label,
+            value: Some(if folded { "collapsed" } else { "expanded" }.to_string()),
+            enabled: c.enabled(),
+            actions: Actions {
+                activate: Some(Rc::clone(&flip)),
+                ..Actions::default()
+            },
+        });
+        let hover = c.color("hover.overlay");
+        div()
+            .id(c.element_id("sidebar_toggle"))
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_center()
+            .size(px(32.0))
+            .rounded(px(8.0))
+            .hover(move |style| style.bg(hover))
+            .child(icons::icon("sidebar.left", 18.0, c.color("icon.primary")))
+            .on_click(move |_, _, cx| {
+                cx.stop_propagation();
+                flip(cx);
+            })
+    });
+    let has_header = title.is_some() || toggle.is_some();
     div()
         .flex()
         .flex_col()
@@ -385,17 +435,27 @@ pub fn detail(
             style.and_then(|style| style.background),
             |element, background| element.bg(color(c, background)),
         )
-        .children(title.map(|title| {
-            div()
-                .flex_none()
-                .px(px(24.0))
-                .pt(px(16.0))
-                .pb(px(8.0))
-                .text_size(px(20.0))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(c.color("text.primary"))
-                .child(title)
-        }))
+        .when(has_header, |element| {
+            element.child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .flex_none()
+                    .items_center()
+                    .gap(px(8.0))
+                    .px(px(if title.is_some() { 24.0 } else { 12.0 }))
+                    .pt(px(if title.is_some() { 16.0 } else { 8.0 }))
+                    .pb(px(if title.is_some() { 8.0 } else { 4.0 }))
+                    .children(toggle)
+                    .children(title.map(|title| {
+                        div()
+                            .text_size(px(20.0))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(c.color("text.primary"))
+                            .child(title)
+                    })),
+            )
+        })
         .child(
             div()
                 .flex()

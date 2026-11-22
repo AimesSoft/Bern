@@ -52,11 +52,11 @@ impl Theme {
             .unwrap_or(rgba(Srgb::new(0xff, 0x00, 0xff), 0xff))
     }
 
-    /// The color of a recipe slot, such as the `background` of
+    /// The role name of a recipe slot, such as the `background` of
     /// `button.prominent` at `hover`; the `rest` state's when the state
-    /// does not name the slot, clear when neither does.
-    pub fn slot(&self, recipe: &str, state: &str, slot: &str) -> Rgba {
-        let role = bern_theme::RECIPES
+    /// does not name the slot, `"transparent"` when neither does.
+    pub(crate) fn slot_role(recipe: &str, state: &str, slot: &str) -> &'static str {
+        bern_theme::RECIPES
             .iter()
             .find(|candidate| candidate.name == recipe)
             .and_then(|recipe| {
@@ -71,8 +71,7 @@ impl Theme {
                 };
                 find(state).or_else(|| find("rest"))
             })
-            .unwrap_or("transparent");
-        self.color(role)
+            .unwrap_or("transparent")
     }
 }
 

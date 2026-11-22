@@ -22,6 +22,7 @@ pub enum MenuEntry {
         label: String,
         icon: Option<&'static str>,
         destructive: bool,
+        checked: Option<bool>,
         enabled: bool,
         press: crate::ctx::Press,
     },
@@ -36,6 +37,7 @@ pub fn menu_item(
     label: String,
     icon: Option<&'static str>,
     destructive: bool,
+    checked: Option<bool>,
     enabled: bool,
     pick: Option<crate::FilePrompt>,
     shortcut: Option<String>,
@@ -48,7 +50,7 @@ pub fn menu_item(
         window: c.win().id.clone(),
         role: "menu_item",
         label: label.clone(),
-        value: None,
+        value: checked.map(|on| if on { "checked" } else { "unchecked" }.to_string()),
         enabled,
         actions: Actions {
             activate: Some(Rc::clone(&press)),
@@ -63,6 +65,7 @@ pub fn menu_item(
         label,
         icon,
         destructive,
+        checked,
         enabled,
         press,
     }
@@ -249,8 +252,12 @@ pub(crate) fn entry_list(
     hide_disabled: bool,
 ) -> gpui::Div {
     let hover = c.slot("menu", "hover", "background");
+    let check_color = c.slot("menu", "selected", "check");
     let error = c.color("status.error");
     let disabled = c.color("disabled.foreground");
+    let any_checked = entries.iter().any(|entry| {
+        matches!(entry, MenuEntry::Item { checked: Some(_), enabled, .. } if !hide_disabled || *enabled)
+    });
     div()
         .flex()
         .flex_col()
@@ -273,6 +280,7 @@ pub(crate) fn entry_list(
                         label,
                         icon,
                         destructive,
+                        checked,
                         enabled,
                         press,
                     } => {
@@ -281,6 +289,7 @@ pub(crate) fn entry_list(
                             (true, true) => error,
                             (true, false) => c.color("text.primary"),
                         };
+                        let mark_color = if enabled { check_color } else { disabled };
                         let close = target.to_string();
                         div()
                             .id(c.element_id(id))
@@ -293,6 +302,16 @@ pub(crate) fn entry_list(
                             .rounded(px(6.0))
                             .text_size(px(14.0))
                             .text_color(color)
+                            .when(any_checked, |row| {
+                                row.child(
+                                    div().size(px(14.0)).flex_none().when(
+                                        checked == Some(true),
+                                        |mark| {
+                                            mark.child(icons::icon("checkmark", 14.0, mark_color))
+                                        },
+                                    ),
+                                )
+                            })
                             .children(icon.map(|icon| icons::icon(icon, 16.0, color)))
                             .child(label)
                             .when(enabled, |row| {

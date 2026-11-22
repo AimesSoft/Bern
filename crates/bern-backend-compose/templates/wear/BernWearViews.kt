@@ -81,10 +81,15 @@ fun BernButton(label: String, icon: ImageVector?, prominence: BernProminence, de
 fun BernIconButton(label: String, icon: ImageVector?, enabled: Boolean, modifier: Modifier = Modifier,
     style: BernStyle? = null, iconSize: Float? = null, diameter: Dp? = null,
     prominence: BernProminence = BernProminence.Standard, iconProgress: Double? = null,
-    badgeIcon: ImageVector? = null, badgeVisible: Boolean = true, onClick: () -> Unit) {
+    badgeIcon: ImageVector? = null, badgeVisible: Boolean = true, color: BernColor? = null, onClick: () -> Unit) {
+    val tintColor = color?.let { bernPalette().color(it) }
     val glyph: @Composable () -> Unit = {
-        BernIconGlyph(icon ?: BernIcons.get(""), label, iconSize?.let(::bernIconSize) ?: 24.dp,
-            iconProgress, badgeIcon, badgeVisible)
+        val draw: @Composable () -> Unit = {
+            BernIconGlyph(icon ?: BernIcons.get(""), label, iconSize?.let(::bernIconSize) ?: 24.dp,
+                iconProgress, badgeIcon, badgeVisible)
+        }
+        if (tintColor != null) CompositionLocalProvider(LocalContentColor provides tintColor) { draw() }
+        else draw()
     }
     val sized = if (diameter != null) modifier.size(diameter) else modifier
     val material: @Composable (Modifier, MutableInteractionSource?) -> Unit = { m, interaction ->

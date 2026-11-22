@@ -32,6 +32,7 @@ use std::collections::BTreeSet;
 const COMMON: &[&str] = &[
     "feature",
     "appearance",
+    "tint",
     "glass",
     "appear",
     "appear_delay",
@@ -55,6 +56,7 @@ const COMMON: &[&str] = &[
     "idle_area",
     // Drawn by the runtime's filters: GPUI blurs and lights nothing itself.
     "blur",
+    "opacity",
     "glow",
     "glow_opacity",
     // Where a child stands on a `Rail`.
@@ -156,7 +158,10 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "selectable",
         ],
     ),
-    ("Label", &["title", "icon", "style", "font_size", "display"]),
+    (
+        "Label",
+        &["title", "icon", "style", "color", "font_size", "display"],
+    ),
     (
         "Svg",
         &[
@@ -185,6 +190,7 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "corner",
             "fit",
             "rendering",
+            "saturation",
             "aspect",
         ],
     ),
@@ -226,6 +232,7 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "suggested_name",
             "files",
             "prominence",
+            "color",
             "height",
             "font_size",
             "icon_progress",
@@ -292,6 +299,8 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "panel_appearance",
             "prominence",
             "font_size",
+            "shape",
+            "height",
         ],
     ),
     ("Modal", &["width", "height", "cover"]),
@@ -510,6 +519,7 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "label",
             "icon",
             "role",
+            "checked",
             "enabled",
             "shortcut",
             "pick",
@@ -581,7 +591,7 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
     ("NavLink", &["id", "route"]),
     ("Destination", &[]),
     ("SplitView", &[]),
-    ("Sidebar", &["selection", "width", "id"]),
+    ("Sidebar", &["selection", "collapsed", "width", "id"]),
     (
         "SidebarItem",
         &["value", "label", "icon", "badge", "variant"],
@@ -2426,6 +2436,9 @@ pub fn app() -> b::AppDef {{
         if let Some(appearance) = element.keyword("appearance") {
             scope = format!("&({scope}).with_appearance({})", appearance == "dark");
         }
+        if let Some(tint) = element.keyword("tint") {
+            scope = format!("&({scope}).with_tint({})", string(tint));
+        }
         if element.kind == "Stack"
             && let Some(enabled) = element.expr("enabled")
         {
@@ -3012,10 +3025,14 @@ pub fn app() -> b::AppDef {{
                 element.keyword("selectable") == Some("true"),
             ),
             "Label" => format!(
-                "b::label(c, {}, {}, b::TextStyle::{}, {}, {})",
+                "b::label(c, {}, {}, b::TextStyle::{}, {}, {}, {})",
                 text("title"),
                 self.icon(element.icon("icon")),
                 pascal(element.keyword("style").unwrap_or("body")),
+                match element.keyword("color") {
+                    Some(color) => format!("Some({})", string(color)),
+                    None => "None".into(),
+                },
                 self.optional_length(element, "font_size"),
                 element.keyword("display") == Some("icon"),
             ),
@@ -3067,11 +3084,12 @@ pub fn app() -> b::AppDef {{
                 let Some(source) = element.resource("source") else {
                     let source = element.expr("source")?;
                     return Some(format!(
-                        "b::image_url(c, rt::url(&{}), {}, {}, {}, b::Fit::{fit}, {template}, {aspect}, {covers})",
+                        "b::image_url(c, rt::url(&{}), {}, {}, {}, b::Fit::{fit}, {template}, {aspect}, {}, {covers})",
                         self.expr(source, at),
                         self.optional_length(element, "width"),
                         self.optional_length(element, "height"),
                         self.optional_length(element, "corner"),
+                        self.optional_length(element, "saturation"),
                     ));
                 };
                 // GPUI turns pictures of resources only (`check` warns of
@@ -3086,7 +3104,7 @@ pub fn app() -> b::AppDef {{
                     None => "None".into(),
                 };
                 format!(
-                    "b::image(c, {}, {}, {}, {}, {}, b::Fit::{fit}, {template}, {aspect}, {spin}, {covers})",
+                    "b::image(c, {}, {}, {}, {}, {}, b::Fit::{fit}, {template}, {aspect}, {}, {spin}, {covers})",
                     string(source),
                     match element.resource("dark_source") {
                         Some(dark) => format!("Some({})", string(dark)),
@@ -3095,6 +3113,7 @@ pub fn app() -> b::AppDef {{
                     self.optional_length(element, "width"),
                     self.optional_length(element, "height"),
                     self.optional_length(element, "corner"),
+                    self.optional_length(element, "saturation"),
                 )
             }
             "Skeleton" => {
@@ -3228,7 +3247,7 @@ pub fn app() -> b::AppDef {{
                 }
             }
             "IconButton" => format!(
-                "b::icon_button(c, {}, {}, b::IconButtonProps {{ label: {}, prominence: b::Prominence::{}, enabled: {}, height: {}, size: {}, style: {}, pick: {}, shortcut: {}, icon_progress: {}, badge_icon: {}, badge_visible: {} }}, {})",
+                "b::icon_button(c, {}, {}, b::IconButtonProps {{ label: {}, prominence: b::Prominence::{}, color: {}, enabled: {}, height: {}, size: {}, style: {}, pick: {}, shortcut: {}, icon_progress: {}, badge_icon: {}, badge_visible: {} }}, {})",
                 id(),
                 string(self.icon_name(element.icon("icon").unwrap_or("questionmark"))),
                 text("label"),
@@ -3236,6 +3255,10 @@ pub fn app() -> b::AppDef {{
                     Some("prominent") => "Prominent",
                     Some("plain") => "Plain",
                     _ => "Standard",
+                },
+                match element.keyword("color") {
+                    Some(color) => format!("Some({})", string(color)),
+                    None => "None".into(),
                 },
                 self.enabled(element),
                 self.optional_length(element, "height"),
@@ -3683,7 +3706,7 @@ pub fn app() -> b::AppDef {{
                     "None".into()
                 };
                 format!(
-                    "b::popover_button(c, {}, {}, {}, b::PopoverProps {{ presented: {presented}, dark: {}, style: {}, plain: {}, size: {} }}, || {})",
+                    "b::popover_button(c, {}, {}, {}, b::PopoverProps {{ presented: {presented}, dark: {}, style: {}, plain: {}, size: {}, shape: {}, height: {} }}, || {})",
                     id(),
                     text("label"),
                     self.icon(element.icon("icon")),
@@ -3695,6 +3718,8 @@ pub fn app() -> b::AppDef {{
                     self.surface_style("PopoverButton", element),
                     element.keyword("prominence") == Some("plain"),
                     self.optional_length(element, "font_size"),
+                    shape(),
+                    self.optional_length(element, "height"),
                     column(&element.children)
                 )
             }
@@ -4040,8 +4065,15 @@ pub fn app() -> b::AppDef {{
                         labels.join(", ")
                     )
                 };
+                let collapsed = match sidebar.field("collapsed") {
+                    Some(field) => format!(
+                        "Some({})",
+                        field_ref(self.session_index(&field.session), field.field)
+                    ),
+                    None => "None".into(),
+                };
                 format!(
-                    "b::split_view(c, {{ let c = &c.in_sidebar({selection_ref}); b::sidebar(c, {}, {}, {}, {}, {}) }}, b::detail(c, {title}, {}, {}))",
+                    "b::split_view(c, {collapsed}, {{ let c = &c.in_sidebar({selection_ref}); b::sidebar(c, {}, {}, {}, {}, {}) }}, b::detail(c, {title}, {collapsed}, {}, {}))",
                     self.optional_length(sidebar, "width"),
                     column(&part("SidebarHeader")),
                     column(&items),
@@ -4433,8 +4465,12 @@ pub fn app() -> b::AppDef {{
                 "Divider" => out.push_str("v.push(b::MenuEntry::Divider); "),
                 "MenuItem" => {
                     let at = Some(&child.source);
+                    let checked = match child.expr("checked") {
+                        Some(expr) => format!("Some({})", self.condition(expr)),
+                        None => "None".into(),
+                    };
                     out.push_str(&format!(
-                        "v.push(b::menu_item(c, {}, {}, {}, {}, {}, {}, {}, {})); ",
+                        "v.push(b::menu_item(c, {}, {}, {}, {}, {checked}, {}, {}, {}, {})); ",
                         string(child.id.as_deref().unwrap_or(&child.path)),
                         child
                             .text("label")

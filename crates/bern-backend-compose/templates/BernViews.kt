@@ -606,19 +606,34 @@ object BernKey {
 /// An icon and a title; with `fontSize` the icon is set at that size too.
 /// `iconOnly` shows the icon alone, the title its accessible name.
 @Composable
-fun BernLabel(title: String, icon: ImageVector?, style: TextStyle, fontSize: Float? = null, iconOnly: Boolean = false) {
+fun BernLabel(
+    title: String,
+    icon: ImageVector?,
+    style: TextStyle,
+    fontSize: Float? = null,
+    iconOnly: Boolean = false,
+    color: BernColor? = null,
+) {
     // The icon follows the text's size, as a symbol does, and so does the
     // room between them (0.6 of it, 4 to 12).
     val points = fontSize ?: style.fontSize.takeIf { it.isSp }?.value
     val iconModifier = if (points != null) Modifier.size(bernIconSize(points)) else Modifier
-    if (iconOnly && icon != null) {
-        Icon(icon, contentDescription = title, modifier = iconModifier)
-        return
+    val tintColor = color?.let { bernPalette().color(it) }
+    val body: @Composable () -> Unit = {
+        if (iconOnly && icon != null) {
+            Icon(icon, contentDescription = title, modifier = iconModifier)
+        } else {
+            val gap = points?.let { (it * 0.6f).coerceIn(4f, 12f).dp } ?: 8.dp
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(gap)) {
+                if (icon != null) Icon(icon, contentDescription = null, modifier = iconModifier)
+                Text(title, style = if (fontSize != null) style.copy(fontSize = fontSize.sp) else style)
+            }
+        }
     }
-    val gap = points?.let { (it * 0.6f).coerceIn(4f, 12f).dp } ?: 8.dp
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(gap)) {
-        if (icon != null) Icon(icon, contentDescription = null, modifier = iconModifier)
-        Text(title, style = if (fontSize != null) style.copy(fontSize = fontSize.sp) else style)
+    if (tintColor != null) {
+        CompositionLocalProvider(LocalContentColor provides tintColor) { body() }
+    } else {
+        body()
     }
 }
 
@@ -715,15 +730,24 @@ fun BernIconButton(
     iconProgress: Double? = null,
     badgeIcon: ImageVector? = null,
     badgeVisible: Boolean = true,
+    color: BernColor? = null,
     onClick: () -> Unit,
 ) {
     val iconModifier = if (iconSize != null) Modifier.size(bernIconSize(iconSize)) else Modifier
+    val tintColor = color?.let { bernPalette().color(it) }
     val glyph: @Composable () -> Unit = {
-        if (iconProgress == null && badgeIcon == null) {
-            Icon(icon ?: BernIcons.get(""), contentDescription = label, modifier = iconModifier)
+        val draw: @Composable () -> Unit = {
+            if (iconProgress == null && badgeIcon == null) {
+                Icon(icon ?: BernIcons.get(""), contentDescription = label, modifier = iconModifier)
+            } else {
+                BernIconGlyph(icon ?: BernIcons.get(""), label, iconSize?.let(::bernIconSize) ?: 24.dp,
+                    iconProgress, badgeIcon, badgeVisible)
+            }
+        }
+        if (tintColor != null) {
+            CompositionLocalProvider(LocalContentColor provides tintColor) { draw() }
         } else {
-            BernIconGlyph(icon ?: BernIcons.get(""), label, iconSize?.let(::bernIconSize) ?: 24.dp,
-                iconProgress, badgeIcon, badgeVisible)
+            draw()
         }
     }
     val content: @Composable RowScope.() -> Unit = { glyph() }
@@ -1537,6 +1561,7 @@ fun BernImage(
     oneSize: Boolean = false,
     covers: Boolean = false,
     maxSide: Dp? = null,
+    saturation: Float? = null,
 ) {
     val shown = if (dark != null && bernDark()) dark else name
     val url = remember(shown) { BernPictures.resource(shown) }
@@ -1545,7 +1570,7 @@ fun BernImage(
     } else {
         null
     }
-    BernImageURL(url, label, width, height, fit, corner, template, aspect, ratio, twice = oneSize, covers = covers, maxSide = maxSide)
+    BernImageURL(url, label, width, height, fit, corner, template, aspect, ratio, twice = oneSize, covers = covers, maxSide = maxSide, saturation = saturation)
 }
 
 /// The frame of a picture: its declared sizes, the other side by `ratio`
@@ -1709,12 +1734,32 @@ fun BernMenu(
 }
 
 @Composable
-fun BernMenuItem(label: String, icon: ImageVector?, enabled: Boolean, destructive: Boolean, onClick: () -> Unit) {
+fun BernMenuItem(
+    label: String,
+    icon: ImageVector?,
+    enabled: Boolean,
+    destructive: Boolean,
+    checked: Boolean? = null,
+    onClick: () -> Unit,
+) {
+    val leading: (@Composable () -> Unit)? = when {
+        icon != null -> { { Icon(icon, contentDescription = null) } }
+        checked == true -> { { Icon(BernIcons.get("checkmark"), contentDescription = null) } }
+        checked == false -> { { Spacer(Modifier.size(24.dp)) } }
+        else -> null
+    }
+    val trailing: (@Composable () -> Unit)? = if (icon != null && checked != null) {
+        if (checked) { { Icon(BernIcons.get("checkmark"), contentDescription = null) } }
+        else { { Spacer(Modifier.size(24.dp)) } }
+    } else {
+        null
+    }
     DropdownMenuItem(
         text = {
             Text(label, color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
         },
-        leadingIcon = icon?.let { { Icon(it, contentDescription = null) } },
+        leadingIcon = leading,
+        trailingIcon = trailing,
         enabled = enabled,
         onClick = onClick,
     )
@@ -1812,6 +1857,8 @@ fun BernSplitView(
     sidebarWidth: Dp = 280.dp,
     sidebarStyle: BernStyle? = null,
     detailStyle: BernStyle? = null,
+    collapsed: Boolean = false,
+    onCollapsed: ((Boolean) -> Unit)? = null,
     header: (@Composable () -> Unit)? = null,
     sidebar: @Composable (showDetail: () -> Unit) -> Unit,
     footer: (@Composable ColumnScope.() -> Unit)? = null,
@@ -1855,11 +1902,20 @@ fun BernSplitView(
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         if (maxWidth >= 600.dp) {
+            val toggle: (@Composable RowScope.() -> Unit)? = onCollapsed?.let { change ->
+                {
+                    IconButton(onClick = { change(!collapsed) }) {
+                        Icon(BernIcons.get("sidebar.left"), contentDescription = null)
+                    }
+                }
+            }
             // A detail without a title leaves the bar out, and its room.
-            BernChrome(title = title.ifEmpty { null })
+            BernChrome(title = title.ifEmpty { null }, leading = toggle)
             Row(Modifier.fillMaxSize()) {
-                Box(Modifier.width(if (rail) 96.dp else sidebarWidth).fillMaxHeight().then(sidebarBg)) { list {} }
-                VerticalDivider()
+                if (!collapsed) {
+                    Box(Modifier.width(if (rail) 96.dp else sidebarWidth).fillMaxHeight().then(sidebarBg)) { list {} }
+                    VerticalDivider()
+                }
                 Box(Modifier.weight(1f).fillMaxHeight().then(detailBg)) { detail() }
             }
         } else if (showingDetail) {

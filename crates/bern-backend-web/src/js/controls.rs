@@ -50,6 +50,12 @@ impl Generator<'_> {
                     ("icon", element.icon("icon").map(string)),
                     ("role", Self::keyword(element, "role")),
                     ("prominence", Self::keyword(element, "prominence")),
+                    (
+                        "color",
+                        (element.kind == "IconButton")
+                            .then(|| Self::keyword(element, "color"))
+                            .flatten(),
+                    ),
                     ("fontSize", element.number("font_size").map(number)),
                     ("iconProgress", self.value_prop(element, "icon_progress")),
                     ("badgeIcon", element.icon("badge_icon").map(string)),
@@ -762,6 +768,8 @@ impl Generator<'_> {
             ("icon", element.icon("icon").map(string)),
             ("prominence", Self::keyword(element, "prominence")),
             ("fontSize", element.number("font_size").map(number)),
+            ("shape", Self::keyword(element, "shape")),
+            ("height", self.length(element, "height")),
             ("presented", presented),
             (
                 "windowTheme",

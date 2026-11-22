@@ -1035,6 +1035,8 @@ pub struct Decor {
     /// stays inside, and the spring a radius that follows state changes
     /// with.
     pub blur: Option<(Num, f64, Option<Curve>)>,
+    /// `opacity`: 0..1, written or following state with `animate`.
+    pub opacity: Option<(Num, Option<Curve>)>,
     /// While true, motion is reduced everywhere.
     pub reduce_motion: Option<Get>,
     /// `idle_area`: a mouse resting over the element lets its window rest
@@ -1133,6 +1135,12 @@ pub fn Decorate(p: &Parent, ctx: &Ctx, decor: Decor, build: Build) {
                     .blur
                     .set((radius > 0.0).then_some((radius, corner)));
                 blurred.queue_draw();
+            });
+        }
+        if let Some((opacity, curve)) = &decor.opacity {
+            let layer = motion.layer("opacity");
+            bind_number(ctx, opacity, *curve, &motion, move |value| {
+                layer.opacity.set(value.clamp(0.0, 1.0));
             });
         }
         if let Some((radius, opacity, corner)) = decor.glow {

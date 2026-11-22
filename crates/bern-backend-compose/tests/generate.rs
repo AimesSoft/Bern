@@ -2206,3 +2206,122 @@ pub fn app(app: stage::Client, windows: AppWindows, #[session] draft: Draft) -> 
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn menu_checked_popover_shape_opacity_saturation_color_and_sidebar_collapsed_generate() {
+    let protocol = r#"
+#[bern::protocol(namespace = "controls", version = 1)]
+pub mod controls {
+    use bern::prelude::*;
+
+    #[value]
+    pub enum Section {
+        #[label(tr! { "en" => "Home" })]
+        Home,
+        #[label(tr! { "en" => "Library" })]
+        Library,
+    }
+
+    #[state]
+    pub struct State {
+        pub active: bool,
+        pub amount: f64,
+    }
+
+    #[commands]
+    pub trait Commands {
+        fn toggle(&mut self) -> Result<(), CommandError>;
+    }
+}
+"#;
+    let ui = r#"
+use bern::prelude::*;
+use controls_protocol::controls::{self, Section};
+
+#[bern::session]
+pub struct Draft {
+    pub tab: Section,
+    pub collapsed: bool,
+    pub picture: MediaSource,
+}
+
+#[component]
+pub fn app(app: controls::Client, windows: AppWindows, #[session] draft: Draft) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Stage" }, initial: open) {
+                SplitView {
+                    Sidebar(selection: draft.tab, collapsed: draft.collapsed) {
+                        SidebarItem(value: Section::Home, label: tr! { "en" => "Home" })
+                        SidebarItem(value: Section::Library, label: tr! { "en" => "Library" })
+                    }
+                    Detail {
+                        Column(opacity: app.amount, animate: smooth, tint: status.warning) {
+                            Menu(id: sort, label: tr! { "en" => "Sort" }) {
+                                MenuItem(id: opt, label: tr! { "en" => "Active" }, checked: app.active) => app.toggle()
+                            }
+                            PopoverButton(id: pop, label: tr! { "en" => "Filter" }, icon: "slider.horizontal.3", shape: capsule, height: 32) {
+                                Text(content: tr! { "en" => "Filter body" })
+                            }
+                            Label(title: tr! { "en" => "OK" }, icon: "checkmark.circle.fill", color: status.success)
+                            IconButton(id: fav, icon: "heart.fill", label: tr! { "en" => "Like" }, color: status.error) => app.toggle()
+                            Image(source: draft.picture, width: 120, height: 80, saturation: app.amount, animate: smooth)
+                            Marquee(duration: 5, opacity: 0.6) {
+                                Text(content: tr! { "en" => "Banner" })
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+"#;
+    let dir = std::env::temp_dir().join(format!(
+        "bern-compose-controls-sidebar-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    for (package, source) in [
+        ("controls-protocol", protocol),
+        ("controls-ui", ui),
+        ("controls-core", ""),
+    ] {
+        std::fs::create_dir_all(dir.join(package).join("src")).unwrap();
+        std::fs::write(
+            dir.join(package).join("Cargo.toml"),
+            format!("[package]\nname = \"{package}\"\n"),
+        )
+        .unwrap();
+        std::fs::write(dir.join(package).join("src/lib.rs"), source).unwrap();
+    }
+    std::fs::write(
+        dir.join("Bern.toml"),
+        "[app]\nid = \"controls\"\nbundle_id = \"dev.bern.controls\"\nversion = \"0.1.0\"\nname = { \"en\" = \"Controls\" }\n[languages]\nsupported = [\"en\"]\ndefault = \"en\"\n[protocol]\npackage = \"controls-protocol\"\nsource = \"controls-protocol/src/lib.rs\"\n[engine]\npackage = \"controls-core\"\ntype = \"controls_core::Engine\"\n[ui]\npackage = \"controls-ui\"\nsources = [\"controls-ui/src/lib.rs\"]\nroot = \"app\"\n[targets.android]\nplatform = \"android\"\n",
+    )
+    .unwrap();
+    let config = bern_compiler::config::load(&dir.join("Bern.toml")).unwrap();
+    let compiled = bern_compiler::compile(&config).unwrap();
+    let problems = ComposeAndroid.check(&compiled.app, &android(&config));
+    assert!(problems.is_empty(), "{problems:?}");
+    let kotlin =
+        bern_backend_compose::Generator::new(&compiled.app).generate("dev.bern.controls", 0);
+    for expected in [
+        "collapsed = session_Draft.collapsed",
+        "onCollapsed = { session_Draft.collapsed = it }",
+        ".bernOpacity((BernEngine.amount).toFloat(), BernMotion(0.45, 1.0))",
+        "checked = BernEngine.active",
+        "shape = BernShape(true, 32f.dp)",
+        "color = BernColor.Role(\"status.success\")",
+        "color = BernColor.Role(\"status.error\")",
+        "saturation = bernFloat((BernEngine.amount).toFloat(), BernMotion(0.45, 1.0))",
+    ] {
+        assert!(kotlin.contains(expected), "missing `{expected}`:\n{kotlin}");
+    }
+    assert_eq!(
+        kotlin.matches(".bernOpacity(").count(),
+        1,
+        "Marquee owns its opacity:\n{kotlin}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

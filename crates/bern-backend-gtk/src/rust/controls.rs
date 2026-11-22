@@ -73,7 +73,7 @@ impl Generator<'_> {
 
     pub(super) fn icon_button(&self, out: &mut Out, element: &Element) {
         out.line(format!(
-            "b::IconButton(p, c, b::IconButtonProps {{ id: {}, icon: {}, label: {}, enabled: {}, style: {}, pick: {}, paste: {}, font_size: {}, diameter: {}, prominence: {}, icon_progress: {}, badge_icon: {}, badge_visible: {} }}, {});",
+            "b::IconButton(p, c, b::IconButtonProps {{ id: {}, icon: {}, label: {}, enabled: {}, style: {}, pick: {}, paste: {}, font_size: {}, diameter: {}, prominence: {}, icon_progress: {}, badge_icon: {}, badge_visible: {}, color: {} }}, {});",
             self.id(element),
             string(element.icon("icon").unwrap_or("circle")),
             some(self.text_prop(element, "label")),
@@ -87,6 +87,7 @@ impl Generator<'_> {
             some(self.num(element, "icon_progress")),
             some(element.icon("badge_icon").map(string)),
             some(element.expr("badge_visible").map(|value| self.getter(value))),
+            Self::keyword(element, "color"),
             self.action(element),
         ));
         self.shortcut(
@@ -455,7 +456,7 @@ impl Generator<'_> {
         self.children(
             out,
             &format!(
-                "b::PopoverButton(p, c, b::PopoverButtonProps {{ id: {}, label: {}, icon: {}, presented: {}, window_theme: {}, style: {}, plain: {}, font_size: {} }}, ",
+                "b::PopoverButton(p, c, b::PopoverButtonProps {{ id: {}, label: {}, icon: {}, presented: {}, window_theme: {}, style: {}, plain: {}, font_size: {}, shape: {} }}, ",
                 self.id(element),
                 some(self.text_prop(element, "label")),
                 Self::icon(element, "icon"),
@@ -464,6 +465,7 @@ impl Generator<'_> {
                 self.style("PopoverButton", element),
                 element.keyword("prominence") == Some("plain"),
                 Self::number(element, "font_size"),
+                self.shape(element),
             ),
             &element.children,
             ");",

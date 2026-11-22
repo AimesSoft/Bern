@@ -101,6 +101,12 @@ impl Generator<'_> {
                     .expr("badge_visible")
                     .map(|value| self.getter(value)),
             ),
+            (
+                "color",
+                (kind == "IconButton")
+                    .then(|| Self::keyword(element, "color"))
+                    .flatten(),
+            ),
             ("menu", self.context_menu_def(element)),
             ("doubleTap", self.child_action(element, "DoubleTap")),
         ]);
@@ -785,6 +791,7 @@ impl Generator<'_> {
             (element.keyword("prominence") == Some("plain")).then(|| "true".to_string()),
         ));
         fields.push(("iconSize", Self::number(element, "font_size")));
+        fields.push(("shape", self.shape(element)));
         self.call(
             out,
             &format!("B::PopoverButton(p, c, {}, ", designated(&fields)),
@@ -920,6 +927,10 @@ impl Generator<'_> {
             ("icon", Self::icon(item, "icon")),
             ("role", Self::keyword(item, "role")),
             ("enabled", self.enabled(item)),
+            (
+                "checked",
+                item.expr("checked").map(|checked| self.getter(checked)),
+            ),
             ("action", self.action(item)),
             ("pick", self.field(item, "pick")),
             ("save", self.field(item, "save")),

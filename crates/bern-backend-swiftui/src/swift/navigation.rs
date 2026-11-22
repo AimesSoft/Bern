@@ -19,7 +19,14 @@ impl Generator<'_> {
             return;
         };
         let selection = self.field(sidebar, "selection").expect("selection field");
-        out.open("BernSplitView {");
+        if let Some(collapsed) = self.field(sidebar, "collapsed") {
+            out.open(format!(
+                "BernSplitView(collapsed: {}) {{",
+                self.binding_of(&collapsed)
+            ));
+        } else {
+            out.open("BernSplitView {");
+        }
         // Styled items draw their own selection: on iOS and tvOS the list
         // keeps none, and each row selects itself. The Mac's list still
         // selects, so the click that brings the window forward picks the

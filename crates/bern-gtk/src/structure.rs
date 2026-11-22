@@ -606,6 +606,11 @@ pub(crate) struct Entry {
     row: gtk::ListBoxRow,
 }
 
+enum SplitHost {
+    Navigation(adw::NavigationSplitView),
+    Overlay(adw::OverlaySplitView),
+}
+
 /// The items a sidebar shows now, as they mount and leave with `if`,
 /// `match` and `ForEach`.
 pub struct Registry {
@@ -613,7 +618,7 @@ pub struct Registry {
     version: crate::reactive::Version,
     selection: Field,
     ctx: Ctx,
-    showing_detail: RefCell<Option<adw::NavigationSplitView>>,
+    showing_detail: RefCell<Option<SplitHost>>,
 }
 
 impl Registry {
@@ -634,8 +639,12 @@ impl Registry {
 
     fn choose(&self, value: Value) {
         self.ctx.write(self.selection, value);
-        if let Some(split) = self.showing_detail.borrow().as_ref() {
-            split.set_show_content(true);
+        match self.showing_detail.borrow().as_ref() {
+            Some(SplitHost::Navigation(split)) => split.set_show_content(true),
+            Some(SplitHost::Overlay(overlay)) if overlay.is_collapsed() => {
+                overlay.set_show_sidebar(false);
+            }
+            _ => {}
         }
     }
 
@@ -781,6 +790,8 @@ pub struct SplitSpec {
     pub titled: Option<Get>,
     pub sidebar_style: Option<&'static crate::style::StyleDef>,
     pub detail_style: Option<&'static crate::style::StyleDef>,
+    /// `Sidebar(collapsed:)`: session flag binding whether the sidebar is collapsed.
+    pub collapsed: Option<Field>,
 }
 
 /// The sidebar and detail split of GNOME applications: a navigation
@@ -793,21 +804,36 @@ pub fn SplitView(p: &Parent, ctx: &Ctx, spec: SplitSpec, sidebar: Build, detail:
     if let Some(page) = ctx.page() {
         page.hide_header();
     }
-    let split = adw::NavigationSplitView::new();
-    split.set_vexpand(true);
-    split.set_hexpand(true);
+    let host_split = match spec.collapsed {
+        Some(_) => {
+            let overlay = adw::OverlaySplitView::new();
+            overlay.set_vexpand(true);
+            overlay.set_hexpand(true);
+            SplitHost::Overlay(overlay)
+        }
+        None => {
+            let split = adw::NavigationSplitView::new();
+            split.set_vexpand(true);
+            split.set_hexpand(true);
+            SplitHost::Navigation(split)
+        }
+    };
     let selection = spec.selection;
 
     // Sidebar
     let list = gtk::ListBox::new();
     list.add_css_class("navigation-sidebar");
     list.set_selection_mode(gtk::SelectionMode::Single);
+    let host_for_registry = match &host_split {
+        SplitHost::Navigation(split) => SplitHost::Navigation(split.clone()),
+        SplitHost::Overlay(overlay) => SplitHost::Overlay(overlay.clone()),
+    };
     let registry = Rc::new(Registry {
         entries: RefCell::new(Vec::new()),
         version: crate::reactive::Version::new(),
         selection,
         ctx: ctx.clone(),
-        showing_detail: RefCell::new(Some(split.clone())),
+        showing_detail: RefCell::new(Some(host_for_registry)),
     });
     sidebar(
         &Parent::of_list(&list),
@@ -875,8 +901,20 @@ pub fn SplitView(p: &Parent, ctx: &Ctx, spec: SplitSpec, sidebar: Build, detail:
             }
         });
     }
-    let activated = split.clone();
-    list.connect_row_activated(move |_, _| activated.set_show_content(true));
+    match &host_split {
+        SplitHost::Navigation(split) => {
+            let activated = split.clone();
+            list.connect_row_activated(move |_, _| activated.set_show_content(true));
+        }
+        SplitHost::Overlay(overlay) => {
+            let activated = overlay.clone();
+            list.connect_row_activated(move |_, _| {
+                if activated.is_collapsed() {
+                    activated.set_show_sidebar(false);
+                }
+            });
+        }
+    }
 
     let sidebar_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
     if let Some((search, submit)) = spec.search {
@@ -924,19 +962,35 @@ pub fn SplitView(p: &Parent, ctx: &Ctx, spec: SplitSpec, sidebar: Build, detail:
         crate::style::pane_surface(style, &sidebar_view);
     }
     ctx.win().chrome_view(&sidebar_view);
-    let sidebar_page = adw::NavigationPage::new(&sidebar_view, "");
     let name_key = host().def.name;
-    let titled = sidebar_page.clone();
-    effect(move || {
-        let name = tr(name_key);
-        app_title.set_title(&name);
-        titled.set_title(&name);
-    });
-    split.set_sidebar(Some(&sidebar_page));
-    if let Some(width) = spec.width {
-        split.set_sidebar_width_unit(adw::LengthUnit::Px);
-        split.set_min_sidebar_width(width);
-        split.set_max_sidebar_width(width);
+    match &host_split {
+        SplitHost::Navigation(split) => {
+            let sidebar_page = adw::NavigationPage::new(&sidebar_view, "");
+            let titled = sidebar_page.clone();
+            effect(move || {
+                let name = tr(name_key);
+                app_title.set_title(&name);
+                titled.set_title(&name);
+            });
+            split.set_sidebar(Some(&sidebar_page));
+            if let Some(width) = spec.width {
+                split.set_sidebar_width_unit(adw::LengthUnit::Px);
+                split.set_min_sidebar_width(width);
+                split.set_max_sidebar_width(width);
+            }
+        }
+        SplitHost::Overlay(overlay) => {
+            effect(move || {
+                let name = tr(name_key);
+                app_title.set_title(&name);
+            });
+            overlay.set_sidebar(Some(&sidebar_view));
+            if let Some(width) = spec.width {
+                overlay.set_sidebar_width_unit(adw::LengthUnit::Px);
+                overlay.set_min_sidebar_width(width);
+                overlay.set_max_sidebar_width(width);
+            }
+        }
     }
 
     // Detail
@@ -975,25 +1029,97 @@ pub fn SplitView(p: &Parent, ctx: &Ctx, spec: SplitSpec, sidebar: Build, detail:
         crate::style::pane_surface(style, &detail_view);
     }
     ctx.win().chrome_view(&detail_view);
-    let detail_page = adw::NavigationPage::new(&detail_view, "");
-    let titled = detail_page.clone();
-    let shown_page = Rc::clone(&page);
-    let fallback = Rc::clone(&selected_label);
-    effect(move || {
-        shown_page.version.track();
-        titled.set_title(&shown_page.title().unwrap_or_else(|| fallback()));
-    });
-    split.set_content(Some(&detail_page));
+    let root_widget: gtk::Widget = match &host_split {
+        SplitHost::Navigation(split) => {
+            let detail_page = adw::NavigationPage::new(&detail_view, "");
+            let titled = detail_page.clone();
+            let shown_page = Rc::clone(&page);
+            let fallback = Rc::clone(&selected_label);
+            effect(move || {
+                shown_page.version.track();
+                titled.set_title(&shown_page.title().unwrap_or_else(|| fallback()));
+            });
+            split.set_content(Some(&detail_page));
+            // Narrow windows show one pane at a time.
+            let breakpoint = adw::Breakpoint::new(adw::BreakpointCondition::new_length(
+                adw::BreakpointConditionLengthType::MaxWidth,
+                400.0,
+                adw::LengthUnit::Sp,
+            ));
+            breakpoint.add_setter(split, "collapsed", Some(&true.to_value()));
+            ctx.win().window.add_breakpoint(breakpoint);
+            split.clone().upcast()
+        }
+        SplitHost::Overlay(overlay) => {
+            let toggle = gtk::ToggleButton::new();
+            toggle.set_icon_name("sidebar-show-symbolic");
+            toggle.add_css_class("flat");
+            toggle.update_property(&[gtk::accessible::Property::Label("Sidebar")]);
+            overlay
+                .bind_property("show-sidebar", &toggle, "active")
+                .sync_create()
+                .bidirectional()
+                .build();
+            header.pack_start(&toggle);
+            overlay.set_content(Some(&detail_view));
+            let breakpoint = adw::Breakpoint::new(adw::BreakpointCondition::new_length(
+                adw::BreakpointConditionLengthType::MaxWidth,
+                400.0,
+                adw::LengthUnit::Sp,
+            ));
+            breakpoint.add_setter(overlay, "collapsed", Some(&true.to_value()));
+            ctx.win().window.add_breakpoint(breakpoint);
+            if let Some(collapsed_field) = spec.collapsed {
+                let updating_pane = Rc::new(std::cell::Cell::new(false));
+                let initial_open = !crate::value::truthy(&untrack(|| ctx.read(collapsed_field)));
+                overlay.set_show_sidebar(initial_open);
+                {
+                    let overlay = overlay.clone();
+                    let guard = Rc::clone(&updating_pane);
+                    let at = ctx.clone();
+                    effect(move || {
+                        let want_open = !crate::value::truthy(&at.read(collapsed_field));
+                        if !overlay.is_collapsed() && overlay.shows_sidebar() != want_open {
+                            guard.set(true);
+                            overlay.set_show_sidebar(want_open);
+                            guard.set(false);
+                        }
+                    });
+                }
+                {
+                    let guard = Rc::clone(&updating_pane);
+                    let at = ctx.clone();
+                    overlay.connect_show_sidebar_notify(move |ov| {
+                        if guard.get() || ov.is_collapsed() {
+                            return;
+                        }
+                        let want_collapsed = !ov.shows_sidebar();
+                        if crate::value::truthy(&at.peek(collapsed_field)) != want_collapsed {
+                            guard.set(true);
+                            at.write(collapsed_field, Value::Bool(want_collapsed));
+                            guard.set(false);
+                        }
+                    });
+                }
+                {
+                    let guard = Rc::clone(&updating_pane);
+                    let at = ctx.clone();
+                    overlay.connect_collapsed_notify(move |ov| {
+                        if !ov.is_collapsed() {
+                            let want_open = !crate::value::truthy(&at.peek(collapsed_field));
+                            if ov.shows_sidebar() != want_open {
+                                guard.set(true);
+                                ov.set_show_sidebar(want_open);
+                                guard.set(false);
+                            }
+                        }
+                    });
+                }
+            }
+            overlay.clone().upcast()
+        }
+    };
     detail(&Parent::of_box(&content), &ctx.with_page(page));
-
-    // Narrow windows show one pane at a time.
-    let breakpoint = adw::Breakpoint::new(adw::BreakpointCondition::new_length(
-        adw::BreakpointConditionLengthType::MaxWidth,
-        400.0,
-        adw::LengthUnit::Sp,
-    ));
-    breakpoint.add_setter(&split, "collapsed", Some(&true.to_value()));
-    ctx.win().window.add_breakpoint(breakpoint);
 
     if let Some(id) = spec.id {
         let names = Rc::clone(&registry);
@@ -1029,7 +1155,7 @@ pub fn SplitView(p: &Parent, ctx: &Ctx, spec: SplitSpec, sidebar: Build, detail:
             },
         );
     }
-    p.add(&split);
+    p.add(&root_widget);
 }
 
 /// Push navigation over a typed route path. The root content stays

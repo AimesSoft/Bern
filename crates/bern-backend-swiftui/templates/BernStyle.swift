@@ -4412,16 +4412,34 @@ private struct BernColumnFollowsInert: ViewModifier {
 /// does not push the covering page's toolbar items inward; the previous
 /// column visibility returns when the cover leaves.
 struct BernSplitView<Sidebar: View, Detail: View>: View {
+    var collapsed: Binding<Bool>? = nil
     @ViewBuilder let sidebar: () -> Sidebar
     @ViewBuilder let detail: () -> Detail
+    @State private var visibility: NavigationSplitViewVisibility
     #if os(macOS)
     @Environment(\.bernWindowCovered) private var windowCovered
     @Environment(\.bernInert) private var inert
-    @State private var visibility: NavigationSplitViewVisibility = .all
-    @State private var savedVisibility: NavigationSplitViewVisibility = .all
+    @State private var savedVisibility: NavigationSplitViewVisibility
     @State private var holding = false
     private var covered: Bool { windowCovered || inert }
+    #elseif os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
+
+    init(
+        collapsed: Binding<Bool>? = nil,
+        @ViewBuilder sidebar: @escaping () -> Sidebar,
+        @ViewBuilder detail: @escaping () -> Detail
+    ) {
+        self.collapsed = collapsed
+        self.sidebar = sidebar
+        self.detail = detail
+        let initial: NavigationSplitViewVisibility = collapsed?.wrappedValue == true ? .detailOnly : .all
+        _visibility = State(initialValue: initial)
+        #if os(macOS)
+        _savedVisibility = State(initialValue: initial)
+        #endif
+    }
 
     var body: some View {
         #if os(macOS)
@@ -4434,6 +4452,22 @@ struct BernSplitView<Sidebar: View, Detail: View>: View {
                 }
             )
             .opacity(holding ? 0 : 1)
+            .onChange(of: collapsed?.wrappedValue) { _, want in
+                guard let want else { return }
+                let target: NavigationSplitViewVisibility = want ? .detailOnly : .all
+                if covered {
+                    savedVisibility = target
+                } else if visibility != target {
+                    visibility = target
+                }
+            }
+            .onChange(of: visibility) { _, now in
+                guard !covered, let collapsed else { return }
+                let isCollapsed = (now == .detailOnly)
+                if collapsed.wrappedValue != isCollapsed {
+                    collapsed.wrappedValue = isCollapsed
+                }
+            }
             BernSplitHold(
                 covered: covered,
                 onHold: { active in holding = active },
@@ -4456,7 +4490,24 @@ struct BernSplitView<Sidebar: View, Detail: View>: View {
             .ignoresSafeArea(.container)
         }
         #else
-        NavigationSplitView(sidebar: sidebar, detail: detail)
+        NavigationSplitView(columnVisibility: $visibility, sidebar: sidebar, detail: detail)
+            .onChange(of: collapsed?.wrappedValue) { _, want in
+                guard let want else { return }
+                let target: NavigationSplitViewVisibility = want ? .detailOnly : .all
+                if visibility != target {
+                    visibility = target
+                }
+            }
+            .onChange(of: visibility) { _, now in
+                guard let collapsed else { return }
+                #if os(iOS)
+                guard sizeClass == .regular else { return }
+                #endif
+                let isCollapsed = (now == .detailOnly)
+                if collapsed.wrappedValue != isCollapsed {
+                    collapsed.wrappedValue = isCollapsed
+                }
+            }
         #endif
     }
 }

@@ -59,6 +59,7 @@ impl Generator<'_> {
                     "detailStyle",
                     self.style("Detail", detail.keyword("variant"))
                 ),
+                ("collapsed", self.field(sidebar, "collapsed")),
             ])
         ));
         // A header that only names the window is left out: the title bar

@@ -2041,3 +2041,128 @@ fn pointer_events_slider_hover_and_player_state_reach_the_runtime() {
         String::from_utf8_lossy(&result.stderr)
     );
 }
+
+#[test]
+fn menu_checked_popover_shape_opacity_saturation_color_and_sidebar_collapsed_generate() {
+    let protocol = r#"
+#[bern::protocol(namespace = "controls", version = 1)]
+pub mod controls {
+    use bern::prelude::*;
+
+    #[value]
+    pub enum Section {
+        #[label(tr! { "en" => "Home" })]
+        Home,
+        #[label(tr! { "en" => "Library" })]
+        Library,
+    }
+
+    #[state]
+    pub struct State {
+        pub active: bool,
+        pub amount: f64,
+    }
+
+    #[commands]
+    pub trait Commands {
+        fn toggle(&mut self) -> Result<(), CommandError>;
+    }
+}
+"#;
+    let ui = r#"
+use bern::prelude::*;
+use controls_protocol::controls::{self, Section};
+
+#[bern::session]
+pub struct Draft {
+    pub tab: Section,
+    pub collapsed: bool,
+    pub picture: MediaSource,
+}
+
+#[component]
+pub fn app(app: controls::Client, windows: AppWindows, #[session] draft: Draft) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Stage" }, initial: open) {
+                SplitView {
+                    Sidebar(selection: draft.tab, collapsed: draft.collapsed) {
+                        SidebarItem(value: Section::Home, label: tr! { "en" => "Home" })
+                        SidebarItem(value: Section::Library, label: tr! { "en" => "Library" })
+                    }
+                    Detail {
+                        Column(opacity: app.amount, animate: smooth, tint: status.warning) {
+                            Menu(id: sort, label: tr! { "en" => "Sort" }) {
+                                MenuItem(id: opt, label: tr! { "en" => "Active" }, checked: app.active) => app.toggle()
+                            }
+                            PopoverButton(id: pop, label: tr! { "en" => "Filter" }, icon: "slider.horizontal.3", shape: capsule, height: 32) {
+                                Text(content: tr! { "en" => "Filter body" })
+                            }
+                            Label(title: tr! { "en" => "OK" }, icon: "checkmark.circle.fill", color: status.success)
+                            IconButton(id: fav, icon: "heart.fill", label: tr! { "en" => "Like" }, color: status.error) => app.toggle()
+                            Image(source: draft.picture, width: 120, height: 80, saturation: app.amount, animate: smooth)
+                            Marquee(duration: 5, opacity: 0.6) {
+                                Text(content: tr! { "en" => "Banner" })
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+"#;
+    let root = workspace();
+    let dir = root.join("target/bern-test/gtk-controls-sidebar-project");
+    let _ = std::fs::remove_dir_all(&dir);
+    for (package, source) in [
+        ("controls-protocol", protocol),
+        ("controls-ui", ui),
+        ("controls-core", ""),
+    ] {
+        std::fs::create_dir_all(dir.join(package).join("src")).unwrap();
+        std::fs::write(
+            dir.join(package).join("Cargo.toml"),
+            format!("[package]\nname = \"{package}\"\n"),
+        )
+        .unwrap();
+        std::fs::write(dir.join(package).join("src/lib.rs"), source).unwrap();
+    }
+    std::fs::write(
+        dir.join("Bern.toml"),
+        "[app]\nid = \"controls\"\nbundle_id = \"dev.bern.controls\"\nversion = \"0.1.0\"\nname = { \"en\" = \"Controls\" }\n[languages]\nsupported = [\"en\"]\ndefault = \"en\"\n[protocol]\npackage = \"controls-protocol\"\nsource = \"controls-protocol/src/lib.rs\"\n[engine]\npackage = \"controls-core\"\ntype = \"controls_core::Engine\"\n[ui]\npackage = \"controls-ui\"\nsources = [\"controls-ui/src/lib.rs\"]\nroot = \"app\"\n[targets.linux]\nplatform = \"linux\"\n",
+    )
+    .unwrap();
+    let config = bern_compiler::config::load(&dir.join("Bern.toml")).unwrap();
+    let compiled = bern_compiler::compile(&config).unwrap();
+    let problems = GtkLinux.check(&compiled.app, &linux_target(&config));
+    assert!(problems.is_empty(), "{problems:?}");
+    let output = root.join("target/bern-test/gtk-controls-sidebar");
+    let _ = std::fs::remove_dir_all(&output);
+    let context = stage_context(&config, &compiled, &output);
+    for file in GtkLinux.generate(&compiled.app, &context).unwrap() {
+        let path = output.join(&file.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, &file.contents).unwrap();
+    }
+    let generated = std::fs::read_to_string(output.join("app/src/ui.rs")).unwrap();
+    for expected in [
+        "collapsed: Some(b::Field { session: 0, field: 1 })",
+        "checked: Some(b::get(",
+        "shape: b::Shape { capsule: true, height: Some(b::Num::Fixed(32.0)) }",
+        "color: Some(\"status.success\")",
+        "color: Some(\"status.error\")",
+        "saturation: Some(b::Num::Bound(",
+        "opacity: Some((b::Num::Bound(",
+    ] {
+        assert!(
+            generated.contains(expected),
+            "missing `{expected}`:\n{generated}"
+        );
+    }
+    assert_eq!(
+        generated.matches("opacity: Some((b::Num::").count(),
+        1,
+        "Marquee owns its opacity:\n{generated}"
+    );
+}

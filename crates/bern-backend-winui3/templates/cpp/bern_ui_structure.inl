@@ -625,6 +625,8 @@ struct SplitViewProps {
     Get titled;
     StyleDef const* sidebarStyle = nullptr;
     StyleDef const* detailStyle = nullptr;
+    /// `Sidebar(collapsed:)`: session flag tracking whether the pane is collapsed.
+    std::optional<Field> collapsed;
 };
 
 /// The first element under `node` (itself included) that `pick` accepts,
@@ -859,9 +861,65 @@ inline void SplitView(Parent const& p, Ctx const& ctx, SplitViewProps props, Bui
         for (auto part : {view.PaneHeader(), view.PaneFooter()})
             if (auto element = part.try_as<xaml::UIElement>()) element.Visibility(shown);
     };
-    view.PaneOpening([parts](auto&&, auto&&) { parts(true); });
-    view.PaneClosing([parts](auto&&, auto&&) { parts(false); });
-    view.Loaded([parts](IInspectable const& sender, auto&&) { parts(sender.as<controls::NavigationView>().IsPaneOpen()); });
+    auto updatingPane = std::make_shared<bool>(false);
+    auto recordingPane = std::make_shared<bool>(false);
+    auto collapsed = props.collapsed;
+    auto syncOpen = [weakView = winrt::make_weak(view), updatingPane, parts](bool open) {
+        auto view = weakView.get();
+        if (!view) return;
+        if (view.IsPaneOpen() != open) {
+            *updatingPane = true;
+            view.IsPaneOpen(open);
+            *updatingPane = false;
+        }
+        parts(open);
+    };
+    if (collapsed) {
+        bool wantOpen = !Reactive::Untrack([&] { return R::Truthy(ctx.Read(*collapsed)); });
+        syncOpen(wantOpen);
+        Reactive::Run([ctx, collapsed, syncOpen, recordingPane] {
+            bool open = !R::Truthy(ctx.Read(*collapsed));
+            if (*recordingPane) return;
+            Reactive::Untrack([&] {
+                syncOpen(open);
+                return 0;
+            });
+        });
+    }
+    auto recordPane = [weakView = winrt::make_weak(view), updatingPane, recordingPane, collapsed, ctx](bool open) {
+        if (!collapsed || *updatingPane) return;
+        auto view = weakView.get();
+        if (!view) return;
+        // Only persist wide-window toggles; automatic narrow-window folding leaves the user's preference intact.
+        double width = view.ActualWidth();
+        if (width <= 0 || width < view.ExpandedModeThresholdWidth()) return;
+        bool wantCollapsed = !open;
+        if (R::Truthy(ctx.Peek(*collapsed)) != wantCollapsed) {
+            *recordingPane = true;
+            ctx.Write(*collapsed, Value::Bool(wantCollapsed));
+            *recordingPane = false;
+        }
+    };
+    auto restoreWide = [weakView = winrt::make_weak(view), collapsed, ctx, syncOpen, parts] {
+        auto view = weakView.get();
+        if (!view) return;
+        if (collapsed && view.DisplayMode() == controls::NavigationViewDisplayMode::Expanded) {
+            bool wantOpen = !R::Truthy(ctx.Peek(*collapsed));
+            syncOpen(wantOpen);
+        } else {
+            parts(view.IsPaneOpen());
+        }
+    };
+    view.PaneOpening([parts, recordPane](auto&&, auto&&) {
+        parts(true);
+        recordPane(true);
+    });
+    view.PaneClosing([parts, recordPane](auto&&, auto&&) {
+        parts(false);
+        recordPane(false);
+    });
+    view.DisplayModeChanged([restoreWide](auto&&, auto&&) { restoreWide(); });
+    view.Loaded([restoreWide](auto&&, auto&&) { restoreWide(); });
 
     Reactive::Run([registry, ctx, selection] {
         registry->version.Track();

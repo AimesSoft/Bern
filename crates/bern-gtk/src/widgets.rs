@@ -678,6 +678,7 @@ pub struct LabelProps {
     pub style: Option<&'static str>,
     /// The size of the title and icon in points.
     pub font_size: Option<f64>,
+    pub color: Option<&'static str>,
     /// Only the icon shows; the title names it for assistive technology.
     pub icon_only: bool,
 }
@@ -695,6 +696,9 @@ pub fn Label(p: &Parent, ctx: &Ctx, props: LabelProps) {
     if props.icon_only {
         // An image's role is already `img`.
         let image = icon(props.icon.unwrap_or("circle"));
+        if let Some(role) = props.color {
+            crate::theme::apply_role_color(image.upcast_ref(), role);
+        }
         if let Some(title) = title {
             let named = image.clone();
             effect(move || {
@@ -710,6 +714,9 @@ pub fn Label(p: &Parent, ctx: &Ctx, props: LabelProps) {
         let row = adw::ActionRow::new();
         if let Some(name) = props.icon {
             row.add_prefix(&icon(name));
+        }
+        if let Some(role) = props.color {
+            crate::theme::apply_role_color(row.upcast_ref(), role);
         }
         if let Some(title) = title {
             let shown = row.clone();
@@ -732,6 +739,9 @@ pub fn Label(p: &Parent, ctx: &Ctx, props: LabelProps) {
         bind_label(&label, title);
     }
     container.append(&label);
+    if let Some(role) = props.color {
+        crate::theme::apply_role_color(container.upcast_ref(), role);
+    }
     p.add(&container);
 }
 
@@ -884,6 +894,7 @@ pub struct IconButtonProps {
     pub icon_progress: Option<Num>,
     pub badge_icon: Option<&'static str>,
     pub badge_visible: Option<Get>,
+    pub color: Option<&'static str>,
 }
 
 #[allow(non_snake_case)]
@@ -922,6 +933,9 @@ pub fn IconButton(p: &Parent, ctx: &Ctx, props: IconButtonProps, action: Option<
             let side = value.round().max(0.0) as i32;
             sized.set_size_request(side, side);
         });
+    }
+    if let Some(role) = props.color {
+        crate::theme::apply_role_color(button.upcast_ref(), role);
     }
     let label = props.label.as_ref().map(|label| bound_text(ctx, label));
     if let Some(label) = label.clone() {
@@ -4449,6 +4463,8 @@ pub struct ImageProps {
     pub aspect: Option<f64>,
     /// Upper bound in points on the longer side needed when decoded.
     pub decode_max: Option<f64>,
+    /// Color saturation from 0 (grayscale) to 1 (full color).
+    pub saturation: Option<Num>,
 }
 
 /// The content fit of `fit`.
@@ -4467,6 +4483,7 @@ pub(crate) struct Sizing<'a> {
     pub(crate) animate: Option<Curve>,
     pub(crate) corner: &'a Option<Num>,
     pub(crate) aspect: Option<f64>,
+    pub(crate) saturation: &'a Option<Num>,
 }
 
 /// A picture of a declared size and shape, holding `picture`: with one
@@ -4486,8 +4503,15 @@ pub(crate) fn framed(
         animate,
         corner,
         aspect,
+        saturation,
     } = sizing;
     let frame = crate::picture::Frame::new(picture, 0, 0);
+    if let Some(saturation) = saturation {
+        let shown = frame.clone();
+        bind_number(ctx, saturation, animate, &frame, move |value| {
+            shown.set_saturation(value);
+        });
+    }
     let sides: Rc<Cell<(Option<f64>, Option<f64>)>> = Rc::new(Cell::new((None, None)));
     let resize: Rc<dyn Fn()> = {
         let frame = frame.clone();
@@ -4601,6 +4625,7 @@ pub fn Image(p: &Parent, ctx: &Ctx, props: ImageProps) {
             animate: props.animate,
             corner: &props.corner,
             aspect: props.aspect,
+            saturation: &props.saturation,
         },
         Rc::new(Cell::new(ratio)),
     );
@@ -5159,6 +5184,7 @@ pub struct MenuItem {
     pub icon: Option<&'static str>,
     pub role: Option<&'static str>,
     pub enabled: Option<Get>,
+    pub checked: Option<Get>,
     pub action: Option<Act>,
     pub pick: Option<crate::features::Pick>,
     /// `paste:`: the clipboard's text goes into this draft before the
@@ -5223,11 +5249,26 @@ pub fn Menu(p: &Parent, ctx: &Ctx, props: MenuProps, items: Vec<Option<MenuItem>
             continue;
         };
         let name = format!("i{index}");
-        let action = gio::SimpleAction::new(&name, None);
+        let checked = bound_enabled(ctx, &item.checked);
+        let action = match &checked {
+            Some(_) => gio::SimpleAction::new_stateful(&name, None, &false.to_variant()),
+            None => gio::SimpleAction::new(&name, None),
+        };
         let (run, set_file) =
             crate::features::picking(ctx, item.pick.clone(), bound_action(ctx, &item.action));
         let run = crate::features::pasting(ctx, item.paste, run);
-        if let Some(run) = run.clone() {
+        if let Some(checked) = checked.clone() {
+            let shown = action.clone();
+            let check_after = Rc::clone(&checked);
+            effect(move || shown.set_state(&checked().to_variant()));
+            let run_act = run.clone();
+            action.connect_activate(move |act, _| {
+                if let Some(run) = &run_act {
+                    run();
+                }
+                act.set_state(&crate::reactive::untrack(&*check_after).to_variant());
+            });
+        } else if let Some(run) = run.clone() {
             action.connect_activate(move |_, _| run());
         }
         let enabled = bound_enabled(ctx, &item.enabled);
@@ -5241,6 +5282,18 @@ pub fn Menu(p: &Parent, ctx: &Ctx, props: MenuProps, items: Vec<Option<MenuItem>
             .as_ref()
             .map(|label| bound_text(ctx, label))
             .unwrap_or_else(|| Rc::new(String::new));
+        let value = checked.map(|checked| {
+            Rc::new(move || {
+                Some(
+                    if crate::reactive::untrack(&*checked) {
+                        "checked"
+                    } else {
+                        "unchecked"
+                    }
+                    .to_string(),
+                )
+            }) as Rc<dyn Fn() -> Option<String>>
+        });
         controls::register(
             ctx,
             item.id,
@@ -5251,6 +5304,7 @@ pub fn Menu(p: &Parent, ctx: &Ctx, props: MenuProps, items: Vec<Option<MenuItem>
                 activate: run,
                 set_file,
                 file_kinds: item.pick.map(|pick| pick.kinds),
+                value,
                 ..Actions::default()
             },
         );

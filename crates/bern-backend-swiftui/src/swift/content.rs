@@ -235,6 +235,12 @@ impl Generator<'_> {
             out.line(".labelStyle(.iconOnly)");
         }
         self.font(out, element);
+        if let Some(role) = element.keyword("color") {
+            out.line(format!(
+                ".foregroundStyle(BernColor.role({}).color)",
+                string(role)
+            ));
+        }
     }
 
     pub(super) fn image(&self, out: &mut Out, element: &Element) {
@@ -313,6 +319,16 @@ impl Generator<'_> {
                 .map(double)
                 .unwrap_or_else(|| "nil".into()),
         ));
+        if let Some(saturation) = element.expr("saturation") {
+            let value = format!("min(max(Double({}), 0), 1)", self.expr(saturation));
+            out.line(format!(".saturation({value})"));
+            if let Some(token) = element.keyword("animate") {
+                out.line(format!(
+                    ".animation({}.animation, value: {value})",
+                    crate::style::motion(self.app, token)
+                ));
+            }
+        }
         if let Some(corner) = self.length(element, "corner") {
             out.line(format!(
                 ".clipShape(SwiftUI.RoundedRectangle(cornerRadius: {corner}, style: .continuous))"
