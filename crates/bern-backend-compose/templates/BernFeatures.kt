@@ -361,7 +361,12 @@ fun BernThemeChoice(accent: BernColor?, appearance: String?) {
 /// the primary modifier off Apple systems. On a television the remote's
 /// Back stands for `escape` and its Play/Pause for `space`, as on tvOS.
 object BernShortcuts {
-    private class Entry(val shortcut: String, val action: () -> Unit, val active: () -> Boolean)
+    private class Entry(
+        val shortcut: String,
+        val action: () -> Unit,
+        val active: () -> Boolean,
+        val quiet: Boolean = false,
+    )
 
     private val entries = LinkedHashMap<Any, Entry>()
 
@@ -369,8 +374,14 @@ object BernShortcuts {
     /// shortcut's too, so the system does not go back as well.
     private var tookBack = false
 
-    fun register(token: Any, shortcut: String, action: () -> Unit, active: () -> Boolean = { true }) {
-        entries[token] = Entry(shortcut, action, active)
+    fun register(
+        token: Any,
+        shortcut: String,
+        action: () -> Unit,
+        active: () -> Boolean = { true },
+        quiet: Boolean = false,
+    ) {
+        entries[token] = Entry(shortcut, action, active, quiet)
     }
 
     fun remove(token: Any) {
@@ -378,12 +389,36 @@ object BernShortcuts {
     }
 
     /// Runs the action whose shortcut `event` presses; whether one did.
-    /// Counts every key pressed in the app, for `window.idle`.
+    /// Counts every non-quiet key pressed in the app, for `window.idle`.
     var keys by mutableLongStateOf(0L)
         private set
 
+    private fun modifierName(code: Int): String? = when (code) {
+        android.view.KeyEvent.KEYCODE_CTRL_LEFT,
+        android.view.KeyEvent.KEYCODE_CTRL_RIGHT,
+        android.view.KeyEvent.KEYCODE_META_LEFT,
+        android.view.KeyEvent.KEYCODE_META_RIGHT -> "cmd"
+        android.view.KeyEvent.KEYCODE_ALT_LEFT,
+        android.view.KeyEvent.KEYCODE_ALT_RIGHT -> "alt"
+        android.view.KeyEvent.KEYCODE_SHIFT_LEFT,
+        android.view.KeyEvent.KEYCODE_SHIFT_RIGHT -> "shift"
+        else -> null
+    }
+
+    private fun isQuietModifier(code: Int): Boolean {
+        val mod = modifierName(code) ?: return false
+        return entries.values.any { entry ->
+            if (!entry.quiet || !entry.active()) return@any false
+            val parts = entry.shortcut.replace("ctrl+", "cmd+").replace("cmd+cmd+", "cmd+").split("+")
+            parts.size > 1 && mod in parts.dropLast(1)
+        }
+    }
+
     fun pressed(event: android.view.KeyEvent) {
-        if (event.action == android.view.KeyEvent.ACTION_DOWN) keys += 1
+        if (event.action == android.view.KeyEvent.ACTION_DOWN) {
+            if (recorder == null && isQuietModifier(event.keyCode)) return
+            keys += 1
+        }
     }
 
     /// Whether `event` is an arrow of the keyboard or a remote's pad.
@@ -402,7 +437,7 @@ object BernShortcuts {
     /// has not closed yet.
     fun justTookBack() = android.os.SystemClock.uptimeMillis() - backTakenAt < 500
 
-    fun handle(event: KeyEvent): Boolean {
+    fun handle(event: KeyEvent, notifyIdle: Boolean = false): Boolean {
         val code = event.nativeKeyEvent.keyCode
         val back = code == android.view.KeyEvent.KEYCODE_BACK
         if (back && event.type == KeyEventType.KeyUp && tookBack) {
@@ -410,10 +445,13 @@ object BernShortcuts {
             return true
         }
         recorder?.let { record ->
-            if (event.type == KeyEventType.KeyDown) recorded(event, code)?.let { keys ->
-                recorder = null
-                if (back) tookBack = true
-                record(if (keys == "\u0000") null else keys)
+            if (event.type == KeyEventType.KeyDown) {
+                if (notifyIdle) keys += 1
+                recorded(event, code)?.let { recordedKeys ->
+                    recorder = null
+                    if (back) tookBack = true
+                    record(if (recordedKeys == "\u0000") null else recordedKeys)
+                }
             }
             return true
         }
@@ -434,6 +472,8 @@ object BernShortcuts {
         val entry = entries.values.lastOrNull {
             it.shortcut.replace("ctrl+", "cmd+").replace("cmd+cmd+", "cmd+") == pressed && it.active()
         } ?: return false
+        val quiet = entry.quiet
+        if (notifyIdle && !quiet) keys += 1
         if (back) {
             tookBack = true
             backTakenAt = android.os.SystemClock.uptimeMillis()
@@ -577,9 +617,9 @@ fun BernShortcutInput(
 /// remote: what closes on Escape elsewhere closes on Back, before Back
 /// leaves the app. Back reaches the app as a callback, never as a key.
 @Composable
-fun BernShortcut(shortcut: String, active: () -> Boolean = { true }, action: () -> Unit) {
+fun BernShortcut(shortcut: String, active: () -> Boolean = { true }, quiet: Boolean = false, action: () -> Unit) {
     val token = remember { Any() }
-    SideEffect { BernShortcuts.register(token, shortcut, action, active) }
+    SideEffect { BernShortcuts.register(token, shortcut, action, active, quiet) }
     DisposableEffect(token) { onDispose { BernShortcuts.remove(token) } }
     if (shortcut == "escape") {
         val current by rememberUpdatedState(action)
@@ -1720,6 +1760,8 @@ fun BernScroll(
     val density = LocalDensity.current
     val reduce = bernReduceMotion()
     val current by rememberUpdatedState(position)
+    val reportPosition by rememberUpdatedState(onPosition)
+    var reported by remember { mutableStateOf<Any?>(null) }
     // Stand at the first position once its item and the view are laid
     // out.
     LaunchedEffect(state) {
@@ -1739,6 +1781,11 @@ fun BernScroll(
     // Setting the position scrolls to its item.
     LaunchedEffect(position) {
         val wanted = position ?: return@LaunchedEffect
+        if (wanted == reported) {
+            reported = null
+            return@LaunchedEffect
+        }
+        reported = null
         if (!state.placed || wanted == state.nearest()) return@LaunchedEffect
         // An item of a grid not composed yet: near where it would be first,
         // then to where it is once it is composed there.
@@ -1766,12 +1813,35 @@ fun BernScroll(
             }
         }
     }
-    // The person's scroll: once it rests, the position follows the item
-    // at the anchor.
-    LaunchedEffect(state) {
-        snapshotFlow { state.scroll.isScrollInProgress to state.placed }.collect { (moving, placed) ->
-            if (placed && !moving && !state.scrolling) {
-                state.nearest()?.let { nearest -> if (nearest != current) onPosition?.invoke(nearest) }
+    // The person's scroll: where nothing snaps, the position follows while
+    // scrolling; with `snap`, once it rests.
+    LaunchedEffect(state, snap) {
+        if (snap == null) {
+            snapshotFlow {
+                if (state.placed && !state.scrolling) {
+                    state.scroll.value
+                    state.nearest()
+                } else null
+            }.collect { nearest ->
+                if (nearest != null && nearest != current) {
+                    reportPosition?.let { report ->
+                        reported = nearest
+                        report(nearest)
+                    }
+                }
+            }
+        } else {
+            snapshotFlow { state.scroll.isScrollInProgress to state.placed }.collect { (moving, placed) ->
+                if (placed && !moving && !state.scrolling) {
+                    state.nearest()?.let { nearest ->
+                        if (nearest != current) {
+                            reportPosition?.let { report ->
+                                reported = nearest
+                                report(nearest)
+                            }
+                        }
+                    }
+                }
             }
         }
     }

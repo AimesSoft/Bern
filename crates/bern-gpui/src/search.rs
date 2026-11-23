@@ -78,6 +78,16 @@ fn close() {
 
 /// Arrow keys, Return and Escape while a palette is open; true when the
 /// key was the palette's.
+/// Whether the search palette is currently open and taking navigation keys.
+pub(crate) fn is_open() -> bool {
+    PALETTE.with(|palette| {
+        palette
+            .borrow()
+            .as_ref()
+            .is_some_and(|palette| !palette.closing)
+    })
+}
+
 pub(crate) fn keystroke(key: &str, cx: &mut App) -> bool {
     enum Then {
         Nothing,

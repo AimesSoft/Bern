@@ -184,9 +184,10 @@ thread_local! {
 }
 
 thread_local! {
-    /// Key combinations of the buttons shown, as GPUI writes them, with
-    /// what they press; rebuilt as windows draw.
-    static SHORTCUTS: RefCell<Vec<(String, crate::ctx::Press)>> = const { RefCell::new(Vec::new()) };
+    /// Key combinations of the buttons and shortcuts shown, as GPUI writes
+    /// them, with what they press and whether they are `quiet` for
+    /// `window.idle`; rebuilt as windows draw.
+    static SHORTCUTS: RefCell<Vec<(String, crate::ctx::Press, bool)>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Bern's `cmd+shift+o` as GPUI's `cmd-shift-o`.
@@ -204,8 +205,9 @@ pub(crate) fn run_shortcut(keystroke: &str, cx: &mut App) -> bool {
         shortcuts
             .borrow()
             .iter()
-            .find(|(keys, _)| keys == keystroke)
-            .map(|(_, press)| Rc::clone(press))
+            .rev()
+            .find(|(keys, _, _)| keys == keystroke)
+            .map(|(_, press, _)| Rc::clone(press))
     });
     match found {
         Some(press) => {
@@ -217,15 +219,62 @@ pub(crate) fn run_shortcut(keystroke: &str, cx: &mut App) -> bool {
 }
 
 pub(crate) fn register_shortcut(c: &Ctx, shortcut: Option<&str>, press: &crate::ctx::Press) {
+    register_shortcut_with_quiet(c, shortcut, press, false);
+}
+
+pub(crate) fn register_shortcut_with_quiet(
+    c: &Ctx,
+    shortcut: Option<&str>,
+    press: &crate::ctx::Press,
+    quiet: bool,
+) {
     if let Some(shortcut) = shortcut
+        && !shortcut.is_empty()
         && !c.listing()
     {
         SHORTCUTS.with(|shortcuts| {
             shortcuts
                 .borrow_mut()
-                .push((keystroke(shortcut), Rc::clone(press)))
+                .push((keystroke(shortcut), Rc::clone(press), quiet))
         });
     }
+}
+
+fn format_keystroke(keystroke: &gpui::Keystroke) -> (String, bool) {
+    let mut keys = Vec::new();
+    let modifiers = keystroke.modifiers;
+    if modifiers.platform {
+        keys.push("cmd");
+    }
+    if modifiers.control {
+        keys.push("ctrl");
+    }
+    if modifiers.alt {
+        keys.push("alt");
+    }
+    if modifiers.shift {
+        keys.push("shift");
+    }
+    let bare = keys.is_empty();
+    keys.push(keystroke.key.as_str());
+    (keys.join("-"), bare)
+}
+
+/// Whether `keystroke` matches a currently mounted `quiet` shortcut that will
+/// handle it.
+pub(crate) fn is_quiet_keystroke(keystroke: &gpui::Keystroke) -> bool {
+    let (formatted, bare) = format_keystroke(keystroke);
+    if bare && crate::search::is_open() {
+        return false;
+    }
+    SHORTCUTS.with(|shortcuts| {
+        shortcuts
+            .borrow()
+            .iter()
+            .rev()
+            .find(|(keys, _, _)| *keys == formatted)
+            .is_some_and(|(_, _, quiet)| *quiet)
+    })
 }
 
 thread_local! {
@@ -1562,25 +1611,52 @@ pub fn drop_area(
 
 /// Run the button shortcut a keystroke names, if one does.
 pub(crate) fn keystroke_pressed(keystroke: &gpui::Keystroke, cx: &mut App) {
-    let mut keys = Vec::new();
-    let modifiers = keystroke.modifiers;
-    if modifiers.platform {
-        keys.push("cmd");
-    }
-    if modifiers.control {
-        keys.push("ctrl");
-    }
-    if modifiers.alt {
-        keys.push("alt");
-    }
-    if modifiers.shift {
-        keys.push("shift");
-    }
-    if keys.is_empty() && crate::search::keystroke(&keystroke.key, cx) {
+    let (formatted, bare) = format_keystroke(keystroke);
+    if bare && crate::search::keystroke(&keystroke.key, cx) {
         return;
     }
-    keys.push(keystroke.key.as_str());
-    run_shortcut(&keys.join("-"), cx);
+    run_shortcut(&formatted, cx);
 }
 
 use gpui::prelude::FluentBuilder;
+
+#[cfg(test)]
+mod shortcut_tests {
+    use super::*;
+
+    fn press(key: &str, platform: bool, control: bool) -> gpui::Keystroke {
+        gpui::Keystroke {
+            modifiers: gpui::Modifiers {
+                platform,
+                control,
+                ..gpui::Modifiers::default()
+            },
+            key: key.to_string(),
+            key_char: None,
+        }
+    }
+
+    #[test]
+    fn quiet_keystrokes_match_latest_mounted_entry() {
+        clear_shortcuts();
+        let noop: crate::ctx::Press = Rc::new(|_| {});
+        SHORTCUTS.with(|s| {
+            let mut s = s.borrow_mut();
+            s.push((keystroke("right"), Rc::clone(&noop), true));
+            s.push((keystroke("cmd+left"), Rc::clone(&noop), true));
+            s.push((keystroke("space"), Rc::clone(&noop), false));
+        });
+        assert!(is_quiet_keystroke(&press("right", false, false)));
+        assert!(is_quiet_keystroke(&press("left", true, false)));
+        assert!(!is_quiet_keystroke(&press("left", false, false)));
+        assert!(!is_quiet_keystroke(&press("space", false, false)));
+        assert!(!is_quiet_keystroke(&press("a", false, false)));
+        // A later non-quiet shortcut on the same key overrides an earlier quiet one.
+        SHORTCUTS.with(|s| {
+            s.borrow_mut()
+                .push((keystroke("right"), Rc::clone(&noop), false))
+        });
+        assert!(!is_quiet_keystroke(&press("right", false, false)));
+        clear_shortcuts();
+    }
+}

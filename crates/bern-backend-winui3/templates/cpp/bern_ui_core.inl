@@ -1621,6 +1621,10 @@ struct Win {
         std::function<bool()> enabled;
     };
     std::vector<std::shared_ptr<QuietKey>> quietKeys;
+    /// A `quiet` shortcut's key that `KeyboardAccelerator::Invoked` just
+    /// handled before the accompanying `KeyDown` event arrives at `root`.
+    std::optional<winrt::Windows::System::VirtualKey> quietKeyConsumed;
+    uint64_t quietKeySeq = 0;
     /// The window's layout size by its width: compact, medium, expanded
     /// or large.
     Cell<std::string> size{std::string("expanded")};

@@ -835,9 +835,9 @@ inline void ScrollView(Parent const& p, Ctx const& ctx, ScrollProps props, Build
         if (scroll->horizontal) viewer.ChangeView(*offset, nullptr, nullptr, !smooth || Reduced());
         else viewer.ChangeView(nullptr, *offset, nullptr, !smooth || Reduced());
     };
-    // Scrolling that ends between items comes to rest on the nearest one,
-    // unless the position stands at an anchor of its own: then the view
-    // rests where the person leaves it.
+    // Scrolling comes to rest on the nearest item only with `snap`; without
+    // `snap`, the view rests where the person leaves it and `position` follows
+    // the item nearest the anchor while scrolling as well.
     auto travelling = std::make_shared<winrt::weak_ref<xaml::UIElement>>();
     auto placed = std::make_shared<bool>(false);
     auto writeSeq = std::make_shared<uint64_t>(0);
@@ -863,12 +863,16 @@ inline void ScrollView(Parent const& p, Ctx const& ctx, ScrollProps props, Build
             if (!item || R::KeyText(ctx.Peek(*position)) == item->first) return;
             auto const& type = app->catalog.sessions[position->session].fields[position->field].second;
             Value key = type.kind == BType::Kind::Int ? Value::Int(std::strtoll(item->first.c_str(), nullptr, 10)) : Value::Text(item->first);
+            struct Reset {
+                std::shared_ptr<bool> flag;
+                ~Reset() { *flag = false; }
+            };
             *telling = true;
+            Reset reset{telling};
             ctx.Write(*position, key);
-            *telling = false;
         });
     };
-    scroller.ViewChanged([scroll, nearest, scrollTo, travelling, placed, tell, nudges, nudgeMotion, fraction, snaps = props.snap || !props.anchor](auto&&, controls::ScrollViewerViewChangedEventArgs const& args) {
+    scroller.ViewChanged([scroll, nearest, scrollTo, travelling, placed, tell, position, ctx, nudges, nudgeMotion, fraction, snaps = props.snap != nullptr](auto&&, controls::ScrollViewerViewChangedEventArgs const& args) {
         if (!*placed) return;
         if (args.IsIntermediate()) {
             if (!snaps && !travelling->get()) tell();
@@ -894,7 +898,7 @@ inline void ScrollView(Parent const& p, Ctx const& ctx, ScrollProps props, Build
             scrollTo(item->second, true);
             return;
         }
-        tell();
+        if (position && R::KeyText(ctx.Peek(*position)) != item->first) tell();
     });
     if (!position) {
         *placed = true;
@@ -904,8 +908,9 @@ inline void ScrollView(Parent const& p, Ctx const& ctx, ScrollProps props, Build
     Reactive::Run([scroll, position, ctx, placed, travelling, writeSeq, scrollTo, nearest, telling] {
         auto key = R::KeyText(ctx.Read(*position));
         Reactive::Untrack([&] {
+            if (*telling) return 0;
             ++*writeSeq;
-            if (!*placed || *telling) return 0;
+            if (!*placed) return 0;
             for (auto const& [itemKey, item] : ItemsOf(*scroll)) {
                 if (itemKey != key) continue;
                 auto at = nearest();
@@ -1237,19 +1242,29 @@ inline void Accelerator(Ctx const& ctx, char const* keys, std::function<bool()> 
     accelerator.Key(*key);
     accelerator.Modifiers(modifiers);
     bool typed = (modifiers & (VirtualKeyModifiers::Control | VirtualKeyModifiers::Menu)) == VirtualKeyModifiers::None;
-    accelerator.Invoked([invoked, typed, root = winrt::make_weak(ctx.win->root)](auto&&, xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args) {
+    bool isQuiet = static_cast<bool>(quiet);
+    std::weak_ptr<bool> alive(ctx.win->life);
+    accelerator.Invoked([invoked, typed, isQuiet, win = ctx.win, alive, targetKey = *key, root = winrt::make_weak(ctx.win->root)](auto&&, xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args) {
         if (shortcutRecording) return;
         if (typed)
             if (auto element = root.get(); element && element.XamlRoot()) {
                 auto focused = xaml::Input::FocusManager::GetFocusedElement(element.XamlRoot());
                 if (focused && (focused.try_as<controls::TextBox>() || focused.try_as<controls::PasswordBox>())) return;
             }
-        if (invoked()) args.Handled(true);
+        if (invoked()) {
+            if (isQuiet && !alive.expired()) {
+                win->quietKeyConsumed = targetKey;
+                uint64_t seq = ++win->quietKeySeq;
+                Host::Post([win, alive, seq] {
+                    if (!alive.expired() && win->quietKeySeq == seq) win->quietKeyConsumed.reset();
+                });
+            }
+            args.Handled(true);
+        }
     });
     if (quiet) {
         auto entry = std::make_shared<Win::QuietKey>(Win::QuietKey{*key, modifiers, std::move(quiet)});
         ctx.win->quietKeys.push_back(entry);
-        std::weak_ptr<bool> alive(ctx.win->life);
         Reactive::OnCleanup([win = ctx.win, alive, entry] {
             if (!alive.expired()) std::erase(win->quietKeys, entry);
         });

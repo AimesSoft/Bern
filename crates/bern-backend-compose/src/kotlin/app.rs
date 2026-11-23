@@ -252,10 +252,19 @@ impl Generator<'_> {
         out.line("/// On a television the remote's arrows move the focus first, and a");
         out.line("/// shortcut takes one only where the focus moves nowhere.");
         out.open("override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {");
-        out.line("BernShortcuts.pressed(event)");
         out.line("val key = androidx.compose.ui.input.key.KeyEvent(event)");
-        out.line("if (BernHost.television && BernShortcuts.isArrow(event)) return super.dispatchKeyEvent(event) || BernShortcuts.handle(key)");
-        out.line("return BernShortcuts.handle(key) || super.dispatchKeyEvent(event)");
+        out.open("if (BernHost.television && BernShortcuts.isArrow(event)) {");
+        out.open("if (super.dispatchKeyEvent(event)) {");
+        out.line("BernShortcuts.pressed(event)");
+        out.line("return true");
+        out.close("}");
+        out.line("if (BernShortcuts.handle(key, notifyIdle = true)) return true");
+        out.line("BernShortcuts.pressed(event)");
+        out.line("return false");
+        out.close("}");
+        out.line("if (BernShortcuts.handle(key, notifyIdle = true)) return true");
+        out.line("BernShortcuts.pressed(event)");
+        out.line("return super.dispatchKeyEvent(event)");
         out.close("}");
         out.close("}");
     }

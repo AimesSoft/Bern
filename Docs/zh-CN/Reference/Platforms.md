@@ -63,7 +63,7 @@
 | `sidebar_header` | 固定侧栏顶栏 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `untitled_detail` | 无标题详情 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `idle_control` | 按状态启停空闲检测（`Window(idle_enabled:)`） | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
-| `quiet_shortcuts` | 不算空闲检测输入的快捷键（`Shortcut(quiet:)`） | — | — | — | — | — | — | 支持 |
+| `quiet_shortcuts` | 不算空闲检测输入的快捷键（`Shortcut(quiet:)`） | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `fill_buttons` | 横向撑满容器的系统按钮（`Button(width: fill)`） | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `page_search` | 页面里的系统搜索框（不在 `Toolbar` / `Sidebar` 里的 `Search`），结果列在框下 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `window_short` | 窗口高度低于紧凑断点（`window.short`），如手机横屏 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |

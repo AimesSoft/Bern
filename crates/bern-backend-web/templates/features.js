@@ -1939,11 +1939,13 @@ B.hooks.idle = (win, seconds, enabled = () => true) => {
       if (typing || popup || quiet() === null) rest(); else win.idle.set(true);
     }, wait * 1000);
   };
-  const events = ["pointermove", "pointerdown", "keydown", "wheel", "touchstart"];
+  const events = ["pointermove", "pointerdown", "wheel", "touchstart"];
+  const keydown = (event) => { if (!quietKeyEvents.has(event)) rest(); };
   const leave = (event) => { if (event.pointerType === "mouse") { mouseOver = null; mousePoint = null; rest(); } };
   // The pointer is known before the input that wakes the window counts.
   for (const name of ["pointermove", "pointerdown"]) win.element.addEventListener(name, track, { capture: true, passive: true });
   for (const name of events) win.element.addEventListener(name, rest, { capture: true, passive: true });
+  win.element.addEventListener("keydown", keydown, { capture: true, passive: true });
   win.element.addEventListener("pointerleave", leave);
   effect(() => win.element.classList.toggle("bern-idle", win.idle.get()));
   let previousEnabled;
@@ -1952,6 +1954,7 @@ B.hooks.idle = (win, seconds, enabled = () => true) => {
     clearTimeout(timer);
     for (const name of ["pointermove", "pointerdown"]) win.element.removeEventListener(name, track, { capture: true });
     for (const name of events) win.element.removeEventListener(name, rest, { capture: true });
+    win.element.removeEventListener("keydown", keydown, { capture: true });
     win.element.removeEventListener("pointerleave", leave);
   });
   rest();
@@ -2721,13 +2724,22 @@ export function ScrollView(p, ctx, { axis, snap, position, arrival, nudgeMotion,
   if (!position) return;
   let placed = false;
   let travelling = null;
+  let telling = false;
   const scrollTo = (item, smooth) => {
     const offset = offsetOf(item);
     node.scrollTo({ [horizontal ? "left" : "top"]: offset, behavior: smooth && !reduced ? "smooth" : "instant" });
   };
-  // The field follows the item the user leaves at the anchor.
+  const tell = () => {
+    const item = nearest();
+    if (!item || eq(item.bernKey, position.peek())) return;
+    telling = true;
+    try { position.set(item.bernKey); } finally { telling = false; }
+  };
+  // The field follows the item at the anchor: while scrolling where nothing
+  // snaps, and once scrolling rests otherwise.
   let resting = 0;
   const rest = () => {
+    if (placed && !snap && !travelling) tell();
     clearTimeout(resting);
     resting = setTimeout(() => {
       if (!placed) return;
@@ -2739,7 +2751,7 @@ export function ScrollView(p, ctx, { axis, snap, position, arrival, nudgeMotion,
         if (arrival === "nudge" && item === arrived) nudgeOnce(arrived, nudgeMotion);
         return;
       }
-      if (item && !eq(item.bernKey, position.peek())) position.set(item.bernKey);
+      tell();
     }, 140);
   };
   node.addEventListener("scroll", rest, { passive: true });
@@ -2748,7 +2760,7 @@ export function ScrollView(p, ctx, { axis, snap, position, arrival, nudgeMotion,
   effect(() => {
     const key = position.get();
     untrack(() => {
-      if (!placed) return;
+      if (!placed || telling) return;
       // An item of a lazy grid not built yet is built near the view first.
       const item = items().find((one) => eq(one.bernKey, key)) ?? B.revealLazy(node, key);
       if (!item || item === nearest() && Math.abs(offsetOf(item) - current()) < 1) return;
@@ -2962,6 +2974,9 @@ export function appIcon(choose, names) {
 /// systems and Control elsewhere. The latest control wins; a key without a
 /// modifier does not fire while text is being edited.
 const shortcuts = [];
+/// Keydown events consumed by a `quiet` shortcut (or a bare modifier held for
+/// an enabled modified `quiet` shortcut): `window.idle` treats them as no input.
+const quietKeyEvents = new WeakSet();
 const apple = /Mac|iPhone|iPad/.test(navigator.platform);
 const KEY_NAMES = {
   " ": "space", Escape: "escape", Enter: "return", Tab: "tab", Backspace: "delete", Delete: "delete",
@@ -3005,25 +3020,41 @@ let recordingInput = null;
 /// `spec` runs `run` while it is mounted; `active`, when given, says
 /// whether it takes the key now. Of the shortcuts that take a key, the one
 /// mounted last runs. A shortcut that follows state is a getter, read at
-/// each key press; a text that is empty or no shortcut takes no key.
-export function shortcut(spec, run, active) {
+/// each key press; a text that is empty or no shortcut takes no key. With
+/// `quiet`, its key is no input for `window.idle`.
+export function shortcut(spec, run, active, quiet = false) {
   const fixed = typeof spec === "function" ? null : normalized(spec);
   const keys = fixed === null ? () => normalized(String(untrack(spec) ?? "")) : () => fixed;
-  const entry = { keys, run, active };
+  const entry = { keys, run, active, quiet: Boolean(quiet) };
   shortcuts.push(entry);
   onCleanup(() => shortcuts.splice(shortcuts.indexOf(entry), 1));
   if (listening) return;
   listening = true;
   document.addEventListener("keydown", (event) => {
     if (event.isComposing || recordingInput) return;
+    if (["Shift", "Control", "Alt", "Meta"].includes(event.key)) {
+      const mod = event.key === "Shift" ? "shift"
+        : event.key === "Alt" ? "alt"
+        : event.key === "Control" ? (apple ? "ctrl" : "cmd")
+        : (apple ? "cmd" : null);
+      if (mod && shortcuts.some((one) => {
+        if (!one.quiet || (one.active && !one.active())) return false;
+        const parts = one.keys().split("+");
+        return parts.length > 1 && parts.slice(0, -1).includes(mod);
+      })) {
+        quietKeyEvents.add(event);
+      }
+      return;
+    }
     // Let the focused menu or native popover handle Escape before an app's
     // window-level shortcut (for example leaving the player) can act on it.
     if (event.key === "Escape" && document.querySelector('[popover="auto"]:popover-open')) return;
     const keys = pressed(event);
     const found = [...shortcuts].reverse().find((one) => one.keys() === keys && (!one.active || one.active()));
     if (!found) return;
-    const editing = event.target.closest?.("input, textarea, [contenteditable]");
+    const editing = event.target?.closest?.("input, textarea, [contenteditable]");
     if (editing && !/^(cmd|ctrl|alt)\+/.test(keys)) return;
+    if (found.quiet) quietKeyEvents.add(event);
     event.preventDefault();
     found.run();
   }, true);
@@ -3031,11 +3062,11 @@ export function shortcut(spec, run, active) {
 
 /// `Shortcut`: `key` runs `action` while it is mounted and enabled, without
 /// a control on the page.
-export function KeyShortcut(p, ctx, { key, enabled }, action) {
+export function KeyShortcut(p, ctx, { key, enabled, quiet }, action) {
   if (!action) return;
   const active = enabled === undefined ? undefined
     : () => Boolean(typeof enabled === "function" ? untrack(enabled) : enabled);
-  shortcut(key, () => untrack(action), active);
+  shortcut(key, () => untrack(action), active, Boolean(quiet));
 }
 
 /// `ShortcutInput`: a button showing the shortcut as this computer writes

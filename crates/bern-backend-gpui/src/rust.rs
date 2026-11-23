@@ -569,7 +569,7 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
         "ColorPicker",
         &["id", "label", "label_hidden", "value", "current", "feature"],
     ),
-    ("Shortcut", &["key", "enabled"]),
+    ("Shortcut", &["key", "enabled", "quiet"]),
     (
         "ShortcutInput",
         &[
@@ -3949,8 +3949,9 @@ pub fn app() -> b::AppDef {{
                     Some(Prop::Expr { expr }) => format!("rt::plain(&{})", self.expr(expr, at)),
                     _ => "String::new()".into(),
                 };
+                let quiet = element.keyword("quiet") == Some("true");
                 format!(
-                    "b::shortcut(c, {key}, {}, {})",
+                    "b::shortcut(c, {key}, {}, {quiet}, {})",
                     self.enabled(element),
                     self.action(element)
                 )

@@ -227,7 +227,9 @@ impl Render for WindowView {
             .on_key_down({
                 let win = Rc::clone(&self.win);
                 move |event: &KeyDownEvent, _, _| {
-                    woke(&win);
+                    if !crate::controls::is_quiet_keystroke(&event.keystroke) {
+                        woke(&win);
+                    }
                     if event.keystroke.key == "escape" {
                         crate::overlay::close_all();
                     }

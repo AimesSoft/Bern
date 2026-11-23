@@ -1769,6 +1769,40 @@ test("position-only scrolling aligns the leading item without carousel padding",
   scope.dispose();
 });
 
+test("non-snapping ScrollView reports position while scrolling without scrolling back", () => {
+  const { B, F, Element, frames } = runtime();
+  const root = new Element("root");
+  const position = B.cell(1);
+  const scope = new B.Scope();
+  let scrollCalls = 0;
+  B.within(scope, () => F.ScrollView(root, {}, { position, anchor: 0 }, (node) => {
+    node.rect = { left: 0, top: 0, width: 600, height: 400 };
+    node.scrollTop = 0;
+    const origScrollTo = node.scrollTo.bind(node);
+    node.scrollTo = (opts) => { scrollCalls++; return origScrollTo(opts); };
+    for (let index = 1; index <= 3; index++) {
+      const row = new Element("row");
+      row.setAttribute("data-bern-item", index);
+      row.bernKey = index;
+      row.getBoundingClientRect = () => ({ left: 0, top: (index - 1) * 200 - node.scrollTop, width: 120, height: 180 });
+      node.append(row);
+    }
+  }));
+  const scroll = root.childNodes[0];
+  while (frames.length) frames.shift()(0);
+  const initialScrolls = scrollCalls;
+  // Scroll mid-gesture (before any 140 ms rest timer fires): position updates immediately.
+  scroll.scrollTop = 210;
+  scroll.dispatch("scroll", {});
+  assert.equal(position.peek(), 2);
+  assert.equal(scrollCalls, initialScrolls, "self-reported position must not trigger scrollTo");
+  scroll.scrollTop = 410;
+  scroll.dispatch("scroll", {});
+  assert.equal(position.peek(), 3);
+  assert.equal(scrollCalls, initialScrolls);
+  scope.dispose();
+});
+
 test("center snapping remains stable when its own padding contributes to intrinsic viewport size", () => {
   const { B, F, Element, resizeObservers } = runtime();
   const root = new Element("root");
@@ -1934,6 +1968,56 @@ test("a shortcut that follows state takes the keys its text names now", () => {
   keys.set("");
   assert.equal(press({ key: "π", code: "KeyP", altKey: true }), false, "an empty text is no shortcut");
   assert.equal(ran, 2);
+  scope.dispose();
+});
+
+test("quiet shortcuts (bare, modified, and self-disabling) do not wake an idle window", () => {
+  const { B, F, Element, document, timers } = runtime();
+  const root = new Element("div");
+  const win = { element: root, idle: B.cell(false) };
+  const active = B.cell(true);
+  let seeks = 0, toggles = 0, ordinary = 0;
+  const scope = new B.Scope();
+  B.within(scope, () => {
+    B.hooks.idle(win, 3);
+    F.KeyShortcut(null, {}, { key: "right", quiet: true }, () => seeks++);
+    F.KeyShortcut(null, {}, { key: "cmd+left", quiet: true }, () => seeks++);
+    F.KeyShortcut(null, {}, { key: "j", enabled: () => active.get(), quiet: true }, () => {
+      toggles++;
+      active.set(false);
+    });
+    F.KeyShortcut(null, {}, { key: "space" }, () => ordinary++);
+  });
+  timers.at(-1).callback();
+  assert.equal(win.idle.peek(), true, "window starts idle after timeout");
+  const press = (init) => {
+    const event = { target: root, prevented: false, preventDefault() { this.prevented = true; }, ...init };
+    for (const listener of document.listeners.keydown ?? []) listener(event);
+    for (const listener of [...(root.events.keydown ?? [])]) listener(event);
+    return event.prevented;
+  };
+  assert.equal(press({ key: "ArrowRight", code: "ArrowRight" }), true);
+  assert.equal(seeks, 1);
+  assert.equal(win.idle.peek(), true, "bare quiet shortcut leaves window idle");
+  // Pressing the modifier key ahead of a modified quiet shortcut must not wake either.
+  press({ key: "Meta", code: "MetaLeft", metaKey: true });
+  assert.equal(win.idle.peek(), true, "modifier for enabled quiet shortcut leaves window idle");
+  assert.equal(press({ key: "ArrowLeft", code: "ArrowLeft", metaKey: true }), true);
+  assert.equal(seeks, 2);
+  assert.equal(win.idle.peek(), true, "modified quiet shortcut leaves window idle");
+  // A quiet shortcut whose action disables itself synchronously must still stay quiet.
+  assert.equal(press({ key: "j", code: "KeyJ" }), true);
+  assert.equal(toggles, 1);
+  assert.equal(win.idle.peek(), true, "self-disabling quiet shortcut still leaves window idle");
+  // Now disabled, pressing the same key again wakes the window.
+  assert.equal(press({ key: "j", code: "KeyJ" }), false);
+  assert.equal(win.idle.peek(), false, "disabled quiet shortcut wakes the window");
+  timers.at(-1).callback();
+  assert.equal(win.idle.peek(), true);
+  // Ordinary shortcut wakes the window.
+  assert.equal(press({ key: " ", code: "Space" }), true);
+  assert.equal(ordinary, 1);
+  assert.equal(win.idle.peek(), false, "ordinary shortcut wakes an idle window");
   scope.dispose();
 });
 

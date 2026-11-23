@@ -650,21 +650,199 @@ fn a_scroll_position_is_written_after_layout() {
         "if (!viewer || !viewer.IsLoaded()) return;",
         "if (!item || R::KeyText(ctx.Peek(*position)) == item->first) return;",
         "if (!snaps && !travelling->get()) tell();",
-        "if (!*placed || *telling) return 0;",
+        "snaps = props.snap != nullptr",
+        "if (*telling) return 0;",
+        "Reset reset{telling};",
     ] {
         assert!(features.contains(part), "{part}");
     }
 }
 
-/// A `quiet` shortcut's key is no input for `window.idle`.
+/// A `quiet` shortcut's key is no input for `window.idle`: both the runtime
+/// template hooks, generated `.quiet = true` code, and target capability
+/// checking are verified end-to-end.
 #[test]
 fn a_quiet_shortcut_does_not_wake_the_window() {
     let windows = include_str!("../templates/cpp/bern_ui_windows.inl");
-    assert!(windows.contains(
-        "if (quiet->key == args.Key() && quiet->modifiers == held && quiet->enabled()) return;"
-    ));
+    for part in [
+        "bool consumed = win->quietKeyConsumed && *win->quietKeyConsumed == args.Key();",
+        "win->quietKeyConsumed.reset();",
+        "if (consumed) return;",
+        "if (modifier != VirtualKeyModifiers::None && !B::shortcutRecording && GetKeyState(VK_LWIN) >= 0 && GetKeyState(VK_RWIN) >= 0)",
+        "if ((quiet->modifiers & modifier) != VirtualKeyModifiers::None && quiet->enabled()) return;",
+    ] {
+        assert!(windows.contains(part), "{part}");
+    }
     let features = include_str!("../templates/cpp/bern_ui_features.inl");
-    assert!(features.contains("auto quiet = props.quiet ? isEnabled : std::function<bool()>();"));
+    for part in [
+        "auto quiet = props.quiet ? isEnabled : std::function<bool()>();",
+        "win->quietKeyConsumed = targetKey;",
+    ] {
+        assert!(features.contains(part), "{part}");
+    }
+
+    let root = workspace();
+    let dir = std::env::temp_dir().join(format!("bern-winui-quiet-{}", std::process::id()));
+    let out_dir = root.join("target/bern-test/winui3-quiet");
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&out_dir);
+    for (package, source) in [
+        (
+            "quiet-protocol",
+            r#"
+#[bern::protocol(namespace = "quiet", version = 1)]
+pub mod quiet {
+    #[value]
+    pub struct Row {
+        #[content]
+        pub id: String,
+    }
+    #[state]
+    pub struct State {
+        pub active: bool,
+        pub rows: Vec<Row>,
+    }
+    #[commands]
+    pub trait Commands {
+        fn seek(&mut self) -> Result<(), CommandError>;
+    }
+}
+"#,
+        ),
+        (
+            "quiet-ui",
+            r#"
+use bern::prelude::*;
+use quiet_protocol::quiet;
+
+#[bern::session]
+pub struct ScrollDraft {
+    pub current: String,
+}
+
+#[component]
+pub fn app(app: quiet::Client, windows: AppWindows, #[session] scroll: ScrollDraft) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Player" }, initial: open, idle_after: 3) {
+                Column {
+                    Shortcut(key: "right", enabled: app.active, quiet: true) => app.seek()
+                    Shortcut(key: "cmd+left", quiet: true) => app.seek()
+                    Shortcut(key: "space", quiet: false) => app.seek()
+                    ScrollView(axis: vertical, position: scroll.current) {
+                        Column {
+                            ForEach(items: app.rows, key: id) |row| {
+                                Text(content: row.id)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+"#,
+        ),
+        ("quiet-core", ""),
+    ] {
+        std::fs::create_dir_all(dir.join(package).join("src")).unwrap();
+        std::fs::write(
+            dir.join(package).join("Cargo.toml"),
+            format!("[package]\nname = \"{package}\"\n"),
+        )
+        .unwrap();
+        std::fs::write(dir.join(package).join("src/lib.rs"), source).unwrap();
+    }
+    std::fs::write(
+        dir.join("Bern.toml"),
+        "[app]\nid = \"quiet\"\nbundle_id = \"dev.bern.quiet\"\nversion = \"0.1.0\"\nname = { \"en\" = \"Quiet\" }\n[languages]\nsupported = [\"en\"]\ndefault = \"en\"\n[protocol]\npackage = \"quiet-protocol\"\nsource = \"quiet-protocol/src/lib.rs\"\n[engine]\npackage = \"quiet-core\"\ntype = \"quiet_core::Engine\"\n[ui]\npackage = \"quiet-ui\"\nsources = [\"quiet-ui/src/lib.rs\"]\nroot = \"app\"\n[targets.windows]\nplatform = \"windows\"\n",
+    )
+    .unwrap();
+    let config = bern_compiler::config::load(&dir.join("Bern.toml")).unwrap();
+    let compiled = bern_compiler::compile(&config).unwrap();
+    let target = windows_target(&config);
+    let problems = WinUi3Windows.check(&compiled.app, &target);
+    assert!(problems.is_empty(), "{problems:?}");
+    struct NoQuietTarget;
+    impl Target for NoQuietTarget {
+        fn descriptor(&self) -> bern_target_api::TargetDescriptor {
+            let mut d = WinUi3Windows.descriptor();
+            static FEATS: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
+            let base = d.features;
+            d.features = FEATS.get_or_init(|| {
+                base.iter()
+                    .copied()
+                    .filter(|f| *f != bern_target_api::feature::QUIET_SHORTCUTS)
+                    .collect()
+            });
+            d
+        }
+        fn check(
+            &self,
+            app: &bern_ir::Application,
+            _: &bern_target_api::TargetConfig,
+        ) -> Vec<bern_target_api::Diagnostic> {
+            bern_target_api::check_common(self, app)
+        }
+        fn generate(
+            &self,
+            _: &bern_ir::Application,
+            _: &BuildContext,
+        ) -> Result<Vec<bern_target_api::GeneratedFile>, Vec<bern_target_api::Diagnostic>> {
+            Ok(vec![])
+        }
+        fn plan(
+            &self,
+            _: &bern_ir::Application,
+            _: &BuildContext,
+        ) -> Result<bern_target_api::BuildPlan, Vec<bern_target_api::Diagnostic>> {
+            Ok(bern_target_api::BuildPlan::default())
+        }
+    }
+    let warnings = NoQuietTarget.check(&compiled.app, &target);
+    assert!(
+        warnings.iter().any(|d| !d.is_error()
+            && d.message
+                .contains("ignores `quiet` of `Shortcut`: its key wakes a window at rest")),
+        "expected quiet_shortcuts warning: {warnings:?}"
+    );
+    let files = WinUi3Windows
+        .generate(
+            &compiled.app,
+            &BuildContext {
+                project_dir: config.dir.clone(),
+                workspace_dir: root.clone(),
+                output_dir: out_dir.clone(),
+                target,
+                protocol_package: config.protocol_package.name.clone(),
+                protocol_path: config.protocol_package.dir.clone(),
+                protocol_module: compiled.protocol_module.clone(),
+                engine_package: config.engine_package.name.clone(),
+                engine_path: config.engine_package.dir.clone(),
+                engine_type: config.engine_type.clone(),
+                modules: Vec::new(),
+                framework: Framework::Path(root.join("crates")),
+                release: false,
+            },
+        )
+        .unwrap();
+    for file in &files {
+        let path = out_dir.join(&file.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, &file.contents).unwrap();
+    }
+    let app_ui = std::fs::read_to_string(out_dir.join("app/app_ui.inl")).unwrap();
+    assert!(
+        app_ui.contains(".keys = \"right\"") && app_ui.contains(".quiet = true"),
+        "{app_ui}"
+    );
+    assert!(
+        app_ui.contains(".keys = \"cmd+left\"") && app_ui.matches(".quiet = true").count() == 2,
+        "{app_ui}"
+    );
+    assert!(app_ui.contains(".keys = \"space\""), "{app_ui}");
+    compile(&out_dir);
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// The planner: sidebar items that come and go, styled buttons and sidebar

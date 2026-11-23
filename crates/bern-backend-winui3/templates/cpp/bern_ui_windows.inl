@@ -1067,15 +1067,31 @@ inline void TrackIdle(std::shared_ptr<Win> const& win, double seconds, std::func
         rest();
     })), true);
     root.AddHandler(xaml::UIElement::KeyDownEvent(), winrt::box_value(xaml::Input::KeyEventHandler([rest, weak](auto&&, xaml::Input::KeyRoutedEventArgs const& args) {
-        // The key of a `quiet` shortcut is no input.
+        // The key of a `quiet` shortcut that just ran — and a bare modifier
+        // pressed for an enabled modified `quiet` shortcut — is no input.
         if (auto win = weak.lock()) {
+            bool consumed = win->quietKeyConsumed && *win->quietKeyConsumed == args.Key();
+            win->quietKeyConsumed.reset();
+            if (consumed) return;
+            using winrt::Windows::System::VirtualKey;
             using winrt::Windows::System::VirtualKeyModifiers;
-            auto held = VirtualKeyModifiers::None;
-            if (GetKeyState(VK_CONTROL) < 0) held |= VirtualKeyModifiers::Control;
-            if (GetKeyState(VK_MENU) < 0) held |= VirtualKeyModifiers::Menu;
-            if (GetKeyState(VK_SHIFT) < 0) held |= VirtualKeyModifiers::Shift;
-            for (auto const& quiet : win->quietKeys)
-                if (quiet->key == args.Key() && quiet->modifiers == held && quiet->enabled()) return;
+            auto modifier = VirtualKeyModifiers::None;
+            switch (args.Key()) {
+            case VirtualKey::Control:
+            case VirtualKey::LeftControl:
+            case VirtualKey::RightControl: modifier = VirtualKeyModifiers::Control; break;
+            case VirtualKey::Menu:
+            case VirtualKey::LeftMenu:
+            case VirtualKey::RightMenu: modifier = VirtualKeyModifiers::Menu; break;
+            case VirtualKey::Shift:
+            case VirtualKey::LeftShift:
+            case VirtualKey::RightShift: modifier = VirtualKeyModifiers::Shift; break;
+            default: break;
+            }
+            if (modifier != VirtualKeyModifiers::None && !B::shortcutRecording && GetKeyState(VK_LWIN) >= 0 && GetKeyState(VK_RWIN) >= 0) {
+                for (auto const& quiet : win->quietKeys)
+                    if ((quiet->modifiers & modifier) != VirtualKeyModifiers::None && quiet->enabled()) return;
+            }
         }
         rest();
     })), true);
