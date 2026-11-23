@@ -2,7 +2,7 @@
 
 # Android 与 Wear OS
 
-Bern 将 Android 目标（`platform = "android"`）编译为原生的 **Jetpack Compose（Material 3）** 应用，最低支持 **Android 8.0（API 26）**，覆盖手机、平板与 Android TV；将 Wear OS 目标（`platform = "wearos"`）编译为 **Wear Compose Material 3** 应用，最低支持 **Wear OS 4（API 30）**。两者均可在 macOS、Linux 或 Windows 上构建。
+Bern 将 Android 目标（`platform = "android"`）编译为原生的 **Jetpack Compose（Material 3）** 应用，最低支持 **Android 8.0（API 26）**，覆盖手机、平板与 Android TV；将 Wear OS 目标（`platform = "wearos"`）编译为 **Wear Compose Material 3** 应用，默认同样最低支持 **Android 8.0（API 26）**（可通过 `android.min_sdk` 自定义，例如上架 Google Play 的 Wear OS 3.0+ 应用可设为 `30`）。两者均可在 macOS、Linux 或 Windows 上构建。
 
 ## 环境准备
 
@@ -15,8 +15,11 @@ Bern 将 Android 目标（`platform = "android"`）编译为原生的 **Jetpack 
 # 默认必需 ABI（arm64-v8a）
 rustup target add aarch64-linux-android
 
-# 若在 `abis = [...]` 中声明了更多 ABI，请一并安装
-rustup target add armv7-linux-androideabi x86_64-linux-android
+# Wear OS 默认发布打包所需（32 位 armeabi-v7a），Android 目标按需安装
+rustup target add armv7-linux-androideabi
+
+# 若在 `abis = [...]` 中声明了 x86_64，请一并安装
+rustup target add x86_64-linux-android
 
 bern doctor
 ```
@@ -41,12 +44,15 @@ android = "assets/android/res"  # 可选：PNG 或 Android res/ mipmap 目录
 platform = "android"
 ui = "compose"
 abis = ["arm64-v8a"]            # 可选值："arm64-v8a"、"armeabi-v7a"、"x86_64"
-android = { network = true, multicast = false, audio_settings = false, all_files_access = false, cxx_runtime = false }
+android = { network = true, multicast = false, audio_settings = false, all_files_access = false, cxx_runtime = false, min_sdk = 26 }
 
 [targets.wearos]
 platform = "wearos"
 ui = "compose"
-android = { standalone = true } # 默认为 true：独立 Wear OS 应用
+# 省略 `abis` 时，Wear OS 发布打包默认同时输出 64 位与 32 位（`["arm64-v8a", "armeabi-v7a"]`）
+abis = ["arm64-v8a", "armeabi-v7a"]
+# 默认 `min_sdk = 26`（Android 8.0）；上架 Google Play 的 Wear OS 应用可提高至 `30`（Wear OS 3.0）或更高
+android = { standalone = true, min_sdk = 26 }
 ```
 
 ### Android 目标选项（`android = { ... }`）
@@ -59,6 +65,7 @@ android = { standalone = true } # 默认为 true：独立 Wear OS 应用
 | `all_files_access` | Android | 声明 `MANAGE_EXTERNAL_STORAGE`（运行时调用 `bern::platform::ask_all_files` 引导授权）。 |
 | `cxx_runtime` | Android / Wear OS | 当原生 C++ 依赖需要时，从 NDK 打包 `libc++_shared.so`。 |
 | `standalone` | Wear OS | 写入 `com.google.android.wearable.standalone` 元数据（默认 `true`）。 |
+| `min_sdk` | Android / Wear OS | 设置 Gradle 的 `minSdk` 与 NDK 目标 API 级别（范围 `26`–`36`，Android 与 Wear OS 默认均为 `26`；上架 Google Play 的 Wear OS 应用可设为 `30` 或更高）。 |
 
 ## 构建、运行与调试
 
@@ -104,7 +111,7 @@ bern package --target android
 bern package --target wearos
 ```
 
-`bern package` 会在 `target/bern/dist/` 下同时生成 Release 版 **`.apk`**（用于直装测试）与 **`.aab`**（用于上架 Google Play）。
+`bern package` 会在 `target/bern/dist/` 下同时生成 Release 版 **`.apk`**（用于直装测试）与 **`.aab`**（用于上架 Google Play）。当发布构建包含多个 ABI 时（`wearos` 默认同时构建 `arm64-v8a` 与 `armeabi-v7a`），会按架构分别写出 `<应用>-<版本>-<平台>-<架构>.apk`，同时生成一个包含全部架构的 `.aab`。调试用的 `bern build` 与 `bern run` 仍仅编译列表中的第一个 ABI。
 
 未设置签名环境变量时，产物使用调试密钥签名（仅限本机测试，应用商店会拒绝）。发布签名请配置以下环境变量：
 

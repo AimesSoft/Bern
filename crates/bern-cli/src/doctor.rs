@@ -62,7 +62,7 @@ const SPECS: &[Spec] = &[
     ),
     ("Linux · GTK 4", &["linux"], Some(("linux", "Linux")), linux),
     ("Android · Compose", &["android"], None, android),
-    ("Wear OS · Compose", &["wearos"], None, android),
+    ("Wear OS · Compose", &["wearos"], None, wearos),
     ("Web · WebAssembly", &["browser"], None, web),
 ];
 
@@ -251,6 +251,19 @@ fn simulator(system: &str, sdk: &str, os: &str) -> Status {
 
 /// The Android SDK, NDK and Gradle, and the Rust target for phones.
 fn android() -> Status {
+    android_with_targets(&[bern_backend_compose::RUST_TARGET])
+}
+
+/// The Android SDK, NDK and Gradle, and the default 64-bit + 32-bit ARM Rust
+/// targets used by Wear OS releases.
+fn wearos() -> Status {
+    android_with_targets(&[
+        bern_backend_compose::RUST_TARGET,
+        bern_backend_compose::ARMV7_RUST_TARGET,
+    ])
+}
+
+fn android_with_targets(targets: &[&str]) -> Status {
     let tools = match bern_backend_compose::toolchain::describe() {
         Ok(tools) => tools,
         Err(problem) => {
@@ -260,24 +273,35 @@ fn android() -> Status {
             );
         }
     };
-    let target = bern_backend_compose::RUST_TARGET;
     let Some(sysroot) = output("rustc", &["--print", "sysroot"]) else {
         return Status::Missing(
             "rustc is not installed".into(),
             "install Rust from https://rustup.rs".into(),
         );
     };
-    if !Path::new(&sysroot)
-        .join("lib/rustlib")
-        .join(target)
-        .is_dir()
-    {
+    let rustlib = Path::new(&sysroot).join("lib/rustlib");
+    let missing: Vec<&str> = targets
+        .iter()
+        .copied()
+        .filter(|target| !rustlib.join(target).is_dir())
+        .collect();
+    if !missing.is_empty() {
+        let joined = missing.join(" ");
         return Status::Missing(
-            format!("the {target} target is not installed"),
-            format!("rustup target add {target}"),
+            if missing.len() == 1 {
+                format!("the {} target is not installed", missing[0])
+            } else {
+                format!("the {} targets are not installed", missing.join(", "))
+            },
+            format!("rustup target add {joined}"),
         );
     }
-    Status::Ready(format!("{tools}, the {target} target"))
+    let label = if targets.len() == 1 {
+        format!("the {} target", targets[0])
+    } else {
+        format!("the {} targets", targets.join(", "))
+    };
+    Status::Ready(format!("{tools}, {label}"))
 }
 
 fn windows() -> Status {

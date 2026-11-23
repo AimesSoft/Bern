@@ -15,12 +15,14 @@ pub const ACTIVITY_COMPOSE: &str = "1.13.0";
 pub const WEAR_COMPOSE: &str = "1.7.1";
 pub const MEDIA3: &str = "1.11.1";
 pub const COMPILE_SDK: u32 = 37;
-pub const TARGET_SDK: u32 = 36;
+pub const TARGET_SDK: u32 = bern_target_api::ANDROID_TARGET_SDK;
 /// Android 8.0, chosen in the design discussion: Compose and the adaptive
 /// libraries support it, and it covers nearly every phone in use.
-pub const MINIMUM_SDK: u32 = 26;
-/// Wear OS 3.0 (API 30), baseline for Compose for Wear OS Material 3.
-pub const WEAR_MINIMUM_SDK: u32 = 30;
+pub const MINIMUM_SDK: u32 = bern_target_api::ANDROID_MINIMUM_SDK;
+/// Android 8.0 (API 26) default floor for Wear OS builds so older Android 8+
+/// watches are supported out of the box; Google Play Wear OS releases can raise
+/// this via `android = { min_sdk = 30 }` in `Bern.toml`.
+pub const WEAR_MINIMUM_SDK: u32 = bern_target_api::ANDROID_MINIMUM_SDK;
 
 pub fn settings(product: &str) -> String {
     format!(
@@ -120,8 +122,11 @@ fun registerRustBuildTask(variantName: String, release: Boolean) {{
 
             for ((abi, rustTarget, clangPrefix) in bernRustAbis) {{
                 val ext = if (isWin) ".cmd" else ""
-                val clang = llvmBin.resolve("$clangPrefix{min_sdk}-clang$ext").absolutePath
-                val clangxx = llvmBin.resolve("$clangPrefix{min_sdk}-clang++$ext").absolutePath
+                val api = ({min_sdk} downTo 21).firstOrNull {{ level ->
+                    llvmBin.resolve("$clangPrefix$level-clang$ext").isFile
+                }} ?: {min_sdk}
+                val clang = llvmBin.resolve("$clangPrefix$api-clang$ext").absolutePath
+                val clangxx = llvmBin.resolve("$clangPrefix$api-clang++$ext").absolutePath
                 val ar = llvmBin.resolve(if (isWin) "llvm-ar.exe" else "llvm-ar").absolutePath
                 val envTarget = rustTarget.replace('-', '_')
                 val args = mutableListOf(
@@ -199,12 +204,17 @@ pub fn version_code(version: &str) -> u32 {
 /// their own; otherwise the one ABI of `abis` is built into the only APK.
 #[cfg(test)]
 pub fn app_build(app: &Application, abis: &[&str], split: bool) -> String {
-    app_build_for(app, abis, split, false)
+    app_build_for(app, abis, split, false, MINIMUM_SDK)
 }
 
-pub fn app_build_for(app: &Application, abis: &[&str], split: bool, watch: bool) -> String {
+pub fn app_build_for(
+    app: &Application,
+    abis: &[&str],
+    split: bool,
+    watch: bool,
+    min_sdk: u32,
+) -> String {
     let namespace = package(&app.app.bundle_id);
-    let min_sdk = if watch { WEAR_MINIMUM_SDK } else { MINIMUM_SDK };
     let listed = abis
         .iter()
         .map(|abi| format!("\"{abi}\""))

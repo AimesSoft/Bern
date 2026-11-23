@@ -77,6 +77,24 @@ pub fn ndk_bin(ndk: &Path) -> PathBuf {
     ndk.join("toolchains/llvm/prebuilt").join(host).join("bin")
 }
 
+/// The NDK clang/clang++ wrapper for `clang_prefix` at `min_sdk`, falling back
+/// to the newest API level `<= min_sdk` installed in `bin` when an NDK stops
+/// below `min_sdk` (for example NDK 29 at API 35 with `min_sdk = 36`).
+pub fn ndk_compiler(bin: &Path, clang_prefix: &str, min_sdk: u32, suffix: &str) -> PathBuf {
+    let exact = bin.join(format!("{clang_prefix}{min_sdk}-{suffix}"));
+    let exists = |path: &Path| path.is_file() || path.with_extension("cmd").is_file();
+    if exists(&exact) || !bin.is_dir() {
+        return exact;
+    }
+    for api in (21..min_sdk).rev() {
+        let candidate = bin.join(format!("{clang_prefix}{api}-{suffix}"));
+        if exists(&candidate) {
+            return candidate;
+        }
+    }
+    exact
+}
+
 /// Gradle 9.4 or newer, which the Android Gradle plugin needs:
 /// `BERN_GRADLE`, `gradle` on the path, or the newest the Gradle wrapper
 /// downloaded.
@@ -178,4 +196,28 @@ pub fn adb() -> PathBuf {
         .map(|sdk| sdk.join("platform-tools/adb"))
         .filter(|path| path.is_file())
         .unwrap_or_else(|| PathBuf::from("adb"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ndk_compiler_picks_exact_or_newest_lower_api_wrapper() {
+        let dir = std::env::temp_dir().join(format!("bern-ndk-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("armv7a-linux-androideabi26-clang"), "").unwrap();
+        std::fs::write(dir.join("armv7a-linux-androideabi35-clang"), "").unwrap();
+
+        assert_eq!(
+            ndk_compiler(&dir, "armv7a-linux-androideabi", 26, "clang"),
+            dir.join("armv7a-linux-androideabi26-clang")
+        );
+        assert_eq!(
+            ndk_compiler(&dir, "armv7a-linux-androideabi", 36, "clang"),
+            dir.join("armv7a-linux-androideabi35-clang")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
