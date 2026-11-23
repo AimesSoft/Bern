@@ -1920,19 +1920,80 @@ inline xaml::FrameworkElement ControlBar(Ctx const& ctx, std::string const& id, 
 }
 
 using SwapChainPanelNative = std::conditional_t<kWinUI, IBernWinUISwapChainPanelNative, IBernIslandsSwapChainPanelNative>;
-using SwapChainPanelNative2 = std::conditional_t<kWinUI, IBernWinUISwapChainPanelNative2, IBernIslandsSwapChainPanelNative2>;
+using CompositorSwapChainInterop = std::conditional_t<kWinUI, IBernWinUICompositorSwapChainInterop, IBernIslandsCompositorInterop>;
+using CompositorGraphicsInterop = std::conditional_t<kWinUI, IBernWinUICompositorInterop, IBernIslandsCompositorInterop>;
+using DrawingSurfaceInterop = std::conditional_t<kWinUI, IBernWinUIDrawingSurfaceInterop, IBernIslandsDrawingSurfaceInterop>;
+#if BERN_WINUI
+namespace directx = winrt::Microsoft::Graphics::DirectX;
+#else
+namespace directx = winrt::Windows::Graphics::DirectX;
+#endif
 
-/// A SwapChainPanel as the application's media kernel sees it: the kernel
-/// gives its swap chain from any thread, and the panel takes the newest on
-/// the UI thread until the view has taken the surface back.
-struct KernelPanel : winrt::implements<KernelPanel, SwapChainPanelNative> {
-    winrt::weak_ref<controls::SwapChainPanel> panel;
+inline composition::ICompositionSurface MakeSwapChainSurface(composition::Compositor const& compositor, ::IUnknown* swapChain) {
+    if (!compositor || !swapChain) return nullptr;
+    auto interop = compositor.try_as<CompositorSwapChainInterop>();
+    if (!interop) return nullptr;
+    winrt::com_ptr<::IUnknown> raw;
+    if (FAILED(interop->CreateCompositionSurfaceForSwapChain(swapChain, raw.put())) || !raw) return nullptr;
+    composition::ICompositionSurface surface{nullptr};
+    if (FAILED(raw->QueryInterface(winrt::guid_of<composition::ICompositionSurface>(), winrt::put_abi(surface)))) return nullptr;
+    return surface;
+}
+
+inline bool BindSwapChainHandle(composition::SpriteVisual const& sprite, composition::CompositionSurfaceBrush const& brush, HANDLE handle) {
+    if (!sprite || !brush) return false;
+    if (!handle) {
+        sprite.Brush(nullptr);
+        brush.Surface(nullptr);
+        return true;
+    }
+    auto interop = sprite.Compositor().try_as<CompositorSwapChainInterop>();
+    if (!interop) return false;
+    winrt::com_ptr<::IUnknown> raw;
+    if (FAILED(interop->CreateCompositionSurfaceForHandle(handle, raw.put())) || !raw) return false;
+    composition::ICompositionSurface surface{nullptr};
+    if (FAILED(raw->QueryInterface(winrt::guid_of<composition::ICompositionSurface>(), winrt::put_abi(surface))) || !surface) return false;
+    brush.Surface(surface);
+    sprite.Brush(brush);
+    return true;
+}
+
+/// A dual-path Composition video surface as the application's media kernel
+/// sees it: while the visual or any ancestor is translucent (`0 < Opacity < 1`),
+/// frames are copied on the GPU into a CompositionDrawingSurface (which alpha-
+/// blends cleanly over underlying XAML without swap-chain punch-through); once
+/// fully opaque, the brush switches atomically to the zero-copy DXGI swap chain.
+struct KernelPanel : winrt::implements<KernelPanel, SwapChainPanelNative, IBernCompositionVideoTarget> {
+    composition::SpriteVisual sprite{nullptr};
+    composition::CompositionSurfaceBrush brush{nullptr};
     std::mutex lock;
     /// Guarded by the lock.
     winrt::com_ptr<IDXGISwapChain> chain;
+    IDXGISwapChain* applied = nullptr;
+    winrt::com_ptr<ID3D11Texture2D> blendedTex;
+    uint64_t blendedSeq = 0;
+    uint64_t appliedBlendedSeq = 0;
     bool detached = false;
+    /// Read from the kernel's thread, written on the UI thread. Starts true so
+    /// a newly mounted view with an entrance fade never exposes a raw swap
+    /// chain before its ancestor opacity watchers attach.
+    std::atomic<bool> needsBlended{true};
 
-    explicit KernelPanel(controls::SwapChainPanel const& shown) : panel(winrt::make_weak(shown)) {}
+    /// UI-thread-only state.
+    bool opacityInitialized = false;
+    bool showingDrawingSurface = false;
+    bool drawingHasFrame = false;
+    composition::ICompositionSurface swapChainSurface{nullptr};
+    winrt::com_ptr<ID3D11Device> d3dDevice;
+    winrt::com_ptr<ID2D1Device> d2dDevice;
+    composition::CompositionGraphicsDevice graphicsDevice{nullptr};
+    composition::CompositionDrawingSurface drawingSurface{nullptr};
+    uint32_t drawingW = 0;
+    uint32_t drawingH = 0;
+    DXGI_FORMAT drawingFmt = DXGI_FORMAT_UNKNOWN;
+
+    KernelPanel(composition::SpriteVisual shown, composition::CompositionSurfaceBrush surfaceBrush)
+        : sprite(std::move(shown)), brush(std::move(surfaceBrush)) {}
 
     HRESULT __stdcall SetSwapChain(IDXGISwapChain* next) noexcept override {
         {
@@ -1948,40 +2009,305 @@ struct KernelPanel : winrt::implements<KernelPanel, SwapChainPanelNative> {
         return S_OK;
     }
 
+    HRESULT __stdcall GetNeedsBlendedFrame(BOOL* needed) noexcept override {
+        if (!needed) return E_POINTER;
+        *needed = needsBlended.load(std::memory_order_acquire) ? TRUE : FALSE;
+        return S_OK;
+    }
+
+    HRESULT __stdcall PresentBlendedTexture(::IUnknown* texture) noexcept override {
+        {
+            std::lock_guard guard(lock);
+            if (detached) return S_OK;
+            blendedTex = nullptr;
+            if (texture) texture->QueryInterface(__uuidof(ID3D11Texture2D), blendedTex.put_void());
+            ++blendedSeq;
+        }
+        try {
+            Host::Post([self = get_strong()] { self->ApplyBlended(); });
+        } catch (...) {
+            return E_FAIL;
+        }
+        return S_OK;
+    }
+
+    void ReleaseDrawingSurface() {
+        {
+            std::lock_guard guard(lock);
+            blendedTex = nullptr;
+        }
+        drawingSurface = nullptr;
+        drawingW = drawingH = 0;
+        drawingFmt = DXGI_FORMAT_UNKNOWN;
+        drawingHasFrame = false;
+    }
+
+    void SetNeedsBlended(bool want) {
+        if (detached) return;
+        bool prev = needsBlended.exchange(want, std::memory_order_acq_rel);
+        if (prev != want || !opacityInitialized) {
+            opacityInitialized = true;
+            SyncBrush();
+            if (!want && swapChainSurface) ReleaseDrawingSurface();
+        }
+    }
+
+    void SyncBrush() {
+        if (detached || !sprite || !brush) return;
+        if (needsBlended.load(std::memory_order_acquire)) {
+            if (drawingHasFrame && drawingSurface) {
+                if (!showingDrawingSurface || !sprite.Brush()) {
+                    brush.Surface(drawingSurface);
+                    sprite.Brush(brush);
+                    showingDrawingSurface = true;
+                }
+            } else {
+                // Keep the visual empty while translucent until a drawing-
+                // surface frame lands so the raw DXGI swap chain never punches
+                // through underlying XAML layers.
+                sprite.Brush(nullptr);
+                brush.Surface(nullptr);
+                showingDrawingSurface = false;
+            }
+            return;
+        }
+        if (swapChainSurface) {
+            if (showingDrawingSurface || !sprite.Brush()) {
+                brush.Surface(swapChainSurface);
+                sprite.Brush(brush);
+                showingDrawingSurface = false;
+            }
+        } else if (drawingHasFrame && drawingSurface) {
+            if (!showingDrawingSurface || !sprite.Brush()) {
+                brush.Surface(drawingSurface);
+                sprite.Brush(brush);
+                showingDrawingSurface = true;
+            }
+        } else {
+            sprite.Brush(nullptr);
+            brush.Surface(nullptr);
+            showingDrawingSurface = false;
+        }
+    }
+
     void Apply() {
         winrt::com_ptr<IDXGISwapChain> next;
         {
             std::lock_guard guard(lock);
             if (detached) return;
             next = chain;
+            if (next.get() == applied) return;
+            applied = next.get();
         }
-        if (auto shown = panel.get(); shown && FAILED(shown.as<SwapChainPanelNative>()->SetSwapChain(next.get())))
-            Report("video: the panel does not take the media kernel's swap chain");
+        if (!sprite || !brush) return;
+        if (!next) {
+            swapChainSurface = nullptr;
+            drawingHasFrame = false;
+            SyncBrush();
+            return;
+        }
+        swapChainSurface = MakeSwapChainSurface(sprite.Compositor(), next.get());
+        if (!swapChainSurface) {
+            Report("video: the surface does not take the media kernel's swap chain");
+            return;
+        }
+        if (!showingDrawingSurface) {
+            brush.Surface(nullptr);
+            sprite.Brush(nullptr);
+        }
+        SyncBrush();
+        if (!needsBlended.load(std::memory_order_acquire) && drawingSurface) ReleaseDrawingSurface();
     }
 
-    /// The kernel no longer draws into the panel: show nothing.
+    bool EnsureDrawingSurface(ID3D11Device* dev, uint32_t width, uint32_t height, DXGI_FORMAT fmt) {
+        if (!sprite || !dev || width == 0 || height == 0) return false;
+        directx::DirectXPixelFormat dxFmt{};
+        if (fmt == DXGI_FORMAT_B8G8R8A8_UNORM) dxFmt = directx::DirectXPixelFormat::B8G8R8A8UIntNormalized;
+        else if (fmt == DXGI_FORMAT_R16G16B16A16_FLOAT) dxFmt = directx::DirectXPixelFormat::R16G16B16A16Float;
+        else return false;
+
+        if (!graphicsDevice || d3dDevice.get() != dev) {
+            drawingSurface = nullptr;
+            graphicsDevice = nullptr;
+            d2dDevice = nullptr;
+            d3dDevice = nullptr;
+            drawingW = drawingH = 0;
+            drawingFmt = DXGI_FORMAT_UNKNOWN;
+            drawingHasFrame = false;
+            showingDrawingSurface = false;
+
+            if (winrt::com_ptr<ID3D10Multithread> mt;
+                SUCCEEDED(dev->QueryInterface(__uuidof(ID3D10Multithread), mt.put_void())) && mt) {
+                mt->SetMultithreadProtected(TRUE);
+            }
+
+            auto compInterop = sprite.Compositor().try_as<CompositorGraphicsInterop>();
+            if (!compInterop) return false;
+            winrt::com_ptr<::IUnknown> gdRaw;
+            HRESULT hr = compInterop->CreateGraphicsDevice(dev, gdRaw.put());
+            if (FAILED(hr) || !gdRaw) {
+                winrt::com_ptr<IDXGIDevice> dxgiDev;
+                winrt::com_ptr<ID2D1Factory1> d2dFactory;
+                winrt::com_ptr<ID2D1Device> d2d;
+                D2D1_FACTORY_OPTIONS opts{};
+                if (FAILED(dev->QueryInterface(__uuidof(IDXGIDevice), dxgiDev.put_void())) ||
+                    FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_MULTI_THREADED, __uuidof(ID2D1Factory1), &opts, d2dFactory.put_void())) ||
+                    FAILED(d2dFactory->CreateDevice(dxgiDev.get(), d2d.put())))
+                    return false;
+                hr = compInterop->CreateGraphicsDevice(d2d.get(), gdRaw.put());
+                if (FAILED(hr) || !gdRaw) return false;
+                d2dDevice = std::move(d2d);
+            }
+            composition::CompositionGraphicsDevice gd{nullptr};
+            if (FAILED(gdRaw->QueryInterface(winrt::guid_of<composition::ICompositionGraphicsDevice>(), winrt::put_abi(gd))) || !gd)
+                return false;
+            d3dDevice.copy_from(dev);
+            graphicsDevice = std::move(gd);
+        }
+
+        if (!drawingSurface || drawingFmt != fmt) {
+            try {
+                drawingSurface = graphicsDevice.CreateDrawingSurface(
+                    Size{static_cast<float>(width), static_cast<float>(height)},
+                    dxFmt,
+                    directx::DirectXAlphaMode::Premultiplied);
+            } catch (...) {
+                drawingSurface = nullptr;
+                return false;
+            }
+            drawingW = width;
+            drawingH = height;
+            drawingFmt = fmt;
+            showingDrawingSurface = false;
+        } else if (drawingW != width || drawingH != height) {
+            auto dsInterop = drawingSurface.try_as<DrawingSurfaceInterop>();
+            if (dsInterop && SUCCEEDED(dsInterop->Resize(SIZE{static_cast<LONG>(width), static_cast<LONG>(height)}))) {
+                drawingW = width;
+                drawingH = height;
+            } else {
+                try {
+                    drawingSurface = graphicsDevice.CreateDrawingSurface(
+                        Size{static_cast<float>(width), static_cast<float>(height)},
+                        dxFmt,
+                        directx::DirectXAlphaMode::Premultiplied);
+                } catch (...) {
+                    drawingSurface = nullptr;
+                    return false;
+                }
+                drawingW = width;
+                drawingH = height;
+                showingDrawingSurface = false;
+            }
+        }
+        return static_cast<bool>(drawingSurface);
+    }
+
+    void ApplyBlended() {
+        winrt::com_ptr<ID3D11Texture2D> srcTex;
+        {
+            std::lock_guard guard(lock);
+            if (detached) return;
+            if (blendedSeq == appliedBlendedSeq) return;
+            appliedBlendedSeq = blendedSeq;
+            srcTex = blendedTex;
+        }
+        if (!sprite || !brush) return;
+        if (!srcTex) {
+            drawingHasFrame = false;
+            SyncBrush();
+            return;
+        }
+        if (!needsBlended.load(std::memory_order_acquire) && swapChainSurface) return;
+        D3D11_TEXTURE2D_DESC desc{};
+        srcTex->GetDesc(&desc);
+        winrt::com_ptr<ID3D11Device> dev;
+        srcTex->GetDevice(dev.put());
+        if (!EnsureDrawingSurface(dev.get(), desc.Width, desc.Height, desc.Format)) return;
+        auto dsInterop = drawingSurface.try_as<DrawingSurfaceInterop>();
+        if (!dsInterop) return;
+
+        bool updated = false;
+        winrt::com_ptr<IDXGISurface> dstSurf;
+        POINT offset{};
+        if (SUCCEEDED(dsInterop->BeginDraw(nullptr, __uuidof(IDXGISurface), dstSurf.put_void(), &offset)) && dstSurf) {
+            bool copied = false;
+            if (auto dstTex = dstSurf.try_as<ID3D11Texture2D>()) {
+                winrt::com_ptr<ID3D11DeviceContext> immCtx;
+                dev->GetImmediateContext(immCtx.put());
+                if (immCtx) {
+                    D3D11_BOX box{0, 0, 0, desc.Width, desc.Height, 1};
+                    immCtx->CopySubresourceRegion(dstTex.get(), 0, static_cast<UINT>(offset.x), static_cast<UINT>(offset.y), 0, srcTex.get(), 0, &box);
+                    copied = true;
+                }
+            }
+            dstSurf = nullptr;
+            if (SUCCEEDED(dsInterop->EndDraw()) && copied) updated = true;
+        } else {
+            winrt::com_ptr<ID2D1DeviceContext> d2dCtx;
+            if (SUCCEEDED(dsInterop->BeginDraw(nullptr, __uuidof(ID2D1DeviceContext), d2dCtx.put_void(), &offset)) && d2dCtx) {
+                bool copied = false;
+                winrt::com_ptr<IDXGISurface> srcSurf;
+                if (SUCCEEDED(srcTex->QueryInterface(__uuidof(IDXGISurface), srcSurf.put_void())) && srcSurf) {
+                    D2D1_BITMAP_PROPERTIES1 bp = D2D1::BitmapProperties1(
+                        D2D1_BITMAP_OPTIONS_NONE,
+                        D2D1::PixelFormat(desc.Format, D2D1_ALPHA_MODE_PREMULTIPLIED));
+                    winrt::com_ptr<ID2D1Bitmap1> bmp;
+                    if (SUCCEEDED(d2dCtx->CreateBitmapFromDxgiSurface(srcSurf.get(), &bp, bmp.put())) && bmp) {
+                        d2dCtx->SetUnitMode(D2D1_UNIT_MODE_PIXELS);
+                        d2dCtx->SetTransform(D2D1::Matrix3x2F::Identity());
+                        d2dCtx->SetPrimitiveBlend(D2D1_PRIMITIVE_BLEND_COPY);
+                        d2dCtx->DrawBitmap(bmp.get(), D2D1::RectF(
+                            static_cast<float>(offset.x), static_cast<float>(offset.y),
+                            static_cast<float>(offset.x + desc.Width), static_cast<float>(offset.y + desc.Height)));
+                        copied = true;
+                    }
+                }
+                d2dCtx = nullptr;
+                if (SUCCEEDED(dsInterop->EndDraw()) && copied) updated = true;
+            }
+        }
+        if (updated) {
+            drawingHasFrame = true;
+            SyncBrush();
+        }
+    }
+
+    /// The kernel no longer draws into the visual: release all surfaces.
     void Detach() {
         {
             std::lock_guard guard(lock);
             detached = true;
             chain = nullptr;
+            applied = nullptr;
+            blendedTex = nullptr;
         }
-        if (auto shown = panel.get()) {
-            try { shown.as<SwapChainPanelNative>()->SetSwapChain(nullptr); } catch (...) {}
+        try {
+            if (sprite) sprite.Brush(nullptr);
+            if (brush) brush.Surface(nullptr);
+        } catch (...) {
         }
+        swapChainSurface = nullptr;
+        drawingSurface = nullptr;
+        graphicsDevice = nullptr;
+        d2dDevice = nullptr;
+        d3dDevice = nullptr;
+        drawingHasFrame = false;
+        showingDrawingSurface = false;
+        sprite = nullptr;
+        brush = nullptr;
     }
 };
 
-/// A player's frames on screen: the swap chain its media engine draws
-/// into, in a SwapChainPanel. The engine draws as many pixels as the video
-/// takes up on screen; the panel is that many DIPs large and scaled back by
-/// the display scale, so that each pixel of the swap chain is one on screen.
-/// The application's media kernel draws the whole frame instead, fitting
-/// the video itself, into a panel as many pixels as the frame.
-struct VideoScreen {
-    controls::SwapChainPanel panel;
-    controls::Canvas canvas;
-    media::ScaleTransform scale;
+/// A player's frames on screen: the swap chain its media engine or media
+/// kernel draws into, bound to a Composition SpriteVisual via
+/// CompositionSurfaceBrush. For external media kernels, translucent periods
+/// (`0 < Opacity < 1` on the view or any ancestor) composite through a
+/// CompositionDrawingSurface and switch back to the DXGI swap chain at full
+/// opacity.
+struct VideoScreen : std::enable_shared_from_this<VideoScreen> {
+    controls::Border surface;
+    composition::SpriteVisual sprite{nullptr};
+    composition::CompositionSurfaceBrush brush{nullptr};
     controls::Grid frame{nullptr};
     std::string fit;
     Media::Frames frames;
@@ -1989,22 +2315,104 @@ struct VideoScreen {
     uint64_t token = 0;
     /// Clipped by a rounded Composition clip instead of the frame's own.
     bool rounded = false;
-    /// The kernel's view of the panel, its attachment and the size it has.
+    /// The kernel's view of the surface, its attachment and the size it has.
     winrt::com_ptr<KernelPanel> kernel;
     std::string view;
+    std::string playerId;
+    std::string windowId;
     Media::SurfaceSize reported;
+    bool disposed = false;
+    winrt::weak_ref<xaml::XamlRoot> watchedRoot;
+    winrt::event_token rootChanged{};
+    std::vector<std::pair<winrt::weak_ref<xaml::UIElement>, int64_t>> opacityWatchers;
+
+    void InitVisual() {
+        auto visual = xaml::Hosting::ElementCompositionPreview::GetElementVisual(surface);
+        auto compositor = visual.Compositor();
+        brush = compositor.CreateSurfaceBrush();
+        brush.Stretch(composition::CompositionStretch::Fill);
+        sprite = compositor.CreateSpriteVisual();
+        xaml::Hosting::ElementCompositionPreview::SetElementChildVisual(surface, sprite);
+    }
+
+    void UpdateEffectiveOpacity() {
+        if (disposed || !kernel || !surface) return;
+        double effective = 1.0;
+        xaml::DependencyObject node = surface;
+        while (node) {
+            if (auto elem = node.try_as<xaml::UIElement>()) {
+                effective *= elem.Opacity();
+                if (effective < 0.999) break;
+            }
+            node = media::VisualTreeHelper::GetParent(node);
+        }
+        kernel->SetNeedsBlended(effective < 0.999);
+    }
+
+    void WatchOpacityAncestors() {
+        if (disposed || !kernel || !surface) return;
+        UnwatchOpacityAncestors();
+        std::weak_ptr<VideoScreen> weak = shared_from_this();
+        xaml::DependencyObject node = surface;
+        while (node) {
+            if (auto elem = node.try_as<xaml::UIElement>()) {
+                int64_t cb = elem.RegisterPropertyChangedCallback(
+                    xaml::UIElement::OpacityProperty(),
+                    [weak](xaml::DependencyObject const&, xaml::DependencyProperty const&) {
+                        if (auto screen = weak.lock()) screen->UpdateEffectiveOpacity();
+                    });
+                opacityWatchers.emplace_back(winrt::make_weak(elem), cb);
+            }
+            node = media::VisualTreeHelper::GetParent(node);
+        }
+        UpdateEffectiveOpacity();
+    }
+
+    void UnwatchOpacityAncestors() {
+        for (auto& [weakElem, cb] : opacityWatchers) {
+            if (auto elem = weakElem.get()) {
+                try { elem.UnregisterPropertyChangedCallback(xaml::UIElement::OpacityProperty(), cb); } catch (...) {}
+            }
+        }
+        opacityWatchers.clear();
+    }
+
+    void WatchRoot() {
+        if (disposed || !frame) return;
+        auto root = frame.XamlRoot();
+        if (!root) return;
+        if (auto current = watchedRoot.get(); current == root) return;
+        UnwatchRoot();
+        watchedRoot = winrt::make_weak(root);
+        std::weak_ptr<VideoScreen> weak = shared_from_this();
+        rootChanged = root.Changed([weak](auto&&, auto&&) {
+            if (auto screen = weak.lock()) screen->Layout();
+        });
+    }
+
+    void UnwatchRoot() {
+        if (auto root = watchedRoot.get(); root && rootChanged.value != 0) {
+            try { root.Changed(rootChanged); } catch (...) {}
+        }
+        watchedRoot = nullptr;
+        rootChanged = {};
+    }
 
     void Show(Media::Frames const& next) {
+        if (disposed) return;
         frames = next;
         if (next.chain != shown) {
             shown = next.chain;
-            HRESULT result = panel.as<SwapChainPanelNative2>()->SetSwapChainHandle(shown);
-            if (FAILED(result) && shown) Report("video: the panel does not take the media engine's swap chain");
+            if (!BindSwapChainHandle(sprite, brush, shown) && shown)
+                Report("video: the surface does not take the media engine's swap chain");
         }
         Layout();
     }
 
     void Layout() {
+        if (disposed || !frame || !sprite) return;
+        WatchRoot();
+        if (kernel && opacityWatchers.empty()) WatchOpacityAncestors();
         double w = frame.ActualWidth(), h = frame.ActualHeight();
         if (w <= 0 || h <= 0) return;
         if (!rounded) {
@@ -2014,11 +2422,18 @@ struct VideoScreen {
         }
         if (kernel) {
             auto size = Size();
-            panel.Width(static_cast<double>(size.width));
-            panel.Height(static_cast<double>(size.height));
-            scale.ScaleX(w / size.width);
-            scale.ScaleY(h / size.height);
-            if (size != reported) {
+            // A DXGI composition swap chain draws 1:1 in the visual's local
+            // pixel coordinates; sizing the visual to the physical back-buffer
+            // dimensions and scaling down to DIPs matches both the swap chain
+            // and the physical-pixel CompositionDrawingSurface identically.
+            sprite.Offset(float3{0, 0, 0});
+            sprite.Size(float2{static_cast<float>(size.width), static_cast<float>(size.height)});
+            sprite.Scale(float3{static_cast<float>(w / size.width), static_cast<float>(h / size.height), 1.0f});
+            if (view.empty()) {
+                reported = size;
+                SwapChainPanelNative* native = kernel.get();
+                view = Media::Attach(native, reported, FitCode(), playerId, windowId);
+            } else if (size != reported) {
                 reported = size;
                 Media::Resize(view, size);
             }
@@ -2037,13 +2452,12 @@ struct VideoScreen {
         auto root = frame.XamlRoot();
         double s = root ? root.RasterizationScale() : 1.0;
         long pw = (std::max)(1L, std::lround(cw * s)), ph = (std::max)(1L, std::lround(ch * s));
-        panel.Width(static_cast<double>(pw));
-        panel.Height(static_cast<double>(ph));
-        scale.ScaleX(dw / pw);
-        scale.ScaleY(dh / ph);
         // On whole pixels, so that the frames stay sharp.
-        controls::Canvas::SetLeft(panel, std::round((w - dw) / 2 * s) / s);
-        controls::Canvas::SetTop(panel, std::round((h - dh) / 2 * s) / s);
+        float left = static_cast<float>(std::round((w - dw) / 2 * s) / s);
+        float top = static_cast<float>(std::round((h - dh) / 2 * s) / s);
+        sprite.Offset(float3{left, top, 0});
+        sprite.Size(float2{static_cast<float>(pw), static_cast<float>(ph)});
+        sprite.Scale(float3{static_cast<float>(dw / pw), static_cast<float>(dh / ph), 1.0f});
         Media::Resize(token, static_cast<uint32_t>(pw), static_cast<uint32_t>(ph));
     }
 
@@ -2136,12 +2550,14 @@ inline void Video(Parent const& p, Ctx const& ctx, VideoProps props) {
     auto screen = std::make_shared<VideoScreen>();
     screen->frame = frame;
     screen->fit = props.fit ? props.fit : "contain";
-    auto element = screen->panel;
-    element.RenderTransform(screen->scale);
+    screen->playerId = playerId;
+    screen->windowId = win->id;
+    auto element = screen->surface;
+    element.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+    element.VerticalAlignment(xaml::VerticalAlignment::Stretch);
     element.IsHitTestVisible(false);
-    screen->canvas.IsHitTestVisible(false);
-    screen->canvas.Children().Append(element);
-    frame.Children().Append(screen->canvas);
+    screen->InitVisual();
+    frame.Children().Append(element);
     controls::StackPanel status;
     status.Spacing(6);
     status.HorizontalAlignment(xaml::HorizontalAlignment::Center);
@@ -2152,18 +2568,29 @@ inline void Video(Parent const& p, Ctx const& ctx, VideoProps props) {
     frame.SizeChanged([weak](auto&&, auto&&) {
         if (auto screen = weak.lock()) screen->Layout();
     });
-    // On a display of another scale.
-    element.CompositionScaleChanged([weak](auto&&, auto&&) {
-        if (auto screen = weak.lock()) screen->Layout();
+    frame.Loaded([weak](auto&&, auto&&) {
+        if (auto screen = weak.lock()) {
+            screen->WatchOpacityAncestors();
+            screen->Layout();
+        }
+    });
+    frame.Unloaded([weak](auto&&, auto&&) {
+        if (auto screen = weak.lock()) {
+            screen->UnwatchOpacityAncestors();
+            screen->UnwatchRoot();
+        }
     });
     if (Media::Kernel()) {
-        screen->kernel = winrt::make_self<KernelPanel>(element);
-        screen->reported = screen->Size();
-        SwapChainPanelNative* native = screen->kernel.get();
-        screen->view = Media::Attach(native, screen->reported, screen->FitCode(), playerId, win->id);
+        screen->kernel = winrt::make_self<KernelPanel>(screen->sprite, screen->brush);
         Reactive::OnCleanup([screen] {
-            Media::Detach(screen->view);
+            screen->disposed = true;
+            screen->UnwatchOpacityAncestors();
+            screen->UnwatchRoot();
+            if (!screen->view.empty()) Media::Detach(screen->view);
             screen->kernel->Detach();
+            try { xaml::Hosting::ElementCompositionPreview::SetElementChildVisual(screen->surface, nullptr); } catch (...) {}
+            screen->sprite = nullptr;
+            screen->brush = nullptr;
         });
     } else {
         screen->token = Media::Show(playerId, [weak](Media::Frames const& frames) {
@@ -2171,12 +2598,18 @@ inline void Video(Parent const& p, Ctx const& ctx, VideoProps props) {
         });
         auto token = Media::AttachView(playerId, win->id);
         Reactive::OnCleanup([token, screen] {
+            screen->disposed = true;
+            screen->UnwatchRoot();
             Media::DetachView(token);
             Media::Hide(screen->token);
-            if (screen->shown) {
-                screen->shown = nullptr;
-                try { screen->panel.as<SwapChainPanelNative2>()->SetSwapChainHandle(nullptr); } catch (...) {}
-            }
+            screen->shown = nullptr;
+            try {
+                if (screen->sprite) screen->sprite.Brush(nullptr);
+                if (screen->brush) screen->brush.Surface(nullptr);
+                xaml::Hosting::ElementCompositionPreview::SetElementChildVisual(screen->surface, nullptr);
+            } catch (...) {}
+            screen->sprite = nullptr;
+            screen->brush = nullptr;
         });
     }
     Reactive::Run([element, status, playerId, labelText] {

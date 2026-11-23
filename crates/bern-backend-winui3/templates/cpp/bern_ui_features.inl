@@ -1572,7 +1572,7 @@ inline std::shared_ptr<Popover> MakePopover(Ctx const& ctx, Build content, bool 
         if (auto popover = weak.lock()) popover->open = true;
         Snapshot::Schedule();
     });
-    popover->flyout.Closed([weak](auto&&, auto&&) {
+    popover->flyout.Closed([weak, win = ctx.win, alive = ctx.win ? std::weak_ptr<bool>(ctx.win->life) : std::weak_ptr<bool>()](auto&&, auto&&) {
         if (auto popover = weak.lock()) {
             popover->open = false;
             // After the closing animation has used the content.
@@ -1580,11 +1580,17 @@ inline std::shared_ptr<Popover> MakePopover(Ctx const& ctx, Build content, bool 
                 if (auto popover = weak.lock(); popover && !popover->open) popover->Unmount();
             });
         }
+#if BERN_WINUI
+        if (win && !alive.expired()) RestoreWindowedPopupImeFocus(win);
+#endif
         Snapshot::Schedule();
     });
-    Reactive::OnCleanup([popover] {
+    Reactive::OnCleanup([popover, win = ctx.win, alive = ctx.win ? std::weak_ptr<bool>(ctx.win->life) : std::weak_ptr<bool>()] {
         popover->flyout.Hide();
         popover->Unmount();
+#if BERN_WINUI
+        if (win && !alive.expired()) RestoreWindowedPopupImeFocus(win);
+#endif
     });
     return popover;
 }

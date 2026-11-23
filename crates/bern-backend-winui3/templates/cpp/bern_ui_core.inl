@@ -1689,6 +1689,9 @@ struct Win {
 #if BERN_WINUI
     std::vector<winrt::Windows::Graphics::RectInt32> passthroughRects;
     bool passthroughQueued = false;
+    /// Owned windowed-popup HWND that temporarily holds Win32 keyboard focus
+    /// for IME text input inside a `ShouldConstrainToRootBounds(false)` popup.
+    HWND imePopupHwnd = nullptr;
 #endif
     /// A dialog window's content dialog, and the window it shows over.
     controls::ContentDialog sheet{nullptr};

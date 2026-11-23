@@ -69,6 +69,41 @@ struct __declspec(uuid("d5a2f60c-37b2-44a2-937b-8d8eb9726821")) IBernIslandsSwap
     virtual HRESULT __stdcall SetSwapChainHandle(HANDLE swapChain) = 0;
 };
 
+// Composition interop for binding a DXGI swap chain (or its shared handle) to
+// a SpriteVisual via CompositionSurfaceBrush, and for dual-path alpha-blended
+// composition via CompositionDrawingSurface while a video visual is translucent.
+struct __declspec(uuid("FAB19398-6D19-4D8A-B752-8F096C396069")) IBernWinUICompositorInterop : ::IUnknown {
+    virtual HRESULT __stdcall CreateGraphicsDevice(::IUnknown* renderingDevice, ::IUnknown** result) = 0;
+};
+struct __declspec(uuid("FC084699-67D8-40E1-ADE7-08901D84FFDA")) IBernWinUICompositorSwapChainInterop : IBernWinUICompositorInterop {
+    virtual HRESULT __stdcall CreateCompositionSurfaceForHandle(HANDLE swapChain, ::IUnknown** result) = 0;
+    virtual HRESULT __stdcall CreateCompositionSurfaceForSwapChain(::IUnknown* swapChain, ::IUnknown** result) = 0;
+};
+struct __declspec(uuid("25297D5C-3AD4-4C9C-B5CF-E36A38512330")) IBernIslandsCompositorInterop : ::IUnknown {
+    virtual HRESULT __stdcall CreateCompositionSurfaceForHandle(HANDLE swapChain, ::IUnknown** result) = 0;
+    virtual HRESULT __stdcall CreateCompositionSurfaceForSwapChain(::IUnknown* swapChain, ::IUnknown** result) = 0;
+    virtual HRESULT __stdcall CreateGraphicsDevice(::IUnknown* renderingDevice, ::IUnknown** result) = 0;
+};
+struct __declspec(uuid("2D6355C2-AD57-4EAE-92E4-4C3EFF65D578")) IBernWinUIDrawingSurfaceInterop : ::IUnknown {
+    virtual HRESULT __stdcall BeginDraw(RECT const* updateRect, REFIID iid, void** updateObject, POINT* updateOffset) = 0;
+    virtual HRESULT __stdcall EndDraw() = 0;
+    virtual HRESULT __stdcall Resize(SIZE sizePixels) = 0;
+};
+struct __declspec(uuid("FD04E6E3-FE0C-4C3C-AB19-A07601A576EE")) IBernIslandsDrawingSurfaceInterop : ::IUnknown {
+    virtual HRESULT __stdcall BeginDraw(RECT const* updateRect, REFIID iid, void** updateObject, POINT* updateOffset) = 0;
+    virtual HRESULT __stdcall EndDraw() = 0;
+    virtual HRESULT __stdcall Resize(SIZE sizePixels) = 0;
+};
+// Optional COM interface on the media kernel's Windows surface target: while a
+// video visual or any ancestor has effective opacity in [0, 1), the host
+// composites GPU snapshots through a CompositionDrawingSurface (which blends
+// over underlying XAML without swap-chain punch-through) and switches to the
+// zero-copy DXGI swap chain once fully opaque.
+struct __declspec(uuid("B3F4C1E2-8A7D-4C5E-9F1B-2E4D6A8C0F31")) IBernCompositionVideoTarget : ::IUnknown {
+    virtual HRESULT __stdcall GetNeedsBlendedFrame(BOOL* needed) = 0;
+    virtual HRESULT __stdcall PresentBlendedTexture(::IUnknown* d3d11Texture) = 0;
+};
+
 #if BERN_WITH_WINUI
 // The WinUI 3 front end, on the Windows App Runtime 2 the system has.
 #include <winrt/Microsoft.UI.h>
@@ -98,6 +133,7 @@ struct __declspec(uuid("d5a2f60c-37b2-44a2-937b-8d8eb9726821")) IBernIslandsSwap
 #if BERN_WITH_ISLANDS
 // The fallback front end, the system XAML of Windows 10 and 11 hosted in
 // Win32 windows through XAML Islands.
+#include <winrt/Windows.Graphics.DirectX.h>
 #include <winrt/Windows.UI.Composition.h>
 #include <winrt/Windows.UI.Xaml.h>
 #include <winrt/Windows.UI.Xaml.Automation.h>

@@ -1976,6 +1976,160 @@ inline bool IsEnter(xaml::Input::KeyRoutedEventArgs const& args) {
     return args.Key() == winrt::Windows::System::VirtualKey::Enter;
 }
 
+#if BERN_WINUI
+/// First descendant child HWND whose class name matches `className`.
+inline HWND FindDescendantHwndByClass(HWND parent, wchar_t const* className) {
+    if (!parent || !IsWindow(parent)) return nullptr;
+    struct Search {
+        wchar_t const* cls;
+        HWND found = nullptr;
+    } search{className, nullptr};
+    EnumChildWindows(
+        parent,
+        [](HWND child, LPARAM lp) -> BOOL {
+            auto* s = reinterpret_cast<Search*>(lp);
+            wchar_t buf[128]{};
+            if (GetClassNameW(child, buf, static_cast<int>(std::size(buf))) > 0 && wcscmp(buf, s->cls) == 0) {
+                s->found = child;
+                return FALSE;
+            }
+            return TRUE;
+        },
+        reinterpret_cast<LPARAM>(&search));
+    return search.found;
+}
+
+/// Whether `element` currently resides inside an open windowed popup
+/// (`ShouldConstrainToRootBounds == false`).
+inline bool IsInWindowedPopup(xaml::UIElement const& element) {
+    auto root = element ? element.XamlRoot() : nullptr;
+    if (!root) return false;
+    auto popups = media::VisualTreeHelper::GetOpenPopupsForXamlRoot(root);
+    if (popups.Size() == 0) return false;
+    for (xaml::DependencyObject node = element; node; node = media::VisualTreeHelper::GetParent(node)) {
+        for (auto const& popup : popups) {
+            if (popup.IsOpen() && !popup.ShouldConstrainToRootBounds() && popup.Child() == node) return true;
+        }
+    }
+    return false;
+}
+
+/// Find the owned windowed popup host HWND and its `InputSiteWindowClass`
+/// child HWND for a focused text input inside an unconstrained WinUI 3 popup.
+/// WinUI 3 keeps Win32 focus on the owner island while RichEdit/TSF queries
+/// the popup's own island input HWND via `ITextHost2::TxGetWindow`, which
+/// breaks CJK IME composition unless Win32 keyboard focus moves to that input
+/// HWND (see microsoft/microsoft-ui-xaml#11412).
+inline std::pair<HWND, HWND> FindWindowedPopupInputHwnd(HWND ownerHwnd, xaml::UIElement const& element) {
+    if (!ownerHwnd || !IsWindow(ownerHwnd) || !IsInWindowedPopup(element)) return {nullptr, nullptr};
+    std::optional<POINT> targetPt;
+    if (auto fe = element.try_as<xaml::FrameworkElement>(); fe && fe.XamlRoot()) {
+        try {
+            double scale = fe.XamlRoot().RasterizationScale();
+            auto pt = fe.TransformToVisual(nullptr).TransformPoint(
+                {static_cast<float>(fe.ActualWidth() / 2.0), static_cast<float>(fe.ActualHeight() / 2.0)});
+            POINT screenPt{static_cast<LONG>(std::lround(pt.X * scale)), static_cast<LONG>(std::lround(pt.Y * scale))};
+            if (ClientToScreen(ownerHwnd, &screenPt)) targetPt = screenPt;
+        } catch (winrt::hresult_error const&) {
+        }
+    }
+    struct Search {
+        HWND owner;
+        std::optional<POINT> target;
+        HWND matchedHost = nullptr;
+        HWND matchedInput = nullptr;
+        HWND fallbackHost = nullptr;
+        HWND fallbackInput = nullptr;
+    } search{ownerHwnd, targetPt};
+    EnumThreadWindows(
+        GetCurrentThreadId(),
+        [](HWND hwnd, LPARAM lp) -> BOOL {
+            auto* s = reinterpret_cast<Search*>(lp);
+            if (hwnd == s->owner || !IsWindowVisible(hwnd)) return TRUE;
+            if (GetWindow(hwnd, GW_OWNER) != s->owner) return TRUE;
+            HWND input = FindDescendantHwndByClass(hwnd, L"InputSiteWindowClass");
+            if (!input) return TRUE;
+            if (!s->fallbackHost) {
+                s->fallbackHost = hwnd;
+                s->fallbackInput = input;
+            }
+            if (s->target) {
+                RECT rc{};
+                if (GetWindowRect(hwnd, &rc) && PtInRect(&rc, *s->target)) {
+                    s->matchedHost = hwnd;
+                    s->matchedInput = input;
+                    return FALSE;
+                }
+            }
+            return TRUE;
+        },
+        reinterpret_cast<LPARAM>(&search));
+    if (search.matchedInput) return {search.matchedHost, search.matchedInput};
+    return {search.fallbackHost, search.fallbackInput};
+}
+
+/// Return Win32 keyboard focus from a windowed popup back to its owner island
+/// when the text input loses focus or the popup closes, without stealing focus
+/// from unrelated applications.
+inline void RestoreWindowedPopupImeFocus(Win* win) {
+    if (!win || win->closed || !win->hwnd || !win->imePopupHwnd) return;
+    HWND popupHost = win->imePopupHwnd;
+    win->imePopupHwnd = nullptr;
+    HWND active = GetActiveWindow();
+    HWND focused = GetFocus();
+    bool inPopup = (active == popupHost) || (focused && GetAncestor(focused, GA_ROOT) == popupHost);
+    if (inPopup && IsWindow(win->hwnd)) {
+        HWND mainInput = FindDescendantHwndByClass(win->hwnd, L"InputSiteWindowClass");
+        ::SetFocus(mainInput ? mainInput : win->hwnd);
+    } else if (IsWindow(win->hwnd) && GetForegroundWindow() != win->hwnd) {
+        SendMessageW(win->hwnd, WM_NCACTIVATE, FALSE, 0);
+    }
+}
+
+/// Move Win32 keyboard focus onto the windowed popup's `InputSiteWindowClass`
+/// HWND so RichEdit and Windows TSF/IME share the focused HWND.
+inline bool FocusWindowedPopupForIme(Win* win, xaml::UIElement const& element) {
+    if (!win || win->closed || !win->hwnd) return false;
+    auto [popupHost, popupInput] = FindWindowedPopupInputHwnd(win->hwnd, element);
+    if (!popupInput) return false;
+    win->imePopupHwnd = popupHost;
+    if (::GetFocus() != popupInput) ::SetFocus(popupInput);
+    return true;
+}
+
+/// Keep Win32 focus aligned with the windowed popup's input HWND whenever a
+/// text editing control inside an unconstrained popup receives keyboard focus.
+inline void EnableWindowedPopupIme(xaml::FrameworkElement const& control, Win* win) {
+    if (!win) return;
+    std::weak_ptr<bool> alive(win->life);
+    control.GotFocus([weak = winrt::make_weak(control), win, alive](auto&&, auto&&) {
+        if (alive.expired() || win->closed) return;
+        auto el = weak.get();
+        if (!el) return;
+        if (!FocusWindowedPopupForIme(win, el)) {
+            Host::Post([weak, win, alive] {
+                if (alive.expired() || win->closed) return;
+                if (auto el = weak.get(); el && el.try_as<controls::Control>()
+                    && el.as<controls::Control>().FocusState() != xaml::FocusState::Unfocused) {
+                    FocusWindowedPopupForIme(win, el);
+                }
+            });
+        }
+    });
+    control.LostFocus([win, alive](auto&&, auto&&) {
+        if (alive.expired() || win->closed || !win->imePopupHwnd) return;
+        Host::Post([win, alive] {
+            if (alive.expired() || win->closed || !win->imePopupHwnd || !win->root || !win->root.XamlRoot()) return;
+            auto focused = xaml::Input::FocusManager::GetFocusedElement(win->root.XamlRoot());
+            if (auto fe = focused.try_as<xaml::UIElement>()) {
+                if ((fe.try_as<controls::TextBox>() || fe.try_as<controls::PasswordBox>()) && IsInWindowedPopup(fe)) return;
+            }
+            RestoreWindowedPopupImeFocus(win);
+        });
+    });
+}
+#endif
+
 struct TextInputProps {
     char const* id = "";
     Str label;
@@ -2065,6 +2219,9 @@ inline void TextInput(Parent const& p, Ctx const& ctx, TextInputProps props) {
         control = box;
     }
     BindName(control, text);
+#if BERN_WINUI
+    EnableWindowedPopupIme(control, ctx.win);
+#endif
     SetRole(control, L"bern-fill-width");
     if (p.isList) {
         if (multiline || props.labelHidden) {
@@ -2124,6 +2281,9 @@ inline controls::AutoSuggestBox SearchBox(Ctx const& ctx, SearchProps const& pro
     });
     auto run = Run(ctx, props.submit);
     box.QuerySubmitted([run](auto&&, auto&&) { if (run) run(); });
+#if BERN_WINUI
+    EnableWindowedPopupIme(box, ctx.win);
+#endif
     Controls::Register(ctx, props.id, "search", placeholder ? placeholder : TextFn([] { return winrt::hstring(); }), nullptr,
         Actions{.edit = [ctx, field](std::string const& value) { SetDraft(ctx, field, Value::Text(value)); },
             .submit = run,
@@ -4225,101 +4385,14 @@ inline std::pair<double, double> ShownSize(PictureProps const& props, double wid
     return {0, 0};
 }
 
-/// Decode `bytes` into `bitmap`, which XAML does on the UI thread.
-inline winrt::fire_and_forget LoadPicture(media::Imaging::BitmapImage bitmap, std::vector<uint8_t> bytes, std::string name) {
-    try {
-        winrt::Windows::Storage::Streams::InMemoryRandomAccessStream stream;
-        winrt::Windows::Storage::Streams::DataWriter writer(stream);
-        writer.WriteBytes(bytes);
-        co_await writer.StoreAsync();
-        writer.DetachStream();
-        stream.Seek(0);
-        co_await bitmap.SetSourceAsync(stream);
-    } catch (winrt::hresult_error const& error) {
-        Report("image " + name + ": " + Utf8(error.message()));
-    }
+/// Atomically swap `frame`'s content once the replacement element is ready so
+/// switching sources never flashes an empty frame in between.
+inline void ReplaceFrame(controls::Grid const& frame, xaml::UIElement const& next) {
+    frame.Children().Clear();
+    frame.Children().Append(next);
 }
 
-/// Decode a picture that shows at a size that never changes (`shown`) away
-/// from the UI thread, then show it in `image`. A picture larger than it
-/// shows is double-sampled: decoded, with the decoder's filter, at twice
-/// the display's pixels it covers, which the compositor halves. Squeezed
-/// down from a much larger picture by the compositor alone, its edges
-/// would break up; decoded whole by XAML, a page of posters holds the
-/// window still.
-inline winrt::fire_and_forget DecodePicture(winrt::weak_ref<controls::Image> weak, std::vector<uint8_t> bytes, std::string name, PictureProps shown,
-    std::shared_ptr<Scope> owner = nullptr) {
-    namespace imaging = winrt::Windows::Graphics::Imaging;
-    winrt::apartment_context ui;
-    co_await winrt::resume_background();
-    imaging::SoftwareBitmap pixels{nullptr};
-    std::string failed;
-    try {
-        winrt::Windows::Storage::Streams::InMemoryRandomAccessStream stream;
-        winrt::Windows::Storage::Streams::DataWriter writer(stream);
-        writer.WriteBytes(bytes);
-        co_await writer.StoreAsync();
-        writer.DetachStream();
-        stream.Seek(0);
-        auto decoder = co_await imaging::BitmapDecoder::CreateAsync(stream);
-        double width = decoder.OrientedPixelWidth(), height = decoder.OrientedPixelHeight();
-        imaging::BitmapTransform transform;
-        if (width > 0 && height > 0) {
-            auto size = ShownSize(shown, width, height);
-            double twiceWidth = size.first * 2 * shown.scale, twiceHeight = size.second * 2 * shown.scale;
-            if (twiceWidth >= 1 && twiceHeight >= 1 && twiceWidth < width && twiceHeight < height) {
-                // The decoder scales before it turns the picture upright.
-                double across = twiceWidth / width, down = twiceHeight / height;
-                if (decoder.PixelWidth() != decoder.OrientedPixelWidth()) std::swap(across, down);
-                transform.ScaledWidth(static_cast<uint32_t>((std::max)(1L, std::lround(decoder.PixelWidth() * across))));
-                transform.ScaledHeight(static_cast<uint32_t>((std::max)(1L, std::lround(decoder.PixelHeight() * down))));
-                transform.InterpolationMode(imaging::BitmapInterpolationMode::Fant);
-            }
-        }
-        pixels = co_await decoder.GetSoftwareBitmapAsync(imaging::BitmapPixelFormat::Bgra8, imaging::BitmapAlphaMode::Premultiplied, transform,
-            imaging::ExifOrientationMode::RespectExifOrientation, imaging::ColorManagementMode::ColorManageToSRgb);
-    } catch (winrt::hresult_error const& error) {
-        failed = Utf8(error.message());
-    }
-    co_await ui;
-    if (!pixels) {
-        Report("image " + name + ": " + failed);
-        co_return;
-    }
-    auto image = weak.get();
-    if (!image || (owner && owner->disposed)) co_return;
-    try {
-        if (shown.saturation) {
-            int32_t pw = pixels.PixelWidth(), ph = pixels.PixelHeight();
-            if (pw <= 0 || ph <= 0) co_return;
-            media::Imaging::WriteableBitmap wb(pw, ph);
-            pixels.CopyToBuffer(wb.PixelBuffer());
-            size_t len = static_cast<size_t>(pw) * static_cast<size_t>(ph) * 4;
-            uint8_t* dst = wb.PixelBuffer().data();
-            auto raw = std::make_shared<std::vector<uint8_t>>(dst, dst + len);
-            image.Source(wb);
-            auto sat = shown.saturation;
-            auto bind = [wb, raw, sat, len] {
-                Reactive::Run([wb, raw, sat, len] {
-                    ApplySaturation(raw->data(), wb.PixelBuffer().data(), len, sat->Get());
-                    wb.Invalidate();
-                });
-            };
-            if (owner) owner->Run(bind);
-            else bind();
-            co_return;
-        }
-        media::Imaging::SoftwareBitmapSource source;
-        image.Source(source);
-        co_await source.SetBitmapAsync(pixels);
-    } catch (winrt::hresult_error const& error) {
-        Report("image " + name + ": " + Utf8(error.message()));
-    }
-}
-
-/// The XAML picture: SDR pictures, and HDR ones where they cannot be drawn
-/// as HDR. `framed` when both sides are given.
-inline controls::Image SdrImage(PictureProps const& props, std::vector<uint8_t> bytes, TextFn const& name) {
+inline controls::Image MakeSdrImage(PictureProps const& props, TextFn const& name) {
     controls::Image image;
     std::string_view fit = props.fit ? props.fit : "contain";
     bool framed = props.fills || (props.width && props.height);
@@ -4335,21 +4408,154 @@ inline controls::Image SdrImage(PictureProps const& props, std::vector<uint8_t> 
         image.HorizontalAlignment(xaml::HorizontalAlignment::Left);
         image.VerticalAlignment(xaml::VerticalAlignment::Top);
     }
-    if ((props.fixed || props.decodeMax || props.saturation) && !bytes.empty()) {
-        PictureProps decode = props;
-        if (!props.fixed && props.decodeMax) {
-            decode.width.reset();
-            decode.height.reset();
-        }
-        DecodePicture(winrt::make_weak(image), std::move(bytes), props.source, decode, props.saturation ? LaterScope() : nullptr);
-    } else {
-        media::Imaging::BitmapImage bitmap;
-        image.Source(bitmap);
-        if (!bytes.empty()) LoadPicture(bitmap, std::move(bytes), props.source);
-    }
     if (name) BindName(image, name);
     else xaml::Automation::AutomationProperties::SetAccessibilityView(image, xaml::Automation::Peers::AccessibilityView::Raw);
     return image;
+}
+
+inline PictureProps DecodePropsFor(PictureProps const& props) {
+    PictureProps decode = props;
+    if (!props.fixed && props.decodeMax) {
+        decode.width.reset();
+        decode.height.reset();
+    }
+    return decode;
+}
+
+/// Decode `bytes` into `bitmap` on the UI thread, then replace `frame`'s child
+/// only once the bitmap has loaded and `owner` is still active.
+inline winrt::fire_and_forget LoadPicture(winrt::weak_ref<controls::Grid> weakFrame, std::shared_ptr<std::vector<uint8_t>> bytes, std::string name,
+    PictureProps props, TextFn label, std::shared_ptr<Scope> owner) {
+    try {
+        media::Imaging::BitmapImage bitmap;
+        winrt::Windows::Storage::Streams::InMemoryRandomAccessStream stream;
+        winrt::Windows::Storage::Streams::DataWriter writer(stream);
+        writer.WriteBytes(*bytes);
+        co_await writer.StoreAsync();
+        writer.DetachStream();
+        stream.Seek(0);
+        co_await bitmap.SetSourceAsync(stream);
+        auto frame = weakFrame.get();
+        if (!frame || (owner && owner->disposed)) co_return;
+        auto image = MakeSdrImage(props, label);
+        image.Source(bitmap);
+        ReplaceFrame(frame, image);
+    } catch (winrt::hresult_error const& error) {
+        Report("image " + name + ": " + Utf8(error.message()));
+    }
+}
+
+/// Decode `bytes` to a premultiplied BGRA8 `SoftwareBitmap` on the caller's
+/// background thread, double-sampled to `shown`.
+inline winrt::Windows::Foundation::IAsyncOperation<winrt::Windows::Graphics::Imaging::SoftwareBitmap> DecodeSoftwareBitmapAsync(
+    std::shared_ptr<std::vector<uint8_t>> bytes, PictureProps shown) {
+    namespace imaging = winrt::Windows::Graphics::Imaging;
+    winrt::Windows::Storage::Streams::InMemoryRandomAccessStream stream;
+    winrt::Windows::Storage::Streams::DataWriter writer(stream);
+    writer.WriteBytes(*bytes);
+    co_await writer.StoreAsync();
+    writer.DetachStream();
+    stream.Seek(0);
+    auto decoder = co_await imaging::BitmapDecoder::CreateAsync(stream);
+    double width = decoder.OrientedPixelWidth(), height = decoder.OrientedPixelHeight();
+    imaging::BitmapTransform transform;
+    if (width > 0 && height > 0) {
+        auto size = ShownSize(shown, width, height);
+        double twiceWidth = size.first * 2 * shown.scale, twiceHeight = size.second * 2 * shown.scale;
+        if (twiceWidth >= 1 && twiceHeight >= 1 && twiceWidth < width && twiceHeight < height) {
+            // The decoder scales before it turns the picture upright.
+            double across = twiceWidth / width, down = twiceHeight / height;
+            if (decoder.PixelWidth() != decoder.OrientedPixelWidth()) std::swap(across, down);
+            transform.ScaledWidth(static_cast<uint32_t>((std::max)(1L, std::lround(decoder.PixelWidth() * across))));
+            transform.ScaledHeight(static_cast<uint32_t>((std::max)(1L, std::lround(decoder.PixelHeight() * down))));
+            transform.InterpolationMode(imaging::BitmapInterpolationMode::Fant);
+        }
+    }
+    co_return co_await decoder.GetSoftwareBitmapAsync(imaging::BitmapPixelFormat::Bgra8, imaging::BitmapAlphaMode::Premultiplied, transform,
+        imaging::ExifOrientationMode::RespectExifOrientation, imaging::ColorManagementMode::ColorManageToSRgb);
+}
+
+/// Upload an already-decoded `SoftwareBitmap` on the UI thread and atomically
+/// replace `frame`'s child once ready so switching sources never flashes blank.
+inline winrt::fire_and_forget PresentSoftwareBitmap(winrt::weak_ref<controls::Grid> weakFrame, winrt::Windows::Graphics::Imaging::SoftwareBitmap pixels,
+    std::string name, PictureProps props, TextFn label, std::shared_ptr<Scope> owner) {
+    auto frame = weakFrame.get();
+    if (!frame || !pixels || (owner && owner->disposed)) co_return;
+    try {
+        if (props.saturation) {
+            int32_t pw = pixels.PixelWidth(), ph = pixels.PixelHeight();
+            if (pw <= 0 || ph <= 0) co_return;
+            media::Imaging::WriteableBitmap wb(pw, ph);
+            pixels.CopyToBuffer(wb.PixelBuffer());
+            size_t len = static_cast<size_t>(pw) * static_cast<size_t>(ph) * 4;
+            uint8_t* dst = wb.PixelBuffer().data();
+            auto raw = std::make_shared<std::vector<uint8_t>>(dst, dst + len);
+            auto sat = props.saturation;
+            auto bind = [wb, raw, sat, len] {
+                Reactive::Run([wb, raw, sat, len] {
+                    ApplySaturation(raw->data(), wb.PixelBuffer().data(), len, sat->Get());
+                    wb.Invalidate();
+                });
+            };
+            if (owner) owner->Run(bind);
+            else bind();
+            auto image = MakeSdrImage(props, label);
+            image.Source(wb);
+            ReplaceFrame(frame, image);
+            co_return;
+        }
+        media::Imaging::SoftwareBitmapSource source;
+        co_await source.SetBitmapAsync(pixels);
+        frame = weakFrame.get();
+        if (!frame || (owner && owner->disposed)) co_return;
+        auto image = MakeSdrImage(props, label);
+        image.Source(source);
+        ReplaceFrame(frame, image);
+    } catch (winrt::hresult_error const& error) {
+        Report("image " + name + ": " + Utf8(error.message()));
+    }
+}
+
+/// Decode a picture that shows at a size that never changes (`shown`) away
+/// from the UI thread, then atomically show it in `frame`. A picture larger
+/// than it shows is double-sampled: decoded, with the decoder's filter, at
+/// twice the display's pixels it covers, which the compositor halves. Squeezed
+/// down from a much larger picture by the compositor alone, its edges would
+/// break up; decoded whole by XAML, a page of posters holds the window still.
+inline winrt::fire_and_forget DecodePicture(winrt::weak_ref<controls::Grid> weakFrame, std::shared_ptr<std::vector<uint8_t>> bytes, std::string name,
+    PictureProps props, PictureProps shown, TextFn label, std::shared_ptr<Scope> owner = nullptr) {
+    namespace imaging = winrt::Windows::Graphics::Imaging;
+    winrt::apartment_context ui;
+    co_await winrt::resume_background();
+    imaging::SoftwareBitmap pixels{nullptr};
+    std::string failed;
+    try {
+        pixels = co_await DecodeSoftwareBitmapAsync(std::move(bytes), shown);
+    } catch (winrt::hresult_error const& error) {
+        failed = Utf8(error.message());
+    }
+    co_await ui;
+    if (!pixels) {
+        Report("image " + name + ": " + failed);
+        co_return;
+    }
+    PresentSoftwareBitmap(std::move(weakFrame), std::move(pixels), std::move(name), std::move(props), std::move(label), std::move(owner));
+}
+
+/// Show an SDR picture in `frame`, keeping any previous picture visible until
+/// the decoded bitmap is ready.
+inline void ShowSdr(controls::Grid const& frame, PictureProps const& props, std::shared_ptr<std::vector<uint8_t>> bytes, TextFn const& name,
+    std::shared_ptr<Scope> owner = nullptr) {
+    if (bytes->empty()) {
+        ReplaceFrame(frame, MakeSdrImage(props, name));
+        return;
+    }
+    if (!owner) owner = LaterScope();
+    if (props.fixed || props.decodeMax || props.saturation) {
+        DecodePicture(winrt::make_weak(frame), std::move(bytes), props.source, props, DecodePropsFor(props), name, std::move(owner));
+    } else {
+        LoadPicture(winrt::make_weak(frame), std::move(bytes), props.source, props, name, std::move(owner));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -4478,6 +4684,7 @@ struct View : std::enable_shared_from_this<View> {
     UINT chainWidth = 0, chainHeight = 0;
     /// Whether the swap chain shows the current bitmap at its size.
     bool rendered = false;
+    std::shared_ptr<Scope> owner;
 
     HWND Window() const { return win ? win->hwnd : nullptr; }
 
@@ -4510,10 +4717,10 @@ struct View : std::enable_shared_from_this<View> {
 
     /// Show the XAML picture instead, when this one cannot be drawn.
     void FallBack() {
-        frame.Children().Clear();
-        frame.Children().Append(SdrImage(props, *bytes, name));
         chain = nullptr;
         bitmap = nullptr;
+        if (owner && owner->disposed) return;
+        ShowSdr(frame, props, bytes, name, owner);
     }
 
     /// Take a decoded picture: premultiply it and make it a Direct2D bitmap.
@@ -4637,6 +4844,11 @@ struct View : std::enable_shared_from_this<View> {
         context->SetTarget(nullptr);
         HRESULT presented = SUCCEEDED(drawn) ? chain->Present(1, 0) : drawn;
         rendered = SUCCEEDED(presented);
+        if (rendered && frame) {
+            for (uint32_t i = frame.Children().Size(); i-- > 0;) {
+                if (frame.Children().GetAt(i) != panel) frame.Children().RemoveAt(i);
+            }
+        }
         if (presented == D2DERR_RECREATE_TARGET || presented == DXGI_ERROR_DEVICE_REMOVED || presented == DXGI_ERROR_DEVICE_RESET) {
             // The GPU went away: start over with new devices.
             CurrentGpu() = nullptr;
@@ -4688,7 +4900,8 @@ inline void CALLBACK Tick(HWND, UINT, UINT_PTR, DWORD) {
 
 /// Put an HDR picture in `frame`, falling back to the XAML picture when it
 /// cannot be drawn.
-inline void Show(controls::Grid const& frame, Ctx const& ctx, std::shared_ptr<std::vector<uint8_t>> bytes, PictureProps const& props, TextFn name, bool gainMap) {
+inline void Show(controls::Grid const& frame, Ctx const& ctx, std::shared_ptr<std::vector<uint8_t>> bytes, PictureProps const& props, TextFn name, bool gainMap,
+    std::shared_ptr<Scope> owner = nullptr) {
     auto view = std::make_shared<View>();
     view->frame = frame;
     view->win = ctx.win;
@@ -4696,6 +4909,7 @@ inline void Show(controls::Grid const& frame, Ctx const& ctx, std::shared_ptr<st
     view->props = props;
     view->name = name;
     view->gainMap = gainMap;
+    view->owner = owner ? std::move(owner) : LaterScope();
     std::string_view fit = props.fit ? props.fit : "contain";
     bool framed = props.width && props.height;
     bool centered = framed && fit == "contain";
@@ -4721,11 +4935,15 @@ inline void Show(controls::Grid const& frame, Ctx const& ctx, std::shared_ptr<st
     auto token = nextView++;
     views[token] = view;
     if (!timer) timer = SetTimer(nullptr, 0, 1000, Tick);
-    Reactive::OnCleanup([token] {
+    Reactive::OnCleanup([token, weak] {
         views.erase(token);
         if (views.empty() && timer) {
             KillTimer(nullptr, timer);
             timer = 0;
+        }
+        if (auto view = weak.lock(); view && !view->rendered && view->frame) {
+            uint32_t idx = 0;
+            if (view->frame.Children().IndexOf(view->panel, idx)) view->frame.Children().RemoveAt(idx);
         }
     });
     view->display = QueryDisplay(view->Window());
@@ -4971,10 +5189,11 @@ inline std::wstring ResourcePath(std::string_view name) {
 }
 
 /// Show encoded picture bytes in `frame`: HDR where the display shows it.
-inline void ShowPicture(controls::Grid const& frame, Ctx const& ctx, std::shared_ptr<std::vector<uint8_t>> bytes, PictureProps const& picture, TextFn name) {
+inline void ShowPicture(controls::Grid const& frame, Ctx const& ctx, std::shared_ptr<std::vector<uint8_t>> bytes, PictureProps const& picture, TextFn name,
+    std::shared_ptr<Scope> owner = nullptr) {
     uint32_t kind = bytes->empty() ? 0 : bern_picture_kind(bytes->data(), bytes->size());
-    if (kind != 0 && Hdr::GetGpu()) Hdr::Show(frame, ctx, bytes, picture, name, kind == 3);
-    else frame.Children().Append(SdrImage(picture, *bytes, name));
+    if (kind != 0 && Hdr::GetGpu()) Hdr::Show(frame, ctx, bytes, picture, name, kind == 3, std::move(owner));
+    else ShowSdr(frame, picture, std::move(bytes), name, std::move(owner));
 }
 
 /// A scope that ends with the current one, for what shows later.
@@ -5011,22 +5230,46 @@ inline void Keep(std::wstring const& key, std::shared_ptr<std::vector<uint8_t>> 
 }
 }
 
-/// Read a picture's bytes away from the UI thread, then show it in the
-/// frame within `owner`, unless that has ended meanwhile (the frame went
-/// away or now shows another picture). Reading a file can wait on the disk
-/// or on a virus scanner, which must not hold the window still while a
-/// page builds.
+/// Read a picture's bytes (and decode SDR bitmaps) away from the UI thread in
+/// a single background hop, then atomically replace `frame` within `owner`
+/// unless that has ended meanwhile (the frame went away or now shows another
+/// picture). Reading a file can wait on the disk or on a virus scanner, which
+/// must not hold the window still while a page builds.
 inline winrt::fire_and_forget ShowLater(winrt::weak_ref<controls::Grid> weak, Ctx ctx, std::wstring key, std::function<std::vector<uint8_t>()> read,
     std::string label, PictureProps picture, TextFn name, std::shared_ptr<Scope> owner) {
+    namespace imaging = winrt::Windows::Graphics::Imaging;
     winrt::apartment_context ui;
     co_await winrt::resume_background();
     auto bytes = std::make_shared<std::vector<uint8_t>>(read());
+    uint32_t kind = bytes->empty() ? 0 : bern_picture_kind(bytes->data(), bytes->size());
+    bool decodeHere = kind == 0 && !bytes->empty() && (picture.fixed || picture.decodeMax || picture.saturation);
+    imaging::SoftwareBitmap pixels{nullptr};
+    std::string decodeFailed;
+    if (decodeHere) {
+        try {
+            pixels = co_await DecodeSoftwareBitmapAsync(bytes, DecodePropsFor(picture));
+        } catch (winrt::hresult_error const& error) {
+            decodeFailed = Utf8(error.message());
+        }
+    }
     co_await ui;
     if (key.starts_with(L"url:") || key.starts_with(L"served:")) Recent::Keep(key, bytes);
     auto frame = weak.get();
     if (!frame || owner->disposed) co_return;
-    if (bytes->empty()) Report("image " + label + ": the picture cannot be read");
-    owner->Run([&] { ShowPicture(frame, ctx, bytes, picture, name); });
+    if (bytes->empty()) {
+        Report("image " + label + ": the picture cannot be read");
+        ReplaceFrame(frame, MakeSdrImage(picture, name));
+        co_return;
+    }
+    if (decodeHere) {
+        if (!pixels) {
+            Report("image " + label + ": " + decodeFailed);
+            co_return;
+        }
+        PresentSoftwareBitmap(std::move(weak), std::move(pixels), std::move(label), std::move(picture), std::move(name), std::move(owner));
+        co_return;
+    }
+    owner->Run([&] { ShowPicture(frame, ctx, bytes, picture, name, owner); });
 }
 
 /// Show the picture `key` names: at once when it was read lately, else once
@@ -5034,7 +5277,7 @@ inline winrt::fire_and_forget ShowLater(winrt::weak_ref<controls::Grid> weak, Ct
 inline void ShowRead(controls::Grid const& frame, Ctx const& ctx, std::wstring key, std::function<std::vector<uint8_t>()> read, std::string label,
     PictureProps const& picture, TextFn const& name) {
     if (auto bytes = Recent::Find(key)) {
-        ShowPicture(frame, ctx, bytes, picture, name);
+        ShowPicture(frame, ctx, bytes, picture, name, LaterScope());
         return;
     }
     ShowLater(winrt::make_weak(frame), ctx, std::move(key), std::move(read), std::move(label), picture, name, LaterScope());
@@ -5056,11 +5299,13 @@ inline winrt::fire_and_forget ShowDownloaded(winrt::weak_ref<controls::Grid> wea
     co_await ui;
     auto frame = weak.get();
     if (!frame || owner->disposed) co_return;
-    frame.Children().Clear();
-    if (!buffer) co_return;
+    if (!buffer) {
+        frame.Children().Clear();
+        co_return;
+    }
     auto bytes = std::make_shared<std::vector<uint8_t>>(buffer.data(), buffer.data() + buffer.Length());
     Recent::Keep(key, bytes);
-    owner->Run([&] { ShowPicture(frame, ctx, bytes, picture, name); });
+    owner->Run([&] { ShowPicture(frame, ctx, bytes, picture, name, owner); });
 }
 
 /// A picture from a declared resource, or from a `MediaSource` the engine
@@ -5161,7 +5406,6 @@ inline void Image(Parent const& p, Ctx const& ctx, ImageProps props) {
             int now = dark.Get();
             if (now < 0) return;
             Reactive::Untrack([&] {
-                frame.Children().Clear();
                 PictureProps shown = picture;
                 shown.source = now ? night : light;
                 std::string source = shown.source;
@@ -5175,15 +5419,19 @@ inline void Image(Parent const& p, Ctx const& ctx, ImageProps props) {
     } else if (props.url) {
         auto url = props.url;
         bool covers = props.covers;
+        auto initialized = std::make_shared<bool>(false);
         auto shown = std::make_shared<std::optional<std::string>>();
-        Reactive::Run([frame, url, ctx, picture, name, shown, covers] {
+        Reactive::Run([frame, url, ctx, picture, name, initialized, shown, covers] {
             auto next = R::Url(url(ctx));
-            if (*shown == next && frame.Children().Size() > 0) return;
+            if (*initialized && *shown == next) return;
+            *initialized = true;
             *shown = next;
             Reactive::Untrack([&] {
-                frame.Children().Clear();
                 frame.Visibility(next ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
-                if (!next) return 0;
+                if (!next) {
+                    frame.Children().Clear();
+                    return 0;
+                }
                 if (auto path = Host::FilePath(*next)) {
                     std::wstring file = *path;
                     ShowRead(frame, ctx, file, [file] { return FileBytes(file); }, *next, picture, name);
@@ -5192,8 +5440,9 @@ inline void Image(Parent const& p, Ctx const& ctx, ImageProps props) {
                     ShowRead(frame, ctx, L"served:" + std::wstring(Wide(served)), [served] { return Host::ServedBytes(served); }, served, picture, name);
                 } else {
                     std::wstring key = L"url:" + std::wstring(Wide(*next));
-                    if (auto bytes = Recent::Find(key)) ShowPicture(frame, ctx, bytes, picture, name);
+                    if (auto bytes = Recent::Find(key)) ShowPicture(frame, ctx, bytes, picture, name, LaterScope());
                     else {
+                        frame.Children().Clear();
                         if (!covers) {
                             auto placeholder = MakeSkeletonShape(0.07, true, 0.0, "rect");
                             placeholder.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
