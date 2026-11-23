@@ -3190,3 +3190,189 @@ pub fn app(app: nav_footer::Client, windows: AppWindows) -> impl View {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn tab_content_is_wrapped_in_a_single_container_view() {
+    let protocol = r#"
+#[bern::protocol(namespace = "tab_wrap", version = 1)]
+pub mod tab_wrap {
+    use bern::prelude::*;
+
+    #[value]
+    pub enum Page {
+        #[label(tr! { "en" => "Home" })]
+        Home,
+        #[label(tr! { "en" => "Library" })]
+        Library,
+    }
+
+    #[state]
+    pub struct State {
+        #[content]
+        pub title: String,
+    }
+
+    #[commands]
+    pub trait Commands {
+        fn ping(&mut self) -> Result<(), CommandError>;
+    }
+}
+"#;
+    let ui = r#"
+use bern::prelude::*;
+use tab_wrap_protocol::tab_wrap::{self, Page};
+
+#[bern::session]
+pub struct Draft {
+    pub page: Page,
+    pub detail: bool,
+}
+
+#[component]
+pub fn library_page(app: tab_wrap::Client, #[session] draft: Draft) -> impl View {
+    ui! {
+        if draft.detail {
+            Stack {
+                Text(content: app.title)
+            }
+            Shortcut(key: "escape") => draft.detail.set(false)
+        } else {
+            Button(id: open_detail, label: tr! { "en" => "Open" }) => draft.detail.set(true)
+        }
+    }
+}
+
+#[component]
+pub fn main_view(app: tab_wrap::Client, #[session] draft: Draft) -> impl View {
+    ui! {
+        Tabs(id: main_tabs, selection: draft.page) {
+            Tab(value: Page::Home, label: tr! { "en" => "Home" }, icon: "house") {
+                Text(content: app.title)
+            }
+            Tab(value: Page::Library, label: tr! { "en" => "Library" }, icon: "books.vertical") {
+                library_page(app: app)
+            }
+        }
+    }
+}
+
+#[component]
+pub fn app(app: tab_wrap::Client, windows: AppWindows) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Tabs" }, initial: open) {
+                main_view(app: app)
+            }
+        }
+    }
+}
+"#;
+    let root = workspace();
+    let dir = std::env::temp_dir().join(format!("bern-swiftui-tab-wrap-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    for (package, source) in [
+        ("tab-wrap-protocol", protocol),
+        ("tab-wrap-ui", ui),
+        ("tab-wrap-core", ""),
+    ] {
+        std::fs::create_dir_all(dir.join(package).join("src")).unwrap();
+        std::fs::write(
+            dir.join(package).join("Cargo.toml"),
+            format!("[package]\nname = \"{package}\"\n"),
+        )
+        .unwrap();
+        std::fs::write(dir.join(package).join("src/lib.rs"), source).unwrap();
+    }
+    std::fs::write(
+        dir.join("Bern.toml"),
+        "[app]\nid = \"tabwrap\"\nbundle_id = \"dev.bern.tabwrap\"\nversion = \"0.1.0\"\nname = { \"en\" = \"TabWrap\" }\n[languages]\nsupported = [\"en\"]\ndefault = \"en\"\n[protocol]\npackage = \"tab-wrap-protocol\"\nsource = \"tab-wrap-protocol/src/lib.rs\"\n[engine]\npackage = \"tab-wrap-core\"\ntype = \"tab_wrap_core::Engine\"\n[ui]\npackage = \"tab-wrap-ui\"\nsources = [\"tab-wrap-ui/src/lib.rs\"]\nroot = \"app\"\n[targets.ios]\nplatform = \"ios\"\n[targets.macos]\nplatform = \"macos\"\n",
+    )
+    .unwrap();
+    let config = bern_compiler::config::load(&dir.join("Bern.toml")).unwrap();
+    let compiled = bern_compiler::compile(&config).unwrap();
+
+    for (platform, backend) in [
+        ("ios", &SwiftUiIos as &dyn Target),
+        ("macos", &SwiftUiMacos as &dyn Target),
+    ] {
+        let target = config
+            .targets
+            .iter()
+            .find(|t| t.platform.as_str() == platform)
+            .unwrap()
+            .clone();
+        let problems = backend.check(&compiled.app, &target);
+        assert!(problems.is_empty(), "{platform}: {problems:?}");
+        let output = dir.join(format!("out-{platform}"));
+        let context = BuildContext {
+            project_dir: config.dir.clone(),
+            workspace_dir: root.clone(),
+            output_dir: output.clone(),
+            target,
+            protocol_package: config.protocol_package.name.clone(),
+            protocol_path: config.protocol_package.dir.clone(),
+            protocol_module: compiled.protocol_module.clone(),
+            engine_package: config.engine_package.name.clone(),
+            engine_path: config.engine_package.dir.clone(),
+            engine_type: config.engine_type.clone(),
+            modules: Vec::new(),
+            framework: Framework::Path(root.join("crates")),
+            release: false,
+        };
+        let files = backend.generate(&compiled.app, &context).unwrap();
+        for file in &files {
+            let path = output.join(&file.path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, &file.contents).unwrap();
+        }
+        let sources = output.join("Sources");
+        let generated = std::fs::read_to_string(sources.join("BernGenerated.swift")).unwrap();
+        let tab_view_start = generated
+            .find("SwiftUI.TabView(selection:")
+            .unwrap_or_else(|| panic!("{platform}: missing SwiftUI.TabView:\n{generated}"));
+        let tab_view_section = &generated[tab_view_start..];
+        let tab_view_end = tab_view_section
+            .find(".bernAccentTint()")
+            .unwrap_or(tab_view_section.len());
+        let tab_view_body = &tab_view_section[..tab_view_end];
+        assert_eq!(
+            tab_view_body.matches("SwiftUI.ZStack {").count(),
+            2,
+            "{platform}: each Tab should wrap its body in a single SwiftUI.ZStack:\n{tab_view_body}"
+        );
+        assert!(
+            !tab_view_body.contains("SwiftUI.Group {"),
+            "{platform}: Tab must not wrap its body in transparent SwiftUI.Group:\n{tab_view_body}"
+        );
+        #[cfg(target_os = "macos")]
+        if platform == "macos" {
+            let result = Command::new("xcrun")
+                .args([
+                    "swiftc",
+                    "-typecheck",
+                    "-swift-version",
+                    "6",
+                    "-parse-as-library",
+                ])
+                .arg("-target")
+                .arg(format!("arm64-apple-macos{MINIMUM_MACOS}"))
+                .arg("-module-cache-path")
+                .arg(cache::module_cache(&root))
+                .arg("-import-objc-header")
+                .arg(sources.join("bern.h"))
+                .arg(sources.join("BernRuntime.swift"))
+                .arg(sources.join("BernMedia.swift"))
+                .arg(sources.join("BernStyle.swift"))
+                .arg(sources.join("BernAppKit.swift"))
+                .arg(sources.join("BernGenerated.swift"))
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "swiftc rejected the generated code:\n{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
