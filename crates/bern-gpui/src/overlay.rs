@@ -432,7 +432,7 @@ pub(crate) fn menu_button(c: &Ctx, id: &'static str, label: String, items: Vec<E
 pub(crate) const MODAL_CORNER: f32 = 12.0;
 
 /// Size of a `Modal`'s card, and whether it covers a compact window.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct ModalProps {
     pub width: Option<f32>,
     pub height: Option<f32>,
@@ -441,6 +441,8 @@ pub struct ModalProps {
     /// Where its motion has it now: the scrim fades with the card, which
     /// moves and scales.
     pub pose: crate::Pose,
+    /// Optional dismiss action run on Escape or clicking outside the card.
+    pub dismiss: Option<crate::ctx::Press>,
 }
 
 /// `Modal`: its content on a card over a scrim that covers the window,
@@ -448,6 +450,9 @@ pub struct ModalProps {
 pub fn modal(c: &Ctx, props: ModalProps, content: Vec<El>) -> El {
     let compact = crate::value::truthy(&c.window("compact"));
     let cover = props.cover_compact && compact;
+    if let Some(dismiss) = &props.dismiss {
+        crate::controls::register_shortcut(c, Some("escape"), dismiss);
+    }
     // In motion the modal is built at its scale (`motion::moving`): the
     // card's lengths scale, the window's do not.
     let pose = props.pose;
@@ -483,6 +488,11 @@ pub fn modal(c: &Ctx, props: ModalProps, content: Vec<El>) -> El {
         .relative()
         .left(px(pose.x / scale))
         .top(px(pose.y / scale));
+    let card = if let Some(dismiss) = props.dismiss {
+        card.on_mouse_down_out(move |_, _, cx| dismiss(cx))
+    } else {
+        card
+    };
     // Over the whole window, wherever it is declared.
     let top = c.win().title_bar.get() / scale;
     let inset = c.win().inset.get() / scale;

@@ -181,8 +181,68 @@ const PHOTOS_USAGE: &[(&str, &str)] = &[
     ("id", "Menyimpan gambar ke perpustakaan foto Anda."),
 ];
 
-/// `InfoPlist.strings` contents per language, localizing the app name and,
-/// with `[app].photos`, why it adds to the photo library.
+/// Why the application accesses the local network (`[app].local_network`),
+/// as iOS says it when it asks the user.
+const LOCAL_NETWORK_USAGE: &[(&str, &str)] = &[
+    ("zh-Hans", "发现并连接本地网络中的设备。"),
+    ("zh-Hant", "探索並連線本地網路中的裝置。"),
+    (
+        "en",
+        "Discovers and connects to devices on your local network.",
+    ),
+    (
+        "ja",
+        "ローカルネットワーク上のデバイスを検出して接続します。",
+    ),
+    ("ko", "로컬 네트워크의 기기를 찾고 연결합니다."),
+    (
+        "ru",
+        "Обнаруживает устройства в локальной сети и подключается к ним.",
+    ),
+    (
+        "de",
+        "Findet Geräte in deinem lokalen Netzwerk und verbindet sich mit ihnen.",
+    ),
+    (
+        "fr",
+        "Détecte les appareils sur votre réseau local et s’y connecte.",
+    ),
+    (
+        "es",
+        "Descubre y se conecta a dispositivos en tu red local.",
+    ),
+    (
+        "pt-BR",
+        "Descobre e se conecta a dispositivos na sua rede local.",
+    ),
+    (
+        "it",
+        "Rileva e si connette ai dispositivi sulla rete locale.",
+    ),
+    (
+        "tr",
+        "Yerel ağınızdaki cihazları bulur ve bunlara bağlanır.",
+    ),
+    (
+        "vi",
+        "Tìm và kết nối với các thiết bị trong mạng cục bộ của bạn.",
+    ),
+    (
+        "pl",
+        "Wykrywa urządzenia w sieci lokalnej i łączy się z nimi.",
+    ),
+    (
+        "uk",
+        "Виявляє пристрої в локальній мережі та підключається до них.",
+    ),
+    (
+        "id",
+        "Menemukan dan terhubung ke perangkat di jaringan lokal Anda.",
+    ),
+];
+
+/// `InfoPlist.strings` contents per language, localizing the app name and
+/// declared permission usage strings (`[app].photos`, `[app].local_network`).
 pub fn info_plist_tables(app: &Application) -> BTreeMap<String, String> {
     app.languages
         .supported
@@ -196,6 +256,10 @@ pub fn info_plist_tables(app: &Application) -> BTreeMap<String, String> {
                 table.push_str(&format!(
                     "NSPhotoLibraryAddUsageDescription = \"{usage}\";\n"
                 ));
+            }
+            if app.app.local_network {
+                let usage = escape_strings(framework(LOCAL_NETWORK_USAGE, language));
+                table.push_str(&format!("NSLocalNetworkUsageDescription = \"{usage}\";\n"));
             }
             (language.clone(), table)
         })
@@ -634,7 +698,7 @@ pub fn info_plist_ios(app: &Application, executable: &str, minimum_ios: &str) ->
         <string>UIInterfaceOrientationPortraitUpsideDown</string>
         <string>UIInterfaceOrientationLandscapeLeft</string>
         <string>UIInterfaceOrientationLandscapeRight</string>
-    </array>{documents}{files}{audio}{photos}{cleartext}
+    </array>{documents}{files}{audio}{photos}{local_network}{cleartext}
 </dict>
 </plist>
 "#,
@@ -655,6 +719,14 @@ pub fn info_plist_ios(app: &Application, executable: &str, minimum_ios: &str) ->
             format!(
                 "\n    <key>NSPhotoLibraryAddUsageDescription</key>\n    <string>{}</string>",
                 xml(framework(PHOTOS_USAGE, &app.languages.default))
+            )
+        } else {
+            String::new()
+        },
+        local_network = if app.app.local_network {
+            format!(
+                "\n    <key>NSLocalNetworkUsageDescription</key>\n    <string>{}</string>",
+                xml(framework(LOCAL_NETWORK_USAGE, &app.languages.default))
             )
         } else {
             String::new()
@@ -1115,6 +1187,40 @@ mod tests {
         for language in framework_languages() {
             assert!(
                 PHOTOS_USAGE
+                    .iter()
+                    .any(|(candidate, _)| *candidate == language),
+                "{language}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_app_using_the_local_network_says_why_in_each_language() {
+        let mut hello = app("hello");
+        let key = "NSLocalNetworkUsageDescription";
+        assert!(!info_plist_ios(&hello, "Hello", "17.0").contains(key));
+        assert!(
+            info_plist_tables(&hello)
+                .values()
+                .all(|table| !table.contains(key))
+        );
+        hello.app.local_network = true;
+        let plist = info_plist_ios(&hello, "Hello", "17.0");
+        let default = framework(LOCAL_NETWORK_USAGE, &hello.languages.default);
+        assert!(
+            plist.contains(&format!("<key>{key}</key>\n    <string>{default}</string>")),
+            "{plist}"
+        );
+        for (language, table) in info_plist_tables(&hello) {
+            let usage = framework(LOCAL_NETWORK_USAGE, &language);
+            assert!(
+                table.contains(&format!("{key} = \"{usage}\";")),
+                "{language}: {table}"
+            );
+        }
+        for language in framework_languages() {
+            assert!(
+                LOCAL_NETWORK_USAGE
                     .iter()
                     .any(|(candidate, _)| *candidate == language),
                 "{language}"

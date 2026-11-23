@@ -82,7 +82,7 @@
 | `Marquee` | **`duration: Length`**<br>`phase: Number`<br>`paused: Bool`<br>`opacity: NumberValue` | 可含子内容；无动作 |
 | `ScaleBox` | **`width: Length`**<br>**`height: Length`** | 可含子内容；无动作 |
 | `Positioned` | **`x: Length`**<br>**`y: Length`**<br>**`width: Length`**<br>**`height: Length`**<br>`bleed: Bool` | 可含子内容；无动作；`bleed` 让 `ScaleBox` 场景里的图层在到达的画布边上延伸到盒子边缘 |
-| `Modal` | `width: Length`<br>`height: Length`<br>`cover: compact` | 可含子内容；无动作；不写 `height` 时与内容一样高（其中的 `ScrollView` 与它滚动的内容一样高），窗口放不下时到窗口边缘为止 |
+| `Modal` | `width: Length`<br>`height: Length`<br>`cover: compact` | 可含子内容；可选动作（点击弹窗外或按 Escape 时执行）；不写 `height` 时与内容一样高（其中的 `ScrollView` 与它滚动的内容一样高），窗口放不下时到窗口边缘为止 |
 | `Flow` | `gap: Length` | 可含子内容；无动作；每行的子项竖直居中，`Spacer` 占满所在行余下的宽度 |
 | `Timer` | **`interval: Number`**<br>`enabled: Bool` | 不含子节点；必须绑定动作 |
 | `Watch` | **`value: Watched`** | 不含子节点；必须绑定动作；挂载时与值变化时运行 |
@@ -90,7 +90,7 @@
 | `PickerOption` | **`value: KeyValue`**<br>**`label: DisplayText`** | 不含子节点；无动作；直接位于 ["Picker"] |
 | `Rail` | `axis: horizontal / vertical`<br>`anchor: start / center / end`<br>`overhang: Length` | 可含子内容；无动作 |
 | `Spacer` | 无专有属性 | 不含子节点；无动作 |
-| `WindowButtons` | 无专有属性 | 不含子节点；无动作；macOS 上占出红绿灯的位置，其他平台不占位置 |
+| `WindowButtons` | `edge: leading / trailing` | 不含子节点；无动作；`leading` 在 macOS 上占出红绿灯位置，`trailing` 在 Windows 上占出三大键位置，其他情况不占位置 |
 | `Divider` | 无专有属性 | 不含子节点；无动作 |
 | `ScrollView` | `axis: vertical / horizontal`<br>`snap: start / center`<br>`position: PositionField`<br>`arrival: nudge`<br>`indicators: automatic / hidden / mouse`<br>`open_at: Number`<br>`open_center: NumberValue`<br>`anchor: Number`<br>`browsing: BoolField` | 可含子内容；无动作 |
 | `SplitView` | 无专有属性 | 仅含 ["Sidebar", "Detail"]；无动作 |

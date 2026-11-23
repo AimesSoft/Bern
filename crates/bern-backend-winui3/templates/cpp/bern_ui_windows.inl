@@ -670,27 +670,175 @@ inline void SetPosition(Win& win, double x, double y) {
 #endif
 }
 
+inline std::wstring ExeSiblingPath(std::wstring const& file) {
+    if (file.empty()) return {};
+    wchar_t exe[MAX_PATH];
+    DWORD len = GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    std::wstring own(exe, len);
+    return own.substr(0, own.find_last_of(L"\\/") + 1) + file;
+}
+
+#if BERN_WINUI
+/// Extract the closest-size icon entry from an `.ico` file on disk (or
+/// PE resource 1 when `file` is empty) and apply it to the XAML title bar.
+inline std::vector<uint8_t> ReadIconImageBytes(std::wstring const& file, int side) {
+    std::vector<uint8_t> bytes;
+    if (!file.empty()) {
+        std::wstring path = ExeSiblingPath(file);
+        std::vector<uint8_t> raw = B::FileBytes(path);
+        if (raw.size() >= 6) {
+            uint16_t count = static_cast<uint16_t>(raw[4] | (raw[5] << 8));
+            size_t bestOff = 0, bestLen = 0;
+            int bestDelta = (std::numeric_limits<int>::max)();
+            size_t bestEntry = 0;
+            for (uint16_t i = 0; i < count; ++i) {
+                size_t pos = 6 + static_cast<size_t>(i) * 16;
+                if (pos + 16 > raw.size()) break;
+                int w = raw[pos] == 0 ? 256 : raw[pos];
+                uint32_t len = raw[pos + 8] | (raw[pos + 9] << 8) | (raw[pos + 10] << 16) | (raw[pos + 11] << 24);
+                uint32_t off = raw[pos + 12] | (raw[pos + 13] << 8) | (raw[pos + 14] << 16) | (raw[pos + 15] << 24);
+                if (off + len > raw.size() || len == 0) continue;
+                int delta = std::abs(w - side) + (w < side ? 1000 : 0);
+                if (delta < bestDelta) {
+                    bestDelta = delta;
+                    bestOff = off;
+                    bestLen = len;
+                    bestEntry = pos;
+                }
+            }
+            if (bestLen > 0) {
+                static uint8_t const png[] = {0x89, 'P', 'N', 'G'};
+                uint8_t const* data = raw.data() + bestOff;
+                if (bestLen >= 4 && std::equal(png, png + 4, data)) {
+                    bytes.assign(data, data + bestLen);
+                } else {
+                    auto put = [&bytes](uint32_t value, int length) {
+                        for (int k = 0; k < length; ++k) bytes.push_back(static_cast<uint8_t>(value >> (8 * k)));
+                    };
+                    put(0, 2);
+                    put(1, 2);
+                    put(1, 2);
+                    bytes.insert(bytes.end(), raw.data() + bestEntry, raw.data() + bestEntry + 8);
+                    put(static_cast<uint32_t>(bestLen), 4);
+                    put(22, 4);
+                    bytes.insert(bytes.end(), data, data + bestLen);
+                }
+                return bytes;
+            }
+        }
+    }
+    auto instance = GetModuleHandleW(nullptr);
+    HRSRC group = FindResourceW(instance, MAKEINTRESOURCEW(1), RT_GROUP_ICON);
+    if (!group) return {};
+    auto directory = static_cast<PBYTE>(LockResource(LoadResource(instance, group)));
+    int id = directory ? LookupIconIdFromDirectoryEx(directory, TRUE, side, side, LR_DEFAULTCOLOR) : 0;
+    HRSRC entry = id ? FindResourceW(instance, MAKEINTRESOURCEW(id), RT_ICON) : nullptr;
+    if (!entry) return {};
+    auto data = static_cast<uint8_t const*>(LockResource(LoadResource(instance, entry)));
+    auto size = SizeofResource(instance, entry);
+    if (!data || size == 0) return {};
+    static uint8_t const png[] = {0x89, 'P', 'N', 'G'};
+    if (size >= 4 && std::equal(png, png + 4, data)) {
+        bytes.assign(data, data + size);
+    } else {
+        int count = directory[4] | (directory[5] << 8);
+        PBYTE found = nullptr;
+        for (int i = 0; i < count && !found; ++i) {
+            PBYTE one = directory + 6 + 14 * i;
+            if ((one[12] | (one[13] << 8)) == id) found = one;
+        }
+        if (!found) return {};
+        auto put = [&bytes](uint32_t value, int length) {
+            for (int k = 0; k < length; ++k) bytes.push_back(static_cast<uint8_t>(value >> (8 * k)));
+        };
+        put(0, 2);    // reserved
+        put(1, 2);    // icon
+        put(1, 2);    // one image
+        bytes.insert(bytes.end(), found, found + 8);
+        put(size, 4);
+        put(22, 4);   // the image follows the 6-byte header and the entry
+        bytes.insert(bytes.end(), data, data + size);
+    }
+    return bytes;
+}
+
+inline winrt::fire_and_forget ShowTitleIcon(controls::TitleBar titleBar, int side, std::wstring file = {}, std::weak_ptr<Win> weakWin = {}, uint64_t generation = 0) {
+    auto bytes = ReadIconImageBytes(file, side);
+    if (bytes.empty()) co_return;
+    try {
+        winrt::Windows::Storage::Streams::InMemoryRandomAccessStream stream;
+        winrt::Windows::Storage::Streams::DataWriter writer(stream);
+        writer.WriteBytes(bytes);
+        co_await writer.StoreAsync();
+        if (auto win = weakWin.lock(); !win || win->closed || (generation != 0 && win->iconGeneration != generation)) co_return;
+        writer.DetachStream();
+        stream.Seek(0);
+        media::Imaging::BitmapImage bitmap;
+        bitmap.DecodePixelWidth(side);
+        co_await bitmap.SetSourceAsync(stream);
+        auto win = weakWin.lock();
+        if (!win || win->closed || (generation != 0 && win->iconGeneration != generation)) co_return;
+        controls::ImageIconSource icon;
+        icon.ImageSource(bitmap);
+        win->titleIcon = icon;
+        if (!win->headerNames.Peek()) titleBar.IconSource(icon);
+        Snapshot::Schedule();
+    } catch (winrt::hresult_error const& error) {
+        Report("title bar icon: " + Utf8(error.message()));
+    }
+}
+#endif
+
 /// The application icon (resource 1), or the `.ico` `file` beside the
 /// executable, for the title bar, the taskbar and Alt+Tab, at the sizes of
 /// the window's display.
-inline void SetWindowIcons(HWND hwnd, std::wstring const& file = {}) {
+inline void SetWindowIcons(Win& win, std::wstring const& file = {}) {
+    if (!win.hwnd) return;
+    win.iconFile = file;
     auto instance = GetModuleHandleW(nullptr);
-    auto dpi = GetDpiForWindow(hwnd);
-    std::wstring path;
-    if (!file.empty()) {
-        wchar_t exe[MAX_PATH];
-        std::wstring own(exe, GetModuleFileNameW(nullptr, exe, MAX_PATH));
-        path = own.substr(0, own.find_last_of(L"\\/") + 1) + file;
-    }
-    auto load = [&](int metric) {
+    auto dpi = GetDpiForWindow(win.hwnd);
+    std::wstring path = ExeSiblingPath(file);
+    auto load = [&](int metric, bool& owned) {
         int side = GetSystemMetricsForDpi(metric, dpi ? dpi : 96);
-        if (!path.empty())
-            if (auto chosen = static_cast<HICON>(LoadImageW(nullptr, path.c_str(), IMAGE_ICON, side, side, LR_LOADFROMFILE)))
+        if (!path.empty()) {
+            if (auto chosen = static_cast<HICON>(LoadImageW(nullptr, path.c_str(), IMAGE_ICON, side, side, LR_LOADFROMFILE))) {
+                owned = true;
                 return chosen;
+            }
+        }
+        owned = false;
         return static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(1), IMAGE_ICON, side, side, LR_SHARED));
     };
-    if (auto large = load(SM_CXICON)) SendMessageW(hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(large));
-    if (auto compact = load(SM_CXSMICON)) SendMessageW(hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(compact));
+    bool ownedBig = false, ownedSmall = false;
+    HICON large = load(SM_CXICON, ownedBig);
+    HICON compact = load(SM_CXSMICON, ownedSmall);
+    HICON oldBig = win.bigIcon, oldSmall = win.smallIcon;
+    win.bigIcon = ownedBig ? large : nullptr;
+    win.smallIcon = ownedSmall ? compact : nullptr;
+    if (large) SendMessageW(win.hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(large));
+    if (compact) SendMessageW(win.hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(compact));
+#if BERN_WINUI
+    if (win.window) {
+        try {
+            if (!path.empty() && ownedBig) {
+                win.window.AppWindow().SetIcon(path);
+            } else if (large) {
+                win.window.AppWindow().SetIcon(winrt::Microsoft::UI::IconId{reinterpret_cast<uint64_t>(large)});
+            }
+        } catch (winrt::hresult_error const&) {
+        }
+    }
+    if (win.titleBar) {
+        std::weak_ptr<Win> weak;
+        for (auto const& candidate : all) {
+            if (candidate.get() == &win) { weak = candidate; break; }
+        }
+        ShowTitleIcon(win.titleBar, static_cast<int>(std::lround(16 * win.Scale())), file, weak, ++win.iconGeneration);
+    }
+#endif
+    if (oldBig && oldBig != large) DestroyIcon(oldBig);
+    if (oldSmall && oldSmall != compact) DestroyIcon(oldSmall);
+    if (win.Def().id == app->catalog.primary) StatusArea::SetAppIcon(file);
 }
 
 #if BERN_WINUI
@@ -703,8 +851,11 @@ inline void SetWindowIcons(HWND hwnd, std::wstring const& file = {}) {
 /// comes here, a resizing column every frame, and only when the title bar
 /// has set its own widths or the scale has changed are the insets asked
 /// for again.
-inline void FitTitleBarInsets(controls::TitleBar const& titleBar, xaml::Window const& window, std::array<double, 3>& fitted) {
-    if (!titleBar.XamlRoot() || media::VisualTreeHelper::GetChildrenCount(titleBar) == 0) return;
+inline void FitTitleBarInsets(Win& win) {
+    auto const& titleBar = win.titleBar;
+    auto const& window = win.window;
+    auto& fitted = win.titleBarInsets;
+    if (!titleBar || !window || !titleBar.XamlRoot() || media::VisualTreeHelper::GetChildrenCount(titleBar) == 0) return;
     if (titleBar.Visibility() != xaml::Visibility::Visible) return;
     auto grid = media::VisualTreeHelper::GetChild(titleBar, 0).try_as<controls::Grid>();
     if (!grid) return;
@@ -716,7 +867,8 @@ inline void FitTitleBarInsets(controls::TitleBar const& titleBar, xaml::Window c
     auto first = columns.GetAt(0), last = columns.GetAt(count - 1);
     if (first.Width().Value == fitted[0] && last.Width().Value == fitted[1] && scale == fitted[2]) return;
     auto bar = window.AppWindow().TitleBar();
-    double left = bar.LeftInset() / scale, right = bar.RightInset() / scale;
+    double left = bar.LeftInset() / scale;
+    double right = bar.RightInset() / scale;
     // Without caption buttons, as the window leaves the full screen or an
     // immersive page, there are no insets yet: keep the current widths and
     // ask again once the buttons are back.
@@ -732,68 +884,8 @@ inline void FitTitleBarInsets(controls::TitleBar const& titleBar, xaml::Window c
     fit(first, left);
     fit(last, right);
     fitted = {first.Width().Value, last.Width().Value, scale};
-}
-
-/// The application icon in the XAML title bar: the image of icon resource 1
-/// closest to the title bar's size. A PNG image is decoded as it is; a
-/// bitmap image is wrapped in a one-image `.ico`, which XAML also decodes.
-inline winrt::fire_and_forget ShowTitleIcon(std::shared_ptr<Win> win, int side) {
-    auto titleBar = win->titleBar;
-    auto instance = GetModuleHandleW(nullptr);
-    HRSRC group = FindResourceW(instance, MAKEINTRESOURCEW(1), RT_GROUP_ICON);
-    if (!group) co_return;
-    auto directory = static_cast<PBYTE>(LockResource(LoadResource(instance, group)));
-    int id = directory ? LookupIconIdFromDirectoryEx(directory, TRUE, side, side, LR_DEFAULTCOLOR) : 0;
-    HRSRC entry = id ? FindResourceW(instance, MAKEINTRESOURCEW(id), RT_ICON) : nullptr;
-    if (!entry) co_return;
-    auto data = static_cast<uint8_t const*>(LockResource(LoadResource(instance, entry)));
-    auto size = SizeofResource(instance, entry);
-    if (!data || size == 0) co_return;
-    std::vector<uint8_t> bytes;
-    static uint8_t const png[] = {0x89, 'P', 'N', 'G'};
-    if (size >= 4 && std::equal(png, png + 4, data)) {
-        bytes.assign(data, data + size);
-    } else {
-        // The group's entry for the image (14 bytes: width, height, colours,
-        // reserved, planes, bit count, length, resource id) gives the
-        // `.ico` entry its first 8 bytes.
-        int count = directory[4] | (directory[5] << 8);
-        PBYTE found = nullptr;
-        for (int i = 0; i < count && !found; ++i) {
-            PBYTE one = directory + 6 + 14 * i;
-            if ((one[12] | (one[13] << 8)) == id) found = one;
-        }
-        if (!found) co_return;
-        auto put = [&bytes](uint32_t value, int length) {
-            for (int k = 0; k < length; ++k) bytes.push_back(static_cast<uint8_t>(value >> (8 * k)));
-        };
-        put(0, 2);    // reserved
-        put(1, 2);    // icon
-        put(1, 2);    // one image
-        bytes.insert(bytes.end(), found, found + 8);
-        put(size, 4);
-        put(22, 4);   // the image follows the 6-byte header and the entry
-        bytes.insert(bytes.end(), data, data + size);
-    }
-    try {
-        winrt::Windows::Storage::Streams::InMemoryRandomAccessStream stream;
-        winrt::Windows::Storage::Streams::DataWriter writer(stream);
-        writer.WriteBytes(bytes);
-        co_await writer.StoreAsync();
-        if (win->closed) co_return;
-        writer.DetachStream();
-        stream.Seek(0);
-        media::Imaging::BitmapImage bitmap;
-        bitmap.DecodePixelWidth(side);
-        co_await bitmap.SetSourceAsync(stream);
-        if (win->closed) co_return;
-        controls::ImageIconSource icon;
-        icon.ImageSource(bitmap);
-        win->titleIcon = icon;
-        if (!win->headerNames.Peek()) titleBar.IconSource(icon);
-    } catch (winrt::hresult_error const& error) {
-        Report("title bar icon: " + Utf8(error.message()));
-    }
+    if (std::abs(win.rightInset.Peek() - right) > 0.5) win.rightInset.Set(right);
+    QueueTitleBarPassthrough(&win);
 }
 #endif
 
@@ -1111,38 +1203,96 @@ inline void TrackIdle(std::shared_ptr<Win> const& win, double seconds, std::func
 }
 
 #if BERN_WINUI
-inline void ShowCaptionTheme(Win& win);
-inline void FitCaptionHeight(Win& win);
-#endif
-
-/// Show or hide the window's title bar for `immersive`.
-inline void ShowChrome(Win& win, bool immersive) {
-#if BERN_WINUI
-    if (win.titleBar) win.titleBar.Visibility(immersive ? xaml::Visibility::Collapsed : xaml::Visibility::Visible);
-    try {
-        if (auto presenter = win.window.AppWindow().Presenter().try_as<winrt::Microsoft::UI::Windowing::OverlappedPresenter>())
-            presenter.SetBorderAndTitleBar(true, !immersive);
-    } catch (winrt::hresult_error const&) {
-    }
-    // The caption buttons go or come back, and their insets with them.
-    win.titleBarInsets = {-1, -1, 0};
-    if (!immersive) {
-        ShowCaptionTheme(win);
-        FitCaptionHeight(win);
-    }
-    if (win.titleBar) win.titleBar.InvalidateMeasure();
-#else
-    LONG_PTR style = GetWindowLongPtrW(win.hwnd, GWL_STYLE);
-    LONG_PTR next = immersive ? (style & ~WS_CAPTION) | WS_THICKFRAME : style | WS_CAPTION;
-    if (next != style) {
-        SetWindowLongPtrW(win.hwnd, GWL_STYLE, next);
-        SetWindowPos(win.hwnd, nullptr, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
-    }
-#endif
+/// Over a layer under the bars that is a page over the window, only the
+/// caption buttons stay, as macOS keeps only its window buttons: the title
+/// bar's icon, title and pane button fade out, and the bar still moves the
+/// window while interactive top-bar controls pass through via
+/// `InputNonClientPointerSource`.
+inline void ShowTitleBarContent(controls::TitleBar const& bar, bool shown) {
+    bar.Opacity(shown ? 1.0 : 0.0);
+    bar.IsHitTestVisible(shown);
+    bar.IsPaneToggleButtonVisible(shown && bar.Resources().HasKey(winrt::box_value(L"bern.paneToggle")));
 }
 
-/// The accent last shown, to change the brushes only when it changes.
-inline int shownAccent = -1;
+/// Keep interactive controls overlapping the top title-bar strip clickable
+/// while a covering `under_bars` page is shown, leaving empty space around
+/// them draggable as the window's title bar.
+inline void SyncTitleBarPassthrough(Win& win) {
+    if (win.closed || !win.window || win.owner) return;
+    try {
+        auto source = winrt::Microsoft::UI::Input::InputNonClientPointerSource::GetForWindowId(win.window.AppWindow().Id());
+        bool active = win.covering.Peek() > 0 && !win.chromeHidden && !win.fullscreen.Peek() && win.titleBar && win.host && win.root && win.root.XamlRoot();
+        if (!active) {
+            if (!win.passthroughRects.empty()) {
+                win.passthroughRects.clear();
+                source.ClearRegionRects(winrt::Microsoft::UI::Input::NonClientRegionKind::Passthrough);
+                if (win.titleBar) win.titleBar.InvalidateArrange();
+            }
+            return;
+        }
+        double scale = win.root.XamlRoot().RasterizationScale();
+        if (scale <= 0) return;
+        double barH = win.titleBar.ActualHeight();
+        if (barH <= 0) barH = 48.0;
+        double limitY = barH + 8.0;
+        std::vector<winrt::Windows::Graphics::RectInt32> rects;
+        std::function<void(xaml::DependencyObject const&)> walk = [&](xaml::DependencyObject const& node) {
+            if (!node) return;
+            auto fe = node.try_as<xaml::FrameworkElement>();
+            if (fe && (fe.Visibility() != xaml::Visibility::Visible || fe.Opacity() <= 0.01 || !fe.IsHitTestVisible())) return;
+            if (fe) {
+                double w = fe.ActualWidth(), h = fe.ActualHeight();
+                if (w > 0 && h > 0) {
+                    bool interactive = fe.try_as<controls::Primitives::ButtonBase>() || fe.try_as<controls::AutoSuggestBox>()
+                        || fe.try_as<controls::TextBox>() || fe.try_as<controls::PasswordBox>() || fe.try_as<controls::ComboBox>()
+                        || fe.try_as<controls::Primitives::RangeBase>();
+                    if (interactive) {
+                        // Skip full-window canvas buttons (such as a video tap
+                        // surface) so empty top-bar space remains draggable,
+                        // while still descending into any overlay buttons inside.
+                        if (h <= barH * 2.5) {
+                            try {
+                                auto box = fe.TransformToVisual(win.root)
+                                               .TransformBounds({0, 0, static_cast<float>(w), static_cast<float>(h)});
+                                if (box.Y < limitY && box.Y + box.Height > 0 && box.Width > 0 && box.Height > 0) {
+                                    rects.push_back(winrt::Windows::Graphics::RectInt32{
+                                        static_cast<int32_t>(std::floor(box.X * scale)),
+                                        static_cast<int32_t>(std::floor(box.Y * scale)),
+                                        static_cast<int32_t>(std::ceil(box.Width * scale)),
+                                        static_cast<int32_t>(std::ceil(box.Height * scale)),
+                                    });
+                                    return;
+                                }
+                            } catch (winrt::hresult_error const&) {
+                            }
+                        }
+                    }
+                }
+            }
+            int32_t count = media::VisualTreeHelper::GetChildrenCount(node);
+            for (int32_t i = 0; i < count; ++i) walk(media::VisualTreeHelper::GetChild(node, i));
+        };
+        walk(win.host);
+        if (rects != win.passthroughRects) {
+            win.passthroughRects = rects;
+            if (rects.empty()) source.ClearRegionRects(winrt::Microsoft::UI::Input::NonClientRegionKind::Passthrough);
+            else source.SetRegionRects(winrt::Microsoft::UI::Input::NonClientRegionKind::Passthrough, rects);
+        }
+    } catch (winrt::hresult_error const&) {
+    }
+}
+
+inline void QueueTitleBarPassthrough(Win* win) {
+    if (!win || win->closed || win->owner || win->passthroughQueued) return;
+    win->passthroughQueued = true;
+    std::weak_ptr<bool> alive = win->life;
+    Host::Post([win, alive] {
+        if (alive.expired() || win->closed) return;
+        win->passthroughQueued = false;
+        SyncTitleBarPassthrough(*win);
+    });
+}
+#endif
 
 #if BERN_WINUI
 /// The appearance of the title bar that holds the page header: that of the
@@ -1163,22 +1313,73 @@ inline void ShowCaptionTheme(Win& win) {
     } else if (std::string under = UnifiedLook(win); !under.empty()) {
         mode = under;
     }
+    bool dark = mode == "dark" ? true : mode == "light" ? false : (win.root && B::IsDark(win.root));
+    if (win.titleBar) win.titleBar.RequestedTheme(dark ? xaml::ElementTheme::Dark : xaml::ElementTheme::Light);
     try {
         using winrt::Microsoft::UI::Windowing::TitleBarTheme;
-        win.window.AppWindow().TitleBar().PreferredTheme(mode == "dark" ? TitleBarTheme::Dark
-                : mode == "light"                                        ? TitleBarTheme::Light
-                                                                         : TitleBarTheme::UseDefaultAppMode);
+        auto bar = win.window.AppWindow().TitleBar();
+        bar.PreferredTheme(dark ? TitleBarTheme::Dark : TitleBarTheme::Light);
+        if (dark) {
+            bar.ButtonForegroundColor(winrt::Windows::UI::Color{255, 255, 255, 255});
+            bar.ButtonHoverForegroundColor(winrt::Windows::UI::Color{255, 255, 255, 255});
+            bar.ButtonPressedForegroundColor(winrt::Windows::UI::Color{200, 255, 255, 255});
+            bar.ButtonInactiveForegroundColor(winrt::Windows::UI::Color{160, 255, 255, 255});
+            bar.ButtonHoverBackgroundColor(winrt::Windows::UI::Color{20, 255, 255, 255});
+            bar.ButtonPressedBackgroundColor(winrt::Windows::UI::Color{14, 255, 255, 255});
+        } else {
+            bar.ButtonForegroundColor(winrt::Windows::UI::Color{255, 0, 0, 0});
+            bar.ButtonHoverForegroundColor(winrt::Windows::UI::Color{255, 0, 0, 0});
+            bar.ButtonPressedForegroundColor(winrt::Windows::UI::Color{160, 0, 0, 0});
+            bar.ButtonInactiveForegroundColor(winrt::Windows::UI::Color{115, 0, 0, 0});
+            bar.ButtonHoverBackgroundColor(winrt::Windows::UI::Color{15, 0, 0, 0});
+            bar.ButtonPressedBackgroundColor(winrt::Windows::UI::Color{10, 0, 0, 0});
+        }
     } catch (...) {
     }
 }
 #else
-/// The caption buttons on a page in the page's appearance.
 inline void ShowCaptionTheme(Win& win) {
     if (!win.captionButtons) return;
     std::string mode = !win.coverings.empty() ? win.coverings.back().second : "";
     win.captionButtons.RequestedTheme(mode == "dark" ? xaml::ElementTheme::Dark : mode == "light" ? xaml::ElementTheme::Light : xaml::ElementTheme::Default);
 }
 #endif
+
+/// Show or hide the window's title bar for `immersive` idle chrome hiding.
+inline void ShowChrome(Win& win, bool hide) {
+    win.chromeHidden = hide;
+#if BERN_WINUI
+    if (win.fullscreen.Peek()) {
+        if (win.titleBar) win.titleBar.Visibility(xaml::Visibility::Collapsed);
+        QueueTitleBarPassthrough(&win);
+        return;
+    }
+    if (win.titleBar) win.titleBar.Visibility(hide ? xaml::Visibility::Collapsed : xaml::Visibility::Visible);
+    try {
+        if (auto presenter = win.window.AppWindow().Presenter().try_as<winrt::Microsoft::UI::Windowing::OverlappedPresenter>())
+            presenter.SetBorderAndTitleBar(true, !hide);
+    } catch (winrt::hresult_error const&) {
+    }
+    // The caption buttons go or come back, and their insets with them.
+    win.titleBarInsets = {-1, -1, 0};
+    if (!hide) {
+        RestoreTitleBar(win);
+    } else {
+        QueueTitleBarPassthrough(&win);
+    }
+    if (win.titleBar) win.titleBar.InvalidateMeasure();
+#else
+    LONG_PTR style = GetWindowLongPtrW(win.hwnd, GWL_STYLE);
+    LONG_PTR next = hide ? (style & ~WS_CAPTION) | WS_THICKFRAME : style | WS_CAPTION;
+    if (next != style) {
+        SetWindowLongPtrW(win.hwnd, GWL_STYLE, next);
+        SetWindowPos(win.hwnd, nullptr, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+#endif
+}
+
+/// The accent last shown, to change the brushes only when it changes.
+inline int shownAccent = -1;
 
 /// `WindowSet(accent:, appearance:)` for one window: its appearance, and the
 /// application's accent.
@@ -1228,7 +1429,7 @@ inline void FollowTheme(std::shared_ptr<Win> const& win, Ctx const& ctx) {
         Reactive::Run([weak, icon, ctx] {
             std::wstring file = icon(ctx);
             Reactive::Untrack([&] {
-                if (auto win = weak.lock(); win && win->hwnd) SetWindowIcons(win->hwnd, file);
+                if (auto win = weak.lock(); win && win->hwnd) SetWindowIcons(*win, file);
                 return 0;
             });
         });
@@ -1255,17 +1456,6 @@ inline void FollowTheme(std::shared_ptr<Win> const& win, Ctx const& ctx) {
         });
     }
 }
-
-#if BERN_WINUI
-/// Over a layer under the bars that is a page over the window, only the
-/// caption buttons stay, as macOS keeps only its window buttons: the title
-/// bar's icon, title and pane button fade out, and the bar still moves the
-/// window.
-inline void ShowTitleBarContent(controls::TitleBar const& bar, bool shown) {
-    bar.Opacity(shown ? 1.0 : 0.0);
-    bar.IsPaneToggleButtonVisible(shown && bar.Resources().HasKey(winrt::box_value(L"bern.paneToggle")));
-}
-#endif
 
 #if BERN_WINUI
 /// Whether the window's page header stands in its title bar.
@@ -1455,11 +1645,15 @@ inline void RestoreTitleBar(Win& win) {
     win.titleBarInsets = {-1, -1, 0};
     FitCaptionHeight(win);
     if (win.titleBar) {
-        FitTitleBarInsets(win.titleBar, win.window, win.titleBarInsets);
+        FitTitleBarInsets(win);
     }
     PlaceHeader(win);
-    if (win.immersive.Peek()) {
+    if (win.immersive.Peek() && win.idle.Peek()) {
         ShowChrome(win, true);
+    } else {
+        win.chromeHidden = false;
+        if (win.titleBar) ShowTitleBarContent(win.titleBar, win.covering.Peek() == 0);
+        QueueTitleBarPassthrough(&win);
     }
 }
 #endif
@@ -1609,8 +1803,12 @@ inline void Mount(std::shared_ptr<Win> const& win, controls::Grid const& host, s
             Reactive::Untrack([&] {
                 if (raw->titleBar && !raw->owner) ShowTitleBarContent(raw->titleBar, !covered);
                 ShowCaptionTheme(*raw);
+                QueueTitleBarPassthrough(raw);
                 return 0;
             });
+        });
+        host.LayoutUpdated([raw](auto&&, auto&&) {
+            if (!raw->closed && raw->covering.Peek() > 0) QueueTitleBarPassthrough(raw);
         });
 #else
         Reactive::Run([raw] {
@@ -1635,12 +1833,14 @@ inline void Mount(std::shared_ptr<Win> const& win, controls::Grid const& host, s
             auto immersive = def.immersive;
             Reactive::Run([raw, immersive, ctx] {
                 bool on = immersive(ctx);
-                [[maybe_unused]] bool idle = raw->idle.Get();
+                bool idle = raw->idle.Get();
                 Reactive::Untrack([&] {
-                    if (raw->immersive.Peek() != on) {
-                        raw->immersive.Set(on);
-                        if (!raw->owner) ShowChrome(*raw, on);
-                    }
+                    if (raw->immersive.Peek() != on) raw->immersive.Set(on);
+                    // Keep the window's caption buttons visible while controls
+                    // are shown (`!idle`), hiding them only once the window
+                    // goes idle, matching macOS.
+                    bool hideChrome = on && idle;
+                    if (!raw->owner && raw->chromeHidden != hideChrome) ShowChrome(*raw, hideChrome);
 #if BERN_WINUI
                     SyncIdleCursor(*raw);
 #else
@@ -1842,11 +2042,14 @@ inline std::string Open(std::string const& kindId) {
     titleBar.LayoutUpdated([weakWin = std::weak_ptr<Win>(win)](auto&&, auto&&) {
         if (auto current = weakWin.lock(); current && current->titleBar && current->window) {
             auto before = current->titleBarInsets;
-            FitTitleBarInsets(current->titleBar, current->window, current->titleBarInsets);
+            FitTitleBarInsets(*current);
             if (current->titleBarInsets != before) PlaceHeader(*current);
         }
     });
     titleBar.SizeChanged([raw = win.get()](auto&&, auto&&) { PlaceHeader(*raw); });
+    root.ActualThemeChanged([weakWin = std::weak_ptr<Win>(win)](auto&&, auto&&) {
+        if (auto current = weakWin.lock()) ShowCaptionTheme(*current);
+    });
     originals[win->hwnd] = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(win->hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(Subclass)));
     if (def.settings || def.utility) {
         auto presenter = window.AppWindow().Presenter().as<winrt::Microsoft::UI::Windowing::OverlappedPresenter>();
@@ -1886,10 +2089,7 @@ inline std::string Open(std::string const& kindId) {
         if (auto win = weakTheme.lock()) UpdateFrameTheme(*win);
     });
 #endif
-    SetWindowIcons(win->hwnd);
-#if BERN_WINUI
-    ShowTitleIcon(win, static_cast<int>(std::lround(16 * win->Scale())));
-#endif
+    SetWindowIcons(*win);
     auto appearance = Dev::Appearance();
     if (appearance == "dark") root.RequestedTheme(xaml::ElementTheme::Dark);
     else if (appearance == "light") root.RequestedTheme(xaml::ElementTheme::Light);
@@ -2019,6 +2219,8 @@ inline void Ended(std::shared_ptr<Win> const& win) {
         win->source = nullptr;
     }
 #endif
+    if (win->bigIcon) { DestroyIcon(win->bigIcon); win->bigIcon = nullptr; }
+    if (win->smallIcon) { DestroyIcon(win->smallIcon); win->smallIcon = nullptr; }
     win->life.reset();
     Host::Post(ExitIfDone);
 }
@@ -2866,19 +3068,40 @@ inline NOTIFYICONDATAW Data(UINT flags) {
     return data;
 }
 
+inline std::wstring appIconFile;
+inline HICON appIconHandle = nullptr;
+
 /// The icon at the small icon size of the system's scale: the application
-/// icon, or with `StatusItem(image:)` its picture, black on a light taskbar
-/// (resource 2) and white on a dark one (3), as Windows draws its own.
+/// icon (following `WindowSet(icon:)`), or with `StatusItem(image:)` its
+/// picture, black on a light taskbar (resource 2) and white on a dark one (3).
 inline HICON Icon() {
-    int resource = 1;
+    int side = GetSystemMetricsForDpi(SM_CXSMICON, GetDpiForSystem());
     if (app->statusItem->image) {
         DWORD light = 0, size = sizeof light;
         RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"SystemUsesLightTheme",
             RRF_RT_REG_DWORD, nullptr, &light, &size);
-        resource = light ? 2 : 3;
+        int resource = light ? 2 : 3;
+        return static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(resource), IMAGE_ICON, side, side, LR_SHARED));
     }
-    int side = GetSystemMetricsForDpi(SM_CXSMICON, GetDpiForSystem());
-    return static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(resource), IMAGE_ICON, side, side, LR_SHARED));
+    if (!appIconFile.empty()) {
+        std::wstring path = WindowManager::ExeSiblingPath(appIconFile);
+        if (auto loaded = static_cast<HICON>(LoadImageW(nullptr, path.c_str(), IMAGE_ICON, side, side, LR_LOADFROMFILE))) {
+            if (appIconHandle && appIconHandle != loaded) DestroyIcon(appIconHandle);
+            appIconHandle = loaded;
+            return loaded;
+        }
+    }
+    if (appIconHandle) { DestroyIcon(appIconHandle); appIconHandle = nullptr; }
+    return static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(1), IMAGE_ICON, side, side, LR_SHARED));
+}
+
+inline void SetAppIcon(std::wstring const& file) {
+    if (appIconFile == file) return;
+    appIconFile = file;
+    if (!hwnd || !app || !app->statusItem || app->statusItem->image || !WindowManager::statusShown) return;
+    auto data = Data(NIF_ICON);
+    data.hIcon = Icon();
+    Shell_NotifyIconW(NIM_MODIFY, &data);
 }
 
 /// Add the icon; again after Explorer restarted.

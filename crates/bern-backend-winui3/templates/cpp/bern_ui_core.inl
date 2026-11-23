@@ -74,6 +74,7 @@ struct WindowDef {
 /// Everything the runtime needs to know about a generated application.
 namespace StatusArea {
 struct Menu;
+inline void SetAppIcon(std::wstring const& file);
 }
 
 /// The `StatusItem`: its tooltip, and the application's items of its menu,
@@ -1663,6 +1664,18 @@ struct Win {
     Cell<bool> headerNames{false};
     /// `WindowSet(appearance:)` as last chosen: "light", "dark" or "".
     std::string appearanceMode;
+    /// `WindowSet(icon:)` as last chosen, and the loaded non-shared HICONs.
+    std::wstring iconFile;
+    HICON bigIcon = nullptr, smallIcon = nullptr;
+    uint64_t iconGeneration = 0;
+    /// Whether the window's native title bar chrome is currently hidden.
+    bool chromeHidden = false;
+    /// Trailing caption-button width in DIPs (`RightInset / scale` on WinUI 3).
+    Cell<double> rightInset{0.0};
+#if BERN_WINUI
+    std::vector<winrt::Windows::Graphics::RectInt32> passthroughRects;
+    bool passthroughQueued = false;
+#endif
     /// A dialog window's content dialog, and the window it shows over.
     controls::ContentDialog sheet{nullptr};
     Win* owner = nullptr;
@@ -1755,3 +1768,13 @@ inline void Open(Ctx const& ctx, std::string const& player, Value const& source)
 namespace Snapshot {
 void Schedule();
 }
+
+namespace B {
+inline controls::Grid Header(std::shared_ptr<Page> page, TextFn fallback, bool showTitle);
+}
+
+#if BERN_WINUI
+namespace WindowManager {
+inline void QueueTitleBarPassthrough(Win* win);
+}
+#endif

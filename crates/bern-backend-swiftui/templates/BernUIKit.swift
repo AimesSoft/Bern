@@ -1226,6 +1226,81 @@ extension BernFiles {
         picker.delegate = delegate
         topViewController()?.present(picker, animated: true)
     }
+
+    private static func presentShare(_ path: String) -> Int32 {
+        guard let presenter = topViewController() else { return 1 }
+        let share = UIActivityViewController(
+            activityItems: [URL(fileURLWithPath: path)],
+            applicationActivities: nil
+        )
+        if let popover = share.popoverPresentationController {
+            popover.sourceView = presenter.view
+            popover.sourceRect = CGRect(
+                x: presenter.view.bounds.midX,
+                y: presenter.view.bounds.midY,
+                width: 1,
+                height: 1
+            )
+            popover.permittedArrowDirections = []
+        }
+        presenter.present(share, animated: true)
+        return 0
+    }
+
+    /// Presents the system share sheet for a local file (`bern::platform::open_path`).
+    nonisolated static func openPath(_ path: String) -> Int32 {
+        guard FileManager.default.fileExists(atPath: path) else { return 1 }
+        if Thread.isMainThread {
+            return MainActor.assumeIsolated { presentShare(path) }
+        }
+        DispatchQueue.main.async { MainActor.assumeIsolated { _ = presentShare(path) } }
+        return 0
+    }
+
+    /// Copies a local file or folder into a user-selected Files folder URL
+    /// (`bern::platform::export_path`). Runs on the caller's thread while
+    /// holding the security-scoped grant; collisions are numbered.
+    nonisolated static func exportPath(_ sourcePath: String, to directoryURL: String) -> Int32 {
+        guard let directory = URL(string: directoryURL), directory.isFileURL else { return 1 }
+        let access = directory.startAccessingSecurityScopedResource()
+        defer { if access { directory.stopAccessingSecurityScopedResource() } }
+        let source = URL(fileURLWithPath: sourcePath)
+        let manager = FileManager.default
+        let keys: Set<URLResourceKey> = [.isSymbolicLinkKey, .isDirectoryKey, .isRegularFileKey]
+        func valid(_ item: URL) -> Bool {
+            guard let values = try? item.resourceValues(forKeys: keys) else { return false }
+            return values.isSymbolicLink != true
+                && (values.isDirectory == true || values.isRegularFile == true)
+        }
+        guard valid(source) else { return 1 }
+        if (try? source.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+            guard let entries = manager.enumerator(
+                at: source,
+                includingPropertiesForKeys: Array(keys),
+                errorHandler: { _, _ in false }
+            ) else { return 1 }
+            var count = 0
+            for case let item as URL in entries {
+                count += 1
+                guard count <= 100_000, valid(item) else { return 1 }
+            }
+        }
+        var destination = directory.appendingPathComponent(source.lastPathComponent)
+        var suffix = 1
+        while manager.fileExists(atPath: destination.path) {
+            let ext = source.pathExtension
+            let stem = source.deletingPathExtension().lastPathComponent
+            let name = stem + " (\(suffix))" + (ext.isEmpty ? "" : "." + ext)
+            destination = directory.appendingPathComponent(name)
+            suffix += 1
+        }
+        do {
+            try manager.copyItem(at: source, to: destination)
+            return 0
+        } catch {
+            return 1
+        }
+    }
 }
 
 private final class BernPickDelegate: NSObject, UIDocumentPickerDelegate {

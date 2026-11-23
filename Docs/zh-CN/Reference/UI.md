@@ -68,7 +68,7 @@ Windows 暂时去掉标记只显示文字；其他目标的实现见[属性表](
 
 区域与画布的比例不同时，画布两侧（或上下）会留出空白。`Positioned(bleed: true)` 的图层在它到达的每条画布边上继续延伸，铺满到 `ScaleBox` 的边缘：背景、铺满窗口的画面都写成到达画布边的图层并带 `bleed`，就不会在宽窗口里留出黑边；画布按设计尺寸显示时空白为零，与不写 `bleed` 完全相同。`bleed` 可绑定布尔表达式（例如只在画面铺满时延伸），延伸的边随图层的 `animate` 动效移入移出，窗口尺寸变化时立即跟随。它只对 `ScaleBox` 场景里的图层生效；图层里面的 `Positioned` 用它自己的坐标，不再延伸。实现：Web、SwiftUI（macOS、iOS、tvOS）、Compose、GTK 与 WinUI 3。
 
-`WindowButtons` 占出窗口自己的按钮在内容前端所占的位置：内容铺到标题栏下面时，macOS 的红绿灯与其后的间距共 84 点；网页、手机、平板、电视、Windows、Linux 的窗口在那里没有按钮，它不占位置，也不在所在行里产生间距。
+`WindowButtons` 占出窗口自带按钮在 `edge`（默认 `leading`）侧所占的位置：内容铺到标题栏下面时，`leading` 在 macOS 上占出红绿灯与其后间距共 84 点；`trailing` 在 Windows 上占出系统三大键宽度（`RightInset`）；在该侧没有窗口按钮的平台不占位置，也不在所在行里产生间距。
 
 ```rust
 ScaleBox(width: 1280, height: 720) {

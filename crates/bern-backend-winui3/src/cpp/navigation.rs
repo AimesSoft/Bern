@@ -33,6 +33,9 @@ impl Generator<'_> {
                 other => content.push(other.clone()),
             }
         }
+        let search_results = search
+            .filter(|search| search.field("value").is_some() && !search.children.is_empty())
+            .map(|search| search.children.as_slice());
         let search = search
             .filter(|search| search.field("value").is_some())
             .map(|search| format!("B::SearchProps{}", self.search_props(search)));
@@ -62,6 +65,10 @@ impl Generator<'_> {
                 ("collapsed", self.field(sidebar, "collapsed")),
             ])
         ));
+        match search_results {
+            Some(children) => self.children(out, "", children, ","),
+            None => out.line("nullptr,"),
+        }
         // A header that only names the window is left out: the title bar
         // shows the application's icon and name.
         match header.filter(|header| header.keyword("role") != Some("title")) {

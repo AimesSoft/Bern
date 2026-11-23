@@ -371,12 +371,24 @@ pub fn status_pictures(path: &Path, sides: &[u32], color: [u8; 3]) -> Result<Vec
 }
 
 /// A Windows icon (`.ico`) holding the images as PNG. Images larger than
-/// 256 pixels are kept only when there is nothing smaller, as Windows reads
-/// icons up to 256 pixels.
+/// 256 pixels are scaled down to 256 pixels when there is nothing smaller,
+/// as Windows rejects PNG icon entries larger than 256 × 256.
 pub fn ico(images: &[Image]) -> Vec<u8> {
-    let mut chosen: Vec<&Image> = images.iter().filter(|image| image.size <= 256).collect();
+    let mut chosen: Vec<(u32, Cow<'_, [u8]>)> = images
+        .iter()
+        .filter(|image| image.size <= 256)
+        .map(|image| (image.size, Cow::Borrowed(image.png.as_ref())))
+        .collect();
     if chosen.is_empty() {
-        chosen.push(largest(images));
+        let best = largest(images);
+        let scaled = (best.size > 256)
+            .then(|| scale_png_square(&best.png, 256))
+            .flatten();
+        if let Some(png) = scaled {
+            chosen.push((256, Cow::Owned(png)));
+        } else {
+            chosen.push((best.size, Cow::Borrowed(best.png.as_ref())));
+        }
     }
     let count = chosen.len() as u16;
     let mut out = Vec::new();
@@ -384,27 +396,44 @@ pub fn ico(images: &[Image]) -> Vec<u8> {
     out.extend_from_slice(&1u16.to_le_bytes()); // icon
     out.extend_from_slice(&count.to_le_bytes());
     let mut offset = 6 + 16 * chosen.len() as u32;
-    for image in &chosen {
-        // 0 stands for 256 pixels or more.
-        let side = if image.size >= 256 {
-            0
-        } else {
-            image.size as u8
-        };
+    for (size, png) in &chosen {
+        // 0 stands for 256 pixels.
+        let side = if *size >= 256 { 0 } else { *size as u8 };
         out.push(side);
         out.push(side);
         out.push(0); // no palette
         out.push(0); // reserved
         out.extend_from_slice(&1u16.to_le_bytes()); // colour planes
         out.extend_from_slice(&32u16.to_le_bytes()); // bits per pixel
-        out.extend_from_slice(&(image.png.len() as u32).to_le_bytes());
+        out.extend_from_slice(&(png.len() as u32).to_le_bytes());
         out.extend_from_slice(&offset.to_le_bytes());
-        offset += image.png.len() as u32;
+        offset += png.len() as u32;
     }
-    for image in &chosen {
-        out.extend_from_slice(&image.png);
+    for (_, png) in &chosen {
+        out.extend_from_slice(png);
     }
     out
+}
+
+fn scale_png_square(png: &[u8], side: u32) -> Option<Vec<u8>> {
+    let src = resvg::tiny_skia::Pixmap::decode_png(png).ok()?;
+    let mut dst = resvg::tiny_skia::Pixmap::new(side, side)?;
+    let sx = side as f32 / src.width().max(1) as f32;
+    let sy = side as f32 / src.height().max(1) as f32;
+    let paint = resvg::tiny_skia::PixmapPaint {
+        opacity: 1.0,
+        blend_mode: resvg::tiny_skia::BlendMode::SourceOver,
+        quality: resvg::tiny_skia::FilterQuality::Bilinear,
+    };
+    dst.draw_pixmap(
+        0,
+        0,
+        src.as_ref(),
+        &paint,
+        resvg::tiny_skia::Transform::from_scale(sx, sy),
+        None,
+    );
+    dst.encode_png().ok()
 }
 
 /// A macOS icon (`.icns`) holding the images as PNG, each under the entry

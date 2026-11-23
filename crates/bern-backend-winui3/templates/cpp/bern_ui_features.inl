@@ -727,33 +727,51 @@ inline void ScrollView(Parent const& p, Ctx const& ctx, ScrollProps props, Build
     p.Add(scroller);
     if (props.openAt) {
         // Once it first knows how far it scrolls, it stands at that
-        // fraction of it.
+        // fraction of it, then disconnects its layout listener.
         double at = (std::clamp)(*props.openAt, 0.0, 1.0);
         auto opened = std::make_shared<bool>(false);
-        scroller.LayoutUpdated([weak = winrt::make_weak(scroller), at, opened, horizontal](auto&&, auto&&) {
+        auto token = std::make_shared<winrt::event_token>();
+        *token = scroller.LayoutUpdated([weak = winrt::make_weak(scroller), at, opened, token, horizontal](auto&&, auto&&) {
             auto viewer = weak.get();
             if (!viewer || *opened) return;
             double room = horizontal ? viewer.ScrollableWidth() : viewer.ScrollableHeight();
             if (room <= 0) return;
             *opened = true;
+            if (token->value) {
+                viewer.LayoutUpdated(*token);
+                *token = {};
+            }
             if (horizontal) viewer.ChangeView(at * room, nullptr, nullptr, true);
             else viewer.ChangeView(nullptr, at * room, nullptr, true);
+        });
+        Reactive::OnCleanup([weak = winrt::make_weak(scroller), token] {
+            if (token->value)
+                if (auto viewer = weak.get()) viewer.LayoutUpdated(*token);
         });
     }
     if (props.openCenter.Given()) {
         // Read once, untracked: the view opens there and then scrolls freely.
         double at = (std::clamp)(Reactive::Untrack([&] { return props.openCenter.Now(ctx); }), 0.0, 1.0);
         auto opened = std::make_shared<bool>(false);
-        scroller.LayoutUpdated([weak = winrt::make_weak(scroller), at, opened, horizontal](auto&&, auto&&) {
+        auto token = std::make_shared<winrt::event_token>();
+        *token = scroller.LayoutUpdated([weak = winrt::make_weak(scroller), at, opened, token, horizontal](auto&&, auto&&) {
             auto viewer = weak.get();
             if (!viewer || *opened) return;
             double room = horizontal ? viewer.ScrollableWidth() : viewer.ScrollableHeight();
             if (room <= 0) return;
             *opened = true;
+            if (token->value) {
+                viewer.LayoutUpdated(*token);
+                *token = {};
+            }
             double port = horizontal ? viewer.ViewportWidth() : viewer.ViewportHeight();
             double middle = (std::clamp)(at * (room + port) - port / 2, 0.0, room);
             if (horizontal) viewer.ChangeView(middle, nullptr, nullptr, true);
             else viewer.ChangeView(nullptr, middle, nullptr, true);
+        });
+        Reactive::OnCleanup([weak = winrt::make_weak(scroller), token] {
+            if (token->value)
+                if (auto viewer = weak.get()) viewer.LayoutUpdated(*token);
         });
     }
     // Scrolled by hand: the view moves, and not because it was asked to.
@@ -1477,25 +1495,57 @@ inline std::shared_ptr<Popover> MakePopover(Ctx const& ctx, Build content, bool 
     auto inner = ctx;
     if (windowTheme) inner.appearance.clear();
     if (auto inherited = PresenterTheme(L"FlyoutPresenter", inner.appearance)) popover->flyout.FlyoutPresenterStyle(inherited);
-    // Without a color of its own the bubble is the platform's in-app
-    // acrylic, blurring the window's content under it (a video): it stays
-    // inside the window, as a popup window of its own would show only the
-    // acrylic's fallback color.
+    // Without a color of its own the bubble uses a theme-pinned WinUI 3
+    // `DesktopAcrylicController` backdrop (matching native Windows 11 flyouts
+    // while keeping dark popovers dark even inside a light window, and
+    // blurring hardware-composited video underneath) and in-app acrylic on the
+    // system XAML.
     bool material = !(style && style->base.background);
+#if BERN_WINUI
+    bool useAcrylic = material && DesktopAcrylicAvailable();
+    winrt::com_ptr<ThemedAcrylicBackdrop> backdrop;
+    bool initialDark = inner.appearance.empty() ? (ctx.win && ctx.win->root && IsDark(ctx.win->root)) : inner.appearance == "dark";
+    if (useAcrylic) {
+        popover->flyout.ShouldConstrainToRootBounds(false);
+        backdrop = winrt::make_self<ThemedAcrylicBackdrop>(initialDark);
+        popover->flyout.SystemBackdrop(backdrop.as<media::SystemBackdrop>());
+    } else if (material) {
+        popover->flyout.ShouldConstrainToRootBounds(true);
+    }
+#else
     if (material) popover->flyout.ShouldConstrainToRootBounds(true);
+#endif
     std::weak_ptr<Popover> weak = popover;
-    auto apply = [weak, ctx, inner, windowTheme, style, material] {
+    auto apply = [weak, ctx, inner, windowTheme, style, material
+#if BERN_WINUI
+        , backdrop, useAcrylic
+#endif
+    ] {
         auto popover = weak.lock();
         if (!popover || (!windowTheme && !style && !material)) return;
         bool dark = inner.appearance.empty() ? IsDark(ctx.win->root) : inner.appearance == "dark";
+#if BERN_WINUI
+        if (backdrop) backdrop->SetDark(dark);
+#endif
         auto theme = dark ? xaml::ElementTheme::Dark : xaml::ElementTheme::Light;
         auto look = xaml::Markup::XamlReader::Load(LR"(<Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" TargetType="FlyoutPresenter" />)").as<xaml::Style>();
         // The platform's material (acrylic) in the bubble's own appearance:
         // the default style would take it from the window's.
         if (auto themed = PresenterTheme(L"FlyoutPresenter", dark ? "dark" : "light")) look.BasedOn(themed);
         look.Setters().Append(xaml::Setter(xaml::FrameworkElement::RequestedThemeProperty(), winrt::box_value(theme)));
-        if (style && style->base.background) look.Setters().Append(xaml::Setter(controls::Control::BackgroundProperty(), media::SolidColorBrush(ColorOf(ctx.win, dark, *style->base.background))));
-        else if (auto acrylic = InAppAcrylic(dark)) look.Setters().Append(xaml::Setter(controls::Control::BackgroundProperty(), acrylic));
+        if (style && style->base.background) {
+            look.Setters().Append(xaml::Setter(controls::Control::BackgroundProperty(), media::SolidColorBrush(ColorOf(ctx.win, dark, *style->base.background))));
+        } else {
+#if BERN_WINUI
+            if (useAcrylic) {
+                look.Setters().Append(xaml::Setter(controls::Control::BackgroundProperty(), media::SolidColorBrush(winrt::Windows::UI::Colors::Transparent())));
+            } else if (auto acrylic = InAppAcrylic(dark)) {
+                look.Setters().Append(xaml::Setter(controls::Control::BackgroundProperty(), acrylic));
+            }
+#else
+            if (auto acrylic = InAppAcrylic(dark)) look.Setters().Append(xaml::Setter(controls::Control::BackgroundProperty(), acrylic));
+#endif
+        }
         if (style && style->base.foreground) look.Setters().Append(xaml::Setter(controls::Control::ForegroundProperty(), media::SolidColorBrush(ColorOf(ctx.win, dark, *style->base.foreground))));
         popover->flyout.FlyoutPresenterStyle(look);
         if (popover->content) {
@@ -1519,6 +1569,7 @@ inline std::shared_ptr<Popover> MakePopover(Ctx const& ctx, Build content, bool 
     });
     popover->flyout.Opened([weak](auto&&, auto&&) {
         if (auto popover = weak.lock()) popover->open = true;
+        Snapshot::Schedule();
     });
     popover->flyout.Closed([weak](auto&&, auto&&) {
         if (auto popover = weak.lock()) {
@@ -1528,6 +1579,7 @@ inline std::shared_ptr<Popover> MakePopover(Ctx const& ctx, Build content, bool 
                 if (auto popover = weak.lock(); popover && !popover->open) popover->Unmount();
             });
         }
+        Snapshot::Schedule();
     });
     Reactive::OnCleanup([popover] {
         popover->flyout.Hide();

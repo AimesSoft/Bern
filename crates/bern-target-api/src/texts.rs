@@ -1661,6 +1661,7 @@ pub(crate) mod tests {
                 background_audio: false,
                 overlays: false,
                 photos: false,
+                local_network: false,
                 opens: Vec::new(),
             },
             languages: Languages {

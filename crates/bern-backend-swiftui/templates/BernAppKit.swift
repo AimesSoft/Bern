@@ -2906,6 +2906,7 @@ struct BernIconChoice: ViewModifier {
     func body(content: Content) -> some View {
         content.onChange(of: icon, initial: true) {
             NSApplication.shared.applicationIconImage = icon.flatMap { NSImage(named: $0) }
+            NSApplication.shared.dockTile.display()
         }
     }
 }

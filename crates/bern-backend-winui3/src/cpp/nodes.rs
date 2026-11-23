@@ -401,6 +401,9 @@ impl Generator<'_> {
             "Canvas" => self.canvas(out, element),
             "Spacer" => out.line("B::Spacer(p);"),
             // The caption buttons stand at the trailing end of the title bar.
+            "WindowButtons" if element.keyword("edge") == Some("trailing") => {
+                out.line("B::WindowButtons(p, c);");
+            }
             "WindowButtons" => {}
             "Divider" => out.line("B::Divider(p, c);"),
             "ScrollView" => self.scroll_view(out, element),

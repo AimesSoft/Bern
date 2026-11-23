@@ -864,9 +864,9 @@ pub const COMPONENTS: &[ComponentSpec] = &[
     spec("Spacer", &[], Children::None, "Flexible space"),
     spec(
         "WindowButtons",
-        &[],
+        &[opt("edge", PropKind::Keyword(&["leading", "trailing"]))],
         Children::None,
-        "The room the window's own buttons take at the leading end of content that runs under the title bar: the traffic lights on macOS; nothing, and no gap, where the window has no buttons there",
+        "The room the window's own buttons take at `edge` (default `leading`) of content that runs under the title bar: the traffic lights at `leading` on macOS, the caption buttons at `trailing` on Windows; nothing, and no gap, where the window has no buttons at that edge",
     ),
     spec("Divider", &[], Children::None, "Separator line"),
     spec(

@@ -1379,6 +1379,8 @@ pub struct ModalProps {
     pub cover: bool,
     /// The motion of the card.
     pub decor: Option<Decor>,
+    /// Optional dismiss action run on Escape or clicking outside the card.
+    pub dismiss: Option<Act>,
 }
 
 /// A modal of the window, distinct from another window: the content below
@@ -1439,6 +1441,37 @@ pub fn Modal(_p: &Parent, ctx: &Ctx, props: ModalProps, children: Build) {
     glib::idle_add_local_once(move || {
         focused.child_focus(gtk::DirectionType::TabForward);
     });
+    if let Some(dismiss) = props.dismiss {
+        let on_esc = Rc::clone(&dismiss);
+        let esc_ctx = ctx.clone();
+        let keys = gtk::EventControllerKey::new();
+        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+        keys.connect_key_pressed(move |_, key, _, _| {
+            if key == gtk::gdk::Key::Escape {
+                on_esc(&esc_ctx);
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        });
+        frame.add_controller(keys);
+        let click = gtk::GestureClick::new();
+        let click_card = card.clone();
+        let click_frame = frame.clone();
+        let click_ctx = ctx.clone();
+        click.connect_released(move |_, _, x, y| {
+            if let Some(bounds) = click_card.compute_bounds(&click_frame) {
+                let inside = x as f32 >= bounds.x()
+                    && x as f32 <= bounds.x() + bounds.width()
+                    && y as f32 >= bounds.y()
+                    && y as f32 <= bounds.y() + bounds.height();
+                if !inside {
+                    dismiss(&click_ctx);
+                }
+            }
+        });
+        frame.add_controller(click);
+    }
     on_cleanup(move || {
         frame.remove_css_class("bern-shown");
         frame.imp().closing.set(true);
