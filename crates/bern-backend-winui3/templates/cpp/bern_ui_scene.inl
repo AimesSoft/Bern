@@ -442,10 +442,14 @@ struct AccordionPanel : controls::PanelT<AccordionPanel> {
             for (auto const& [one, made] : clips)
                 if (one.get() == child) geometry = made;
             if (!geometry) {
-                auto visual = xaml::Hosting::ElementCompositionPreview::GetElementVisual(child);
-                geometry = visual.Compositor().CreateRoundedRectangleGeometry();
-                visual.Clip(visual.Compositor().CreateGeometricClip(geometry));
-                clips.emplace_back(winrt::make_weak(child), geometry);
+                try {
+                    auto visual = xaml::Hosting::ElementCompositionPreview::GetElementVisual(child);
+                    geometry = visual.Compositor().CreateRoundedRectangleGeometry();
+                    visual.Clip(visual.Compositor().CreateGeometricClip(geometry));
+                    clips.emplace_back(winrt::make_weak(child), geometry);
+                } catch (winrt::hresult_error const&) {
+                    continue;
+                }
             }
             float w = widths[i], h = arrangedHeight;
             float r = (std::min)({static_cast<float>(corner), w / 2, h / 2});
@@ -620,6 +624,8 @@ struct ModalProps {
     Transition const* appear = nullptr;
     Transition const* disappear = nullptr;
     std::optional<double> appearDelay;
+    /// Runs when the user clicks outside the card or presses Escape.
+    Act dismiss;
 };
 
 /// Show a modal's dialog in the window's XAML root.
@@ -640,8 +646,8 @@ inline winrt::fire_and_forget ShowModal(winrt::weak_ref<controls::ContentDialog>
 /// which dims what lies below and takes no input there, with the dialog's
 /// own entrance and exit. The dialog is the declared size within the
 /// window, without a height as tall as its content; `cover: compact`
-/// fills a compact window. It stays while the element is mounted: Escape
-/// does not close it.
+/// fills a compact window. When `dismiss` is provided, pressing Escape or
+/// clicking outside the card invokes it.
 inline void Modal(Parent const&, Ctx const& ctx, ModalProps props, Build const& children) {
     if (!ctx.win || !ctx.win->root) return;
     double width = props.width.Given() ? Reactive::Untrack([&] { return props.width.Now(ctx); }) : 960;
@@ -683,17 +689,79 @@ inline void Modal(Parent const&, Ctx const& ctx, ModalProps props, Build const& 
             return 0;
         });
     });
-    // It takes the window's theme and language, which a popup does not
-    // inherit.
-    dialog.RequestedTheme(root.ActualTheme());
+    // Inherit the enclosing surface's appearance (e.g. a dark detail page)
+    // or fall back to the window's theme, and render with frosted acrylic
+    // card material.
+    std::string appearance = ctx.appearance;
+    auto applyAppearance = [weak = winrt::make_weak(dialog), root, appearance] {
+        auto dialog = weak.get();
+        if (!dialog) return;
+        bool dark = appearance == "dark" ? true : appearance == "light" ? false : IsDark(root);
+        dialog.RequestedTheme(dark ? xaml::ElementTheme::Dark : xaml::ElementTheme::Light);
+        if (auto acrylic = InAppAcrylic(dark)) {
+            dialog.Background(acrylic);
+            dialog.Resources().Insert(winrt::box_value(L"ContentDialogBackground"), acrylic);
+            dialog.Resources().Insert(winrt::box_value(L"ContentDialogTopOverlay"), media::SolidColorBrush(winrt::Windows::UI::Colors::Transparent()));
+        }
+        auto appRes = xaml::Application::Current().Resources();
+        wchar_t const* borderKey = kWinUI ? L"SurfaceStrokeColorFlyoutBrush" : L"SystemControlTransientBorderBrush";
+        for (auto themeName : dark ? std::initializer_list<wchar_t const*>{L"Dark", L"Default"} : std::initializer_list<wchar_t const*>{L"Light"}) {
+            if (auto value = ThemeValue(appRes, themeName, borderKey)) {
+                if (auto brush = value.try_as<media::Brush>()) {
+                    dialog.BorderBrush(brush);
+                    break;
+                }
+            }
+        }
+    };
+    applyAppearance();
     dialog.Language(root.Language());
-    auto themeToken = root.ActualThemeChanged([weak = winrt::make_weak(dialog)](xaml::FrameworkElement const& sender, auto&&) {
-        if (auto dialog = weak.get()) dialog.RequestedTheme(sender.ActualTheme());
-    });
+    auto themeToken = root.ActualThemeChanged([applyAppearance](auto&&, auto&&) { applyAppearance(); });
     auto closing = std::make_shared<bool>(false);
-    dialog.Closing([closing](controls::ContentDialog const&, controls::ContentDialogClosingEventArgs const& args) {
-        if (!*closing) args.Cancel(true);
+    auto dismiss = Run(ctx, props.dismiss);
+    dialog.Closing([closing, dismiss](controls::ContentDialog const&, controls::ContentDialogClosingEventArgs const& args) {
+        if (*closing) return;
+        args.Cancel(true);
+        if (dismiss) dismiss();
     });
+    winrt::event_token outsideToken{};
+    if (dismiss) {
+        // Clicking the dimmed backdrop outside the card dismisses the modal.
+        auto pressed = xaml::Input::PointerEventHandler(
+            [weakDialog = winrt::make_weak(dialog), weakContent = winrt::make_weak(content), closing, dismiss](
+                IInspectable const&, xaml::Input::PointerRoutedEventArgs const& args) {
+                if (*closing) return;
+                auto dialog = weakDialog.get();
+                auto content = weakContent.get();
+                if (!dialog || !content) return;
+                auto pt = args.GetCurrentPoint(content).Position();
+                double w = content.ActualWidth(), h = content.ActualHeight();
+                if (w > 0 && h > 0 && (pt.X < 0 || pt.Y < 0 || pt.X > w || pt.Y > h)) {
+                    args.Handled(true);
+                    dismiss();
+                }
+            });
+        dialog.AddHandler(xaml::UIElement::PointerPressedEvent(), winrt::box_value(pressed), true);
+        // Make ContentDialog's full-window LayoutRoot hit-testable outside the
+        // card so clicks on the dimmed backdrop always reach PointerPressed.
+        dialog.Opened([weakDialog = winrt::make_weak(dialog)](auto&&, auto&&) {
+            if (auto dialog = weakDialog.get(); dialog && media::VisualTreeHelper::GetChildrenCount(dialog) > 0) {
+                if (auto layoutRoot = media::VisualTreeHelper::GetChild(dialog, 0).try_as<controls::Panel>(); layoutRoot && !layoutRoot.Background())
+                    layoutRoot.Background(media::SolidColorBrush(winrt::Windows::UI::Colors::Transparent()));
+            }
+            Snapshot::Schedule();
+        });
+        // Also capture Escape directly on the dialog root in case a focused
+        // child control (such as a ScrollViewer or segmented control) receives
+        // it before ContentDialog::Closing.
+        outsideToken = dialog.PreviewKeyDown([closing, dismiss](auto&&, xaml::Input::KeyRoutedEventArgs const& args) {
+            if (*closing || args.Key() != winrt::Windows::System::VirtualKey::Escape) return;
+            args.Handled(true);
+            dismiss();
+        });
+    } else {
+        dialog.Opened([](auto&&, auto&&) { Snapshot::Schedule(); });
+    }
     // Shown once the window is in its XAML root.
     auto show = [weak = winrt::make_weak(dialog), root, size, closing] { ShowModal(weak, root, size, closing); };
     winrt::event_token loadedToken{};
@@ -706,11 +774,12 @@ inline void Modal(Parent const&, Ctx const& ctx, ModalProps props, Build const& 
         });
         loadedToken = *token;
     }
-    Reactive::OnCleanup([dialog, closing, root, sizeToken, themeToken, loadedToken] {
+    Reactive::OnCleanup([dialog, closing, root, sizeToken, themeToken, loadedToken, outsideToken] {
         *closing = true;
         root.SizeChanged(sizeToken);
         root.ActualThemeChanged(themeToken);
         if (loadedToken.value) root.Loaded(loadedToken);
+        if (outsideToken.value) dialog.PreviewKeyDown(outsideToken);
         dialog.Hide();
     });
 }
@@ -1035,6 +1104,12 @@ inline void SearchPalette(Parent const& p, Ctx const& ctx, SearchProps props, Bu
     if (props.iconOnly) {
         iconEntry = controls::Button();
         iconEntry.Content(controls::SymbolIcon(controls::Symbol::Find));
+        Styles::MakeSubtle(iconEntry);
+        iconEntry.Width(36);
+        iconEntry.Height(36);
+        iconEntry.MinWidth(0);
+        iconEntry.MinHeight(0);
+        iconEntry.Padding(xaml::Thickness{0, 0, 0, 0});
         if (prompt)
             Reactive::Run([iconEntry, prompt] {
                 auto name = prompt();
@@ -1129,10 +1204,11 @@ inline void SearchPalette(Parent const& p, Ctx const& ctx, SearchProps props, Bu
         double top = (std::clamp)(static_cast<double>(field.Y + field.Height) + 26, 16.0, (std::max)(16.0, H * 0.3));
         open->to = {center - w / 2, top, w, (std::min)(height, (std::max)(120.0, H - top - 16)), panelCorner};
     };
-    // The height the results ask for: the field row, its rule and the list.
+    // The height the results ask for: the 1px top/bottom panel border (2),
+    // the field row (56), its rule (1) and the list's own content height.
     auto wanted = [open] {
         double list = open->list ? open->list.ActualHeight() : 0;
-        return (std::min)(open->to[3], 57 + list);
+        return (std::min)(open->to[3], 59 + list);
     };
     *close = [open, place, shrink, weakEntry = winrt::make_weak(entry)] {
         if (!open->layer || open->closing) return;
@@ -1256,6 +1332,7 @@ inline void SearchPalette(Parent const& p, Ctx const& ctx, SearchProps props, Bu
         scroller.VerticalScrollBarVisibility(controls::ScrollBarVisibility::Auto);
         controls::Grid::SetRow(scroller, 2);
         auto list = MakeFlex(false, 2, xaml::Thickness{6, 6, 6, 6});
+        list.VerticalAlignment(xaml::VerticalAlignment::Top);
         scroller.Content(list);
         body.Children().Append(scroller);
         panel.Child(body);

@@ -207,11 +207,12 @@ impl Generator<'_> {
         self.children(
             out,
             &format!(
-                "b::Modal(p, c, b::ModalProps {{ width: {}, height: {}, cover: {}, decor: {} }}, ",
+                "b::Modal(p, c, b::ModalProps {{ width: {}, height: {}, cover: {}, decor: {}, dismiss: {} }}, ",
                 some(self.num(element, "width")),
                 some(self.num(element, "height")),
                 element.keyword("cover") == Some("compact"),
                 some(self.decoration(element)),
+                self.action(element),
             ),
             &element.children,
             ");",

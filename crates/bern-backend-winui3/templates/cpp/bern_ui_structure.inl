@@ -797,7 +797,7 @@ inline xaml::FrameworkElement PaneSizer(controls::NavigationView const& view) {
 /// pane collapses as the window narrows, and its button folds it to the
 /// view's strip of icons; a pane of no declared width takes the width its
 /// edge is dragged to.
-inline void SplitView(Parent const& p, Ctx const& ctx, SplitViewProps props, Build const& header, Build const& footer, Build const& sidebar,
+inline void SplitView(Parent const& p, Ctx const& ctx, SplitViewProps props, Build const& searchResults, Build const& header, Build const& footer, Build const& sidebar,
     Build const& detail, Build const& detailFooter = nullptr) {
     if (ctx.page) ctx.page->HideHeader();
     controls::NavigationView view;
@@ -833,7 +833,11 @@ inline void SplitView(Parent const& p, Ctx const& ctx, SplitViewProps props, Bui
     registry->selection = props.selection;
     registry->fallback = props.fallback;
     auto selection = props.selection;
-    if (props.search && props.search->field) view.AutoSuggestBox(SearchBox(ctx, *props.search));
+    if (props.search && props.search->field) {
+        auto box = SearchBox(ctx, *props.search);
+        if (searchResults) AttachSearchResults(box, ctx, *props.search, searchResults);
+        view.AutoSuggestBox(box);
+    }
     if (props.width) view.OpenPaneLength(*props.width);
     // Content pinned above the pane's list, lined up with the
     // destinations. The title bar above names the window.
@@ -2112,7 +2116,12 @@ inline void Video(Parent const& p, Ctx const& ctx, VideoProps props) {
 
     controls::Grid frame;
     frame.MinHeight(props.fillsContainer ? 0 : 120);
-    if (auto style = Styles::Themed(L"Grid", {{L"Background", Keys::VideoBackground}})) frame.Style(style);
+    // Keep custom-chrome (`controls: none`) video surfaces transparent like
+    // macOS and Linux so they never cover an underlying still frame with a
+    // light theme surface before the first decoded frame is presented.
+    if (props.controls) {
+        if (auto style = Styles::Themed(L"Grid", {{L"Background", Keys::VideoBackground}})) frame.Style(style);
+    }
     auto screen = std::make_shared<VideoScreen>();
     screen->frame = frame;
     screen->fit = props.fit ? props.fit : "contain";

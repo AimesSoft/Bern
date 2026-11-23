@@ -87,21 +87,83 @@ impl Generator<'_> {
         self.container(out, element, &format!("B::Grid(p, c, {}, ", props(None)));
     }
 
+    /// Summary of what a `Stack` subtree contains across direct children and
+    /// referenced sub-components (guarded against recursion cycles).
+    fn inspect_subtree(
+        &self,
+        node: &bern_ir::Node,
+        visited: &mut std::collections::HashSet<String>,
+        has_controls: &mut bool,
+        has_toolbar: &mut bool,
+        has_under_bars: &mut bool,
+        has_shell: &mut bool,
+    ) {
+        let mut pending = Vec::new();
+        node.walk(&mut |inner| match inner {
+            bern_ir::Node::Element(el) => {
+                if el.kind == "Toolbar" {
+                    *has_toolbar = true;
+                    *has_controls = true;
+                } else if el.kind == "SplitView" || el.kind == "Tabs" {
+                    *has_shell = true;
+                }
+                if el.kind == "Stack" && el.keyword("under_bars") == Some("true") {
+                    *has_under_bars = true;
+                }
+                if bern_ir::spec::component(&el.kind).is_some_and(|spec| spec.interactive) {
+                    *has_controls = true;
+                }
+            }
+            bern_ir::Node::Component(call) => {
+                pending.push(call.component.clone());
+            }
+            _ => {}
+        });
+        for name in pending {
+            if !visited.insert(name.clone()) {
+                continue;
+            }
+            if let Some(component) = self.app.components.iter().find(|c| c.name == name) {
+                self.inspect_subtree(
+                    &component.body,
+                    visited,
+                    has_controls,
+                    has_toolbar,
+                    has_under_bars,
+                    has_shell,
+                );
+            }
+        }
+    }
+
     /// `Stack`: its children layered over one another.
     pub(super) fn layers(&self, out: &mut Out, element: &Element) {
         let under_bars = element.keyword("under_bars") == Some("true");
+        let unconstrained = element.prop("width").is_none() && element.prop("height").is_none();
         // A layer under the bars with controls of its own is a page over the
-        // window, as on macOS; a backdrop of pictures and fills is not.
+        // window, as on macOS; a backdrop of pictures and fills is not. A
+        // full-window overlay page (outside any SplitView/Tabs) that carries
+        // both a Toolbar and an under-bars backdrop also covers the window.
         let mut controls = false;
-        if under_bars {
+        if under_bars || unconstrained {
+            let mut visited = std::collections::HashSet::new();
+            let (mut has_controls, mut has_toolbar, mut has_under_bars, mut has_shell) =
+                (false, false, false, false);
             for child in element.content() {
-                child.walk(&mut |node| {
-                    if let bern_ir::Node::Element(inner) = node {
-                        controls |= bern_ir::spec::component(&inner.kind)
-                            .is_some_and(|spec| spec.interactive);
-                    }
-                });
+                self.inspect_subtree(
+                    child,
+                    &mut visited,
+                    &mut has_controls,
+                    &mut has_toolbar,
+                    &mut has_under_bars,
+                    &mut has_shell,
+                );
             }
+            controls = if under_bars {
+                has_controls
+            } else {
+                !has_shell && has_toolbar && has_under_bars
+            };
         }
         self.container(
             out,
@@ -232,6 +294,7 @@ impl Generator<'_> {
                     ("appear", transition("appear")),
                     ("disappear", transition("disappear")),
                     ("appearDelay", Self::number(element, "appear_delay")),
+                    ("dismiss", self.action(element)),
                 ])
             ),
             &element.children,

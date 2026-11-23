@@ -613,7 +613,9 @@ fn missing_caption_insets_are_not_kept() {
     for part in [
         "if (left + right <= 0)",
         "if (win.titleBar) win.titleBar.InvalidateMeasure();",
-        "if (!immersive) {",
+        "if (!hide) {",
+        "RestoreTitleBar(win);",
+        "FitCaptionHeight(win);",
         "if (current->titleBarInsets != before) PlaceHeader(*current);",
     ] {
         assert!(windows.contains(part), "{part}");

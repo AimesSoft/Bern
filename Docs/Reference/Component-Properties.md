@@ -82,7 +82,7 @@ Fixed enums list the allowed keywords directly. The table does not repeat every 
 | `Marquee` | **`duration: Length`**<br>`phase: Number`<br>`paused: Bool`<br>`opacity: NumberValue` | May contain children; no action |
 | `ScaleBox` | **`width: Length`**<br>**`height: Length`** | May contain children; no action |
 | `Positioned` | **`x: Length`**<br>**`y: Length`**<br>**`width: Length`**<br>**`height: Length`**<br>`bleed: Bool` | May contain children; no action; `bleed` lets a layer in a `ScaleBox` scene extend to the edge of the box on the canvas edges it reaches |
-| `Modal` | `width: Length`<br>`height: Length`<br>`cover: compact` | May contain children; no action; without `height` it is as tall as its content (a `ScrollView` inside it is as tall as the content it scrolls), and it stops at the window edge when the window cannot fit it |
+| `Modal` | `width: Length`<br>`height: Length`<br>`cover: compact` | May contain children; optional action (runs when clicking outside or pressing Escape); without `height` it is as tall as its content (a `ScrollView` inside it is as tall as the content it scrolls), and it stops at the window edge when the window cannot fit it |
 | `Flow` | `gap: Length` | May contain children; no action; the children in each line are vertically centered, and `Spacer` takes the rest of the width of its line |
 | `Timer` | **`interval: Number`**<br>`enabled: Bool` | No children; must bind an action |
 | `Watch` | **`value: Watched`** | No children; must bind an action; runs on mount and when the value changes |
@@ -90,7 +90,7 @@ Fixed enums list the allowed keywords directly. The table does not repeat every 
 | `PickerOption` | **`value: KeyValue`**<br>**`label: DisplayText`** | No children; no action; directly inside ["Picker"] |
 | `Rail` | `axis: horizontal / vertical`<br>`anchor: start / center / end`<br>`overhang: Length` | May contain children; no action |
 | `Spacer` | No own properties | No children; no action |
-| `WindowButtons` | No own properties | No children; no action; on macOS it takes up the space of the traffic lights, and on other platforms it takes no space |
+| `WindowButtons` | `edge: leading / trailing` | No children; no action; reserves the traffic lights at `leading` on macOS and the caption buttons at `trailing` on Windows, and takes no space elsewhere |
 | `Divider` | No own properties | No children; no action |
 | `ScrollView` | `axis: vertical / horizontal`<br>`snap: start / center`<br>`position: PositionField`<br>`arrival: nudge`<br>`indicators: automatic / hidden / mouse`<br>`open_at: Number`<br>`open_center: NumberValue`<br>`anchor: Number`<br>`browsing: BoolField` | May contain children; no action |
 | `SplitView` | No own properties | Contains only ["Sidebar", "Detail"]; no action |

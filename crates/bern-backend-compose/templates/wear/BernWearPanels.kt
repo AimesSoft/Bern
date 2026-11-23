@@ -76,14 +76,9 @@ fun BernForm(gap: Dp?, rows: BernRows, content: @Composable ColumnScope.() -> Un
 
 @Composable
 fun BernModal(width: Dp, height: Dp, cover: Boolean, enter: EnterTransition?, exit: ExitTransition?,
-    content: @Composable () -> Unit) {
-    // Modal has no dismiss binding: like the phone implementation, its own
-    // buttons dismiss it. The window close protocol must not be bypassed.
-    // Wear Dialog always installs swipe-to-dismiss and requires removal after
-    // dismissal. A non-dismissible Bern Modal therefore uses the underlying
-    // system dialog window, still containing Wear controls and full-screen UI.
-    androidx.compose.ui.window.Dialog(onDismissRequest = {},
-        properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false,
+    dismiss: (() -> Unit)? = null, content: @Composable () -> Unit) {
+    androidx.compose.ui.window.Dialog(onDismissRequest = { dismiss?.invoke() },
+        properties = DialogProperties(dismissOnBackPress = dismiss != null, dismissOnClickOutside = dismiss != null,
             usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         BernPopupContent {
             val shown = remember { androidx.compose.animation.core.MutableTransitionState(false).apply { targetState = true } }
