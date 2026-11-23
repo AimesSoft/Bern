@@ -9,7 +9,7 @@
 <p>Write both your app logic and declarative <code>ui!</code> views in Rust — no embedded browser, no hand-written platform glue.<br>
 At build time, Bern compiles one Rust codebase into SwiftUI, WinUI 3, GTK 4, Jetpack Compose, GPUI and Web DOM/WASM<br>
 across desktop, mobile, tablet, watch, TV and the Web.<br>
-A typed protocol and command architecture keeps business logic in plain Rust, catches omissions at compile time, and ships an app CLI + <code>SKILL.md</code> out of the box.</p>
+A typed protocol and command architecture keeps business logic in plain Rust, catches omissions at compile time, ships an app CLI + <code>SKILL.md</code> out of the box, and lets you <code>bern eject</code> into standalone FFI-wired native IDE projects anytime.</p>
 
 <p>
 <img alt="macOS · SwiftUI" src="https://img.shields.io/badge/macOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
@@ -27,6 +27,7 @@ A typed protocol and command architecture keeps business logic in plain Rust, ca
 <p>
 <a href="https://bern.aimes-soft.com"><img alt="Website" src="https://img.shields.io/badge/website-bern.aimes--soft.com-111827?style=flat-square"></a>
 <img alt="Native UI: no WebView" src="https://img.shields.io/badge/UI-native%20%C2%B7%20no%20WebView-111827?style=flat-square">
+<a href="#eject-to-standalone-native-projects-no-lock-in-and-rust-ffi-starter"><img alt="No lock-in: bern eject" src="https://img.shields.io/badge/lock--in-none%20%C2%B7%20bern%20eject-10B981?style=flat-square"></a>
 <img alt="Memory about 40 MB" src="https://img.shields.io/badge/memory-about%2040%20MB-0EA5E9?style=flat-square">
 <img alt="Skills + CLI" src="https://img.shields.io/badge/AI-Skills%20%2B%20CLI-8B5CF6?style=flat-square">
 <img alt="Rust 1.99" src="https://img.shields.io/badge/Rust-1.99-B7410E?style=flat-square&logo=rust&logoColor=white">
@@ -47,6 +48,7 @@ A typed protocol and command architecture keeps business logic in plain Rust, ca
 <a href="#why-bern">Why Bern</a> ·
 <a href="#how-to-build-software-in-rust">How to build in Rust</a> ·
 <a href="#built-for-ai">Built for AI</a> ·
+<a href="#eject-to-standalone-native-projects-no-lock-in-and-rust-ffi-starter">Eject &amp; FFI</a> ·
 <a href="#measured">Measured</a> ·
 <a href="#compared-with-other-cross-platform-frameworks">Comparison</a> ·
 <a href="#quick-start">Quick start</a>
@@ -106,7 +108,7 @@ A typed protocol and command architecture keeps business logic in plain Rust, ca
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/why-en-dark.svg">
-<img alt="Why Bern: compiled into native UI, generating SwiftUI, WinUI 3, GTK 4, Compose, GPUI and Web code from Rust with zero WebView by default; all Rust with logic separated from UI, plain Rust engine, compile-time checks for omissions and automatic app CLI plus SKILL.md; too light to feel cross-platform, 39 MB, 0.4 s and 2.7 MB on macOS, 35 MB, 0.3 s and 4.2 MB on Windows, 189 KB on the web" src="Docs/Assets/tables/why-en-light.svg" width="100%">
+<img alt="Why Bern: compiled into native UI, generating SwiftUI, WinUI 3, GTK 4, Compose, GPUI and Web code from Rust with zero WebView by default and zero lock-in via bern eject; all Rust with logic separated from UI, plain Rust engine, compile-time checks for omissions and automatic app CLI plus SKILL.md; too light to feel cross-platform, 39 MB, 0.4 s and 2.7 MB on macOS, 35 MB, 0.3 s and 4.2 MB on Windows, 189 KB on the web" src="Docs/Assets/tables/why-en-light.svg" width="100%">
 </picture>
 
 ## How to build software in Rust
@@ -292,6 +294,7 @@ bern check                          # verify types, translations and layout cove
 bern run                            # run native UI on this OS (SwiftUI / WinUI 3 / GTK 4)
 bern run --target web_app           # or Android, iOS, GPUI, Web from the same Rust code
 bern package                        # build release .dmg / installer / .deb / .apk / .ipa / Web
+bern eject --target macos           # export standalone native IDE project with Rust FFI wired up
 
 # Because every UI action is a protocol command, the built app also ships its own CLI:
 tasks ui inspect
@@ -413,6 +416,34 @@ You can run the same commands yourself, including app-specific ones such as `sho
 - **Extensibility**: modular apps (`bern new --module`), co-located per-platform native views (`NativeView` with typed props, `tr!` linting, mandatory CLI entries and `Fallback`, see [Native Views](Docs/Topics/Native-Views.md)), and opt-in in-process JavaScript with `bern.cli` and allowlist/denylist policies ([JavaScript](Docs/Topics/JavaScript.md)).
 
 </details>
+
+### Eject to standalone native projects: no lock-in and Rust FFI starter
+
+Because Bern compiles your `ui!` declarations into each platform's own UI code, you are never locked into the framework. Run `bern eject` at any time to export standard, self-contained native IDE projects with UI sources split cleanly per component and window (`Do not edit` banners removed), leaving the original Bern project untouched.
+
+It also works as an **instant native-to-Rust FFI project generator**: even if you plan to hand-write SwiftUI, Kotlin Compose, WinUI 3 C++, GTK, or Web UI from day one, `bern new` + `bern eject` gives you a ready-to-build project across every platform with the Rust engine, C ABI / FFI bridge, state snapshot bindings, and native IDE build hooks already wired up — no manual Xcode Run Script, NDK/JNI, MSBuild, or WASM plumbing.
+
+```sh
+bern eject --target macos --out ./native-macos                   # offline Rust source + Xcode project
+bern eject --target ios --engine prebuilt --release --out ./ios  # prebuilt XCFramework, no Rust required
+
+# Example ejected macOS layout (similarly Gradle / Visual Studio .sln / Cargo / Web ES modules):
+# native-macos/
+# ├── MyApp.xcodeproj/           # wired with Build Rust Engine phase (or XCFramework)
+# ├── Sources/{App,Models,Styles,Views,Windows,Native,Runtime}/
+# └── rust/                      # offline self-contained Rust workspace + C FFI bridge
+```
+
+| Platform | Standalone native project | Pre-wired Rust FFI (`--engine source` / `--engine prebuilt`) |
+| --- | --- | --- |
+| **macOS / iOS / tvOS / watchOS** | `<Product>.xcodeproj` + `.xcscheme` | `rust/` + Xcode `build-rust.sh` / `BernEngine.xcframework` |
+| **Android / Wear OS** | Gradle project (`app/build.gradle.kts`) | `rust/` + Gradle NDK task / `jniLibs/<abi>/libbern_app.so` |
+| **Windows (WinUI 3 / Islands)** | Visual Studio `.sln` + `.vcxproj` | `rust/` + MSBuild `build-rust.cmd` / `lib\<arch>\bern_app.lib` |
+| **Linux (GTK 4)** | Standalone Cargo workspace | Self-contained `Cargo.toml` (`--engine source`) |
+| **Desktop (GPUI)** | Standalone Cargo workspace | Self-contained `Cargo.toml` (`--engine source`) |
+| **Web (DOM + WASM)** | Zero-bundler `index.html` + ES modules | `rust/` + `build-wasm.{sh,cmd}` / prebuilt `app.wasm` |
+
+Choose `--engine source` (default; works cross-host for every target) to keep editing Rust alongside native UI, or `--engine prebuilt` to embed compiled engine binaries so native developers can open and build with **no Rust or Bern installed**. See [Ejecting to standalone native projects](Docs/Topics/Eject.md).
 
 ### Extending with JavaScript: in-process `bern.cli`
 
@@ -597,16 +628,7 @@ bern 0.2.2 on macOS (aarch64)
 bern package
 ```
 
-Builds every target this computer can in release and writes packages to `target/bern/dist/`: a `.dmg` for macOS, an installer (per user, no administrator rights) and a `.zip` for Windows, a `.deb` and a `.tar.gz` for Linux, an `.apk` and an `.aab` for stores for Android, and an archive of the static site for the Web. Desktop and WebUI packages carry the app CLI and, when IPC is enabled, its skill. A static Web package contains only the site; the Android CLI runs on the development computer, not inside the APK. Signing comes from the environment, so certificates stay out of the repository: `BERN_MACOS_SIGNING_IDENTITY` and `BERN_MACOS_NOTARY_PROFILE` (sign and notarize), `BERN_WINDOWS_CERTIFICATE` (a certificate thumbprint or a `.pfx`), `BERN_ANDROID_KEYSTORE`, `BERN_ANDROID_KEYSTORE_PASSWORD` and `BERN_ANDROID_KEY_ALIAS` (the release key). Without them the packages are still made, with a note on what being unsigned means.
-
-### Eject to standalone native projects (no lock-in)
-
-```sh
-bern eject --target macos --out ./native-macos                   # offline Rust source + Xcode project
-bern eject --target ios --engine prebuilt --release --out ./ios  # prebuilt XCFramework, no Rust required
-```
-
-`bern eject` exports standard platform-native IDE projects (`.xcodeproj`, Gradle, Visual Studio `.sln` + `.vcxproj`, standalone Cargo, or zero-bundler ES modules) with UI sources split per component and window, leaving the original Bern project untouched. Choose `--engine source` (default) to vendor a complete offline Rust workspace wired into the native IDE build, or `--engine prebuilt` to embed pre-compiled engine binaries so native developers can open and build without installing Rust or Bern. See [Ejecting to standalone native projects](Docs/Topics/Eject.md).
+Builds every target this computer can in release and writes packages to `target/bern/dist/`: a `.dmg` for macOS, an installer (per user, no administrator rights) and a `.zip` for Windows, a `.deb` and a `.tar.gz` for Linux, an `.apk` and an `.aab` for stores for Android, and an archive of the static site for the Web. Desktop and WebUI packages carry the app CLI and, when IPC is enabled, its skill. A static Web package contains only the site; the Android CLI runs on the development computer, not inside the APK. Signing comes from the environment, so certificates stay out of the repository: `BERN_MACOS_SIGNING_IDENTITY` and `BERN_MACOS_NOTARY_PROFILE` (sign and notarize), `BERN_WINDOWS_CERTIFICATE` (a certificate thumbprint or a `.pfx`), `BERN_ANDROID_KEYSTORE`, `BERN_ANDROID_KEYSTORE_PASSWORD` and `BERN_ANDROID_KEY_ALIAS` (the release key). Without them the packages are still made, with a note on what being unsigned means. To export standalone native IDE projects with Rust FFI wired up instead, run `bern eject` (see [Eject to standalone native projects](#eject-to-standalone-native-projects-no-lock-in-and-rust-ffi-starter)).
 
 ### Run the showcase
 

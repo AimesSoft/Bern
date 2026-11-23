@@ -9,7 +9,7 @@
 <p>ビジネスロジックも宣言的な <code>ui!</code> 画面もすべて Rust で記述——ブラウザーの同梱も、プラットフォームごとの糊付けコードも不要です。<br>
 ビルド時に SwiftUI、WinUI 3、GTK 4、Jetpack Compose、さらに選択式の GPUI と Web へ直接コンパイルし、<br>
 デスクトップ・モバイル・タブレット・ウォッチ・テレビ・Web をカバーします。<br>
-型付きプロトコルとコマンド設計により、ロジックは普通の Rust のまま保たれ、書き漏れはコンパイルエラーとなり、アプリ CLI と <code>SKILL.md</code> も自動で備わります。</p>
+型付きプロトコルとコマンド設計により、ロジックは普通の Rust のまま保たれ、書き漏れはコンパイルエラーとなり、アプリ CLI と <code>SKILL.md</code> も自動で備わります。いつでも <code>bern eject</code> で Rust FFI 配線済みの独立ネイティブプロジェクトへ書き出せるため、ロックインもありません。</p>
 
 <p>
 <img alt="macOS · SwiftUI" src="https://img.shields.io/badge/macOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
@@ -27,6 +27,7 @@
 <p>
 <a href="https://bern.aimes-soft.com"><img alt="公式サイト" src="https://img.shields.io/badge/%E5%85%AC%E5%BC%8F%E3%82%B5%E3%82%A4%E3%83%88-bern.aimes--soft.com-111827?style=flat-square"></a>
 <img alt="ネイティブ UI：WebView なし" src="https://img.shields.io/badge/UI-%E3%83%8D%E3%82%A4%E3%83%86%E3%82%A3%E3%83%96%20%C2%B7%20WebView%20%E3%81%AA%E3%81%97-111827?style=flat-square">
+<a href="#独立ネイティブプロジェクト書き出しロックインなしrust-ffi-雛形"><img alt="ロックインなし：bern eject" src="https://img.shields.io/badge/%E3%83%AD%E3%83%83%E3%82%AF%E3%82%A4%E3%83%B3-%E3%81%AA%E3%81%97%20%C2%B7%20bern%20eject-10B981?style=flat-square"></a>
 <img alt="メモリ約 40 MB" src="https://img.shields.io/badge/%E3%83%A1%E3%83%A2%E3%83%AA-%E7%B4%84%2040%20MB-0EA5E9?style=flat-square">
 <img alt="Skills + CLI" src="https://img.shields.io/badge/AI-Skills%20%2B%20CLI-8B5CF6?style=flat-square">
 <img alt="Rust 1.99" src="https://img.shields.io/badge/Rust-1.99-B7410E?style=flat-square&logo=rust&logoColor=white">
@@ -47,6 +48,7 @@
 <a href="#bern-の特長">特長</a> ·
 <a href="#rust-でアプリを書く流れ">Rust での開発</a> ·
 <a href="#ai-のための設計">AI のための設計</a> ·
+<a href="#独立ネイティブプロジェクト書き出しロックインなしrust-ffi-雛形">ネイティブ書き出し / FFI</a> ·
 <a href="#実測値">実測値</a> ·
 <a href="#他のフレームワークとの比較">比較</a> ·
 <a href="#クイックスタート">クイックスタート</a>
@@ -106,7 +108,7 @@
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/why-ja-dark.svg">
-<img alt="Bern の特長：本物のネイティブ UI へコンパイルし、Rust から SwiftUI、WinUI 3、GTK 4、Compose、GPUI、Web のコードを生成、既定で WebView なし。すべて Rust でロジックと UI を分離し、普通の Rust エンジン、コンパイル時の漏れ検査、アプリ CLI と SKILL.md が自動で付属。クロスプラットフォームとは思えない軽さで、macOS は 39 MB・0.4 秒・2.7 MB、Windows は 35 MB・0.3 秒・4.2 MB、Web は 189 KB" src="Docs/Assets/tables/why-ja-light.svg" width="100%">
+<img alt="Bern の特長：本物のネイティブ UI へコンパイルし、Rust から SwiftUI、WinUI 3、GTK 4、Compose、GPUI、Web のコードを生成、既定で WebView なし、さらに bern eject でロックインなし。すべて Rust でロジックと UI を分離し、普通の Rust エンジン、コンパイル時の漏れ検査、アプリ CLI と SKILL.md が自動で付属。クロスプラットフォームとは思えない軽さで、macOS は 39 MB・0.4 秒・2.7 MB、Windows は 35 MB・0.3 秒・4.2 MB、Web は 189 KB" src="Docs/Assets/tables/why-ja-light.svg" width="100%">
 </picture>
 
 ## Rust でアプリを書く流れ
@@ -292,6 +294,7 @@ bern check                          # 型・翻訳漏れ・レイアウト入口
 bern run                            # この OS のネイティブ UI を起動（SwiftUI / WinUI 3 / GTK 4）
 bern run --target web_app           # 同じ Rust コードで Android / iOS / GPUI / Web へ
 bern package                        # 各ターゲットの配布パッケージ（.dmg / インストーラー / .deb / .apk / .ipa / Web）
+bern eject --target macos           # Rust FFI 配線済みの独立ネイティブ IDE プロジェクトへ書き出し
 
 # 全操作がプロトコルコマンドのため、ビルドされたアプリはそのまま CLI も備えます：
 tasks ui inspect
@@ -413,6 +416,34 @@ $ showcase window confirm-close --window settings#1 --confirmation settings#1:c1
 - **拡張性**：モジュール化アプリ（`bern new --module`）、Rust ファイルの隣に各プラットフォーム実装を並べる `NativeView`（型付き props、`tr!` 検査、必須 CLI エントリ、`Fallback` 付き。[Native Views](Docs/Topics/Native-Views.md)）、必要に応じて有効化するプロセス内 JavaScript と `bern.cli` の許可／拒否ポリシー（[JavaScript](Docs/Topics/JavaScript.md)）。
 
 </details>
+
+### 独立ネイティブプロジェクト書き出し：ロックインなし・Rust FFI 雛形
+
+Bern はビルド時に各プラットフォーム本来の UI コードを生成するため、フレームワークに縛られることはありません。いつでも `bern eject` を実行するだけで、元の Bern プロジェクトに一切触れずに、コンポーネントやウィンドウごとに分割され `Do not edit` 警告を取り除いた標準の独立ネイティブ IDE プロジェクトを書き出せます。
+
+さらに**「ネイティブ UI から Rust を呼ぶ」ための即戦力 FFI 雛形ジェネレーター**としても使えます。最初から SwiftUI・Kotlin Compose・WinUI 3 C++・GTK・Web の画面を手書きする予定でも、`bern new` + `bern eject` だけで Rust エンジン、C ABI / FFI ブリッジ、状態スナップショット連携、そして各 IDE のビルド連携（Xcode Run Script、Gradle NDK/JNI、Visual Studio MSBuild、WASM ビルドスクリプト）が配線済みのテンプレートを一瞬で用意できます。
+
+```sh
+bern eject --target macos --out ./native-macos                   # オフライン Rust ソース + Xcode プロジェクト
+bern eject --target ios --engine prebuilt --release --out ./ios  # ビルド済み XCFramework（Rust 不要）
+
+# 書き出された macOS プロジェクト例（Gradle / Visual Studio .sln / Cargo / Web ES モジュールも同様）：
+# native-macos/
+# ├── MyApp.xcodeproj/           # Build Rust Engine フェーズ配線済み（または XCFramework 同梱）
+# ├── Sources/{App,Models,Styles,Views,Windows,Native,Runtime}/
+# └── rust/                      # 完全オフラインの自己完結 Rust ワークスペース + C FFI ブリッジ
+```
+
+| プラットフォーム | 独立ネイティブプロジェクト | 配線済み Rust FFI（`--engine source` / `--engine prebuilt`） |
+| --- | --- | --- |
+| **macOS / iOS / tvOS / watchOS** | `<Product>.xcodeproj` + `.xcscheme` | `rust/` + Xcode `build-rust.sh` / `BernEngine.xcframework` |
+| **Android / Wear OS** | Gradle プロジェクト（`app/build.gradle.kts`） | `rust/` + Gradle NDK タスク / `jniLibs/<abi>/libbern_app.so` |
+| **Windows（WinUI 3 / Islands）** | Visual Studio `.sln` + `.vcxproj` | `rust/` + MSBuild `build-rust.cmd` / `lib\<arch>\bern_app.lib` |
+| **Linux（GTK 4）** | 独立 Cargo ワークスペース | 自己完結 `Cargo.toml`（`--engine source`） |
+| **デスクトップ（GPUI）** | 独立 Cargo ワークスペース | 自己完結 `Cargo.toml`（`--engine source`） |
+| **Web（DOM + WASM）** | バンドラー不要の `index.html` + ES モジュール | `rust/` + `build-wasm.{sh,cmd}` / ビルド済み `app.wasm` |
+
+既定の `--engine source`（任意のホスト OS から全ターゲットを書き出し可能）はネイティブ UI と Rust エンジンを並行開発したい場合に最適で、`--engine prebuilt` はコンパイル済みエンジンバイナリを埋め込むため、**Rust や Bern を入れていないネイティブ開発者**でもそのまま IDE で開いてビルドできます。詳しくは [Ejecting to standalone native projects](Docs/Topics/Eject.md) を参照してください。
 
 ### JavaScript で拡張する：プロセス内 `bern.cli`
 
@@ -597,16 +628,7 @@ bern 0.2.2 on macOS (aarch64)
 bern package
 ```
 
-このコンピューターでビルドできるターゲットを release でビルドし、`target/bern/dist/` にパッケージを書き出します。macOS は `.dmg`、Windows はインストーラー（ユーザーごと、管理者権限不要）と `.zip`、Linux は `.deb` と `.tar.gz`、Android は `.apk` とストア向けの `.aab`、Web は静的サイトのアーカイブです。デスクトップと WebUI のパッケージにはアプリの CLI が入り、IPC が有効ならスキルも入ります。静的 Web パッケージにはサイトのファイルだけが入り、Android の CLI は APK の中ではなく開発用コンピューターで動作します。署名は環境変数で設定し、証明書はリポジトリに入れません：`BERN_MACOS_SIGNING_IDENTITY` と `BERN_MACOS_NOTARY_PROFILE`（署名と公証）、`BERN_WINDOWS_CERTIFICATE`（証明書の拇印または `.pfx`）、`BERN_ANDROID_KEYSTORE`・`BERN_ANDROID_KEYSTORE_PASSWORD`・`BERN_ANDROID_KEY_ALIAS`（リリース鍵）。設定がなくてもパッケージは作られ、未署名の影響を知らせます。
-
-### 独立した純ネイティブプロジェクトへ書き出す（ロックインなし）
-
-```sh
-bern eject --target macos --out ./native-macos                   # オフライン Rust ソース + Xcode プロジェクト
-bern eject --target ios --engine prebuilt --release --out ./ios  # ビルド済み XCFramework（Rust 不要）
-```
-
-`bern eject` は元の Bern プロジェクトを変更せず、コンポーネントやウィンドウ単位に分割された標準のネイティブ IDE プロジェクト（`.xcodeproj`、Gradle、Visual Studio `.sln` + `.vcxproj`、独立 Cargo、バンドラー不要の ES モジュール）を書き出します。既定の `--engine source` は完全オフラインで自己完結した Rust ワークスペースを同梱してネイティブ IDE のビルドに組み込み、`--engine prebuilt` はコンパイル済みエンジンバイナリを埋め込むため、Rust や Bern を入れていない環境でもそのまま開いてビルドできます。詳しくは [Ejecting to standalone native projects](Docs/Topics/Eject.md) を参照してください。
+このコンピューターでビルドできるターゲットを release でビルドし、`target/bern/dist/` にパッケージを書き出します。macOS は `.dmg`、Windows はインストーラー（ユーザーごと、管理者権限不要）と `.zip`、Linux は `.deb` と `.tar.gz`、Android は `.apk` とストア向けの `.aab`、Web は静的サイトのアーカイブです。デスクトップと WebUI のパッケージにはアプリの CLI が入り、IPC が有効ならスキルも入ります。静的 Web パッケージにはサイトのファイルだけが入り、Android の CLI は APK の中ではなく開発用コンピューターで動作します。署名は環境変数で設定し、証明書はリポジトリに入れません：`BERN_MACOS_SIGNING_IDENTITY` と `BERN_MACOS_NOTARY_PROFILE`（署名と公証）、`BERN_WINDOWS_CERTIFICATE`（証明書の拇印または `.pfx`）、`BERN_ANDROID_KEYSTORE`・`BERN_ANDROID_KEYSTORE_PASSWORD`・`BERN_ANDROID_KEY_ALIAS`（リリース鍵）。設定がなくてもパッケージは作られ、未署名の影響を知らせます。Rust FFI が配線された独立ネイティブ IDE プロジェクトとして書き出したい場合は `bern eject` を実行してください（[独立ネイティブプロジェクト書き出し](#独立ネイティブプロジェクト書き出しロックインなしrust-ffi-雛形)を参照）。
 
 ### ショーケースを動かす
 

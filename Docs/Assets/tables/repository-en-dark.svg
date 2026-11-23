@@ -47,8 +47,8 @@
 <text x="132.0" y="434.1" font-size="13.5" fill="#F0F6FC"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#79C0FF">crates/bern-adapter-cli</tspan> · <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#79C0FF">-json</tspan></text>
 <text x="520.0" y="434.1" font-size="13.5" fill="#9198A1">App CLI and JSON entries derived from the command catalog</text>
 <text x="132.0" y="460.1" font-size="13.5" fill="#F0F6FC"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#79C0FF">crates/bern-cli</tspan></text>
-<text x="520.0" y="460.1" font-size="13.5" fill="#9198A1">The build tool <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#79C0FF">bern</tspan>: create, check, build, run, package and</text>
-<text x="520.0" y="480.1" font-size="13.5" fill="#9198A1">doctor</text>
+<text x="520.0" y="460.1" font-size="13.5" fill="#9198A1">The build tool <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#79C0FF">bern</tspan>: create, check, build, run, package,</text>
+<text x="520.0" y="480.1" font-size="13.5" fill="#9198A1">eject and doctor</text>
 <line x1="0" y1="500.0" x2="960" y2="500.0" stroke="#30363D"/>
 <text x="0.0" y="527.9" font-size="13" fill="#6EA2F5" font-weight="700">Examples and</text>
 <text x="0.0" y="547.9" font-size="13" fill="#6EA2F5" font-weight="700">docs</text>
