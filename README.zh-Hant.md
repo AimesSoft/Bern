@@ -9,7 +9,7 @@
 <p>商業邏輯與宣告式 <code>ui!</code> 介面全用 Rust 撰寫——不捆綁瀏覽器核心，也不必為各平台手寫膠水程式碼。<br>
 建置時直接編譯成各平台自己的原生介面（SwiftUI、WinUI 3、GTK 4、Jetpack Compose，以及可選 GPUI 與 Web），<br>
 涵蓋桌面、手機、平板、手錶、電視與網頁。<br>
-基於型別化協定與命令架構：邏輯留在純 Rust，漏寫在編譯期報錯，順帶自動產生應用程式 CLI 與 <code>SKILL.md</code>。</p>
+基於型別化協定與命令架構：邏輯留在純 Rust，漏寫在編譯期報錯，自動產生應用程式 CLI 與 <code>SKILL.md</code>，且隨時可用 <code>bern eject</code> 匯出配好 Rust FFI 的獨立原生專案（無框架鎖定）。</p>
 
 <p>
 <img alt="macOS · SwiftUI" src="https://img.shields.io/badge/macOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
@@ -27,6 +27,7 @@
 <p>
 <a href="https://bern.aimes-soft.com"><img alt="官網" src="https://img.shields.io/badge/%E5%AE%98%E7%B6%B2-bern.aimes--soft.com-111827?style=flat-square"></a>
 <img alt="原生介面：無 WebView" src="https://img.shields.io/badge/%E4%BB%8B%E9%9D%A2-%E5%8E%9F%E7%94%9F%20%C2%B7%20%E7%84%A1%20WebView-111827?style=flat-square">
+<a href="#匯出獨立原生專案無鎖定與-rust-ffi-範本"><img alt="無鎖定：bern eject" src="https://img.shields.io/badge/%E9%8E%96%E5%AE%9A-%E7%84%A1%20%C2%B7%20bern%20eject-10B981?style=flat-square"></a>
 <img alt="記憶體約 40 MB" src="https://img.shields.io/badge/%E8%A8%98%E6%86%B6%E9%AB%94-%E7%B4%84%2040%20MB-0EA5E9?style=flat-square">
 <img alt="Skills + CLI" src="https://img.shields.io/badge/AI-Skills%20%2B%20CLI-8B5CF6?style=flat-square">
 <img alt="Rust 1.99" src="https://img.shields.io/badge/Rust-1.99-B7410E?style=flat-square&logo=rust&logoColor=white">
@@ -47,6 +48,7 @@
 <a href="#核心特色">核心特色</a> ·
 <a href="#用-rust-怎麼撰寫軟體">用 Rust 怎麼撰寫軟體</a> ·
 <a href="#為-ai-而建">為 AI 而建</a> ·
+<a href="#匯出獨立原生專案無鎖定與-rust-ffi-範本">原生匯出 / FFI 範本</a> ·
 <a href="#實測數據">實測數據</a> ·
 <a href="#與其他跨平台框架比較">比較</a> ·
 <a href="#快速開始">快速開始</a>
@@ -106,7 +108,7 @@
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/why-zh-Hant-dark.svg">
-<img alt="核心特色：編譯成真正的原生介面，用 Rust 產生 SwiftUI、WinUI 3、GTK 4、Compose、GPUI 與 Web 程式碼，預設無 WebView；全 Rust 開發、邏輯與介面分離，協定定義狀態與命令、引擎純 Rust 可獨立單測、漏翻譯與漏入口編譯期報錯並自動產生 CLI 與 SKILL.md；輕到不像跨平台，macOS 記憶體 39 MB、0.4 秒出現視窗、應用程式套件 2.7 MB，Windows 35 MB、0.3 秒、4.2 MB，Web 189 KB" src="Docs/Assets/tables/why-zh-Hant-light.svg" width="100%">
+<img alt="核心特色：編譯成真正的原生介面，用 Rust 產生 SwiftUI、WinUI 3、GTK 4、Compose、GPUI 與 Web 程式碼，預設無 WebView，且隨時可用 bern eject 匯出配好 Rust FFI 的獨立原生專案；全 Rust 開發、邏輯與介面分離，協定定義狀態與命令、引擎純 Rust 可獨立單測、漏翻譯與漏入口編譯期報錯並自動產生 CLI 與 SKILL.md；輕到不像跨平台，macOS 記憶體 39 MB、0.4 秒出現視窗、應用程式套件 2.7 MB，Windows 35 MB、0.3 秒、4.2 MB，Web 189 KB" src="Docs/Assets/tables/why-zh-Hant-light.svg" width="100%">
 </picture>
 
 ## 用 Rust 怎麼撰寫軟體
@@ -292,6 +294,7 @@ bern check                          # 編譯期校驗型別、翻譯完整性與
 bern run                            # 直接執行本機原生介面（SwiftUI / WinUI 3 / GTK 4）
 bern run --target web_app           # 或同一份程式碼切到 Android、iOS、GPUI、Web
 bern package                        # 打包各端 release 套件（.dmg / 安裝程式 / .deb / .apk / .ipa / Web）
+bern eject --target macos           # 隨時匯出已配好 Rust FFI 的獨立原生 IDE 專案
 
 # 因為每個介面操作都綁定了協定命令，編譯出來的應用天然附帶 CLI：
 tasks ui inspect
@@ -413,6 +416,34 @@ $ showcase window confirm-close --window settings#1 --confirmation settings#1:c1
 - **擴充能力**：模組化應用程式（`bern new --module`）、緊鄰嵌入各平台原生程式碼的 `NativeView`（含強型別 props、`tr!` 檢查、強制 CLI 入口與 `Fallback`，見[緊鄰原生視圖](Docs/zh-CN/Topics/Native-Views.md)），以及按需啟用的行程內 JavaScript 與 `bern.cli` 黑白名單（見[JavaScript 與目標能力](Docs/zh-CN/Topics/JavaScript.md)）。
 
 </details>
+
+### 匯出獨立原生專案：無鎖定與 Rust FFI 範本
+
+因為 Bern 在建置期產生的本來就是各平台自己的原生 UI 程式碼，你永遠不會被框架鎖定。隨時執行 `bern eject`，即可在不改動原 Bern 專案的前提下，匯出依元件與視窗拆好檔案、清除 `Do not edit` 標記的獨立標準 IDE 專案，直接交由原生流程繼續演進。
+
+它同時也是一款**開箱即用的「原生介面呼叫 Rust」專案範本產生器**：即便你從第一天起就打算手寫 SwiftUI、Kotlin Compose、WinUI 3 C++、GTK 或 Web 介面，用 `bern new` + `bern eject` 也能立刻拿到已搭好 Rust 核心、C ABI / FFI 橋接、狀態快照綁定與原生 IDE 建置腳本的全平台起步範本——省去手配 Xcode Run Script、Android NDK/JNI、Visual Studio MSBuild 或 WASM 橋接的繁瑣工作。
+
+```sh
+bern eject --target macos --out ./native-macos                   # 離線 Rust 後端原始碼 + Xcode 專案
+bern eject --target ios --engine prebuilt --release --out ./ios  # 預編譯 XCFramework，無需安裝 Rust
+
+# 匯出的 macOS 專案範例（Android Gradle / Visual Studio .sln / Cargo / Web ES 模組結構類似）：
+# native-macos/
+# ├── MyApp.xcodeproj/           # 已聯動 Build Rust Engine 階段（或直接嵌入 XCFramework）
+# ├── Sources/{App,Models,Styles,Views,Windows,Native,Runtime}/
+# └── rust/                      # 離線自包含的 Rust 工作區 + C FFI 橋接層
+```
+
+| 平台 | 獨立原生專案入口 | 已配好的 Rust FFI 交付（`--engine source` / `--engine prebuilt`） |
+| --- | --- | --- |
+| **macOS / iOS / tvOS / watchOS** | `<Product>.xcodeproj` + `.xcscheme` | `rust/` + Xcode `build-rust.sh` / `BernEngine.xcframework` |
+| **Android / Wear OS** | Gradle 專案（`app/build.gradle.kts`） | `rust/` + Gradle NDK 任務 / `jniLibs/<abi>/libbern_app.so` |
+| **Windows（WinUI 3 / Islands）** | Visual Studio `.sln` + `.vcxproj` | `rust/` + MSBuild `build-rust.cmd` / `lib\<arch>\bern_app.lib` |
+| **Linux（GTK 4）** | 獨立 Cargo 工作區 | 自包含 `Cargo.toml`（`--engine source`） |
+| **桌面（GPUI）** | 獨立 Cargo 工作區 | 自包含 `Cargo.toml`（`--engine source`） |
+| **Web（DOM + WASM）** | 零打包器 `index.html` + ES 模組 | `rust/` + `build-wasm.{sh,cmd}` / 預編譯 `app.wasm` |
+
+預設 `--engine source`（支援跨宿主系統匯出全平台專案）便於繼續同步開發 Rust 引擎與原生介面；`--engine prebuilt` 則直接預編譯並嵌入引擎二進位，讓接手的原生開發者**無需安裝 Rust 或 Bern** 即可直接開啟建置。詳見[匯出為獨立純原生專案](Docs/zh-CN/Topics/Eject.md)。
 
 ### 以 JavaScript 擴充：行程內 `bern.cli`
 
@@ -597,16 +628,7 @@ bern 0.2.2 on macOS (aarch64)
 bern package
 ```
 
-以 release 建置本機能建置的目標，在 `target/bern/dist/` 中產生安裝套件：macOS 的 `.dmg`，Windows 的安裝程式（依目前使用者安裝，不需要系統管理員權限）與免安裝的 `.zip`，Linux 的 `.deb` 與 `.tar.gz`，Android 的 `.apk` 與上架用的 `.aab`，Web 的靜態網站壓縮檔。桌面和 WebUI 套件含有應用程式 CLI，啟用 IPC 時也包含 Skill。靜態 Web 套件只含網站檔案；Android CLI 在開發電腦上執行，不會包進 APK。簽署以環境變數設定，憑證不進儲存庫：`BERN_MACOS_SIGNING_IDENTITY` 與 `BERN_MACOS_NOTARY_PROFILE`（簽署並公證），`BERN_WINDOWS_CERTIFICATE`（憑證指紋或 `.pfx`），`BERN_ANDROID_KEYSTORE`、`BERN_ANDROID_KEYSTORE_PASSWORD` 與 `BERN_ANDROID_KEY_ALIAS`（發布金鑰）。沒有設定時照樣產生，並提示未簽署的後果。
-
-### 匯出獨立純原生專案（無框架鎖定）
-
-```sh
-bern eject --target macos --out ./native-macos                   # 離線 Rust 後端原始碼 + Xcode 專案
-bern eject --target ios --engine prebuilt --release --out ./ios  # 預編譯 XCFramework，無需安裝 Rust
-```
-
-`bern eject` 可隨時匯出標準原生 IDE 專案（`.xcodeproj`、Gradle、Visual Studio `.sln` + `.vcxproj`、獨立 Cargo 或零打包器 ES 模組），依元件與視窗拆分成清晰檔案，且不改動原 Bern 專案。預設 `--engine source` 會離線打包完整自包含的 Rust 工作區並與原生 IDE 建置聯動；`--engine prebuilt` 會預編譯並嵌入引擎二進位，讓原生開發者無需安裝 Rust 或 Bern 即可直接開啟建置。詳見[匯出為獨立純原生專案](Docs/zh-CN/Topics/Eject.md)。
+以 release 建置本機能建置的目標，在 `target/bern/dist/` 中產生安裝套件：macOS 的 `.dmg`，Windows 的安裝程式（依目前使用者安裝，不需要系統管理員權限）與免安裝的 `.zip`，Linux 的 `.deb` 與 `.tar.gz`，Android 的 `.apk` 與上架用的 `.aab`，Web 的靜態網站壓縮檔。桌面和 WebUI 套件含有應用程式 CLI，啟用 IPC 時也包含 Skill。靜態 Web 套件只含網站檔案；Android CLI 在開發電腦上執行，不會包進 APK。簽署以環境變數設定，憑證不進儲存庫：`BERN_MACOS_SIGNING_IDENTITY` 與 `BERN_MACOS_NOTARY_PROFILE`（簽署並公證），`BERN_WINDOWS_CERTIFICATE`（憑證指紋或 `.pfx`），`BERN_ANDROID_KEYSTORE`、`BERN_ANDROID_KEYSTORE_PASSWORD` 與 `BERN_ANDROID_KEY_ALIAS`（發布金鑰）。沒有設定時照樣產生，並提示未簽署的後果。如果需要匯出已配好 Rust FFI 的獨立原生 IDE 專案，執行 `bern eject`（見[匯出獨立原生專案](#匯出獨立原生專案無鎖定與-rust-ffi-範本)）。
 
 ### 執行展示應用程式
 

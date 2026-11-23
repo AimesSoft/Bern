@@ -54,7 +54,7 @@ TEXT = {
             dict(icon="window", title="编译成真正的原生界面", blocks=[
                 ("lead", "用 Rust 写一套界面，构建时直接生成 SwiftUI、WinUI 3、GTK 4、Compose、GPUI 与 Web 代码。"),
                 ("list", ["系统目标即平台原生控件，默认无 WebView", "外观、深浅色、输入法与无障碍跟随系统", "需要统一 GPU 渲染时一键切到 `ui = \"gpui\"`"]),
-                ("note", "不同于网页套壳或全自绘引擎：不捆绑浏览器，也无需按平台手写 Swift / C++ / Kotlin 胶水。"),
+                ("note", "无框架锁定：随时用 `bern eject` 导出配好 Rust FFI 的独立原生 IDE 工程，也可用作原生调 Rust 的起步模板。"),
             ]),
             dict(icon="code", title="全 Rust 开发，逻辑与界面分离", blocks=[
                 ("lead", "协议定义状态与命令，引擎写纯 Rust 业务，界面用 `ui!` 声明。"),
@@ -159,7 +159,7 @@ TEXT = {
                 ("国内多端（小程序、App、H5、鸿蒙）一套代码。", "没有桌面应用目标；经典模式的 App 界面是 WebView。"),
             ]))),
             bern=("想用一份 Rust 代码做出各平台原生应用的团队：每个平台都是系统自己的控件与观感，业务逻辑只写一次，AI 既能写它、也能直接用它。",
-                  "编译成各平台自己的 UI 代码，默认无 JS 引擎、无自绘层：macOS 上 39 MB 内存、0.4 秒出窗口、应用包 2.7 MB。漏写的翻译与入口在编译期报错；Agent 经 SKILL.md 与 CLI 操作应用，启用脚本时 JS 也能通过 `bern.cli` 与黑白名单接入同一套命令目录。"),
+                  "编译成各平台自己的 UI 代码，默认无 JS 引擎、无自绘层：macOS 上 39 MB 内存、0.4 秒出窗口、应用包 2.7 MB。漏写的翻译与入口在编译期报错；Agent 经 SKILL.md 与 CLI 操作应用，启用脚本时 JS 也能通过 `bern.cli` 与黑白名单接入同一套命令目录；随时可用 `bern eject` 导出配好 Rust FFI 的独立原生工程，无框架锁定。"),
         ),
         roadmap=dict(
             status=dict(done="已完成", wip="进行中"),
@@ -172,7 +172,7 @@ TEXT = {
                                     ("`flutter + macos`", "next")], "wip"),
                 ("6", "标准控件体系、自动骨架图、原生嵌入、脚本扩展与开发工具", [("全套控件", "done"), ("默认骨架图", "done"), ("`NativeView`", "done"),
                                                        ("`window.screenshot`", "done"), ("`bern.cli` + 黑白名单", "done"),
-                                                       ("`new` / `run` / `doctor` / `package`", "done")], "done"),
+                                                       ("`new` / `run` / `package` / `eject`", "done")], "done"),
                 ("7", "样式覆盖、动效与自绘，模块化应用，媒体类应用的组件", [("SwiftUI", "done"), ("Compose", "done"), ("GTK", "done"),
                                                        ("WinUI 3", "done"), ("GPUI", "done"), ("Web", "done")], "done"),
             ],
@@ -189,7 +189,7 @@ TEXT = {
             "GTK 与 GPUI 运行时，只在对应生成的应用中编译",
             "为没有原生主题的目标提供的 Bern 色彩算法",
             "从命令目录派生的应用 CLI 与 JSON 入口",
-            "构建工具 `bern`：创建、检查、构建、运行、打包与诊断",
+            "构建工具 `bern`：创建、检查、构建、运行、打包、导出与诊断",
             "核心示例：展示应用、最小窗口、模块化计划、媒体图案集",
             "专项示例：紧邻 `NativeView`、手表端、纯 Rust 动画 SVG",
             "中英双语开发指南、平台操作手册、专题与接口参考",
@@ -200,7 +200,7 @@ TEXT = {
             dict(icon="window", title="編譯成真正的原生介面", blocks=[
                 ("lead", "用 Rust 寫一套介面，建置時直接產生 SwiftUI、WinUI 3、GTK 4、Compose、GPUI 與 Web 程式碼。"),
                 ("list", ["系統目標即平台原生控制項，預設無 WebView", "外觀、深淺色、輸入法與無障礙跟隨系統", "需要統一 GPU 繪製時一鍵切換 `ui = \"gpui\"`"]),
-                ("note", "不同於網頁套殼或全自繪引擎：不隨附瀏覽器，也不必按平台手寫 Swift / C++ / Kotlin 膠水。"),
+                ("note", "無框架鎖定：隨時用 `bern eject` 匯出配好 Rust FFI 的獨立原生 IDE 專案，也可作為原生呼叫 Rust 的起步範本。"),
             ]),
             dict(icon="code", title="全 Rust 開發，邏輯與介面分離", blocks=[
                 ("lead", "協定定義狀態與命令，引擎寫純 Rust 業務，介面以 `ui!` 宣告。"),
@@ -305,7 +305,7 @@ TEXT = {
                 ("中國大陸多端（小程式、App、H5、鴻蒙）一套程式碼。", "沒有桌面應用程式目標；經典模式的 App 介面是 WebView。"),
             ]))),
             bern=("想用一份 Rust 程式碼做出各平台原生應用程式的團隊：每個平台都是系統自己的控制項與觀感，商業邏輯只寫一次，AI 既能寫它、也能直接用它。",
-                  "編譯成各平台自己的 UI 程式碼，預設無 JS 引擎、無自繪層：macOS 上 39 MB 記憶體、0.4 秒出現視窗、應用程式套件 2.7 MB。漏寫的翻譯與入口在編譯期報錯；Agent 經 SKILL.md 與 CLI 操作應用，啟用腳本時 JS 也能透過 `bern.cli` 與黑白名單接入同一套命令目錄。"),
+                  "編譯成各平台自己的 UI 程式碼，預設無 JS 引擎、無自繪層：macOS 上 39 MB 記憶體、0.4 秒出現視窗、應用程式套件 2.7 MB。漏寫的翻譯與入口在編譯期報錯；Agent 經 SKILL.md 與 CLI 操作應用，啟用腳本時 JS 也能透過 `bern.cli` 與黑白名單接入同一套命令目錄；隨時可用 `bern eject` 匯出配好 Rust FFI 的獨立原生專案，無框架鎖定。"),
         ),
         roadmap=dict(
             status=dict(done="已完成", wip="進行中"),
@@ -318,7 +318,7 @@ TEXT = {
                                     ("`flutter + macos`", "next")], "wip"),
                 ("6", "標準控制項體系、自動骨架圖、原生嵌入、腳本擴充與開發工具", [("全套控制項", "done"), ("預設骨架圖", "done"), ("`NativeView`", "done"),
                                                        ("`window.screenshot`", "done"), ("`bern.cli` + 黑白名單", "done"),
-                                                       ("`new` / `run` / `doctor` / `package`", "done")], "done"),
+                                                       ("`new` / `run` / `package` / `eject`", "done")], "done"),
                 ("7", "樣式覆寫、動效與自繪，模組化應用程式，媒體類應用程式的元件", [("SwiftUI", "done"), ("Compose", "done"), ("GTK", "done"),
                                                             ("WinUI 3", "done"), ("GPUI", "done"), ("Web", "done")], "done"),
             ],
@@ -335,7 +335,7 @@ TEXT = {
             "GTK 與 GPUI 執行環境，只在對應產生的應用程式中編譯",
             "為沒有原生主題的目標提供的 Bern 色彩演算法",
             "從命令目錄衍生的應用程式 CLI 與 JSON 入口",
-            "建置工具 `bern`：建立、檢查、建置、執行、打包與診斷",
+            "建置工具 `bern`：建立、檢查、建置、執行、打包、匯出與診斷",
             "核心範例：展示應用、最小視窗、模組化計畫、媒體圖案集",
             "專項範例：緊鄰 `NativeView`、手錶端、純 Rust 動畫 SVG",
             "中英雙語開發指南、平台操作手冊、專題與介面參考",
@@ -347,7 +347,7 @@ TEXT = {
                 ("lead", "Write UI once in Rust; Bern generates SwiftUI, WinUI 3, GTK 4, Compose, GPUI and Web code."),
                 ("list", ["Real OS controls, zero WebView by default", "Look, dark mode, IME and a11y from the OS",
                           "Switch to `ui = \"gpui\"` for unified GPU UI"]),
-                ("note", "Unlike WebView shells or self-drawn toolkits: no browser engine and no hand-written Swift, C++ or Kotlin glue."),
+                ("note", "Zero lock-in: run `bern eject` anytime for standalone native IDE projects with Rust FFI wired up — also a quick native-to-Rust starter."),
             ]),
             dict(icon="code", title="All Rust, clean separation", blocks=[
                 ("lead", "A protocol declares state and commands; plain Rust runs the engine; `ui!` declares views."),
@@ -464,7 +464,7 @@ TEXT = {
                  "No desktop app target; classic-mode apps render in a WebView."),
             ]))),
             bern=("Teams that want native apps on every platform from one Rust codebase: each platform gets its own system controls and look, the business logic is written once, and AI can both write the app and use it.",
-                  "It compiles to each platform's own UI code with no JS engine and no self-drawn layer by default: 39 MB of memory, a window in 0.4 s and a 2.7 MB app on macOS. Missing translations or layout entries fail to compile; agents drive apps via SKILL.md and the CLI, and opt-in JS scripts share the same catalog through `bern.cli` and allowlist/denylist policies."),
+                  "It compiles to each platform's own UI code with no JS engine and no self-drawn layer by default: 39 MB of memory, a window in 0.4 s and a 2.7 MB app on macOS. Missing translations or layout entries fail to compile; agents drive apps via SKILL.md and the CLI, opt-in JS shares the same catalog via `bern.cli`, and `bern eject` exports FFI-wired standalone native IDE projects anytime with zero lock-in."),
         ),
         roadmap=dict(
             status=dict(done="Done", wip="In progress"),
@@ -477,7 +477,7 @@ TEXT = {
                                                ("`flutter + macos`", "next")], "wip"),
                 ("6", "Standard controls, automatic skeletons, native views, scripting and tooling",
                  [("Full control set", "done"), ("Auto skeletons", "done"), ("`NativeView`", "done"), ("`window.screenshot`", "done"),
-                  ("`bern.cli` + policy", "done"), ("`new` / `run` / `doctor` / `package`", "done")], "done"),
+                  ("`bern.cli` + policy", "done"), ("`new` / `run` / `package` / `eject`", "done")], "done"),
                 ("7", "Style overrides, motion and drawing; modular apps; components for media apps",
                  [("SwiftUI", "done"), ("Compose", "done"), ("GTK", "done"), ("WinUI 3", "done"), ("GPUI", "done"), ("Web", "done")], "done"),
             ],
@@ -494,7 +494,7 @@ TEXT = {
             "GTK and GPUI runtimes, compiled only inside generated apps",
             "Bern's color algorithm for targets without a native theme",
             "App CLI and JSON entries derived from the command catalog",
-            "The build tool `bern`: create, check, build, run, package and doctor",
+            "The build tool `bern`: create, check, build, run, package, eject and doctor",
             "Core examples: showcase, hello, modular planner and media gallery",
             "Focused examples: co-located `NativeView`, watches and animated SVG",
             "Bilingual guides, platform manuals, topics and reference",
@@ -505,7 +505,7 @@ TEXT = {
             dict(icon="window", title="ネイティブ UI へコンパイル", blocks=[
                 ("lead", "Rust で一度書けば、ビルド時に SwiftUI、WinUI 3、GTK 4、Compose、GPUI、Web を生成します。"),
                 ("list", ["OS 標準のコントロール、既定で WebView なし", "外観・ダークモード・IME は OS に準拠", "統一 GPU 描画は `ui = \"gpui\"` で切替"]),
-                ("note", "ブラウザー同梱も、Swift / C++ / Kotlin の手書き糊付けコードも不要です。"),
+                ("note", "ロックインなし：いつでも `bern eject` で Rust FFI 配線済みの独立ネイティブ IDE プロジェクトを書き出せ、ネイティブ＋Rust の雛形にも使えます。"),
             ]),
             dict(icon="code", title="すべて Rust、ロジックと UI を分離", blocks=[
                 ("lead", "プロトコルで状態とコマンドを定義し、普通の Rust でエンジン、`ui!` で画面を書きます。"),
@@ -619,7 +619,7 @@ TEXT = {
                  "デスクトップアプリのターゲットはありません。クラシックモードのアプリは WebView です。"),
             ]))),
             bern=("一つの Rust コードからあらゆるプラットフォームのネイティブアプリを作りたいチーム。各プラットフォームでシステム自身のコントロールと見た目になり、ビジネスロジックは一度書くだけ。AI がアプリを書くことも、使うこともできます。",
-                  "各プラットフォーム自身の UI コードにコンパイルされ、既定で JS エンジンも独自描画レイヤーもありません。macOS ではメモリ 39 MB、0.4 秒でウインドウ表示、アプリは 2.7 MB。翻訳漏れや入口忘れはコンパイルエラーになり、エージェントは SKILL.md と CLI で操作でき、JS 有効時は `bern.cli` と許可／拒否ポリシーで同じコマンドカタログを共有します。"),
+                  "各プラットフォーム自身の UI コードにコンパイルされ、既定で JS エンジンも独自描画レイヤーもありません。macOS ではメモリ 39 MB、0.4 秒でウインドウ表示、アプリは 2.7 MB。翻訳漏れや入口忘れはコンパイルエラーになり、エージェントは SKILL.md と CLI で操作でき、JS 有効時は `bern.cli` で同じカタログを共有、さらに `bern eject` でいつでも FFI 配線済みの独立ネイティブプロジェクトへロックインなしで書き出せます。"),
         ),
         roadmap=dict(
             status=dict(done="完了", wip="進行中"),
@@ -632,7 +632,7 @@ TEXT = {
                                               ("Android / タブレット / TV", "done"), ("Wear OS", "done"), ("GPUI", "done"), ("`flutter + macos`", "next")], "wip"),
                 ("6", "標準コントロール体系、自動スケルトン、ネイティブ埋め込み、スクリプトとツール",
                  [("標準コントロール一式", "done"), ("自動スケルトン", "done"), ("`NativeView`", "done"), ("`window.screenshot`", "done"),
-                  ("`bern.cli` + ポリシー", "done"), ("`new` / `run` / `doctor` / `package`", "done")], "done"),
+                  ("`bern.cli` + ポリシー", "done"), ("`new` / `run` / `package` / `eject`", "done")], "done"),
                 ("7", "スタイルの上書き、モーション、描画、モジュール化アプリ、メディアアプリ向けのコンポーネント",
                  [("SwiftUI", "done"), ("Compose", "done"), ("GTK", "done"), ("WinUI 3", "done"), ("GPUI", "done"), ("Web", "done")], "done"),
             ],
@@ -649,7 +649,7 @@ TEXT = {
             "GTK・GPUI ランタイム。対応する生成アプリの中でのみコンパイルされる",
             "ネイティブのテーマを持たないターゲット向けの Bern 配色アルゴリズム",
             "コマンドカタログから派生するアプリ CLI と JSON 入口",
-            "ビルドツール `bern`：作成、チェック、ビルド、実行、配布、環境確認",
+            "ビルドツール `bern`：作成、チェック、ビルド、実行、配布、書き出し、環境確認",
             "主要サンプル：ショーケース、最小ウィンドウ、モジュール化プランナー、パターン集",
             "特化サンプル：隣接 `NativeView`、ウォッチ、純 Rust アニメーション SVG",
             "英中バイリンガル開発ガイド、プラットフォーム手順書、トピックとリファレンス",
@@ -660,7 +660,7 @@ TEXT = {
 
 ALT = {
     "zh-Hans": dict(
-        why="核心特色：编译成真正的原生界面，用 Rust 生成 SwiftUI、WinUI 3、GTK 4、Compose、GPUI 与 Web 代码，默认无 WebView；全 Rust 开发、逻辑与界面分离，协议定义状态与命令、引擎纯 Rust 可独立单测、漏翻译与漏入口编译期报错并自动生成 CLI 与 SKILL.md；轻到不像跨平台，macOS 内存 39 MB、0.4 秒出窗口、应用包 2.7 MB，Windows 35 MB、0.3 秒、4.2 MB，Web 189 KB",
+        why="核心特色：编译成真正的原生界面，用 Rust 生成 SwiftUI、WinUI 3、GTK 4、Compose、GPUI 与 Web 代码，默认无 WebView，且随时可用 bern eject 导出配好 Rust FFI 的独立原生工程；全 Rust 开发、逻辑与界面分离，协议定义状态与命令、引擎纯 Rust 可独立单测、漏翻译与漏入口编译期报错并自动生成 CLI 与 SKILL.md；轻到不像跨平台，macOS 内存 39 MB、0.4 秒出窗口、应用包 2.7 MB，Windows 35 MB、0.3 秒、4.2 MB，Web 189 KB",
         ai="AI 漏掉的五类问题与 Bern 的处理：少写一种语言报 B102，某个布局缺功能入口报 B201，入口没有登记到功能报 B202，入口只在条件分支里报 B203，给按钮挂任意代码则根本写不出来",
         measured="实测数据：macOS（SwiftUI）启动 0.41 秒、内存 39 MB、应用包 2.7 MB；Windows（WinUI 3）0.32 秒、35 MB、应用目录 4.2 MB；Web 全部资源 gzip 后 189 KB",
         more="更多能力：每个操作都是命令、编译期就做检查、业务逻辑留在 Rust、从第一天起就本地化、深浅色零配置、声明式多窗口",
@@ -672,7 +672,7 @@ ALT = {
         repository="仓库结构：核心、运行时、目标模块、入口与工具、示例与文档各自包含的 crate 与目录",
     ),
     "zh-Hant": dict(
-        why="核心特色：編譯成真正的原生介面，用 Rust 產生 SwiftUI、WinUI 3、GTK 4、Compose、GPUI 與 Web 程式碼，預設無 WebView；全 Rust 開發、邏輯與介面分離，協定定義狀態與命令、引擎純 Rust 可獨立單測、漏翻譯與漏入口編譯期報錯並自動產生 CLI 與 SKILL.md；輕到不像跨平台，macOS 記憶體 39 MB、0.4 秒出現視窗、應用程式套件 2.7 MB，Windows 35 MB、0.3 秒、4.2 MB，Web 189 KB",
+        why="核心特色：編譯成真正的原生介面，用 Rust 產生 SwiftUI、WinUI 3、GTK 4、Compose、GPUI 與 Web 程式碼，預設無 WebView，且隨時可用 bern eject 匯出配好 Rust FFI 的獨立原生專案；全 Rust 開發、邏輯與介面分離，協定定義狀態與命令、引擎純 Rust 可獨立單測、漏翻譯與漏入口編譯期報錯並自動產生 CLI 與 SKILL.md；輕到不像跨平台，macOS 記憶體 39 MB、0.4 秒出現視窗、應用程式套件 2.7 MB，Windows 35 MB、0.3 秒、4.2 MB，Web 189 KB",
         ai="AI 漏掉的五類問題與 Bern 的處理：少寫一種語言報 B102，某個版面缺功能入口報 B201，入口沒有登記到功能報 B202，入口只在條件分支裡報 B203，給按鈕掛任意程式碼則根本寫不出來",
         measured="實測數據：macOS（SwiftUI）啟動 0.41 秒、記憶體 39 MB、應用程式套件 2.7 MB；Windows（WinUI 3）0.32 秒、35 MB、應用程式目錄 4.2 MB；Web 全部資源 gzip 後 189 KB",
         more="更多能力：每個操作都是命令、編譯期就做檢查、商業邏輯留在 Rust、從第一天起就在地化、深淺色零設定、宣告式多視窗",
@@ -684,7 +684,7 @@ ALT = {
         repository="儲存庫結構：核心、執行環境、目標模組、入口與工具、範例與文件各自包含的 crate 與目錄",
     ),
     "en": dict(
-        why="Why Bern: compiled into native UI, generating SwiftUI, WinUI 3, GTK 4, Compose, GPUI and Web code from Rust with zero WebView by default; all Rust with logic separated from UI, plain Rust engine, compile-time checks for omissions and automatic app CLI plus SKILL.md; too light to feel cross-platform, 39 MB, 0.4 s and 2.7 MB on macOS, 35 MB, 0.3 s and 4.2 MB on Windows, 189 KB on the web",
+        why="Why Bern: compiled into native UI, generating SwiftUI, WinUI 3, GTK 4, Compose, GPUI and Web code from Rust with zero WebView by default and zero lock-in via bern eject; all Rust with logic separated from UI, plain Rust engine, compile-time checks for omissions and automatic app CLI plus SKILL.md; too light to feel cross-platform, 39 MB, 0.4 s and 2.7 MB on macOS, 35 MB, 0.3 s and 4.2 MB on Windows, 189 KB on the web",
         ai="Five things an AI forgets and what Bern does: a missing language is B102, a feature without an entry in some layout is B201, an entry not registered to a feature is B202, an entry only inside a conditional branch is B203, and arbitrary code on a button cannot be written at all",
         measured="Measured: macOS (SwiftUI) launches in 0.41 s with 39 MB of memory and a 2.7 MB bundle; Windows (WinUI 3) in 0.32 s with 35 MB and a 4.2 MB folder; the web app is 189 KB gzipped",
         more="More: every action is a command, checked at compile time, your logic stays in Rust, localized from day one, dark mode with zero setup, declarative multi-window",
@@ -696,7 +696,7 @@ ALT = {
         repository="Repository: the crates and directories in core, runtime, targets, entries and tools, and examples and docs",
     ),
     "ja": dict(
-        why="Bern の特長：本物のネイティブ UI へコンパイルし、Rust から SwiftUI、WinUI 3、GTK 4、Compose、GPUI、Web のコードを生成、既定で WebView なし。すべて Rust でロジックと UI を分離し、普通の Rust エンジン、コンパイル時の漏れ検査、アプリ CLI と SKILL.md が自動で付属。クロスプラットフォームとは思えない軽さで、macOS は 39 MB・0.4 秒・2.7 MB、Windows は 35 MB・0.3 秒・4.2 MB、Web は 189 KB",
+        why="Bern の特長：本物のネイティブ UI へコンパイルし、Rust から SwiftUI、WinUI 3、GTK 4、Compose、GPUI、Web のコードを生成、既定で WebView なし、さらに bern eject でロックインなし。すべて Rust でロジックと UI を分離し、普通の Rust エンジン、コンパイル時の漏れ検査、アプリ CLI と SKILL.md が自動で付属。クロスプラットフォームとは思えない軽さで、macOS は 39 MB・0.4 秒・2.7 MB、Windows は 35 MB・0.3 秒・4.2 MB、Web は 189 KB",
         ai="AI が漏らす 5 つのことと Bern の扱い：翻訳の不足は B102、あるレイアウトに機能の入口がないと B201、入口が機能に未登録なら B202、入口が条件分岐の中だけなら B203、ボタンへの任意のコードはそもそも書けない",
         measured="実測値：macOS（SwiftUI）は起動 0.41 秒、メモリ 39 MB、アプリバンドル 2.7 MB。Windows（WinUI 3）は 0.32 秒、35 MB、アプリフォルダー 4.2 MB。Web は全アセットを gzip して 189 KB",
         more="その他の機能：すべての操作はコマンド、コンパイル時にチェック、ロジックは Rust のまま、初日からローカライズ、ダークモードは設定不要、宣言的マルチウィンドウ",
