@@ -2,7 +2,7 @@
 
 # Android & Wear OS
 
-Bern compiles Android (`platform = "android"`) to native **Jetpack Compose (Material 3)** targeting **Android 8.0 (API 26) or newer** across phones, tablets, and Android TV. It compiles Wear OS (`platform = "wearos"`) to **Wear Compose Material 3** targeting **Wear OS 4 (API 30) or newer**. Both targets can be built from macOS, Linux, or Windows.
+Bern compiles Android (`platform = "android"`) to native **Jetpack Compose (Material 3)** targeting **Android 8.0 (API 26) or newer** across phones, tablets, and Android TV. It compiles Wear OS (`platform = "wearos"`) to **Wear Compose Material 3**, also targeting **Android 8.0 (API 26) or newer by default** (configurable via `android.min_sdk`, e.g., `30` for Google Play Wear OS 3.0+ releases). Both targets can be built from macOS, Linux, or Windows.
 
 ## Prerequisites
 
@@ -15,8 +15,11 @@ Bern compiles Android (`platform = "android"`) to native **Jetpack Compose (Mate
 # Required default ABI (arm64-v8a)
 rustup target add aarch64-linux-android
 
-# Optional additional ABIs if listed in `abis = [...]`
-rustup target add armv7-linux-androideabi x86_64-linux-android
+# Required for Wear OS default release packaging (32-bit armeabi-v7a) and optional for Android
+rustup target add armv7-linux-androideabi
+
+# Optional x86_64 ABI if listed in `abis = [...]`
+rustup target add x86_64-linux-android
 
 bern doctor
 ```
@@ -41,12 +44,15 @@ android = "assets/android/res"  # Optional: PNG or Android res/ mipmap folder
 platform = "android"
 ui = "compose"
 abis = ["arm64-v8a"]            # Valid values: "arm64-v8a", "armeabi-v7a", "x86_64"
-android = { network = true, multicast = false, audio_settings = false, all_files_access = false, cxx_runtime = false }
+android = { network = true, multicast = false, audio_settings = false, all_files_access = false, cxx_runtime = false, min_sdk = 26 }
 
 [targets.wearos]
 platform = "wearos"
 ui = "compose"
-android = { standalone = true } # Default true: Wear OS standalone app
+# Omit `abis` to package both 64-bit and 32-bit watches (`["arm64-v8a", "armeabi-v7a"]`) by default
+abis = ["arm64-v8a", "armeabi-v7a"]
+# Defaults to `min_sdk = 26` (Android 8.0); raise to `30` (Wear OS 3.0) or higher for Google Play
+android = { standalone = true, min_sdk = 26 }
 ```
 
 ### Android target options (`android = { ... }`)
@@ -59,6 +65,7 @@ android = { standalone = true } # Default true: Wear OS standalone app
 | `all_files_access` | Android | Declares `MANAGE_EXTERNAL_STORAGE` (prompted at runtime via `bern::platform::ask_all_files`). |
 | `cxx_runtime` | Android / Wear OS | Bundles `libc++_shared.so` from the NDK when native C++ dependencies require it. |
 | `standalone` | Wear OS | Sets `com.google.android.wearable.standalone` metadata (defaults to `true`). |
+| `min_sdk` | Android / Wear OS | Sets `minSdk` in Gradle and the NDK target API level (`26`–`36`, defaults to `26` on both Android and Wear OS; set `30` or higher for Google Play Wear OS submissions). |
 
 ## Build, run, and debug
 
@@ -104,7 +111,7 @@ bern package --target android
 bern package --target wearos
 ```
 
-`bern package` produces both a release **`.apk`** (sideloading/testing) and an **`.aab`** (Android App Bundle for Google Play) under `target/bern/dist/`.
+`bern package` produces both a release **`.apk`** (sideloading/testing) and an **`.aab`** (Android App Bundle for Google Play) under `target/bern/dist/`. When a release builds more than one ABI—including `wearos` by default (`arm64-v8a` and `armeabi-v7a`)—it writes one per-ABI APK (`<app>-<version>-<platform>-<abi>.apk`) alongside the multi-ABI `.aab`. Debug `bern build` and `bern run` still compile only the first ABI in the list.
 
 Without signing variables, the packages are debug-signed (installable for local testing, rejected by app stores). Set these environment variables for release signing:
 

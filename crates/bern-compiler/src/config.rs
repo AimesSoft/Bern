@@ -1167,6 +1167,16 @@ fn target_config(name: String, target: RawTarget, errors: &mut Vec<Diagnostic>) 
             "target `{name}`: android.standalone applies to Wear OS targets only"
         )));
     }
+    if let Some(min_sdk) = target.android.as_ref().and_then(|options| options.min_sdk)
+        && !(bern_target_api::ANDROID_MINIMUM_SDK..=bern_target_api::ANDROID_TARGET_SDK)
+            .contains(&min_sdk)
+    {
+        errors.push(Diagnostic::error(format!(
+            "target `{name}`: android.min_sdk must be between {} and {} (got {min_sdk})",
+            bern_target_api::ANDROID_MINIMUM_SDK,
+            bern_target_api::ANDROID_TARGET_SDK,
+        )));
+    }
 
     let frontends = target_frontends(&name, &target.platform, target.frontends, errors);
     let separate_packages = match target.packages.as_deref() {
@@ -1986,6 +1996,41 @@ mod tests {
             toml::from_str::<RawTarget>("platform = 'android'\nandroid = { netwrok = true }")
                 .is_err()
         );
+
+        let mut sdk_errors = Vec::new();
+        let wear_sdk = target_config(
+            "watch".into(),
+            parse("platform = 'wearos'\nandroid = { min_sdk = 30 }"),
+            &mut sdk_errors,
+        );
+        assert!(sdk_errors.is_empty(), "{sdk_errors:?}");
+        assert_eq!(wear_sdk.android.unwrap().min_sdk, Some(30));
+
+        let phone_sdk = target_config(
+            "phone".into(),
+            parse("platform = 'android'\nandroid = { min_sdk = 26 }"),
+            &mut sdk_errors,
+        );
+        assert!(sdk_errors.is_empty(), "{sdk_errors:?}");
+        assert_eq!(phone_sdk.android.unwrap().min_sdk, Some(26));
+
+        let mut low_errors = Vec::new();
+        target_config(
+            "watch".into(),
+            parse("platform = 'wearos'\nandroid = { min_sdk = 25 }"),
+            &mut low_errors,
+        );
+        assert_eq!(low_errors.len(), 1);
+        assert!(low_errors[0].message.contains("android.min_sdk"));
+
+        let mut high_errors = Vec::new();
+        target_config(
+            "watch".into(),
+            parse("platform = 'wearos'\nandroid = { min_sdk = 37 }"),
+            &mut high_errors,
+        );
+        assert_eq!(high_errors.len(), 1);
+        assert!(high_errors[0].message.contains("android.min_sdk"));
     }
 
     #[test]

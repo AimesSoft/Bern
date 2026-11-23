@@ -86,7 +86,7 @@
 <text x="40" y="793" font-size="12" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" fill="#59636E">compose + wearos</text>
 <text x="232.0" y="771.7" font-size="14" fill="#1F2328">Wear OS Compose Material 3、円形ウォッチ向けレイア</text>
 <text x="232.0" y="792.7" font-size="14" fill="#1F2328">ウトと回転入力</text>
-<text x="232.0" y="815.2" font-size="12.5" fill="#59636E">Wear OS 4 以降</text>
+<text x="232.0" y="815.2" font-size="12.5" fill="#59636E">Android 8.0 以降（min_sdk 指定可）</text>
 <text x="636.0" y="771.5" font-size="13.5" fill="#1F2328">プロセス内（JNI）</text>
 <circle cx="834" cy="767.5" r="4" fill="#1A7F37"/><text x="844.0" y="772.0" font-size="13.5" font-weight="700" fill="#1A7F37">利用可能</text>
 <line x1="0" y1="837.0" x2="960" y2="837.0" stroke="#E6EAEF"/>

@@ -27,7 +27,7 @@ use bern_target_api::{
 use std::path::PathBuf;
 
 pub use kotlin::Generator;
-pub use project::{MINIMUM_SDK, TARGET_SDK};
+pub use project::{MINIMUM_SDK, TARGET_SDK, WEAR_MINIMUM_SDK};
 
 const RUNTIME: &str = include_str!("../templates/BernRuntime.kt");
 const VIEWS: &str = include_str!("../templates/BernViews.kt");
@@ -41,6 +41,9 @@ const APP_ICON: &str = include_str!("../templates/BernAppIcon.kt");
 /// The Rust target of the engine library: 64-bit ARM, which every phone
 /// of the supported Android versions runs.
 pub const RUST_TARGET: &str = "aarch64-linux-android";
+/// The 32-bit ARM Rust target included by default in Wear OS releases so older
+/// Android 8+ watches are covered alongside 64-bit watches.
+pub const ARMV7_RUST_TARGET: &str = "armv7-linux-androideabi";
 
 /// An Android ABI: its name, its Rust target, and what the NDK's compilers
 /// start with, which for 32-bit ARM is not the Rust target.
@@ -58,7 +61,7 @@ const ABIS: &[Abi] = &[
     },
     Abi {
         name: "armeabi-v7a",
-        rust: "armv7-linux-androideabi",
+        rust: ARMV7_RUST_TARGET,
         clang: "armv7a-linux-androideabi",
     },
     Abi {
@@ -74,7 +77,10 @@ fn split_abis(context: &BuildContext) -> bool {
 }
 
 /// The ABIs of this build: those of `abis` in a release, the first alone
-/// otherwise, for a build to try on one device.
+/// otherwise, for a build to try on one device. When `abis` is omitted,
+/// Android defaults to `arm64-v8a`, while Wear OS releases default to both
+/// `arm64-v8a` and `armeabi-v7a` so 32-bit watches are supported out of the
+/// box.
 fn build_abis(context: &BuildContext) -> Vec<&'static Abi> {
     let named = |name: &str| ABIS.iter().find(|abi| abi.name == name);
     let mut abis: Vec<&Abi> = context
@@ -85,11 +91,29 @@ fn build_abis(context: &BuildContext) -> Vec<&'static Abi> {
         .collect();
     if abis.is_empty() {
         abis.push(&ABIS[0]);
+        if context.target.platform == "wearos" {
+            abis.push(&ABIS[1]);
+        }
     }
     if !context.release {
         abis.truncate(1);
     }
     abis
+}
+
+/// Effective `minSdk` for this Android or Wear OS build.
+fn minimum_sdk(context: &BuildContext) -> u32 {
+    let default = if context.target.platform == "wearos" {
+        WEAR_MINIMUM_SDK
+    } else {
+        MINIMUM_SDK
+    };
+    context
+        .target
+        .android
+        .as_ref()
+        .and_then(|options| options.min_sdk)
+        .unwrap_or(default)
 }
 
 /// Components not realized yet.
@@ -401,6 +425,7 @@ impl Target for ComposeAndroid {
                 round: alternate_round,
             });
         }
+        let min_sdk = minimum_sdk(context);
         let mut files = vec![
             GeneratedFile::text("project/settings.gradle.kts", project::settings(&product)),
             GeneratedFile::text("project/build.gradle.kts", project::root_build()),
@@ -415,6 +440,7 @@ impl Target for ComposeAndroid {
                         .collect::<Vec<_>>(),
                     split_abis(context),
                     watch,
+                    min_sdk,
                 ),
             ),
             GeneratedFile::text(
@@ -570,7 +596,7 @@ impl Target for ComposeAndroid {
             "ir_version": app.ir_version,
             "generator": "bern-backend-compose",
             "generator_version": env!("CARGO_PKG_VERSION"),
-            "minimum_sdk": if watch { project::WEAR_MINIMUM_SDK } else { MINIMUM_SDK },
+            "minimum_sdk": min_sdk,
             "target_sdk": TARGET_SDK,
             "abis": build_abis(context).iter().map(|abi| abi.name).collect::<Vec<_>>(),
             "profile": if context.release { "release" } else { "debug" },
@@ -608,14 +634,10 @@ impl Target for ComposeAndroid {
         let path = |path: &PathBuf| path.display().to_string();
         let abis = build_abis(context);
         let watch = context.target.platform == "wearos";
-        let minimum_sdk = if watch {
-            project::WEAR_MINIMUM_SDK
-        } else {
-            MINIMUM_SDK
-        };
+        let min_sdk = minimum_sdk(context);
         let engine = |abi: &Abi| {
             let compiler =
-                |suffix: &str| path(&bin.join(format!("{}{minimum_sdk}-{suffix}", abi.clang)));
+                |suffix: &str| path(&toolchain::ndk_compiler(&bin, abi.clang, min_sdk, suffix));
             let target = abi.rust.replace('-', "_");
             let env = vec![
                 (
@@ -720,6 +742,15 @@ impl Target for ComposeAndroid {
         };
         let assets = gradle_project.join("app/src/main/assets/bern/resources");
         let mut steps = Vec::new();
+        // Drop native libraries left over from ABIs no longer in this build so
+        // `bundleRelease` never packs stale architectures.
+        for abi in ABIS {
+            if !abis.iter().any(|active| active.name == abi.name) {
+                steps.push(BuildStep::RemoveIfExists {
+                    path: gradle_project.join("app/src/main/jniLibs").join(abi.name),
+                });
+            }
+        }
         for abi in &abis {
             let jni = gradle_project.join("app/src/main/jniLibs").join(abi.name);
             steps.extend([
@@ -986,11 +1017,7 @@ impl Target for ComposeAndroid {
         let mut prebuilt_staging = Vec::new();
         let mut prebuilt_steps = Vec::new();
         let abis = build_abis(context);
-        let min_sdk = if watch {
-            project::WEAR_MINIMUM_SDK
-        } else {
-            MINIMUM_SDK
-        };
+        let min_sdk = minimum_sdk(context);
 
         for file in generated {
             if file.path == std::path::Path::new("build.json") || file.path == generated_kt_rel {
@@ -1082,7 +1109,7 @@ impl Target for ComposeAndroid {
             let staging = &options.staging_dir;
             for abi in &abis {
                 let compiler = |suffix: &str| {
-                    bin.join(format!("{}{min_sdk}-{suffix}", abi.clang))
+                    toolchain::ndk_compiler(&bin, abi.clang, min_sdk, suffix)
                         .display()
                         .to_string()
                 };

@@ -81,7 +81,7 @@
 <text x="40.0" y="687.5" font-size="15" fill="#F0F6FC" font-weight="700">Wear OS</text>
 <text x="40" y="709" font-size="12" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" fill="#9198A1">compose + wearos</text>
 <text x="232.0" y="687.7" font-size="14" fill="#F0F6FC">Wear OS Compose Material 3，圆屏手表布局与表冠滚动</text>
-<text x="232.0" y="710.2" font-size="12.5" fill="#9198A1">Wear OS 4 及以上</text>
+<text x="232.0" y="710.2" font-size="12.5" fill="#9198A1">Android 8.0 及以上（可配 min_sdk）</text>
 <text x="636.0" y="687.5" font-size="13.5" fill="#F0F6FC">应用进程内（JNI）</text>
 <circle cx="834" cy="683.5" r="4" fill="#3FB950"/><text x="844.0" y="688.0" font-size="13.5" font-weight="700" fill="#3FB950">可用</text>
 <line x1="0" y1="732.0" x2="960" y2="732.0" stroke="#21262D"/>

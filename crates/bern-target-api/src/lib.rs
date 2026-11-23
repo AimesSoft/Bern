@@ -466,13 +466,20 @@ pub struct TargetConfig {
     pub javascript: bool,
     /// Explicit Android host capabilities; absent on other platforms.
     pub android: Option<AndroidOptions>,
-    /// The Android ABIs a release is built for, one APK each; empty for
-    /// the 64-bit ARM alone, and for other platforms.
+    /// The Android ABIs a release is built for, one APK each; empty for the
+    /// platform default (`arm64-v8a` on Android; `arm64-v8a` and `armeabi-v7a`
+    /// on Wear OS releases), and for other platforms.
     pub abis: Vec<String>,
 }
 
 /// The Android ABIs a release can be built for.
 pub const ANDROID_ABIS: &[&str] = &["arm64-v8a", "armeabi-v7a", "x86_64"];
+
+/// Lowest Android API level Bern's Compose runtime supports (Android 8.0).
+pub const ANDROID_MINIMUM_SDK: u32 = 26;
+
+/// Android target SDK level used by Bern's Compose backend.
+pub const ANDROID_TARGET_SDK: u32 = 36;
 
 /// Android capabilities needed by an application's Rust engine, which
 /// cannot be inferred from its UI. Multicast also enables network access.
@@ -493,6 +500,10 @@ pub struct AndroidOptions {
     /// Wear OS only: whether all core functions work without a phone.
     /// Omitted means true; companion applications explicitly set false.
     pub standalone: Option<bool>,
+    /// Minimum Android API level (`minSdk`) for Android or Wear OS builds.
+    /// Omitted uses the platform default (`26`, Android 8.0); Google Play
+    /// Wear OS releases can raise this to `30` (Wear OS 3.0) or newer.
+    pub min_sdk: Option<u32>,
 }
 
 impl TargetConfig {
