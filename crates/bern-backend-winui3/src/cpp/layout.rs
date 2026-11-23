@@ -5,8 +5,46 @@ use super::{BUILDER, Generator, Out, designated, ident, motion_ref, null, string
 use bern_ir::{Element, Prop};
 
 impl Generator<'_> {
+    /// Whether `node` carries a trailing `WindowButtons` directly in this row
+    /// (or within conditional branches of the row), marking it as a Windows
+    /// title-bar row aligned with the system caption buttons.
+    fn has_trailing_window_buttons(node: &bern_ir::Node) -> bool {
+        match node {
+            bern_ir::Node::Element(el) => {
+                el.kind == "WindowButtons" && el.keyword("edge") == Some("trailing")
+            }
+            bern_ir::Node::If(branch) => {
+                branch
+                    .branches
+                    .iter()
+                    .any(|(_, body)| body.iter().any(Self::has_trailing_window_buttons))
+                    || branch
+                        .otherwise
+                        .iter()
+                        .any(Self::has_trailing_window_buttons)
+            }
+            bern_ir::Node::IfLet(branch) => {
+                branch.then.iter().any(Self::has_trailing_window_buttons)
+                    || branch
+                        .otherwise
+                        .iter()
+                        .any(Self::has_trailing_window_buttons)
+            }
+            bern_ir::Node::Match(branch) => branch
+                .arms
+                .iter()
+                .any(|arm| arm.body.iter().any(Self::has_trailing_window_buttons)),
+            bern_ir::Node::Component(_) => false,
+        }
+    }
+
     /// `Column` and `Row`: a stack along their axis.
     pub(super) fn stack(&self, out: &mut Out, element: &Element) {
+        let title_bar = element.kind == "Row"
+            && element
+                .children
+                .iter()
+                .any(Self::has_trailing_window_buttons);
         self.container(
             out,
             element,
@@ -30,6 +68,7 @@ impl Generator<'_> {
                     ("reflow", Self::reflow(element)),
                     ("paddingX", self.len(element, "padding_x")),
                     ("paddingY", self.len(element, "padding_y")),
+                    ("titleBar", title_bar.then(|| "true".into())),
                 ])
             ),
         );

@@ -1857,6 +1857,7 @@ inline xaml::FrameworkElement IconGlyph(Ctx const& ctx, IconButtonProps const& p
 /// button of that diameter (the design's play button).
 inline void IconButton(Parent const& p, Ctx const& ctx, IconButtonProps props) {
     controls::Button button;
+    if (!props.iconSize && ctx.inTitleBar) props.iconSize = kTitleBarIconSize;
     xaml::FrameworkElement glyph = (props.iconProgress || props.badgeIcon)
         ? IconGlyph(ctx, props)
         : xaml::FrameworkElement(Icons::Icon(props.icon, props.iconSize.value_or(16)));
@@ -1871,8 +1872,9 @@ inline void IconButton(Parent const& p, Ctx const& ctx, IconButtonProps props) {
     } else if (plain || !drawsSurface) {
         Styles::MakeSubtle(button);
     }
-    // A square around the icon: `height`, a style's control size, or the
-    // icon with 10 on each side, as an app bar button.
+    // A square around the icon: `height`, a style's control size, title-bar
+    // caption-button geometry when sitting beside Windows' caption buttons,
+    // or the icon with 10 on each side, as an app bar button.
     auto square = [button, accent](double d) {
         double size = (std::max)(0.0, d);
         button.Width(size);
@@ -1887,6 +1889,13 @@ inline void IconButton(Parent const& p, Ctx const& ctx, IconButtonProps props) {
     } else if (props.style && props.style->size) {
         std::string_view size = props.style->size;
         square(size == "small" ? 24 : size == "large" ? 42 : size == "extra_large" ? 52 : 32);
+    } else if (ctx.inTitleBar && !accent) {
+        button.Width(kTitleBarButtonWidth);
+        button.MinWidth(0);
+        button.MinHeight(0);
+        button.Padding(xaml::Thickness{0, 0, 0, 0});
+        button.CornerRadius(xaml::CornerRadius{0, 0, 0, 0});
+        Reactive::Run([button, win = ctx.win] { button.Height(CaptionHeight(win)); });
     } else {
         square(props.iconSize.value_or(16) + 20);
     }
@@ -3649,6 +3658,9 @@ struct StackProps {
     /// Padding across and along, in place of `padding` there.
     Len paddingX;
     Len paddingY;
+    /// True when a `Row` carries trailing `WindowButtons`, placing its action
+    /// controls in the native title-bar strip beside the caption buttons.
+    bool titleBar = false;
 };
 
 /// Bind `padding`, `padding_x` and `padding_y` to `apply`, which takes
@@ -3711,7 +3723,7 @@ inline void Stack(Parent const& p, Ctx const& ctx, StackProps props, Build const
             : align == "bottom" ? xaml::VerticalAlignment::Bottom
             : align == "fill" ? xaml::VerticalAlignment::Stretch
             : xaml::VerticalAlignment::Center;
-        children(Parent::Aligned(panel, std::nullopt, v), ctx);
+        children(Parent::Aligned(panel, std::nullopt, v), props.titleBar ? ctx.TitleBar() : ctx);
     }
     Place(p, panel);
 }
@@ -3990,6 +4002,9 @@ inline void Layers(Parent const& p, Ctx const& ctx, LayersProps props, Build con
             win->covering.Set(win->covering.Peek() + 1);
             overlayPage = std::make_shared<Page>();
             overlayPage->win = win;
+            overlayPage->inTitleBar = true;
+            overlayPage->tools.Spacing(0);
+            overlayPage->leadingTools.Spacing(0);
             Reactive::OnCleanup([win, token] {
                 std::erase_if(win->coverings, [token](auto const& page) { return page.first == token; });
                 win->covering.Set(win->covering.Peek() - 1);
@@ -4022,12 +4037,18 @@ inline void Layers(Parent const& p, Ctx const& ctx, LayersProps props, Build con
         controls::Canvas::SetZIndex(bar, 2);
         Win* win = ctx.win;
         Reactive::Run([bar, win] {
-            double inset = win->fullscreen.Get() || win->owner ? 0.0 : win->rightInset.Get();
+            bool ownBar = !win->fullscreen.Get() && !win->owner;
+            double inset = ownBar ? win->rightInset.Get() : 0.0;
 #if !BERN_WINUI
-            if (inset <= 0 && !win->fullscreen.Get() && !win->owner) inset = 138.0;
+            if (ownBar && inset <= 0) inset = 138.0;
 #endif
-            double top = kWinUI && !win->owner ? 6.0 : 12.0;
-            bar.Margin(xaml::Thickness{16, top, inset + 12, 0});
+            if (ownBar) {
+                bar.Height(CaptionHeight(win));
+                bar.Margin(xaml::Thickness{0, 0, inset, 0});
+            } else {
+                bar.Height(std::numeric_limits<double>::quiet_NaN());
+                bar.Margin(xaml::Thickness{12, 8, 12, 0});
+            }
 #if BERN_WINUI
             WindowManager::QueueTitleBarPassthrough(win);
 #endif
@@ -5482,7 +5503,9 @@ inline void Toolbar(Parent const&, Ctx const& ctx, Build const& children) {
             if (auto page = weak.lock()) page->version.Bump();
         }
     });
-    children(ToolsParent(holder, weak), ctx.Toolbar());
+    auto tbCtx = ctx.Toolbar();
+    if (ctx.page && ctx.page->inTitleBar) tbCtx.inTitleBar = true;
+    children(ToolsParent(holder, weak), tbCtx);
 }
 
 /// Toolbar items before a `Spacer`: at the leading end of the header,
@@ -5500,7 +5523,9 @@ inline void LeadingToolbar(Parent const&, Ctx const& ctx, Build const& children)
             if (auto page = weak.lock()) page->version.Bump();
         }
     });
-    children(ToolsParent(holder, weak), ctx.Toolbar());
+    auto tbCtx = ctx.Toolbar();
+    if (ctx.page && ctx.page->inTitleBar) tbCtx.inTitleBar = true;
+    children(ToolsParent(holder, weak), tbCtx);
 }
 
 inline void LanguagePicker(Parent const& p, Ctx const& ctx, char const* id, Str const& label, bool labelHidden = false) {

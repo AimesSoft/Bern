@@ -1493,6 +1493,7 @@ inline media::Brush InAppAcrylic(bool dark) {
 inline std::shared_ptr<Popover> MakePopover(Ctx const& ctx, Build content, bool windowTheme = false, StyleDef const* style = nullptr) {
     auto popover = std::make_shared<Popover>();
     auto inner = ctx;
+    inner.inTitleBar = false;
     if (windowTheme) inner.appearance.clear();
     if (auto inherited = PresenterTheme(L"FlyoutPresenter", inner.appearance)) popover->flyout.FlyoutPresenterStyle(inherited);
     // Without a color of its own the bubble uses a theme-pinned WinUI 3
@@ -1613,9 +1614,10 @@ inline void PopoverButton(Parent const& p, Ctx const& ctx, PopoverButtonProps pr
     controls::Button button;
     auto text = Bound(ctx, props.label);
     if (props.icon) {
-        // As an `IconButton`: the icon with 10 on each side, or `height` × `height`,
-        // no background until pointed at.
-        double size = props.iconSize.value_or(16);
+        // As an `IconButton`: the icon with 10 on each side, `height` × `height`,
+        // or Windows title-bar caption-button geometry when sitting beside the
+        // window's caption buttons, with no background until pointed at.
+        double size = props.iconSize.value_or(ctx.inTitleBar ? kTitleBarIconSize : 16);
         button.Content(Icons::Icon(props.icon, size));
         Styles::MakeSubtle(button);
         auto square = [button](double d) {
@@ -1626,8 +1628,18 @@ inline void PopoverButton(Parent const& p, Ctx const& ctx, PopoverButtonProps pr
             button.MinHeight(0);
             button.Padding(xaml::Thickness{0, 0, 0, 0});
         };
-        if (props.shape && props.shape->height.Given()) BindLen(ctx, props.shape->height, nullptr, square);
-        else square(size + 20);
+        if (props.shape && props.shape->height.Given()) {
+            BindLen(ctx, props.shape->height, nullptr, square);
+        } else if (ctx.inTitleBar) {
+            button.Width(kTitleBarButtonWidth);
+            button.MinWidth(0);
+            button.MinHeight(0);
+            button.Padding(xaml::Thickness{0, 0, 0, 0});
+            button.CornerRadius(xaml::CornerRadius{0, 0, 0, 0});
+            Reactive::Run([button, win = ctx.win] { button.Height(CaptionHeight(win)); });
+        } else {
+            square(size + 20);
+        }
     } else {
         button.Content(TextOf(text));
         if (props.plain) Styles::MakeSubtle(button);
