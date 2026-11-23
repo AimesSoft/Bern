@@ -586,7 +586,12 @@ impl Generator<'_> {
             }
             let label = self.text_prop(tab, "label").unwrap_or_default();
             let value = tab.expr("value").map(|v| self.expr(v)).unwrap_or_default();
-            out.open("SwiftUI.Group {");
+            // A concrete container keeps a `Tab` as one `TabView` entry even
+            // when its content (or a branch inside a child component) emits
+            // zero or several sibling views (such as a page and a `Shortcut`):
+            // `SwiftUI.Group` distributes `.tabItem` and `.tag` onto each
+            // flattened child, duplicating or dropping tabs.
+            out.open("SwiftUI.ZStack {");
             self.nodes(out, &tab.children, ctx);
             out.close("}");
             // A tab's page is a focus scope of its own on tvOS, where the
