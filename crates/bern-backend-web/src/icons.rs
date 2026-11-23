@@ -271,6 +271,11 @@ const ICONS: &[(&str, &str, Fill)] = &[
         lucide!("text-cursor-input"),
         Fill::None,
     ),
+    ("character.phonetic", lucide!("languages"), Fill::None),
+    ("hifispeaker", lucide!("speaker"), Fill::None),
+    ("lock", lucide!("lock"), Fill::None),
+    ("waveform", lucide!("audio-waveform"), Fill::None),
+    ("xmark.circle", lucide!("circle-x"), Fill::None),
     ("trash", lucide!("trash-2"), Fill::None),
     ("tray", lucide!("inbox"), Fill::None),
     (
