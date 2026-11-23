@@ -885,6 +885,8 @@ inline void FitTitleBarInsets(Win& win) {
     fit(last, right);
     fitted = {first.Width().Value, last.Width().Value, scale};
     if (std::abs(win.rightInset.Peek() - right) > 0.5) win.rightInset.Set(right);
+    double height = titleBar.ActualHeight();
+    if (height > 0 && std::abs(win.captionHeight.Peek() - height) > 0.5) win.captionHeight.Set(height);
     QueueTitleBarPassthrough(&win);
 }
 #endif
@@ -2017,7 +2019,13 @@ inline std::string Open(std::string const& kindId) {
             if (current->titleBarInsets != before) PlaceHeader(*current);
         }
     });
-    titleBar.SizeChanged([raw = win.get()](auto&&, auto&&) { PlaceHeader(*raw); });
+    titleBar.SizeChanged([raw = win.get()](auto&&, auto&&) {
+        if (!raw->closed && raw->titleBar && !raw->fullscreen.Peek() && !raw->owner) {
+            double h = raw->titleBar.ActualHeight();
+            if (h > 0 && std::abs(raw->captionHeight.Peek() - h) > 0.5) raw->captionHeight.Set(h);
+        }
+        PlaceHeader(*raw);
+    });
     root.ActualThemeChanged([weakWin = std::weak_ptr<Win>(win)](auto&&, auto&&) {
         if (auto current = weakWin.lock()) ShowCaptionTheme(*current);
     });

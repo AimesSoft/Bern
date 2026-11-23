@@ -373,16 +373,27 @@ inline void List(Parent const& p, Ctx const& ctx, Build const& children) {
 /// A page header: the innermost title or title widget, a back button while
 /// something can go back, and the page's tools.
 inline controls::Grid Header(std::shared_ptr<Page> page, TextFn fallback, bool showTitle) {
+    bool titleBar = page && page->inTitleBar;
     controls::Grid grid;
-    grid.Margin(xaml::Thickness{0, 0, 0, 8});
+    grid.Margin(xaml::Thickness{0, 0, 0, titleBar ? 0.0 : 8.0});
     grid.ColumnDefinitions().Append(Column(AutoLength()));
     grid.ColumnDefinitions().Append(Column(Star()));
     grid.ColumnDefinitions().Append(Column(AutoLength()));
     controls::Button back;
-    back.Content(Icons::Icon("arrow.left", 16));
+    back.Content(Icons::Icon("arrow.left", titleBar ? kTitleBarIconSize : 16));
     back.VerticalAlignment(xaml::VerticalAlignment::Center);
-    back.Margin(xaml::Thickness{0, 0, 8, 0});
-    back.Padding(xaml::Thickness{10, 8, 10, 8});
+    if (titleBar) {
+        back.Margin(xaml::Thickness{0, 0, 0, 0});
+        back.Padding(xaml::Thickness{0, 0, 0, 0});
+        back.Width(kTitleBarButtonWidth);
+        back.MinWidth(0);
+        back.MinHeight(0);
+        back.CornerRadius(xaml::CornerRadius{0, 0, 0, 0});
+        Reactive::Run([back, win = page->win] { back.Height(CaptionHeight(win)); });
+    } else {
+        back.Margin(xaml::Thickness{0, 0, 8, 0});
+        back.Padding(xaml::Thickness{10, 8, 10, 8});
+    }
     Styles::MakeSubtle(back);
     std::weak_ptr<Page> weak = page;
     back.Click([weak](auto&&, auto&&) {
@@ -402,12 +413,12 @@ inline controls::Grid Header(std::shared_ptr<Page> page, TextFn fallback, bool s
     leading.VerticalAlignment(xaml::VerticalAlignment::Center);
     leading.Children().Append(back);
     page->leadingTools.VerticalAlignment(xaml::VerticalAlignment::Center);
-    page->leadingTools.Margin(xaml::Thickness{0, 0, 8, 0});
+    page->leadingTools.Margin(xaml::Thickness{0, 0, titleBar ? 0.0 : 8.0, 0});
     leading.Children().Append(page->leadingTools);
     controls::Grid::SetColumn(holder, 1);
     controls::Grid::SetColumn(page->tools, 2);
     page->tools.VerticalAlignment(xaml::VerticalAlignment::Center);
-    page->tools.Margin(xaml::Thickness{8, 0, 0, 0});
+    page->tools.Margin(xaml::Thickness{titleBar ? 0.0 : 8.0, 0, 0, 0});
     grid.Children().Append(leading);
     grid.Children().Append(holder);
     grid.Children().Append(page->tools);

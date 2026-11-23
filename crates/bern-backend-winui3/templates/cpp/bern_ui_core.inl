@@ -138,6 +138,11 @@ struct RailInfo {
     controls::Panel element{nullptr};
 };
 
+/// Native Windows caption-button metrics in DIPs (Standard title bar).
+inline constexpr double kTitleBarButtonWidth = 46.0;
+inline constexpr double kTitleBarButtonHeight = 32.0;
+inline constexpr double kTitleBarIconSize = 12.0;
+
 struct Ctx {
     Win* win = nullptr;
     std::string comp;
@@ -145,6 +150,9 @@ struct Ctx {
     std::shared_ptr<LocalVar const> locals;
     std::shared_ptr<Page> page;
     bool toolbar = false;
+    /// Whether controls built in this context sit in the window's title-bar
+    /// strip alongside the native caption buttons.
+    bool inTitleBar = false;
     std::optional<Field> nav;
     std::optional<Cell<bool>> shown;
     /// `appearance:` of the part this content is in, for its popups.
@@ -197,6 +205,7 @@ struct Ctx {
     }
     Ctx WithPage(std::shared_ptr<Page> header) const { auto child = *this; child.page = std::move(header); return child; }
     Ctx Toolbar() const { auto child = *this; child.toolbar = true; return child; }
+    Ctx TitleBar() const { auto child = *this; child.inTitleBar = true; return child; }
     Ctx WithNav(Field path) const { auto child = *this; child.nav = path; return child; }
     Ctx WithShown(Cell<bool> cell) const { auto child = *this; child.shown = cell; return child; }
 
@@ -330,6 +339,9 @@ struct Page : std::enable_shared_from_this<Page> {
     bern::Version version;
     /// The window, whose immersive state hides the header.
     Win* win = nullptr;
+    /// Whether this page's header sits in the window's title-bar strip
+    /// alongside the native caption buttons (e.g. a covering overlay page).
+    bool inTitleBar = false;
 
     Page() {
         tools.Orientation(controls::Orientation::Horizontal);
@@ -369,7 +381,7 @@ struct Page : std::enable_shared_from_this<Page> {
     controls::StackPanel AddTools(bool leading = false) {
         controls::StackPanel holder;
         holder.Orientation(controls::Orientation::Horizontal);
-        holder.Spacing(4);
+        holder.Spacing(inTitleBar ? 0 : 4);
         auto into = leading ? leadingTools : tools;
         into.Children().Append(holder);
         version.Bump();
@@ -1660,6 +1672,8 @@ struct Win {
     bool chromeHidden = false;
     /// Trailing caption-button width in DIPs (`RightInset / scale` on WinUI 3).
     Cell<double> rightInset{0.0};
+    /// Native caption-button strip height in DIPs (32 Standard, 48 Tall).
+    Cell<double> captionHeight{kTitleBarButtonHeight};
 #if BERN_WINUI
     std::vector<winrt::Windows::Graphics::RectInt32> passthroughRects;
     bool passthroughQueued = false;
@@ -1755,6 +1769,14 @@ inline void Open(Ctx const& ctx, std::string const& player, Value const& source)
 
 namespace Snapshot {
 void Schedule();
+}
+
+inline double CaptionHeight(Win* win) {
+    if (win) {
+        double h = win->captionHeight.Get();
+        if (h > 0) return h;
+    }
+    return kTitleBarButtonHeight;
 }
 
 namespace B {

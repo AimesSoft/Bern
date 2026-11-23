@@ -2806,3 +2806,24 @@ pub fn app(app: controls::Client, windows: AppWindows) -> impl View {
     compile(&output);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn title_bar_rows_and_overlay_headers_align_with_caption_buttons() {
+    let widgets = include_str!("../templates/cpp/bern_ui_widgets.inl");
+    let features = include_str!("../templates/cpp/bern_ui_features.inl");
+    let scene = include_str!("../templates/cpp/bern_ui_scene.inl");
+    let structure = include_str!("../templates/cpp/bern_ui_structure.inl");
+    for (src, part) in [
+        (widgets, "overlayPage->inTitleBar = true;"),
+        (widgets, "bar.Height(CaptionHeight(win));"),
+        (widgets, "bar.Margin(xaml::Thickness{0, 0, inset, 0});"),
+        (widgets, "button.Width(kTitleBarButtonWidth);"),
+        (features, "inner.inTitleBar = false;"),
+        (features, "button.Width(kTitleBarButtonWidth);"),
+        (scene, "auto row = MakeFlex(true, ctx.inTitleBar ? 0 : 2);"),
+        (scene, "modalCtx.inTitleBar = false;"),
+        (structure, "bool titleBar = page && page->inTitleBar;"),
+    ] {
+        assert!(src.contains(part), "missing `{part}`");
+    }
+}

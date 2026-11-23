@@ -667,7 +667,9 @@ inline void Modal(Parent const&, Ctx const& ctx, ModalProps props, Build const& 
     dialog.Content(content);
     // What fills spans the card; the rest stands in its middle, as in the
     // SwiftUI card, not at its leading edge.
-    children(Parent::Aligned(content, xaml::HorizontalAlignment::Center, std::nullopt), ctx);
+    auto modalCtx = ctx;
+    modalCtx.inTitleBar = false;
+    children(Parent::Aligned(content, xaml::HorizontalAlignment::Center, std::nullopt), modalCtx);
     // The declared size, within the window's edges, or the whole window.
     bool cover = props.cover;
     auto size = [weak = winrt::make_weak(dialog), content, root, win, width, height, cover] {
@@ -1011,12 +1013,16 @@ struct ControlGroupProps {
 /// surface of the group's (Fluent groups by placement), 40 points tall
 /// unless `height` says.
 inline void ControlGroup(Parent const& p, Ctx const& ctx, ControlGroupProps props, Build const& children) {
-    auto row = MakeFlex(true, 2);
+    auto row = MakeFlex(true, ctx.inTitleBar ? 0 : 2);
     Styles::Restyle(row, Styles::SubtleXaml());
     row.HorizontalAlignment(xaml::HorizontalAlignment::Left);
-    row.VerticalAlignment(xaml::VerticalAlignment::Center);
-    row.Height(40);
-    BindLen(ctx, props.height, nullptr, [row](double v) { row.Height((std::max)(0.0, v)); });
+    row.VerticalAlignment(ctx.inTitleBar ? xaml::VerticalAlignment::Top : xaml::VerticalAlignment::Center);
+    if (ctx.inTitleBar) {
+        Reactive::Run([row, win = ctx.win] { row.Height(CaptionHeight(win)); });
+    } else {
+        row.Height(40);
+        BindLen(ctx, props.height, nullptr, [row](double v) { row.Height((std::max)(0.0, v)); });
+    }
     BindName(row, Bound(ctx, props.label));
     children(Parent::Aligned(row, std::nullopt, xaml::VerticalAlignment::Center), ctx);
     p.Add(row);
