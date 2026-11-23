@@ -372,8 +372,12 @@ inline bool Handle(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam, LRESUL
         if (def.minHeight) info->ptMinTrackSize.y = (std::max)(info->ptMinTrackSize.y, static_cast<LONG>(std::lround(*def.minHeight * scale)));
         return false;
     }
-    case WM_ACTIVATE:
-        win->focused = LOWORD(wparam) != WA_INACTIVE;
+    case WM_ACTIVATE: {
+        bool active = LOWORD(wparam) != WA_INACTIVE;
+#if BERN_WINUI
+        if (!active && win->imePopupHwnd && reinterpret_cast<HWND>(lparam) == win->imePopupHwnd) active = true;
+#endif
+        win->focused = active;
 #if BERN_WINUI
         SyncIdleCursor(*win);
 #endif
@@ -383,6 +387,7 @@ inline bool Handle(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam, LRESUL
             bern::pictures::TryAgain();
         }
         return false;
+    }
     case WM_ENTERSIZEMOVE:
         if (!win->movingOrSizing) {
             win->movingOrSizing = true;
@@ -443,6 +448,12 @@ inline LRESULT CALLBACK Subclass(HWND hwnd, UINT message, WPARAM wparam, LPARAM 
         ReplyMessage(0);
     }
     if (message == WM_NCDESTROY) originals.erase(hwnd);
+    if (message == WM_NCACTIVATE && wparam == FALSE) {
+        if (auto win = OfHwnd(hwnd); win && win->imePopupHwnd && IsWindowVisible(win->imePopupHwnd)
+            && (GetActiveWindow() == win->imePopupHwnd || GetForegroundWindow() == win->imePopupHwnd)) {
+            return CallWindowProcW(original, hwnd, message, TRUE, lparam);
+        }
+    }
     if (auto win = OfHwnd(hwnd); win && win->movingOrSizing) {
         if (message == WM_WINDOWPOSCHANGED && lparam) {
             auto const* pos = reinterpret_cast<WINDOWPOS const*>(lparam);

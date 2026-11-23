@@ -1441,8 +1441,8 @@ inline void Grow(xaml::UIElement const& element, Departure from, Motion const* m
         layer->y->Set(dy * u);
         layer->sx->Set(1 + (sx - 1) * u);
         layer->sy->Set(1 + (sy - 1) * u);
-        layer->opacity->Set((std::clamp)(t, 0.0, 1.0));
         if (ghost) {
+            layer->opacity->Set((std::clamp)(t, 0.0, 1.0));
             auto framework = ghost.as<xaml::FrameworkElement>();
             ghost.CenterPoint(float3{static_cast<float>(framework.Width() / 2), static_cast<float>(framework.Height() / 2), 0});
             ghost.Translation(float3{static_cast<float>(-dx * t), static_cast<float>(-dy * t), 0});
