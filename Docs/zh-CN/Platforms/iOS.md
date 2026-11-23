@@ -26,6 +26,7 @@ name = "Tasks"
 files_folder = true          # 在 iOS“文件”App 中公开应用 Documents 目录
 background_audio = false     # 开启 AVAudioSession 后台音频播放
 photos = false               # 保存图片到系统相册时申请相册权限
+local_network = false        # 申请本地网络权限（写入 NSLocalNetworkUsageDescription）
 
 [app.icon]
 default = "assets/icon.png"
@@ -77,7 +78,7 @@ target/bern/ios/bin/tasks --engine ios window screenshot --output ios.png
 - **iPhone 与 iPad 窗口**：iPhone 上副窗口以虚拟 Sheet 呈现，紧凑导航使用标签栏（在 iOS 26.1+ 上 `TabAccessory` 映射为标签栏上方的系统附属栏）。iPadOS（iOS 17+）支持原生多窗口 `WindowGroup`，并通过 `⌘,` 打开设置窗口。
 - **横竖屏锁定**：当播放器等页面需要横屏时，可通过 `Window(landscape: true)` 在手机上切换方向。
 - **图标与动态换图标**：`[app.icon].ios` 支持 PNG、`.appiconset` 或 Icon Composer 的 `.icon`（编译为含浅色/深色/着色三种外观的 Liquid Glass `Assets.car`）。`[app.alternate_icons]` 映射为 `CFBundleAlternateIcons`，可在运行时通过 `WindowSet(icon:)` 切换。
-- **文件与共享**：`file_pick` 调用系统文件选择器；配置 `files_folder = true` 会写入 `UIFileSharingEnabled` 与 `LSSupportsOpeningDocumentsInPlace`，让应用文档出现在系统“文件”App 中。
+- **文件与共享**：`file_pick` 调用系统文件选择器；`bern::platform::open_path` 拉起系统分享面板（`UIActivityViewController`），`bern::platform::export_path` 将本地文件或目录复制到用户所选的安全作用域目录；配置 `files_folder = true` 会写入 `UIFileSharingEnabled` 与 `LSSupportsOpeningDocumentsInPlace`，让应用文档出现在系统“文件”App 中。
 - **iOS 上不适用的桌面能力**：`MenuBar`、`StatusItem` 与 `Switch(login_item: true)` 会被安全视作不适用而不报错，方便与桌面端共用同一份 UI 声明。
 - **iOS 16 回退差异**：运行在 `swiftui-16` 前端时，滚动吸附（`ScrollView(snap:)`）、`scroll_scale` / `scroll_opacity`、外接键盘 `onKeyPress`、iPad 原生多窗口与 HDR 图像会平稳降级（侧边检查器以 Sheet 打开、iPad 使用虚拟窗口、图像按 SDR 绘制）。
 - **原生视图**：可通过 `NativeView(ios: "...")` 挂载与项目同仓的 SwiftUI/UIKit 视图。详见 [原生视图](../Topics/Native-Views.md)。

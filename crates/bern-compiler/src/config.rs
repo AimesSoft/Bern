@@ -237,6 +237,9 @@ struct RawApp {
     /// The application saves pictures to the user's photos.
     #[serde(default)]
     photos: bool,
+    /// The application discovers or connects to devices on the local network.
+    #[serde(default)]
+    local_network: bool,
     /// Files the system may open the application with.
     #[serde(default)]
     opens: Vec<RawOpens>,
@@ -382,6 +385,8 @@ pub struct Config {
     pub overlays: bool,
     /// `[app].photos`.
     pub photos: bool,
+    /// `[app].local_network`.
+    pub local_network: bool,
     /// `[[app.opens]]`, with its kinds checked.
     pub opens: Vec<bern_ir::OpensDef>,
     pub languages: Vec<String>,
@@ -1683,6 +1688,7 @@ pub fn load_excluding(path: &Path, excluded: &[String]) -> Result<Config, Vec<Di
         background_audio: raw.app.background_audio,
         overlays: raw.app.overlays,
         photos: raw.app.photos,
+        local_network: raw.app.local_network,
         opens,
         languages: raw.languages.supported,
         default_language: raw.languages.default,

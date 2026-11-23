@@ -536,6 +536,10 @@ pub struct AppInfo {
     /// (`bern::platform::save_image`), which iOS asks the user to allow.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub photos: bool,
+    /// `[app].local_network`: the application discovers or connects to devices
+    /// on the local network, which iOS asks the user to allow.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub local_network: bool,
     /// `[[app.opens]]`: the files the system may open the application with,
     /// and what file managers show for them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

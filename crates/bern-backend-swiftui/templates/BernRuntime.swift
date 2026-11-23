@@ -1075,6 +1075,12 @@ private func bernPlatformRequest(
         return 0
     case "save_image":
         return BernPhotos.save(text(first, firstLength))
+    #if os(iOS)
+    case "open_path":
+        return BernFiles.openPath(text(first, firstLength))
+    case "export_path":
+        return BernFiles.exportPath(text(first, firstLength), to: text(second, secondLength))
+    #endif
     #if os(macOS)
     case "make_default_opener":
         DispatchQueue.main.async { MainActor.assumeIsolated { BernFiles.makeDefault() } }
