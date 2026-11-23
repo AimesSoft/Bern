@@ -1208,8 +1208,9 @@ inline std::optional<std::string> KeyName(winrt::Windows::System::VirtualKey key
 /// While mounted, `keys` (`cmd` is Control on Windows) calls `invoked`,
 /// which says whether it handled them, as a keyboard accelerator of the
 /// window. Without Control or Alt the keys are text while a text field has
-/// the focus.
-inline void Accelerator(Ctx const& ctx, char const* keys, std::function<bool()> invoked) {
+/// the focus. With `quiet`, which says whether they are enabled, the keys
+/// do not wake a window at rest.
+inline void Accelerator(Ctx const& ctx, char const* keys, std::function<bool()> invoked, std::function<bool()> quiet = nullptr) {
     if (!ctx.win || !ctx.win->root) return;
     using winrt::Windows::System::VirtualKeyModifiers;
     std::string all = keys ? keys : "";
@@ -1245,6 +1246,14 @@ inline void Accelerator(Ctx const& ctx, char const* keys, std::function<bool()> 
             }
         if (invoked()) args.Handled(true);
     });
+    if (quiet) {
+        auto entry = std::make_shared<Win::QuietKey>(Win::QuietKey{*key, modifiers, std::move(quiet)});
+        ctx.win->quietKeys.push_back(entry);
+        std::weak_ptr<bool> alive(ctx.win->life);
+        Reactive::OnCleanup([win = ctx.win, alive, entry] {
+            if (!alive.expired()) std::erase(win->quietKeys, entry);
+        });
+    }
     auto root = ctx.win->root;
     root.KeyboardAccelerators().Append(accelerator);
     Reactive::OnCleanup([weak = winrt::make_weak(root), accelerator] {
@@ -1258,10 +1267,10 @@ inline void Accelerator(Ctx const& ctx, char const* keys, std::function<bool()> 
 /// While mounted, the keys the text `keys` names call `invoked`: the
 /// accelerator follows the text as it changes, and none stands while it is
 /// empty or no shortcut.
-inline void BoundAccelerator(Ctx const& ctx, Str keys, std::function<bool()> invoked) {
-    Reactive::Run([ctx, keys, invoked] {
+inline void BoundAccelerator(Ctx const& ctx, Str keys, std::function<bool()> invoked, std::function<bool()> quiet = nullptr) {
+    Reactive::Run([ctx, keys, invoked, quiet] {
         auto normal = NormalizedShortcut(Utf8(keys(ctx)));
-        if (normal && !normal->empty()) Accelerator(ctx, normal->c_str(), invoked);
+        if (normal && !normal->empty()) Accelerator(ctx, normal->c_str(), invoked, quiet);
     });
 }
 
@@ -1302,6 +1311,8 @@ struct KeyShortcutProps {
     /// The text the keys follow instead of `keys`.
     Str bound;
     Get enabled;
+    /// The keys do not wake a window at rest.
+    bool quiet = false;
     Act action;
 };
 
@@ -1311,13 +1322,15 @@ inline void KeyShortcut(Parent const&, Ctx const& ctx, KeyShortcutProps props) {
     auto enabled = props.enabled;
     auto action = props.action;
     if (!action) return;
-    std::function<bool()> invoked = [ctx, enabled, action] {
-        if (enabled && !Reactive::Untrack([&] { return R::Truthy(enabled(ctx)); })) return false;
+    std::function<bool()> isEnabled = [ctx, enabled] { return !enabled || Reactive::Untrack([&] { return R::Truthy(enabled(ctx)); }); };
+    std::function<bool()> invoked = [ctx, isEnabled, action] {
+        if (!isEnabled()) return false;
         action(ctx);
         return true;
     };
-    if (props.bound) BoundAccelerator(ctx, props.bound, std::move(invoked));
-    else Accelerator(ctx, props.keys, std::move(invoked));
+    auto quiet = props.quiet ? isEnabled : std::function<bool()>();
+    if (props.bound) BoundAccelerator(ctx, props.bound, std::move(invoked), std::move(quiet));
+    else Accelerator(ctx, props.keys, std::move(invoked), std::move(quiet));
 }
 
 struct ShortcutInputProps {

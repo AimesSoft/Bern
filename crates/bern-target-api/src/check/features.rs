@@ -47,6 +47,7 @@ const CHECKS: &[(&str, Check)] = &[
     (feature::WINDOW_SHORT, window_short),
     (feature::WINDOW_LANDSCAPE, window_landscape),
     (feature::IDLE_CONTROL, idle_control),
+    (feature::QUIET_SHORTCUTS, quiet_shortcuts),
     (feature::UNTITLED_DETAIL, untitled_detail),
     (feature::POPOVER_BUTTON, popover_button),
     (feature::SIZE_CLASSES, size_classes),
@@ -815,6 +816,24 @@ fn idle_control(
             "target `{}` ignores `idle_enabled` of window `{}`: once `idle_after` passes without input, `window.idle` turns on whatever the state",
             descriptor.id, window.id
         )));
+    }
+}
+
+fn quiet_shortcuts(
+    descriptor: &TargetDescriptor,
+    app: &Application,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some(shortcut) = first_element(app, |element| {
+        element.kind == "Shortcut" && element.keyword("quiet") == Some("true")
+    }) {
+        diagnostics.push(
+            Diagnostic::warning(format!(
+                "target `{}` ignores `quiet` of `Shortcut`: its key wakes a window at rest",
+                descriptor.id
+            ))
+            .at(shortcut.source.clone()),
+        );
     }
 }
 

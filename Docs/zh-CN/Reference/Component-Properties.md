@@ -86,7 +86,7 @@
 | `Flow` | `gap: Length` | 可含子内容；无动作；每行的子项竖直居中，`Spacer` 占满所在行余下的宽度 |
 | `Timer` | **`interval: Number`**<br>`enabled: Bool` | 不含子节点；必须绑定动作 |
 | `Watch` | **`value: Watched`** | 不含子节点；必须绑定动作；挂载时与值变化时运行 |
-| `Shortcut` | **`key: Shortcut`**<br>`enabled: Bool` | 不含子节点；必须绑定动作 |
+| `Shortcut` | **`key: Shortcut`**<br>`enabled: Bool`<br>`quiet: Flag` | 不含子节点；必须绑定动作 |
 | `PickerOption` | **`value: KeyValue`**<br>**`label: DisplayText`** | 不含子节点；无动作；直接位于 ["Picker"] |
 | `Rail` | `axis: horizontal / vertical`<br>`anchor: start / center / end`<br>`overhang: Length` | 可含子内容；无动作 |
 | `Spacer` | 无专有属性 | 不含子节点；无动作 |

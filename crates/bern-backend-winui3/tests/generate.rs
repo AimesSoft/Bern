@@ -656,6 +656,17 @@ fn a_scroll_position_is_written_after_layout() {
     }
 }
 
+/// A `quiet` shortcut's key is no input for `window.idle`.
+#[test]
+fn a_quiet_shortcut_does_not_wake_the_window() {
+    let windows = include_str!("../templates/cpp/bern_ui_windows.inl");
+    assert!(windows.contains(
+        "if (quiet->key == args.Key() && quiet->modifiers == held && quiet->enabled()) return;"
+    ));
+    let features = include_str!("../templates/cpp/bern_ui_features.inl");
+    assert!(features.contains("auto quiet = props.quiet ? isEnabled : std::function<bool()>();"));
+}
+
 /// The planner: sidebar items that come and go, styled buttons and sidebar
 /// items, a drawing with a pattern and series, a marked text, shared
 /// elements, transitions and an immersive window that rests.

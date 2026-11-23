@@ -960,7 +960,8 @@ inline std::optional<double> IdleWait(Win const& win, double seconds) {
 }
 
 /// `window.idle`: true after `seconds` without pointer, wheel or key input
-/// in the window, and false at the next input. With `idle_area`s on screen
+/// in the window, and false at the next input; the keys of shortcuts with
+/// `quiet` are no input. With `idle_area`s on screen
 /// a mouse counts only while it rests over one, for that area's seconds:
 /// elsewhere, or outside the window, the window stays awake.
 inline void TrackIdle(std::shared_ptr<Win> const& win, double seconds, std::function<bool()> enabled = nullptr) {
@@ -1065,7 +1066,19 @@ inline void TrackIdle(std::shared_ptr<Win> const& win, double seconds, std::func
         win->mouse = Win::Mouse::Outside;
         rest();
     })), true);
-    root.AddHandler(xaml::UIElement::KeyDownEvent(), winrt::box_value(xaml::Input::KeyEventHandler([rest](auto&&, auto&&) { rest(); })), true);
+    root.AddHandler(xaml::UIElement::KeyDownEvent(), winrt::box_value(xaml::Input::KeyEventHandler([rest, weak](auto&&, xaml::Input::KeyRoutedEventArgs const& args) {
+        // The key of a `quiet` shortcut is no input.
+        if (auto win = weak.lock()) {
+            using winrt::Windows::System::VirtualKeyModifiers;
+            auto held = VirtualKeyModifiers::None;
+            if (GetKeyState(VK_CONTROL) < 0) held |= VirtualKeyModifiers::Control;
+            if (GetKeyState(VK_MENU) < 0) held |= VirtualKeyModifiers::Menu;
+            if (GetKeyState(VK_SHIFT) < 0) held |= VirtualKeyModifiers::Shift;
+            for (auto const& quiet : win->quietKeys)
+                if (quiet->key == args.Key() && quiet->modifiers == held && quiet->enabled()) return;
+        }
+        rest();
+    })), true);
     win->idleRest = rest;
     if (enabled) {
         // Switched on again, the count starts over.

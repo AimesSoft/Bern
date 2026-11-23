@@ -86,7 +86,7 @@ Fixed enums list the allowed keywords directly. The table does not repeat every 
 | `Flow` | `gap: Length` | May contain children; no action; the children in each line are vertically centered, and `Spacer` takes the rest of the width of its line |
 | `Timer` | **`interval: Number`**<br>`enabled: Bool` | No children; must bind an action |
 | `Watch` | **`value: Watched`** | No children; must bind an action; runs on mount and when the value changes |
-| `Shortcut` | **`key: Shortcut`**<br>`enabled: Bool` | No children; must bind an action |
+| `Shortcut` | **`key: Shortcut`**<br>`enabled: Bool`<br>`quiet: Flag` | No children; must bind an action |
 | `PickerOption` | **`value: KeyValue`**<br>**`label: DisplayText`** | No children; no action; directly inside ["Picker"] |
 | `Rail` | `axis: horizontal / vertical`<br>`anchor: start / center / end`<br>`overhang: Length` | May contain children; no action |
 | `Spacer` | No own properties | No children; no action |

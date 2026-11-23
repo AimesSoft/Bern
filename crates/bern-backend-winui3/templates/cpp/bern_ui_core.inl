@@ -1613,6 +1613,14 @@ struct Win {
     winrt::Windows::Foundation::Point mousePoint{};
     /// Starts the count toward `window.idle` again, with `idle_after`.
     std::function<void()> idleRest;
+    /// The keys of the shortcuts with `quiet`, which are no input for
+    /// `window.idle`: each says whether it is enabled.
+    struct QuietKey {
+        winrt::Windows::System::VirtualKey key;
+        winrt::Windows::System::VirtualKeyModifiers modifiers;
+        std::function<bool()> enabled;
+    };
+    std::vector<std::shared_ptr<QuietKey>> quietKeys;
     /// The window's layout size by its width: compact, medium, expanded
     /// or large.
     Cell<std::string> size{std::string("expanded")};

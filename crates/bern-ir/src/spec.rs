@@ -833,9 +833,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             &[
                 req("key", PropKind::Shortcut),
                 opt("enabled", PropKind::Bool),
+                opt("quiet", PropKind::Flag),
             ],
             Children::None,
-            "A keyboard shortcut without a control of its own: the key runs the action while the shortcut is mounted and enabled; on a television, the remote's button that stands for the key",
+            "A keyboard shortcut without a control of its own: the key runs the action while the shortcut is mounted and enabled; on a television, the remote's button that stands for the key; with `quiet` the key does not wake a window at rest, nor start its count toward `window.idle` again",
         )
     },
     ComponentSpec {
