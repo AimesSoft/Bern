@@ -167,8 +167,8 @@ if exist "%PACKAGES%\%PKG_ID%\%PKG_VER%\" (
 )
 echo Fetching %PKG_ID% %PKG_VER% from nuget.org
 mkdir "%DEST%" || exit /b 1
-curl.exe --fail --location --silent --show-error --output "%DEST%.nupkg" "https://api.nuget.org/v3-flatcontainer/%PKG_ID%/%PKG_VER%/%PKG_ID%.%PKG_VER%.nupkg" || exit /b 1
-tar.exe -xf "%DEST%.nupkg" -C "%DEST%" || exit /b 1
+"%SystemRoot%\System32\curl.exe" --fail --location --silent --show-error --output "%DEST%.nupkg" "https://api.nuget.org/v3-flatcontainer/%PKG_ID%/%PKG_VER%/%PKG_ID%.%PKG_VER%.nupkg" || exit /b 1
+"%SystemRoot%\System32\tar.exe" -xf "%DEST%.nupkg" -C "%DEST%" || exit /b 1
 del /q "%DEST%.nupkg"
 >"%DEST%\.version" echo %PKG_VER%
 exit /b 0

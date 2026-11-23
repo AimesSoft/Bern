@@ -417,8 +417,10 @@ echo Fetching %1 %2 from nuget.org
 set "PART=%CACHE%\packages\%1.%2.partial"
 if exist "%PART%" rmdir /s /q "%PART%"
 mkdir "%PART%" || exit /b 1
-curl.exe --fail --location --silent --show-error --output "%PART%.nupkg" "https://api.nuget.org/v3-flatcontainer/%1/%2/%1.%2.nupkg" || exit /b 1
-tar.exe -xf "%PART%.nupkg" -C "%PART%" || exit /b 1
+"%SystemRoot%\System32\curl.exe" --fail --location --silent --show-error --output "%PART%.nupkg" "https://api.nuget.org/v3-flatcontainer/%1/%2/%1.%2.nupkg" || exit /b 1
+rem Git Bash can put GNU tar first on PATH; it treats drive letters as remote hosts.
+rem Use Windows' bsdtar, which also understands the ZIP-based NuGet format.
+"%SystemRoot%\System32\tar.exe" -xf "%PART%.nupkg" -C "%PART%" || exit /b 1
 del /q "%PART%.nupkg"
 move "%PART%" "%CACHE%\packages\%1.%2" >nul || exit /b 1
 :package_cached

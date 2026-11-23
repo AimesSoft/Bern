@@ -26,6 +26,7 @@ name = "Tasks"
 files_folder = true          # Expose app Documents directory in the iOS Files app
 background_audio = false     # Enable AVAudioSession background playback
 photos = false               # Request photo library save permission when saving images
+local_network = false        # Request local network permission (NSLocalNetworkUsageDescription)
 
 [app.icon]
 default = "assets/icon.png"
@@ -77,7 +78,7 @@ Useful debugging environment variables (pass through `SIMCTL_CHILD_*` when launc
 - **iPhone vs. iPad windows**: On iPhone, secondary windows open as virtual sheets and compact navigation uses a tab bar (`TabAccessory` maps to the system accessory above the tab bar on iOS 26.1+). On iPadOS (iOS 17+), Bern uses native multi-window `WindowGroup` scenes and exposes the Settings window via `⌘,`.
 - **Orientation locking**: `Window(landscape: true)` locks orientation on iPhone when a screen (such as a video player) requests landscape.
 - **Icons and alternate icons**: `[app.icon].ios` accepts a PNG, `.appiconset`, or Icon Composer `.icon` (compiled to light/dark/tinted Liquid Glass `Assets.car`). `[app.alternate_icons]` maps to `CFBundleAlternateIcons` and switches icons at runtime via `WindowSet(icon:)`.
-- **Files and sharing**: `file_pick` opens the system document picker; setting `files_folder = true` sets `UIFileSharingEnabled` and `LSSupportsOpeningDocumentsInPlace` so the app's documents appear in the Files app.
+- **Files and sharing**: `file_pick` opens the system document picker; `bern::platform::open_path` presents the system share sheet (`UIActivityViewController`), `bern::platform::export_path` copies a local file or folder into a picked security-scoped Files folder, and setting `files_folder = true` sets `UIFileSharingEnabled` and `LSSupportsOpeningDocumentsInPlace` so the app's documents appear in the Files app.
 - **Not applicable on iOS**: `MenuBar`, `StatusItem`, and `Switch(login_item: true)` are accepted cleanly as no-ops so shared desktop/mobile declarations compile without `#[cfg]` guards.
 - **iOS 16 fallback differences**: When running on iOS 16 (`swiftui-16`), scroll paging (`ScrollView(snap:)`), `scroll_scale` / `scroll_opacity`, hardware keyboard `onKeyPress`, iPad multi-window scenes, and HDR images are gracefully reduced (inspector opens as a sheet, iPad uses virtual windows, images render in SDR).
 - **Native views**: Co-located SwiftUI/UIKit views mount through `NativeView(ios: "...")`. See [Native views](../Topics/Native-Views.md).

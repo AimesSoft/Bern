@@ -152,6 +152,10 @@ pub fn package_architecture() -> &'static str {
 /// `stem` plus the extension the build machine's own tools make: `.zip`
 /// on macOS (`ditto`) and Windows (`tar`), `.tar.gz` on Linux (`tar`).
 pub fn archive(dir: &std::path::Path, stem: &std::path::Path) -> (BuildStep, PathBuf) {
+    archive_for_os(dir, stem, std::env::consts::OS)
+}
+
+fn archive_for_os(dir: &std::path::Path, stem: &std::path::Path, os: &str) -> (BuildStep, PathBuf) {
     let parent = dir.parent().unwrap_or(dir).to_path_buf();
     let name = dir
         .file_name()
@@ -162,7 +166,7 @@ pub fn archive(dir: &std::path::Path, stem: &std::path::Path) -> (BuildStep, Pat
         file.push(extension);
         PathBuf::from(file)
     };
-    let (program, args, out) = match std::env::consts::OS {
+    let (program, args, out) = match os {
         "macos" => {
             let out = with(".zip");
             let args = vec![
@@ -177,7 +181,7 @@ pub fn archive(dir: &std::path::Path, stem: &std::path::Path) -> (BuildStep, Pat
                 dir.display().to_string(),
                 out.display().to_string(),
             ];
-            ("ditto", args, out)
+            ("ditto".to_owned(), args, out)
         }
         "windows" => {
             let out = with(".zip");
@@ -190,7 +194,12 @@ pub fn archive(dir: &std::path::Path, stem: &std::path::Path) -> (BuildStep, Pat
                 parent.display().to_string(),
                 name.clone(),
             ];
-            ("tar", args, out)
+            // Git Bash's GNU tar can precede the native tool on PATH and
+            // parses drive-letter paths as remote hosts. ZIP output also
+            // needs Windows' bsdtar rather than GNU tar.
+            let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+            let tar = format!(r"{}\System32\tar.exe", root.trim_end_matches(['\\', '/']));
+            (tar, args, out)
         }
         _ => {
             let out = with(".tar.gz");
@@ -201,12 +210,12 @@ pub fn archive(dir: &std::path::Path, stem: &std::path::Path) -> (BuildStep, Pat
                 parent.display().to_string(),
                 name.clone(),
             ];
-            ("tar", args, out)
+            ("tar".to_owned(), args, out)
         }
     };
     let step = BuildStep::Run {
         description: format!("Archive {name}"),
-        program: program.into(),
+        program,
         args,
         cwd: parent,
         env: vec![],
@@ -259,11 +268,28 @@ mod tests {
                 );
                 assert!(args.contains(&"--noextattr".to_string()));
             }
-            "windows" => assert_eq!(program, "tar"),
+            "windows" => assert!(program.ends_with(r"\System32\tar.exe")),
             _ => assert_eq!(
                 (program.as_str(), out),
                 ("tar", PathBuf::from("/dist/Hello-1.0.tar.gz"))
             ),
         }
+    }
+
+    #[test]
+    fn windows_archives_bypass_path_tar_and_keep_drive_letter_paths() {
+        let (step, out) = archive_for_os(
+            std::path::Path::new("/stage/App"),
+            std::path::Path::new(r"D:\release\App-1.0.0"),
+            "windows",
+        );
+        let BuildStep::Run { program, args, .. } = step else {
+            panic!("a command");
+        };
+        assert!(program.ends_with(r"\System32\tar.exe"));
+        assert!(program.contains(":\\"));
+        assert_eq!(out, PathBuf::from(r"D:\release\App-1.0.0.zip"));
+        assert_eq!(args[3], r"D:\release\App-1.0.0.zip");
+        assert_eq!(args[0], "-a");
     }
 }
