@@ -639,7 +639,8 @@ fn a_wheel_over_a_horizontal_view_scrolls_the_page() {
 }
 
 /// A scroll view writes its position and browsing state after the layout that
-/// moved it, when content that follows them may come or go.
+/// moved it, when content that follows them may come or go, and its position
+/// while it scrolls where nothing snaps.
 #[test]
 fn a_scroll_position_is_written_after_layout() {
     let features = include_str!("../templates/cpp/bern_ui_features.inl");
@@ -647,7 +648,9 @@ fn a_scroll_position_is_written_after_layout() {
         "if (alive.expired() || *browseSeq != seq) return;",
         "if (alive.expired() || *writeSeq != seq || travelling->get()) return;",
         "if (!viewer || !viewer.IsLoaded()) return;",
-        "if (R::KeyText(ctx.Peek(*position)) == before) ctx.Write(*position, key);",
+        "if (!item || R::KeyText(ctx.Peek(*position)) == item->first) return;",
+        "if (!snaps && !travelling->get()) tell();",
+        "if (!*placed || *telling) return 0;",
     ] {
         assert!(features.contains(part), "{part}");
     }
