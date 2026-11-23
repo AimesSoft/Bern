@@ -1077,6 +1077,7 @@ fun BernModal(
     cover: Boolean,
     enter: EnterTransition?,
     exit: ExitTransition?,
+    dismiss: (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     val window = LocalBernWindow.current
@@ -1084,10 +1085,10 @@ fun BernModal(
     val visibility = LocalBernVisibility.current
     val dark = bernDark()
     Dialog(
-        onDismissRequest = {},
+        onDismissRequest = { dismiss?.invoke() },
         properties = DialogProperties(
-            dismissOnBackPress = false,
-            dismissOnClickOutside = false,
+            dismissOnBackPress = dismiss != null,
+            dismissOnClickOutside = dismiss != null,
             usePlatformDefaultWidth = false,
             decorFitsSystemWindows = false,
         ),
@@ -1106,7 +1107,15 @@ fun BernModal(
         }
         // Measure the card in the space above the keyboard, so scrollable
         // fields can shrink while the dialog's footer remains reachable.
-        val viewport = Modifier.fillMaxSize().imePadding()
+        val dismissBg = if (dismiss != null && !covering) {
+            Modifier.clickable(
+                indication = null,
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+            ) { dismiss() }
+        } else {
+            Modifier
+        }
+        val viewport = Modifier.fillMaxSize().then(dismissBg).imePadding()
             .then(if (covering) Modifier else Modifier.safeDrawingPadding())
         BoxWithConstraints(viewport, contentAlignment = Alignment.Center) {
             val card = if (covering) {
@@ -1117,9 +1126,17 @@ fun BernModal(
                 if (height == Dp.Unspecified) Modifier.width(cardWidth).bernFitHeight(most.dp)
                 else Modifier.size(cardWidth, min(height.value, most).dp)
             }
+            val blockOutside = if (dismiss != null && !covering) {
+                Modifier.clickable(
+                    indication = null,
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                ) {}
+            } else {
+                Modifier
+            }
             val surface: @Composable (Modifier) -> Unit = { modifier ->
                 Surface(
-                    modifier = modifier,
+                    modifier = modifier.then(blockOutside),
                     shape = if (covering) RectangleShape else AlertDialogDefaults.shape,
                     color = AlertDialogDefaults.containerColor,
                     tonalElevation = AlertDialogDefaults.TonalElevation,

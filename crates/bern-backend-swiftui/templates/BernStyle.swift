@@ -1487,7 +1487,7 @@ struct BernSearchable<Results: View>: ViewModifier {
     @FocusState private var focused: Bool
 
     func body(content: Content) -> some View {
-        #if os(iOS)
+        #if os(iOS) || os(macOS)
         let replaced = hasResults && !text.wrappedValue.isEmpty
         let field = content
             .opacity(replaced ? 0 : 1)
@@ -1525,7 +1525,7 @@ struct BernSearchable<Results: View>: ViewModifier {
     }
 }
 
-#if os(iOS)
+#if os(iOS) || os(macOS)
 /// What a search finds, in place of the page it searches: a list in the
 /// platform's style. A query that finds nothing says so in the middle of
 /// the page, not in a row of the list.

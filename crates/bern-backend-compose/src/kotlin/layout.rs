@@ -669,8 +669,13 @@ impl Generator<'_> {
             Some(name) => self.exit(Some(name)),
             None => "null".into(),
         };
+        let dismiss = element
+            .action
+            .as_ref()
+            .map(|a| format!(", dismiss = {{ {} }}", self.action(a)))
+            .unwrap_or_default();
         out.open(format!(
-            "BernModal({}, {}, {}, {enter}, {exit}) {{",
+            "BernModal({}, {}, {}, {enter}, {exit}{dismiss}) {{",
             self.length(element, "width")
                 .unwrap_or_else(|| "960.dp".into()),
             // Without a height, as tall as its content.

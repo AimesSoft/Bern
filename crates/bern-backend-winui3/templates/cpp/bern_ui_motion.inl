@@ -300,6 +300,10 @@ struct LayerStack : winrt::implements<LayerStack, IInspectable> {
     /// Whether the element's own Composition visual moves, for controls
     /// that already use it themselves and so refuse Translation and Scale.
     bool handoff = false;
+    /// Whether this layer stack has written a non-identity transform yet; pure
+    /// opacity animations leave CenterPoint/Translation/Scale untouched so
+    /// Composition visual users on the same element do not hit E_ACCESSDENIED.
+    bool transformed = false;
     /// For a navigation view item: its scale holds the line of its
     /// selection pill still, so the pill keeps to the track it slides along
     /// from item to item while a row grows or shrinks.
@@ -383,21 +387,30 @@ struct LayerStack : winrt::implements<LayerStack, IInspectable> {
         if (written == now) return;
         written = now;
         element.Opacity((std::clamp)(opacity, 0.0, 1.0));
+        bool identity = move.x == 0 && move.y == 0 && scale.x == 1 && scale.y == 1;
+        if (!transformed && identity) return;
+        transformed = true;
         if (!handoff) {
             try {
-                element.CenterPoint(center);
                 element.Translation(move);
                 element.Scale(scale);
+                element.CenterPoint(center);
                 return;
             } catch (winrt::hresult_error const&) {
                 handoff = true;
-                xaml::Hosting::ElementCompositionPreview::SetIsTranslationEnabled(element, true);
+                try {
+                    xaml::Hosting::ElementCompositionPreview::SetIsTranslationEnabled(element, true);
+                } catch (winrt::hresult_error const&) {
+                }
             }
         }
-        auto visual = xaml::Hosting::ElementCompositionPreview::GetElementVisual(element);
-        visual.CenterPoint(center);
-        visual.Scale(scale);
-        visual.Properties().InsertVector3(L"Translation", move);
+        try {
+            auto visual = xaml::Hosting::ElementCompositionPreview::GetElementVisual(element);
+            visual.CenterPoint(center);
+            visual.Scale(scale);
+            visual.Properties().InsertVector3(L"Translation", move);
+        } catch (winrt::hresult_error const&) {
+        }
     }
 
     /// Show the element without its move and scale until `Rest(false)`,

@@ -3850,11 +3850,12 @@ pub fn app() -> b::AppDef {{
                 )
             }
             "Modal" => format!(
-                "b::modal(c, b::ModalProps {{ width: {}, height: {}, cover_compact: {}, pose: {} }}, {})",
+                "b::modal(c, b::ModalProps {{ width: {}, height: {}, cover_compact: {}, pose: {}, dismiss: {} }}, {})",
                 self.optional_length(element, "width"),
                 self.optional_length(element, "height"),
                 element.keyword("cover") == Some("compact"),
                 self.pose(element),
+                self.action(element),
                 self.children_along(&element.children, Axis::Column, Along::Layers)
             ),
             "Form" => {

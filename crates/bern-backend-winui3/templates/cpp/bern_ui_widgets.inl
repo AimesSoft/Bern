@@ -1532,13 +1532,18 @@ inline void StyleButton(controls::Button const& button, xaml::UIElement const& m
             static Motion const fade{0.25, 1};
             if (look.shadow) {
                 auto [radius, y, opacity] = *look.shadow;
-                if (cast) cast->Set(radius, y, opacity);
+                if (cast) {
+                    cast->SetActive(true);
+                    cast->Set(radius, y, opacity);
+                }
                 if (shadow && (radius != shadow->radius || y != shadow->y || opacity != shadow->opacity)) {
                     shadow->radius = radius;
                     shadow->y = y;
                     shadow->opacity = opacity;
                     shadow->Draw();
                 }
+            } else if (cast) {
+                cast->SetActive(false);
             }
             xaml::UIElement shown = shadow ? xaml::UIElement(shadow->image) : xaml::UIElement(cast->host);
             LayerTo(shown, "state", 0, 0, 1, 1, look.shadow ? 1 : 0, &fade);
@@ -1566,9 +1571,11 @@ inline controls::Grid Shadowed(controls::Button const& button, StyleDef const* s
     if (!shadows) return wrapper;
     if (Surfaceless(*style)) {
         cast = std::make_shared<ContentShadow>();
+        cast->SetActive(false);
         LayersOf(cast->host)->Get("state")->opacity->Set(0);
         wrapper.Children().InsertAt(0, cast->host);
         cast->Follow(button);
+        Reactive::OnCleanup([cast] { cast->Detach(); });
         return wrapper;
     }
     shadow = std::make_shared<ShadowImage>();
@@ -1857,9 +1864,11 @@ inline void IconButton(Parent const& p, Ctx const& ctx, IconButtonProps props) {
     std::string_view prominence = props.prominence ? props.prominence : "";
     bool sized = props.shape && props.shape->height.Given();
     bool accent = prominence == "prominent";
+    bool plain = prominence == "plain";
+    bool drawsSurface = props.style && (props.style->base.background || props.style->base.border || props.style->base.fill);
     if (accent) {
         if (auto style = Styles::Named(L"AccentButtonStyle")) button.Style(style);
-    } else if (!props.style || !props.style->draws) {
+    } else if (plain || !drawsSurface) {
         Styles::MakeSubtle(button);
     }
     // A square around the icon: `height`, a style's control size, or the
@@ -2169,6 +2178,164 @@ inline xaml::Style PresenterTheme(wchar_t const* target, std::string const& appe
     return style;
 }
 
+#if BERN_WINUI
+inline bool DesktopAcrylicAvailable() {
+    try {
+        return winrt::Microsoft::UI::Composition::SystemBackdrops::DesktopAcrylicController::IsSupported();
+    } catch (winrt::hresult_error const&) {
+        return false;
+    }
+}
+
+/// Native WinUI 3 `DesktopAcrylicController` system backdrop pinned to an
+/// explicit light or dark theme, so transient flyouts and menus opened from a
+/// dark surface inside a light window (or vice versa) keep matching dark/light
+/// frosted glass instead of inheriting the window's theme.
+struct ThemedAcrylicBackdrop : media::SystemBackdropT<ThemedAcrylicBackdrop> {
+    winrt::Microsoft::UI::Composition::SystemBackdrops::SystemBackdropTheme theme;
+    winrt::Microsoft::UI::Composition::SystemBackdrops::DesktopAcrylicController controller{nullptr};
+    winrt::Microsoft::UI::Composition::SystemBackdrops::SystemBackdropConfiguration config{nullptr};
+
+    explicit ThemedAcrylicBackdrop(bool dark)
+        : theme(dark ? winrt::Microsoft::UI::Composition::SystemBackdrops::SystemBackdropTheme::Dark
+                     : winrt::Microsoft::UI::Composition::SystemBackdrops::SystemBackdropTheme::Light) {}
+
+    void SetDark(bool dark) {
+        using winrt::Microsoft::UI::Composition::SystemBackdrops::SystemBackdropTheme;
+        theme = dark ? SystemBackdropTheme::Dark : SystemBackdropTheme::Light;
+        if (config) config.Theme(theme);
+    }
+
+    void OnTargetConnected(winrt::Microsoft::UI::Composition::ICompositionSupportsSystemBackdrop const& target,
+        xaml::XamlRoot const& xamlRoot) {
+        SystemBackdropT::OnTargetConnected(target, xamlRoot);
+        using namespace winrt::Microsoft::UI::Composition::SystemBackdrops;
+        if (!DesktopAcrylicController::IsSupported()) return;
+        config = GetDefaultSystemBackdropConfiguration(target, xamlRoot);
+        config.IsInputActive(true);
+        config.Theme(theme);
+        controller = DesktopAcrylicController();
+        controller.Kind(DesktopAcrylicKind::Thin);
+        controller.SetSystemBackdropConfiguration(config);
+        controller.AddSystemBackdropTarget(target);
+    }
+
+    void OnTargetDisconnected(winrt::Microsoft::UI::Composition::ICompositionSupportsSystemBackdrop const& target) {
+        if (controller) {
+            controller.RemoveSystemBackdropTarget(target);
+            controller.Close();
+            controller = nullptr;
+        }
+        config = nullptr;
+        SystemBackdropT::OnTargetDisconnected(target);
+    }
+
+    void OnDefaultSystemBackdropConfigurationChanged(
+        winrt::Microsoft::UI::Composition::ICompositionSupportsSystemBackdrop const& target,
+        xaml::XamlRoot const& xamlRoot) {
+        if (config) {
+            auto next = GetDefaultSystemBackdropConfiguration(target, xamlRoot);
+            config.IsInputActive(true);
+            config.IsHighContrast(next.IsHighContrast());
+            config.Theme(theme);
+        }
+    }
+};
+#endif
+
+/// Attach a transient results flyout below a search box while it is in use.
+inline void AttachSearchResults(controls::AutoSuggestBox const& box, Ctx const& ctx, SearchProps const& props, Build const& results) {
+    if (!props.field || !results) return;
+    auto content = MakeFlex(false, 4, xaml::Thickness{4, 4, 4, 4});
+    results(Parent::Of(content), ctx);
+    controls::Flyout flyout;
+#if BERN_WINUI
+    bool useAcrylic = DesktopAcrylicAvailable();
+    winrt::com_ptr<ThemedAcrylicBackdrop> backdrop;
+    bool initialDark = ctx.appearance.empty() ? (ctx.win && ctx.win->root && IsDark(ctx.win->root)) : ctx.appearance == "dark";
+    if (useAcrylic) {
+        flyout.ShouldConstrainToRootBounds(false);
+        backdrop = winrt::make_self<ThemedAcrylicBackdrop>(initialDark);
+        flyout.SystemBackdrop(backdrop.as<media::SystemBackdrop>());
+    }
+    auto applyStyle = [flyout, ctx, backdrop, useAcrylic] {
+        bool dark = ctx.appearance.empty() ? (ctx.win && ctx.win->root && IsDark(ctx.win->root)) : ctx.appearance == "dark";
+        if (backdrop) backdrop->SetDark(dark);
+        auto look = xaml::Markup::XamlReader::Load(LR"(<Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" TargetType="FlyoutPresenter" />)").as<xaml::Style>();
+        if (auto themed = PresenterTheme(L"FlyoutPresenter", dark ? "dark" : "light")) look.BasedOn(themed);
+        look.Setters().Append(xaml::Setter(xaml::FrameworkElement::RequestedThemeProperty(), winrt::box_value(dark ? xaml::ElementTheme::Dark : xaml::ElementTheme::Light)));
+        if (useAcrylic) {
+            look.Setters().Append(xaml::Setter(controls::Control::BackgroundProperty(), media::SolidColorBrush(winrt::Windows::UI::Colors::Transparent())));
+        }
+        flyout.FlyoutPresenterStyle(look);
+    };
+    applyStyle();
+    if (ctx.win && ctx.win->root && ctx.appearance.empty()) {
+        auto root = ctx.win->root;
+        auto token = root.ActualThemeChanged([applyStyle](auto&&, auto&&) { applyStyle(); });
+        Reactive::OnCleanup([root, token] { root.ActualThemeChanged(token); });
+    }
+#else
+    if (auto style = PresenterTheme(L"FlyoutPresenter", ctx.appearance)) flyout.FlyoutPresenterStyle(style);
+#endif
+    controls::ScrollViewer scroller;
+    scroller.Content(content);
+    scroller.MaxHeight(360);
+    flyout.Content(scroller);
+    auto field = *props.field;
+    auto weakBox = winrt::make_weak(box);
+    auto open = std::make_shared<bool>(false);
+    // The field's text box inside the search box has the focus.
+    auto focused = std::make_shared<bool>(false);
+    bool suggest = props.suggest;
+    auto show = [weakBox, flyout, open, focused, ctx, field, suggest] {
+        auto box = weakBox.get();
+        if (!box || !box.XamlRoot()) return;
+        bool isFocused = *focused || box.FocusState() != xaml::FocusState::Unfocused;
+        bool typed = suggest || !R::AsText(ctx.Peek(field)).empty();
+        if (isFocused && typed && !*open) {
+            controls::Primitives::FlyoutShowOptions options;
+            options.ShowMode(controls::Primitives::FlyoutShowMode::Transient);
+            options.Placement(controls::Primitives::FlyoutPlacementMode::BottomEdgeAlignedLeft);
+            flyout.ShowAt(box, options);
+        } else if (!typed && *open) {
+            flyout.Hide();
+        }
+    };
+    flyout.Opened([open, weakBox, scroller](auto&&, auto&&) {
+        *open = true;
+        if (auto box = weakBox.get()) scroller.MinWidth((std::max)(200.0, box.ActualWidth()));
+        Snapshot::Schedule();
+    });
+    flyout.Closed([open](auto&&, auto&&) {
+        *open = false;
+        Snapshot::Schedule();
+    });
+    box.GotFocus([show, focused](auto&&, auto&&) {
+        *focused = true;
+        show();
+    });
+    box.LostFocus([focused](auto&&, auto&&) { *focused = false; });
+    box.TextChanged([focused, show](controls::AutoSuggestBox const&, controls::AutoSuggestBoxTextChangedEventArgs const& args) {
+        if (args.Reason() == controls::AutoSuggestionBoxTextChangeReason::UserInput) {
+            *focused = true;
+            show();
+        }
+    });
+    Reactive::Run([ctx, field, show] {
+        ctx.Read(field);
+        Reactive::Untrack([&] {
+            show();
+            return 0;
+        });
+    });
+    // Choosing a result closes the list after the button's Click runs.
+    content.AddHandler(xaml::UIElement::TappedEvent(), winrt::box_value(xaml::Input::TappedEventHandler([flyout](auto&&, auto&&) {
+        Host::Post([flyout] { flyout.Hide(); });
+    })), true);
+    Reactive::OnCleanup([flyout] { flyout.Hide(); });
+}
+
 /// A search field; with results, they show below it while it is in use.
 inline void Search(Parent const& p, Ctx const& ctx, SearchProps props, Build const& results) {
     if (!props.field) return;
@@ -2180,55 +2347,7 @@ inline void Search(Parent const& p, Ctx const& ctx, SearchProps props, Build con
     else if (!ctx.toolbar) SetRole(box, L"bern-fill-width");
     if (props.height) box.Height(*props.height);
     if (props.fontSize) box.FontSize(*props.fontSize);
-    if (results) {
-        auto content = MakeFlex(false, 4, xaml::Thickness{4, 4, 4, 4});
-        results(Parent::Of(content), ctx);
-        controls::Flyout flyout;
-        if (auto style = PresenterTheme(L"FlyoutPresenter", ctx.appearance)) flyout.FlyoutPresenterStyle(style);
-        controls::ScrollViewer scroller;
-        scroller.Content(content);
-        scroller.MaxHeight(360);
-        flyout.Content(scroller);
-        auto field = *props.field;
-        auto weakBox = winrt::make_weak(box);
-        auto open = std::make_shared<bool>(false);
-        // The field's text box inside the search box has the focus.
-        auto focused = std::make_shared<bool>(false);
-        bool suggest = props.suggest;
-        auto show = [weakBox, flyout, open, focused, ctx, field, suggest] {
-            auto box = weakBox.get();
-            if (!box) return;
-            bool typed = suggest || !R::AsText(ctx.Peek(field)).empty();
-            if (*focused && typed && !*open) {
-                controls::Primitives::FlyoutShowOptions options;
-                options.ShowMode(controls::Primitives::FlyoutShowMode::Transient);
-                options.Placement(controls::Primitives::FlyoutPlacementMode::BottomEdgeAlignedLeft);
-                flyout.ShowAt(box, options);
-            } else if (!typed && *open) {
-                flyout.Hide();
-            }
-        };
-        flyout.Opened([open, weakBox, scroller](auto&&, auto&&) {
-            *open = true;
-            if (auto box = weakBox.get()) scroller.MinWidth(box.ActualWidth());
-        });
-        flyout.Closed([open](auto&&, auto&&) { *open = false; });
-        box.GotFocus([show, focused](auto&&, auto&&) {
-            *focused = true;
-            show();
-        });
-        box.LostFocus([focused](auto&&, auto&&) { *focused = false; });
-        Reactive::Run([ctx, field, show] {
-            ctx.Read(field);
-            Reactive::Untrack([&] {
-                show();
-                return 0;
-            });
-        });
-        // Choosing a result closes the list.
-        content.AddHandler(xaml::UIElement::TappedEvent(), winrt::box_value(xaml::Input::TappedEventHandler([flyout](auto&&, auto&&) { flyout.Hide(); })), true);
-        Reactive::OnCleanup([flyout] { flyout.Hide(); });
-    }
+    if (results) AttachSearchResults(box, ctx, props, results);
     Place(p, box);
 }
 
@@ -3845,14 +3964,15 @@ inline void Layers(Parent const& p, Ctx const& ctx, LayersProps props, Build con
     layers.VerticalAlignment(xaml::VerticalAlignment::Top);
     BindLen(ctx, props.width, props.animate, [layers](double w) { layers.Width((std::max)(0.0, w)); });
     BindLen(ctx, props.height, props.animate, [layers](double w) { layers.Height((std::max)(0.0, w)); });
-    if (props.underBars && ctx.win) {
+    std::shared_ptr<Page> overlayPage;
+    if ((props.underBars || props.covers) && ctx.win) {
         // It fills the window both ways, so its containers give it all
         // their room.
         SetRole(layers, L"bern-layers-wh");
         layers.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
         layers.VerticalAlignment(xaml::VerticalAlignment::Stretch);
-        layers.Resources().Insert(winrt::box_value(L"bern.underBars"), winrt::box_value(true));
         Win* win = ctx.win;
+        layers.Resources().Insert(winrt::box_value(L"bern.underBars"), winrt::box_value(true));
         win->underBars.Set(win->underBars.Peek() + 1);
         Reactive::OnCleanup([win] { win->underBars.Set(win->underBars.Peek() - 1); });
         static uint64_t serial = 0;
@@ -3868,6 +3988,8 @@ inline void Layers(Parent const& p, Ctx const& ctx, LayersProps props, Build con
         if (props.covers) {
             win->coverings.emplace_back(token, ctx.appearance);
             win->covering.Set(win->covering.Peek() + 1);
+            overlayPage = std::make_shared<Page>();
+            overlayPage->win = win;
             Reactive::OnCleanup([win, token] {
                 std::erase_if(win->coverings, [token](auto const& page) { return page.first == token; });
                 win->covering.Set(win->covering.Peek() - 1);
@@ -3880,17 +4002,60 @@ inline void Layers(Parent const& p, Ctx const& ctx, LayersProps props, Build con
         layers.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
         layers.VerticalAlignment(xaml::VerticalAlignment::Stretch);
     }
-    children(Parent::Aligned(layers, h, v), ctx);
-    if (p.window && !props.underBars && ctx.win) KeepBelowBars(layers, *ctx.win);
-    // Layers that are all backdrops fill where they stand, as one alone
-    // would.
-    if (layers.Children().Size() > 0 && !props.width.Given() && !props.height.Given()) {
-        bool backdrops = true;
-        for (auto child : layers.Children()) backdrops = backdrops && Backdrop(child);
-        if (backdrops) {
-            SetRole(layers, L"bern-layers-wh");
-            layers.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
-            layers.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+    auto childCtx = ctx;
+    if (overlayPage) childCtx.page = overlayPage;
+    children(Parent::Aligned(layers, h, v), childCtx);
+    if (!props.underBars && ctx.win) {
+        bool hasUnder = false, hasRegular = false;
+        for (auto const& child : layers.Children()) {
+            if (UnderBars(child)) hasUnder = true;
+            else hasRegular = true;
+        }
+        if (p.window || (hasUnder && hasRegular)) KeepBelowBars(layers, *ctx.win);
+    }
+    if (overlayPage && ctx.win) {
+        auto bar = Header(overlayPage, nullptr, false);
+        bar.Resources().Insert(winrt::box_value(L"bern.underBars"), winrt::box_value(true));
+        bar.VerticalAlignment(xaml::VerticalAlignment::Top);
+        bar.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+        if (!ctx.appearance.empty()) bar.RequestedTheme(ThemeNamed(ctx.appearance));
+        controls::Canvas::SetZIndex(bar, 2);
+        Win* win = ctx.win;
+        Reactive::Run([bar, win] {
+            double inset = win->fullscreen.Get() || win->owner ? 0.0 : win->rightInset.Get();
+#if !BERN_WINUI
+            if (inset <= 0 && !win->fullscreen.Get() && !win->owner) inset = 138.0;
+#endif
+            double top = kWinUI && !win->owner ? 6.0 : 12.0;
+            bar.Margin(xaml::Thickness{16, top, inset + 12, 0});
+#if BERN_WINUI
+            WindowManager::QueueTitleBarPassthrough(win);
+#endif
+        });
+        layers.Children().Append(bar);
+    }
+    // Layers that are all backdrops fill along each unconstrained axis, as
+    // a single backdrop (`Canvas` or `Rail`) would on its own.
+    if (layers.Children().Size() > 0 && (!props.width.Given() || !props.height.Given())) {
+        bool allFillW = true, allFillH = true;
+        for (auto child : layers.Children()) {
+            auto r = RoleOf(Unwrapped(child));
+            bool fw = r == L"bern-canvas" || r == L"bern-rail-w" || r == L"bern-rail-wh" || r == L"bern-layers-w" || r == L"bern-layers-wh" || r == L"bern-fill" || r == L"bern-fill-width";
+            bool fh = r == L"bern-canvas" || r == L"bern-rail-h" || r == L"bern-rail-wh" || r == L"bern-layers-h" || r == L"bern-layers-wh" || r == L"bern-fill" || r == L"bern-fill-height";
+            allFillW = allFillW && fw;
+            allFillH = allFillH && fh;
+        }
+        bool wantW = !props.width.Given() && allFillW;
+        bool wantH = !props.height.Given() && allFillH;
+        if (wantW || wantH) {
+            auto cur = std::wstring(RoleOf(layers));
+            bool hasW = wantW || cur == L"bern-layers-w" || cur == L"bern-layers-wh";
+            bool hasH = wantH || cur == L"bern-layers-h" || cur == L"bern-layers-wh";
+            if (hasW && hasH) SetRole(layers, L"bern-layers-wh");
+            else if (hasW) SetRole(layers, L"bern-layers-w");
+            else if (hasH) SetRole(layers, L"bern-layers-h");
+            if (wantW) layers.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+            if (wantH) layers.VerticalAlignment(xaml::VerticalAlignment::Stretch);
         }
     }
     // With a backdrop beside other layers and no width of its own, the
@@ -3944,7 +4109,7 @@ inline void Layers(Parent const& p, Ctx const& ctx, LayersProps props, Build con
             cast->Set(radius, y, opacity);
             layers.Children().InsertAt(0, cast->host);
             cast->Follow(layers);
-            Reactive::OnCleanup([cast] {});
+            Reactive::OnCleanup([cast] { cast->Detach(); });
         }
     }
     if (auto isEnabled = Enabled(ctx, props.enabled)) Reactive::Run([holder, isEnabled] { holder.IsEnabled(isEnabled()); });
@@ -4150,7 +4315,12 @@ inline controls::Image SdrImage(PictureProps const& props, std::vector<uint8_t> 
         image.VerticalAlignment(xaml::VerticalAlignment::Top);
     }
     if ((props.fixed || props.decodeMax || props.saturation) && !bytes.empty()) {
-        DecodePicture(winrt::make_weak(image), std::move(bytes), props.source, props, props.saturation ? LaterScope() : nullptr);
+        PictureProps decode = props;
+        if (!props.fixed && props.decodeMax) {
+            decode.width.reset();
+            decode.height.reset();
+        }
+        DecodePicture(winrt::make_weak(image), std::move(bytes), props.source, decode, props.saturation ? LaterScope() : nullptr);
     } else {
         media::Imaging::BitmapImage bitmap;
         image.Source(bitmap);
@@ -4649,28 +4819,41 @@ inline controls::Border MakeSkeletonShape(double baseOpacity, bool pulse, double
     double opacity = (std::clamp)(baseOpacity, 0.0, 1.0);
     if (pulse && !Reduced()) {
         shape.Opacity(1.0);
+        // Claim the Composition visual before any motion LayerStack can write
+        // UIElement.CenterPoint on this border.
+        try {
+            (void)xaml::Hosting::ElementCompositionPreview::GetElementVisual(shape);
+        } catch (winrt::hresult_error const&) {
+        }
         auto startPulse = [opacity](controls::Border const& border) {
             if (Reduced()) {
                 border.Opacity(opacity);
                 return;
             }
-            auto visual = xaml::Hosting::ElementCompositionPreview::GetElementVisual(border);
-            auto compositor = visual.Compositor();
-            auto anim = compositor.CreateScalarKeyFrameAnimation();
-            auto ease = compositor.CreateCubicBezierEasingFunction(float2{0.42f, 0.0f}, float2{0.58f, 1.0f});
-            anim.InsertKeyFrame(0.0f, static_cast<float>(opacity));
-            anim.InsertKeyFrame(0.5f, static_cast<float>(opacity * 0.55), ease);
-            anim.InsertKeyFrame(1.0f, static_cast<float>(opacity), ease);
-            anim.Duration(std::chrono::milliseconds(1800));
-            anim.IterationBehavior(composition::AnimationIterationBehavior::Forever);
-            visual.StartAnimation(L"Opacity", anim);
+            try {
+                auto visual = xaml::Hosting::ElementCompositionPreview::GetElementVisual(border);
+                auto compositor = visual.Compositor();
+                auto anim = compositor.CreateScalarKeyFrameAnimation();
+                auto ease = compositor.CreateCubicBezierEasingFunction(float2{0.42f, 0.0f}, float2{0.58f, 1.0f});
+                anim.InsertKeyFrame(0.0f, static_cast<float>(opacity));
+                anim.InsertKeyFrame(0.5f, static_cast<float>(opacity * 0.55), ease);
+                anim.InsertKeyFrame(1.0f, static_cast<float>(opacity), ease);
+                anim.Duration(std::chrono::milliseconds(1800));
+                anim.IterationBehavior(composition::AnimationIterationBehavior::Forever);
+                visual.StartAnimation(L"Opacity", anim);
+            } catch (winrt::hresult_error const&) {
+                border.Opacity(opacity);
+            }
         };
         shape.Loaded([startPulse](IInspectable const& sender, auto&&) {
             startPulse(sender.as<controls::Border>());
         });
         shape.Unloaded([](IInspectable const& sender, auto&&) {
-            auto visual = xaml::Hosting::ElementCompositionPreview::GetElementVisual(sender.as<xaml::UIElement>());
-            visual.StopAnimation(L"Opacity");
+            try {
+                auto visual = xaml::Hosting::ElementCompositionPreview::GetElementVisual(sender.as<xaml::UIElement>());
+                visual.StopAnimation(L"Opacity");
+            } catch (winrt::hresult_error const&) {
+            }
         });
     } else {
         shape.Opacity(opacity);
@@ -4887,10 +5070,20 @@ inline void Image(Parent const& p, Ctx const& ctx, ImageProps props) {
     }
     props.width = width;
     props.height = height;
-    // A picture that sets width or height without animating them, and does
-    // not fly, decodes at the size it shows (including conditional widths).
+    // A picture that sets width or height without animating them decodes on a
+    // background thread at twice its display pixels. Shared-element (`hero:`)
+    // pictures also decode off the UI thread, capped generously so they stay
+    // crisp while flying to a larger frame without blocking the UI thread.
     picture.fixed = !props.flies && !props.animate && !picture.fills && (picture.width || picture.height);
-    if (!props.flies) picture.decodeMax = props.decodeMax;
+    if (!props.flies) {
+        picture.decodeMax = props.decodeMax;
+    } else {
+        double floor = 512.0;
+        if (picture.width) floor = (std::max)(floor, *picture.width);
+        if (picture.height) floor = (std::max)(floor, *picture.height);
+        if (props.decodeMax) floor = (std::max)(floor, *props.decodeMax);
+        picture.decodeMax = floor;
+    }
     picture.scale = ctx.win ? ctx.win->Scale() : 1.0;
     if (props.saturation.Given()) {
         auto sat = std::make_shared<Cell<double>>(1.0);
@@ -5476,10 +5669,27 @@ inline void ContextMenuOn(Ctx const& ctx, xaml::UIElement const& element, std::v
     auto scope = std::make_shared<Scope>();
     Reactive::OnCleanup([scope] { scope->Dispose(); });
     auto flyout = std::make_shared<controls::MenuFlyout>(nullptr);
-    element.ContextRequested([plan, scope, flyout](xaml::UIElement const& sender, xaml::Input::ContextRequestedEventArgs const& args) {
+    std::string appearance = ctx.appearance;
+    element.ContextRequested([plan, scope, flyout, appearance](xaml::UIElement const& sender, xaml::Input::ContextRequestedEventArgs const& args) {
         if (scope->disposed) return;
         if (!*flyout) {
             *flyout = controls::MenuFlyout();
+            if (!appearance.empty()) {
+                bool dark = appearance == "dark";
+                auto theme = dark ? xaml::ElementTheme::Dark : xaml::ElementTheme::Light;
+#if BERN_WINUI
+                auto style = xaml::Markup::XamlReader::Load(LR"(<Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" TargetType="MenuFlyoutPresenter" />)").as<xaml::Style>();
+                if (auto themed = PresenterTheme(L"MenuFlyoutPresenter", appearance)) style.BasedOn(themed);
+                style.Setters().Append(xaml::Setter(xaml::FrameworkElement::RequestedThemeProperty(), winrt::box_value(theme)));
+                if (DesktopAcrylicAvailable()) {
+                    flyout->SystemBackdrop(winrt::make<ThemedAcrylicBackdrop>(dark));
+                    style.Setters().Append(xaml::Setter(controls::Control::BackgroundProperty(), media::SolidColorBrush(winrt::Windows::UI::Colors::Transparent())));
+                }
+                flyout->MenuFlyoutPresenterStyle(style);
+#else
+                if (auto style = PresenterTheme(L"MenuFlyoutPresenter", appearance)) flyout->MenuFlyoutPresenterStyle(style);
+#endif
+            }
             scope->Run([&] { MenuItems(*flyout, *plan); });
         }
         controls::Primitives::FlyoutShowOptions options;
@@ -5488,6 +5698,27 @@ inline void ContextMenuOn(Ctx const& ctx, xaml::UIElement const& element, std::v
         flyout->ShowAt(sender, options);
         args.Handled(true);
     });
+}
+
+/// Trailing caption-button room in a top bar that sits under the title bar.
+inline void WindowButtons(Parent const& p, Ctx const& ctx) {
+    controls::Border room;
+    room.Height(1);
+    room.IsHitTestVisible(false);
+    if (Win* win = ctx.win) {
+        Reactive::Run([room, win] {
+            bool shown = !win->fullscreen.Get() && !win->owner;
+            double inset = shown ? win->rightInset.Get() : 0.0;
+#if !BERN_WINUI
+            if (shown && inset <= 0) inset = 138.0;
+#endif
+            room.Width((std::max)(0.0, inset));
+            room.Visibility(inset > 0 ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
+        });
+    } else {
+        room.Visibility(xaml::Visibility::Collapsed);
+    }
+    p.Add(room);
 }
 
 /// A menu button. Each item is registered on its own, so external entries

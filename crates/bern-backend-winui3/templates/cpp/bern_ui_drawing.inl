@@ -600,17 +600,13 @@ struct ContentShadow : std::enable_shared_from_this<ContentShadow> {
     controls::Canvas host;
     double radius = 0, y = 0, opacity = 0;
 
-    /// Cast what `content` shows, from now on.
+    /// Cast what `content` shows, from now on. Stays dormant (no window-wide
+    /// `LayoutUpdated` listener and no alpha-mask allocations) until a
+    /// non-zero shadow is actually active.
     void Follow(xaml::FrameworkElement const& content) {
         shown = winrt::make_weak(content);
         host.IsHitTestVisible(false);
-        auto visual = xaml::Hosting::ElementCompositionPreview::GetElementVisual(host);
-        layer = visual.Compositor().CreateContainerVisual();
-        xaml::Hosting::ElementCompositionPreview::SetElementChildVisual(host, layer);
-        std::weak_ptr<ContentShadow> weak = shared_from_this();
-        content.LayoutUpdated([weak](auto&&, auto&&) {
-            if (auto self = weak.lock()) self->Refresh();
-        });
+        Sync();
     }
 
     void Set(double blur, double down, double alpha) {
@@ -618,7 +614,31 @@ struct ContentShadow : std::enable_shared_from_this<ContentShadow> {
         radius = blur;
         y = down;
         opacity = alpha;
-        for (auto& cast : casts) Shade(cast.shadow);
+        if (Active()) {
+            Sync();
+            for (auto& cast : casts) Shade(cast.shadow);
+        } else {
+            Clear();
+        }
+    }
+
+    /// Pause layout tracking while the shadow host is faded out (e.g. an
+    /// unhovered card), keeping existing sprites only while visible.
+    void SetActive(bool on) {
+        if (enabled == on) return;
+        enabled = on;
+        if (Active()) {
+            Sync();
+        } else {
+            Unsubscribe();
+            ClearCasts();
+        }
+    }
+
+    void Detach() {
+        Unsubscribe();
+        ClearCasts();
+        shown = nullptr;
     }
 
 private:
@@ -633,6 +653,47 @@ private:
     winrt::weak_ref<xaml::FrameworkElement> shown;
     composition::ContainerVisual layer{nullptr};
     std::vector<Cast> casts;
+    winrt::event_token layoutToken{};
+    bool enabled = true;
+
+    bool Active() const { return enabled && radius > 0 && opacity > 0; }
+
+    void Unsubscribe() {
+        if (layoutToken.value) {
+            if (auto content = shown.get()) content.LayoutUpdated(layoutToken);
+            layoutToken = {};
+        }
+    }
+
+    void ClearCasts() {
+        if (layer) {
+            for (auto& cast : casts) layer.Children().Remove(cast.sprite);
+        }
+        casts.clear();
+    }
+
+    void Clear() {
+        Unsubscribe();
+        ClearCasts();
+    }
+
+    void Sync() {
+        if (!Active()) return;
+        auto content = shown.get();
+        if (!content) return;
+        if (!layer) {
+            auto visual = xaml::Hosting::ElementCompositionPreview::GetElementVisual(host);
+            layer = visual.Compositor().CreateContainerVisual();
+            xaml::Hosting::ElementCompositionPreview::SetElementChildVisual(host, layer);
+        }
+        if (!layoutToken.value) {
+            std::weak_ptr<ContentShadow> weak = shared_from_this();
+            layoutToken = content.LayoutUpdated([weak](auto&&, auto&&) {
+                if (auto self = weak.lock()) self->Refresh();
+            });
+        }
+        Refresh();
+    }
 
     void Shade(composition::DropShadow const& shadow) const {
         shadow.Color(winrt::Windows::UI::Color{255, 0, 0, 0});
@@ -643,6 +704,7 @@ private:
 
     /// A cast for each element that shows, where it stands now.
     void Refresh() {
+        if (!Active()) return;
         auto content = shown.get();
         if (!content || !layer) return;
         auto compositor = layer.Compositor();
