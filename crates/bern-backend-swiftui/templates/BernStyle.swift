@@ -149,6 +149,36 @@ enum BernShortcuts {
         if shift { parts.append("shift") }
         return parts
     }
+
+    #if os(macOS)
+    /// Tokens of `ShortcutInput`s currently waiting for a key.
+    @MainActor private static var recordingTokens: Set<UUID> = []
+    @MainActor static var isRecording: Bool { !recordingTokens.isEmpty }
+    @MainActor static func beginRecording(_ token: UUID) { recordingTokens.insert(token) }
+    @MainActor static func endRecording(_ token: UUID) { recordingTokens.remove(token) }
+
+    /// AppKit's key codes of the keys Bern names.
+    static let macKeyCodes: [UInt16: String] = [
+        53: "escape", 49: "space", 36: "return", 76: "return", 48: "tab", 51: "delete", 117: "delete",
+        123: "left", 124: "right", 125: "down", 126: "up", 115: "home", 119: "end",
+        116: "pageup", 121: "pagedown",
+    ]
+
+    /// Whether a macOS key-down event presses `shortcut`.
+    static func matches(event: NSEvent, shortcut: KeyboardShortcut) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let held = modifiers(
+            command: flags.contains(.command), control: flags.contains(.control),
+            option: flags.contains(.option), shift: flags.contains(.shift))
+        guard let key = macKeyCodes[event.keyCode]
+                ?? event.characters(byApplyingModifiers: [])?.lowercased(),
+              let pressed = normalized((held + [key]).joined(separator: "+")),
+              !pressed.isEmpty,
+              let candidate = keyboard(pressed)
+        else { return false }
+        return candidate.key == shortcut.key && candidate.modifiers == shortcut.modifiers
+    }
+    #endif
 }
 
 extension View {
@@ -8053,20 +8083,27 @@ struct BernKeyShortcut: View {
     let shortcut: KeyboardShortcut?
     #endif
     let enabled: Bool
+    let quiet: Bool
     let action: () -> Void
+    #if os(macOS)
+    @Environment(BernWindowContext.self) private var window: BernWindowContext?
+    @State private var quietEntry: BernWindowContext.QuietShortcut?
+    #endif
 
     /// A shortcut that follows state may be none for a while: the key
     /// does nothing then.
     #if os(tvOS)
-    init(remote: BernRemoteKey?, enabled: Bool, action: @escaping () -> Void) {
+    init(remote: BernRemoteKey?, enabled: Bool, quiet: Bool = false, action: @escaping () -> Void) {
         self.remote = remote
         self.enabled = enabled
+        self.quiet = quiet
         self.action = action
     }
     #elseif !os(watchOS)
-    init(shortcut: KeyboardShortcut?, enabled: Bool, action: @escaping () -> Void) {
+    init(shortcut: KeyboardShortcut?, enabled: Bool, quiet: Bool = false, action: @escaping () -> Void) {
         self.shortcut = shortcut
         self.enabled = enabled
+        self.quiet = quiet
         self.action = action
     }
     #endif
@@ -8074,9 +8111,21 @@ struct BernKeyShortcut: View {
     var body: some View {
         #if os(tvOS)
         Color.clear.frame(width: 0, height: 0).accessibilityHidden(true)
-            .bernRemoteShortcut(remote, enabled: enabled, action: action)
+            .bernRemoteShortcut(remote, enabled: enabled, quiet: quiet, action: action)
         #elseif os(watchOS)
         EmptyView()
+        #elseif os(macOS)
+        Button("", action: action)
+            .keyboardShortcut(shortcut)
+            .disabled(!enabled || shortcut == nil)
+            .opacity(0)
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+            .onAppear { syncQuiet(mounted: true) }
+            .onDisappear { syncQuiet(mounted: false) }
+            .onChange(of: enabled) { _, _ in syncQuiet(mounted: true) }
+            .onChange(of: shortcut?.key) { _, _ in syncQuiet(mounted: true) }
+            .onChange(of: shortcut?.modifiers.rawValue) { _, _ in syncQuiet(mounted: true) }
         #else
         Button("", action: action)
             .keyboardShortcut(shortcut)
@@ -8086,6 +8135,27 @@ struct BernKeyShortcut: View {
             .accessibilityHidden(true)
         #endif
     }
+
+    #if os(macOS)
+    private func syncQuiet(mounted: Bool) {
+        guard let window else { return }
+        if !mounted || !quiet {
+            if let entry = quietEntry {
+                window.quietShortcuts.removeAll { $0 === entry }
+                quietEntry = nil
+            }
+            return
+        }
+        if let entry = quietEntry {
+            entry.shortcut = shortcut
+            entry.enabled = enabled
+        } else {
+            let entry = BernWindowContext.QuietShortcut(shortcut: shortcut, enabled: enabled)
+            window.quietShortcuts.append(entry)
+            quietEntry = entry
+        }
+    }
+    #endif
 }
 
 // MARK: - Shortcut inputs
@@ -8105,6 +8175,7 @@ struct BernShortcutInput: View {
     @State private var recording = false
     #if os(macOS)
     @State private var monitor: Any?
+    @State private var recordingToken = UUID()
     #elseif os(iOS)
     @FocusState private var focused: Bool
     #endif
@@ -8162,18 +8233,12 @@ struct BernShortcutInput: View {
     }
 
     #if os(macOS)
-    /// AppKit's key codes of the keys Bern names.
-    private static let codes: [UInt16: String] = [
-        49: "space", 36: "return", 76: "return", 48: "tab", 51: "delete", 117: "delete",
-        123: "left", 124: "right", 125: "down", 126: "up", 115: "home", 119: "end",
-        116: "pageup", 121: "pagedown",
-    ]
-
     /// Take key presses before windows and menus do, while waiting: the
     /// shortcut being chosen must not run what it is bound to now. A
     /// click anywhere stops waiting.
     private func listen() {
         stop()
+        BernShortcuts.beginRecording(recordingToken)
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown]) { event in
             guard recording else { return event }
             if event.type != .keyDown {
@@ -8188,7 +8253,7 @@ struct BernShortcutInput: View {
                 finish(nil)
                 return nil
             }
-            let key = Self.codes[event.keyCode]
+            let key = BernShortcuts.macKeyCodes[event.keyCode]
                 ?? event.characters(byApplyingModifiers: [])?.lowercased()
             if key == "delete" && held.isEmpty {
                 finish("")
@@ -8203,6 +8268,7 @@ struct BernShortcutInput: View {
     }
 
     private func stop() {
+        BernShortcuts.endRecording(recordingToken)
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
     }

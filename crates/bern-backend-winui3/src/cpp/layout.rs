@@ -310,6 +310,10 @@ impl Generator<'_> {
                 ("keys", Self::keyword(element, "key")),
                 ("bound", self.shortcut_keys(element, "key")),
                 ("enabled", self.enabled(element)),
+                (
+                    "quiet",
+                    (element.keyword("quiet") == Some("true")).then(|| "true".to_string()),
+                ),
                 ("action", self.action(element)),
             ])
         ));

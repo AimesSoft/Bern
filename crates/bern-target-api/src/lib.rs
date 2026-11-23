@@ -247,6 +247,9 @@ pub mod feature {
     /// `Window(idle_enabled:)`: idle detection switched on and off by
     /// state. Without it a target keeps detecting idleness all the time.
     pub const IDLE_CONTROL: &str = "idle_control";
+    /// `Shortcut(quiet: true)`: a key that is no input for `window.idle`.
+    /// Without it the key wakes the window, as every other does.
+    pub const QUIET_SHORTCUTS: &str = "quiet_shortcuts";
     /// `Button(width: fill)`: a system button stretched across its
     /// container, as a phone's main action.
     pub const FILL_BUTTONS: &str = "fill_buttons";

@@ -165,6 +165,7 @@ const FEATURES: &[&str] = &[
     bern_target_api::feature::MODAL_FLOW_TIMER,
     bern_target_api::feature::PAGE_BADGES,
     bern_target_api::feature::IDLE_CONTROL,
+    bern_target_api::feature::QUIET_SHORTCUTS,
     bern_target_api::feature::FILL_BUTTONS,
     bern_target_api::feature::GRID_CELLS,
     bern_target_api::feature::PAGE_SEARCH,

@@ -85,6 +85,7 @@ const FEATURES: &[&str] = &[
     feature::COVER_IMAGES,
     feature::ACCORDION_LAYOUT,
     feature::IDLE_CONTROL,
+    feature::QUIET_SHORTCUTS,
     feature::WINDOW_SHORT,
     feature::CAPSULE_CONTROLS,
     feature::ICON_LABELS,

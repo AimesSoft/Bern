@@ -351,7 +351,7 @@ fn pick_file(ctx: &Ctx, kinds: &'static str, give: Rc<dyn Fn(String)>) {
 pub fn shortcut(ctx: &Ctx, keys: &'static str, run: Act) {
     let at = ctx.clone();
     ctx.win()
-        .add_shortcut(keys, Rc::new(move || run(&at)), None);
+        .add_shortcut(keys, Rc::new(move || run(&at)), None, false);
 }
 
 /// Run `run` on the keys the text `keys` names at each key press, while
@@ -360,7 +360,7 @@ pub fn bound_shortcut(ctx: &Ctx, keys: Str, run: Act) {
     let at = ctx.clone();
     let text = bound_text(ctx, &keys);
     ctx.win()
-        .add_bound_shortcut(text, Rc::new(move || run(&at)), None);
+        .add_bound_shortcut(text, Rc::new(move || run(&at)), None, false);
 }
 
 /// Props of `Shortcut`.
@@ -369,6 +369,8 @@ pub struct KeyShortcutProps {
     /// The text the keys follow instead of `keys`, read at each press.
     pub bound: Option<Str>,
     pub enabled: Option<Get>,
+    /// The keys do not wake `window.idle` or restart its countdown.
+    pub quiet: bool,
 }
 
 /// `Shortcut`: `keys` runs the action while it is mounted and enabled,
@@ -386,8 +388,8 @@ pub fn KeyShortcut(_p: &Parent, ctx: &Ctx, props: KeyShortcutProps, action: Opti
     match &props.bound {
         Some(keys) => ctx
             .win()
-            .add_bound_shortcut(bound_text(ctx, keys), run, active),
-        None => ctx.win().add_shortcut(props.keys, run, active),
+            .add_bound_shortcut(bound_text(ctx, keys), run, active, props.quiet),
+        None => ctx.win().add_shortcut(props.keys, run, active, props.quiet),
     }
 }
 
@@ -2008,6 +2010,26 @@ fn snapping(
         )
     };
     let resting: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
+    let telling = Rc::new(Cell::new(false));
+    let write_position = {
+        let telling = Rc::clone(&telling);
+        let at = at.clone();
+        Rc::new(move |key: Value| {
+            let Some(field) = position else { return };
+            if at.peek(field) == key {
+                return;
+            }
+            struct Reset(Rc<Cell<bool>>);
+            impl Drop for Reset {
+                fn drop(&mut self) {
+                    self.0.set(false);
+                }
+            }
+            telling.set(true);
+            let _reset = Reset(Rc::clone(&telling));
+            at.write(field, key);
+        })
+    };
     {
         let nearest = Rc::clone(&nearest);
         let scroll_to = Rc::clone(&scroll_to);
@@ -2018,6 +2040,7 @@ fn snapping(
         let resting = Rc::clone(&resting);
         let browsing = props.browsing;
         let moved_by_grid = Rc::downgrade(scope);
+        let write_position = Rc::clone(&write_position);
         adjustment.connect_value_changed(move |adjustment| {
             if moving_by_us.get()
                 || !placed.get()
@@ -2033,6 +2056,9 @@ fn snapping(
             {
                 at.write(field, Value::Bool(true));
             }
+            if !snap && let Some((key, _, _)) = nearest(false) {
+                write_position(key);
+            }
             if let Some(source) = resting.borrow_mut().take() {
                 source.remove();
             }
@@ -2042,6 +2068,7 @@ fn snapping(
             let at = at.clone();
             let adjustment = adjustment.clone();
             let done = Rc::clone(&resting);
+            let write_position = Rc::clone(&write_position);
             *resting.borrow_mut() = Some(glib::timeout_add_local_once(
                 Duration::from_millis(160),
                 move || {
@@ -2049,7 +2076,7 @@ fn snapping(
                     if let Some(field) = browsing {
                         at.write(field, Value::Bool(false));
                     }
-                    let Some((key, _, offset)) = nearest(true) else {
+                    let Some((key, _, offset)) = nearest(snap) else {
                         return;
                     };
                     let settle = {
@@ -2062,11 +2089,7 @@ fn snapping(
                     } else {
                         settle();
                     }
-                    if let Some(field) = position
-                        && at.peek(field) != key
-                    {
-                        at.write(field, key);
-                    }
+                    write_position(key);
                 },
             ));
         });
@@ -2077,6 +2100,7 @@ fn snapping(
         let offset_of = Rc::clone(&offset_of);
         let scroll_to = Rc::clone(&scroll_to);
         let placed = Rc::clone(&placed);
+        let telling = Rc::clone(&telling);
         let adjustment = adjustment.clone();
         let rest_offset = Rc::clone(&rest_offset);
         let arrival_nudge = props.arrival_nudge;
@@ -2085,7 +2109,7 @@ fn snapping(
             let key = at.read(field);
             scope.changed.track();
             untrack(|| {
-                if !placed.get() {
+                if !placed.get() || telling.get() {
                     return;
                 }
                 let Some((_, item)) = scope

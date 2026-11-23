@@ -63,6 +63,7 @@ The optional GPUI target (`ui = "gpui"`, macOS, Windows, Linux) is a first versi
 | `sidebar_header` | Fixed sidebar header bar | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
 | `untitled_detail` | Untitled detail | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
 | `idle_control` | Turning idle detection on and off by state (`Window(idle_enabled:)`) | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
+| `quiet_shortcuts` | Shortcuts that are no input for idle detection (`Shortcut(quiet:)`) | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
 | `fill_buttons` | System buttons that fill the container horizontally (`Button(width: fill)`) | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
 | `page_search` | A system search field in the page (`Search` not inside a `Toolbar` / `Sidebar`), with results listed below the field | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
 | `window_short` | Window height below the compact breakpoint (`window.short`), such as a phone in landscape | Supported | Supported | Supported | Supported | Supported | Supported | Supported |

@@ -991,7 +991,7 @@ struct BernWindowBehavior: ViewModifier {
             // Touches are watched on the window, outside SwiftUI's gestures:
             // a drag gesture here would keep the navigation bar's buttons
             // from being tapped.
-            .background(BernTouchWatcher { touched() })
+            .background(BernTouchWatcher(windowKind: context.kindID) { touched() })
             #if os(iOS)
             .background(BernHingeWatcher(window: context))
             .onChange(of: immersive && context.idle, initial: true) { _, hidden in
@@ -1338,15 +1338,18 @@ private struct BernSnapshotScheme: ViewModifier {
 /// Calls `touched` whenever a touch begins anywhere in the window it is in,
 /// without taking part in any gesture.
 private struct BernTouchWatcher: UIViewRepresentable {
+    var windowKind: String = ""
     let touched: @MainActor () -> Void
 
     func makeUIView(context: Context) -> BernTouchWatcherView {
         let view = BernTouchWatcherView()
+        view.watcher.windowKind = windowKind
         view.watcher.touched = { _ in touched() }
         return view
     }
 
     func updateUIView(_ view: BernTouchWatcherView, context: Context) {
+        view.watcher.windowKind = windowKind
         view.watcher.touched = { _ in touched() }
     }
 
@@ -1368,6 +1371,7 @@ final class BernTouchWatcherView: UIView {
 /// Sees each touch begin and then steps aside: it never recognizes, cancels
 /// or delays a touch, so every other gesture works as before.
 final class BernTouchRecognizer: UIGestureRecognizer, UIGestureRecognizerDelegate {
+    var windowKind: String = ""
     var touched: (@MainActor (Set<UITouch>) -> Void)?
 
     init() {
@@ -1385,9 +1389,14 @@ final class BernTouchRecognizer: UIGestureRecognizer, UIGestureRecognizerDelegat
 
     #if os(tvOS)
     /// A press of the remote's buttons counts as a touch: a television
-    /// has nothing else.
+    /// has nothing else. Quiet shortcuts do not wake the window.
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent) {
-        touched?([])
+        let quiet = !presses.isEmpty && presses.allSatisfy {
+            BernRemoteShortcuts.shared.isQuiet($0.type, window: windowKind)
+        }
+        if !quiet {
+            touched?([])
+        }
         super.pressesBegan(presses, with: event)
     }
     #endif
@@ -1799,10 +1808,12 @@ final class BernRemoteShortcuts {
     final class Entry {
         let key: BernRemoteKey
         let window: String
+        let quiet: Bool
         var action: () -> Void
-        init(key: BernRemoteKey, window: String, action: @escaping () -> Void) {
+        init(key: BernRemoteKey, window: String, quiet: Bool = false, action: @escaping () -> Void) {
             self.key = key
             self.window = window
+            self.quiet = quiet
             self.action = action
         }
     }
@@ -1823,6 +1834,21 @@ final class BernRemoteShortcuts {
         guard let entry = entries.last(where: { $0.key == key && $0.window == window }) else { return nil }
         return { entry.action() }
     }
+
+    /// Whether `press` maps to a mounted `quiet` shortcut in `window`.
+    func isQuiet(_ type: UIPress.PressType, window: String) -> Bool {
+        let key: BernRemoteKey
+        switch type {
+        case .menu: key = .back
+        case .playPause: key = .playPause
+        case .leftArrow: key = .left
+        case .rightArrow: key = .right
+        case .upArrow: key = .up
+        case .downArrow: key = .down
+        default: return false
+        }
+        return entries.last(where: { $0.key == key && $0.window == window })?.quiet == true
+    }
 }
 
 extension View {
@@ -1830,14 +1856,15 @@ extension View {
     /// `action`.
     /// A key that follows state may be none for a while: the button
     /// does nothing then.
-    func bernRemoteShortcut(_ key: BernRemoteKey?, enabled: Bool, action: @escaping () -> Void) -> some View {
-        modifier(BernRemoteShortcut(key: key, enabled: enabled, action: action))
+    func bernRemoteShortcut(_ key: BernRemoteKey?, enabled: Bool, quiet: Bool = false, action: @escaping () -> Void) -> some View {
+        modifier(BernRemoteShortcut(key: key, enabled: enabled, quiet: quiet, action: action))
     }
 }
 
 private struct BernRemoteShortcut: ViewModifier {
     let key: BernRemoteKey?
     let enabled: Bool
+    let quiet: Bool
     let action: () -> Void
     @Environment(BernWindowContext.self) private var window
     @State private var entry: BernRemoteShortcuts.Entry?
@@ -1861,12 +1888,12 @@ private struct BernRemoteShortcut: ViewModifier {
 
     private func update() {
         let wanted = shown && enabled ? key : nil
-        if let entry, entry.key != wanted {
+        if let entry, entry.key != wanted || entry.quiet != quiet {
             BernRemoteShortcuts.shared.remove(entry)
             self.entry = nil
         }
         if let wanted, entry == nil {
-            let made = BernRemoteShortcuts.Entry(key: wanted, window: window.kindID, action: action)
+            let made = BernRemoteShortcuts.Entry(key: wanted, window: window.kindID, quiet: quiet, action: action)
             BernRemoteShortcuts.shared.add(made)
             entry = made
         }

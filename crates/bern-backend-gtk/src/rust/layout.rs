@@ -223,10 +223,11 @@ impl Generator<'_> {
     /// enabled.
     pub(super) fn key_shortcut(&self, out: &mut Out, element: &Element) {
         out.line(format!(
-            "b::KeyShortcut(p, c, b::KeyShortcutProps {{ keys: {}, bound: {}, enabled: {} }}, {});",
+            "b::KeyShortcut(p, c, b::KeyShortcutProps {{ keys: {}, bound: {}, enabled: {}, quiet: {} }}, {});",
             string(element.keyword("key").unwrap_or_default()),
             some(self.bound_keys(element, "key")),
             self.enabled(element),
+            element.keyword("quiet") == Some("true"),
             self.action(element),
         ));
     }

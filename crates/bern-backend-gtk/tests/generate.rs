@@ -326,7 +326,7 @@ fn planner_and_gallery_build_for_gtk() {
         // Escape closes the details; the dialog's focus starts on its
         // button; the margins ask whether the window is a television's
         // (never, on a desktop).
-        "b::KeyShortcut(p, c, b::KeyShortcutProps { keys: \"escape\", bound: None, enabled: None }",
+        "b::KeyShortcut(p, c, b::KeyShortcutProps { keys: \"escape\", bound: None, enabled: None, quiet: false }",
         "b::default_focus(c, ",
         "c.window(\"tv\")",
         // Keys that type into the search, which suggests.

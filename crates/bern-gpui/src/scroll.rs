@@ -73,6 +73,8 @@ struct State {
     shown: Option<Value>,
     /// Counts scrolling, so only the last of a gesture's events snaps.
     scrolled: u64,
+    /// Currently scrolled by hand, until `rest` settles it.
+    scrolling: bool,
     /// Laid out before: a position set now is scrolled to smoothly.
     ready: bool,
     /// A changed position being scrolled to: from where, to where, how far,
@@ -284,6 +286,7 @@ pub fn scroll_view(c: &Ctx, id: &'static str, props: ScrollProps, children: Vec<
             {
                 state.pending = Some(position.clone());
                 state.shown = Some(position.clone());
+                state.scrolling = false;
             }
         }
         state.handle.clone()
@@ -323,6 +326,7 @@ pub fn scroll_view(c: &Ctx, id: &'static str, props: ScrollProps, children: Vec<
                 let mut scrolls = scrolls.borrow_mut();
                 let state = scrolls.get_mut(&key)?;
                 state.scrolled += 1;
+                state.scrolling = true;
                 // Scrolling by hand ends scrolling to a position.
                 state.glide = None;
                 Some(state.scrolled)
@@ -346,8 +350,10 @@ pub fn scroll_view(c: &Ctx, id: &'static str, props: ScrollProps, children: Vec<
     // to a requested item.
     let probe = {
         let key = key.clone();
+        let c = c.clone();
         gpui::canvas(
             move |bounds, window, _| {
+                let mut report: Option<(Field, Value)> = None;
                 let moved = SCROLLS.with(|scrolls| {
                     let mut scrolls = scrolls.borrow_mut();
                     let state = scrolls.get_mut(&key)?;
@@ -396,6 +402,16 @@ pub fn scroll_view(c: &Ctx, id: &'static str, props: ScrollProps, children: Vec<
                         window.request_animation_frame();
                         return Some(());
                     }
+                    if props.snap == Snap::None
+                        && state.scrolling
+                        && state.pending.is_none()
+                        && let Some(field) = props.position
+                        && let Some((item, _)) = nearest(state, fraction, horizontal)
+                        && state.shown.as_ref() != Some(&item)
+                    {
+                        state.shown = Some(item.clone());
+                        report = Some((field, item));
+                    }
                     let pending = state.pending.clone()?;
                     let Some(item) = state
                         .items
@@ -436,6 +452,12 @@ pub fn scroll_view(c: &Ctx, id: &'static str, props: ScrollProps, children: Vec<
                     }
                     Some(())
                 });
+                if let Some((field, item)) = report
+                    && c.read(field) != item
+                {
+                    c.write(field, item);
+                    window.refresh();
+                }
                 if moved.is_some() {
                     window.refresh();
                 }
@@ -483,6 +505,7 @@ fn rest(
     let found = SCROLLS.with(|scrolls| {
         let mut scrolls = scrolls.borrow_mut();
         let state = scrolls.get_mut(key)?;
+        state.scrolling = false;
         if props.position.is_none() && props.snap == Snap::None {
             return None;
         }

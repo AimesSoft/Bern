@@ -2265,6 +2265,8 @@ pub fn app(app: controls::Client, windows: AppWindows, #[session] draft: Draft) 
                             }
                             Label(title: tr! { "en" => "OK" }, icon: "checkmark.circle.fill", color: status.success)
                             IconButton(id: fav, icon: "heart.fill", label: tr! { "en" => "Like" }, color: status.error) => app.toggle()
+                            Shortcut(key: "right", enabled: app.active, quiet: true) => app.toggle()
+                            Shortcut(key: "space", quiet: false) => app.toggle()
                             Image(source: draft.picture, width: 120, height: 80, saturation: app.amount, animate: smooth)
                             Marquee(duration: 5, opacity: 0.6) {
                                 Text(content: tr! { "en" => "Banner" })
@@ -2317,6 +2319,8 @@ pub fn app(app: controls::Client, windows: AppWindows, #[session] draft: Draft) 
         "shape = BernShape(true, 32f.dp)",
         "color = BernColor.Role(\"status.success\")",
         "color = BernColor.Role(\"status.error\")",
+        "BernShortcut(\"right\", { BernEngine.active }, quiet = true) {",
+        "BernShortcut(\"space\", { true }) {",
         "saturation = bernFloat((BernEngine.amount).toFloat(), BernMotion(0.45, 1.0))",
         "detailFooter = {",
     ] {

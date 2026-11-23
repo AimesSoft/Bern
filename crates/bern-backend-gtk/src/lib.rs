@@ -94,6 +94,7 @@ const FEATURES: &[&str] = &[
     feature::MODAL_FLOW_TIMER,
     feature::PAGE_BADGES,
     feature::IDLE_CONTROL,
+    feature::QUIET_SHORTCUTS,
     feature::FILL_BUTTONS,
     feature::GRID_CELLS,
     feature::PAGE_SEARCH,

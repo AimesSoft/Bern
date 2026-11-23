@@ -1052,7 +1052,8 @@ inline std::optional<double> IdleWait(Win const& win, double seconds) {
 }
 
 /// `window.idle`: true after `seconds` without pointer, wheel or key input
-/// in the window, and false at the next input. With `idle_area`s on screen
+/// in the window, and false at the next input; the keys of shortcuts with
+/// `quiet` are no input. With `idle_area`s on screen
 /// a mouse counts only while it rests over one, for that area's seconds:
 /// elsewhere, or outside the window, the window stays awake.
 inline void TrackIdle(std::shared_ptr<Win> const& win, double seconds, std::function<bool()> enabled = nullptr) {
@@ -1157,7 +1158,35 @@ inline void TrackIdle(std::shared_ptr<Win> const& win, double seconds, std::func
         win->mouse = Win::Mouse::Outside;
         rest();
     })), true);
-    root.AddHandler(xaml::UIElement::KeyDownEvent(), winrt::box_value(xaml::Input::KeyEventHandler([rest](auto&&, auto&&) { rest(); })), true);
+    root.AddHandler(xaml::UIElement::KeyDownEvent(), winrt::box_value(xaml::Input::KeyEventHandler([rest, weak](auto&&, xaml::Input::KeyRoutedEventArgs const& args) {
+        // The key of a `quiet` shortcut that just ran — and a bare modifier
+        // pressed for an enabled modified `quiet` shortcut — is no input.
+        if (auto win = weak.lock()) {
+            bool consumed = win->quietKeyConsumed && *win->quietKeyConsumed == args.Key();
+            win->quietKeyConsumed.reset();
+            if (consumed) return;
+            using winrt::Windows::System::VirtualKey;
+            using winrt::Windows::System::VirtualKeyModifiers;
+            auto modifier = VirtualKeyModifiers::None;
+            switch (args.Key()) {
+            case VirtualKey::Control:
+            case VirtualKey::LeftControl:
+            case VirtualKey::RightControl: modifier = VirtualKeyModifiers::Control; break;
+            case VirtualKey::Menu:
+            case VirtualKey::LeftMenu:
+            case VirtualKey::RightMenu: modifier = VirtualKeyModifiers::Menu; break;
+            case VirtualKey::Shift:
+            case VirtualKey::LeftShift:
+            case VirtualKey::RightShift: modifier = VirtualKeyModifiers::Shift; break;
+            default: break;
+            }
+            if (modifier != VirtualKeyModifiers::None && !B::shortcutRecording && GetKeyState(VK_LWIN) >= 0 && GetKeyState(VK_RWIN) >= 0) {
+                for (auto const& quiet : win->quietKeys)
+                    if ((quiet->modifiers & modifier) != VirtualKeyModifiers::None && quiet->enabled()) return;
+            }
+        }
+        rest();
+    })), true);
     win->idleRest = rest;
     if (enabled) {
         // Switched on again, the count starts over.

@@ -11,15 +11,29 @@ fn idle_ignores_fullscreen_helpers_but_keeps_popovers_awake() {
         .find("@MainActor\nfinal class BernEventMonitor")
         .unwrap();
     let end = runtime[start..].find("/// `submit: clear`").unwrap() + start;
+    let style = include_str!("../templates/BernStyle.swift");
+    let shortcuts_start = style.find("enum BernShortcuts {").unwrap();
+    let shortcuts_end =
+        style[shortcuts_start..].find("\nextension View {").unwrap() + shortcuts_start;
     let stubs = r#"
+enum BernText { static func string(_ key: String) -> String { key } }
 @MainActor final class Platform { var nsWindow: NSWindow? }
 @MainActor final class BernWindowContext {
+    final class QuietShortcut {
+        var shortcut: KeyboardShortcut?
+        var enabled: Bool
+        init(shortcut: KeyboardShortcut?, enabled: Bool) {
+            self.shortcut = shortcut
+            self.enabled = enabled
+        }
+    }
     let platform = Platform()
     var idle = false
     var popoverOwner: UUID?
     var idleAreas: Set<UUID> = []
     var idleAreasHovered: [UUID: Double] = [:]
     var idleAreasChanged: (() -> Void)?
+    var quietShortcuts: [QuietShortcut] = []
 }
 @main struct Test {
     @MainActor static func main() {
@@ -44,6 +58,40 @@ fn idle_ignores_fullscreen_helpers_but_keeps_popovers_awake() {
             RunLoop.current.run(until: Date().addingTimeInterval(0.005))
         }
         precondition(context.idle, "redraws and native helper windows must not prevent idle")
+        // Quiet shortcuts (bare and modified) neither wake an idle window nor reset the countdown.
+        let rightEntry = BernWindowContext.QuietShortcut(shortcut: BernShortcuts.keyboard("right"), enabled: true)
+        let cmdLeftEntry = BernWindowContext.QuietShortcut(shortcut: BernShortcuts.keyboard("cmd+left"), enabled: true)
+        context.quietShortcuts = [rightEntry, cmdLeftEntry]
+        let rightKey = NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [.numericPad, .function],
+            timestamp: 0, windowNumber: window.windowNumber, context: nil,
+            characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: 124
+        )!
+        monitor.handle(event: rightKey, after: 0.02)
+        precondition(context.idle, "a quiet bare shortcut must not wake an idle window")
+        let cmdLeftKey = NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [.command, .numericPad, .function],
+            timestamp: 0, windowNumber: window.windowNumber, context: nil,
+            characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: 123
+        )!
+        monitor.handle(event: cmdLeftKey, after: 0.02)
+        precondition(context.idle, "a quiet modified shortcut must not wake an idle window")
+        // Disabling the quiet shortcut or pressing an ordinary key wakes the window.
+        rightEntry.enabled = false
+        monitor.handle(event: rightKey, after: 0.02)
+        precondition(!context.idle, "a disabled quiet shortcut wakes the window")
+        RunLoop.current.run(until: Date().addingTimeInterval(0.06))
+        precondition(context.idle, "window returns to idle after waiting")
+        let plainKey = NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [],
+            timestamp: 0, windowNumber: window.windowNumber, context: nil,
+            characters: " ", charactersIgnoringModifiers: " ", isARepeat: false, keyCode: 49
+        )!
+        monitor.handle(event: plainKey, after: 0.02)
+        precondition(!context.idle, "an ordinary key wakes an idle window")
+        RunLoop.current.run(until: Date().addingTimeInterval(0.06))
+        precondition(context.idle, "window returns to idle again")
+        context.quietShortcuts = []
         // Repainting a label may rebuild its native tracking area. Neither
         // leaving, re-entering nor re-registering it is user activity.
         context.idleAreasHovered = [:]
@@ -81,7 +129,8 @@ fn idle_ignores_fullscreen_helpers_but_keeps_popovers_awake() {
     fs::write(
         &source,
         format!(
-            "import AppKit\nimport SwiftUI\n{stubs}\n{}",
+            "import AppKit\nimport SwiftUI\n{stubs}\n{}\n{}",
+            &style[shortcuts_start..shortcuts_end],
             &runtime[start..end]
         ),
     )

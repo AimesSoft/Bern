@@ -919,6 +919,10 @@ impl Generator<'_> {
             Self::props(vec![
                 ("key", self.shortcut_keys(element, "key")),
                 ("enabled", self.value_prop(element, "enabled")),
+                (
+                    "quiet",
+                    (element.keyword("quiet") == Some("true")).then(|| "true".into()),
+                ),
             ]),
             self.action_fn(element)
         ));

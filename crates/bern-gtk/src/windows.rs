@@ -204,9 +204,16 @@ fn from_mouse(controller: &impl IsA<gtk::EventController>) -> bool {
         })
 }
 
-/// A mounted shortcut: its token, keys and action, and whether it takes
-/// its keys now (always, without one).
-type Shortcut = (u64, KeySource, Rc<dyn Fn()>, Option<Rc<dyn Fn() -> bool>>);
+/// A mounted shortcut: its token, keys and action, whether it takes
+/// its keys now (always, without one), and whether it leaves `window.idle`
+/// undisturbed.
+struct Shortcut {
+    token: u64,
+    keys: KeySource,
+    run: Rc<dyn Fn()>,
+    active: Option<Rc<dyn Fn() -> bool>>,
+    quiet: bool,
+}
 
 /// The keys of a mounted shortcut: written out, or the text a shortcut
 /// follows, read at each key press. A text that is empty or no shortcut
@@ -407,6 +414,40 @@ fn unshifted_key(
         .map(|(key, ..)| key)
 }
 
+/// Resolve the latest active shortcut matching `pressed` and report whether it
+/// is `quiet`. Plain keys do not fire while text is being edited.
+fn resolve_shortcut(
+    shortcuts: &[Shortcut],
+    pressed: &[Keys],
+    editing: bool,
+) -> Option<(Rc<dyn Fn()>, bool)> {
+    let found = shortcuts.iter().rev().find_map(|shortcut| {
+        let keys = shortcut.keys.keys()?;
+        (pressed.contains(&keys) && shortcut.active.as_ref().is_none_or(|active| active()))
+            .then(|| (keys, Rc::clone(&shortcut.run), shortcut.quiet))
+    })?;
+    let plain = !found
+        .0
+        .modifiers
+        .intersects(gtk::gdk::ModifierType::CONTROL_MASK | gtk::gdk::ModifierType::ALT_MASK);
+    if plain && editing {
+        return None;
+    }
+    Some((found.1, found.2))
+}
+
+/// Whether any active `quiet` shortcut includes the modifier `mask`.
+fn has_quiet_modifier_in(shortcuts: &[Shortcut], mask: gtk::gdk::ModifierType) -> bool {
+    shortcuts.iter().any(|shortcut| {
+        shortcut.quiet
+            && shortcut.active.as_ref().is_none_or(|active| active())
+            && shortcut
+                .keys
+                .keys()
+                .is_some_and(|keys| keys.modifiers.contains(mask))
+    })
+}
+
 impl Win {
     pub(crate) fn cell(&self, field: Field) -> Cell<Value> {
         self.cells
@@ -515,8 +556,9 @@ impl Win {
         keys: &str,
         run: Rc<dyn Fn()>,
         active: Option<Rc<dyn Fn() -> bool>>,
+        quiet: bool,
     ) {
-        self.mount_shortcut(KeySource::Fixed(parse_keys(keys)), run, active);
+        self.mount_shortcut(KeySource::Fixed(parse_keys(keys)), run, active, quiet);
     }
 
     /// Run `run` on the keys `text` names at each key press, while the
@@ -526,8 +568,9 @@ impl Win {
         text: Rc<dyn Fn() -> String>,
         run: Rc<dyn Fn()>,
         active: Option<Rc<dyn Fn() -> bool>>,
+        quiet: bool,
     ) {
-        self.mount_shortcut(KeySource::Bound(text), run, active);
+        self.mount_shortcut(KeySource::Bound(text), run, active, quiet);
     }
 
     fn mount_shortcut(
@@ -535,45 +578,46 @@ impl Win {
         keys: KeySource,
         run: Rc<dyn Fn()>,
         active: Option<Rc<dyn Fn() -> bool>>,
+        quiet: bool,
     ) {
         let token = self.next_shortcut.get();
         self.next_shortcut.set(token + 1);
-        self.shortcuts.borrow_mut().push((token, keys, run, active));
+        self.shortcuts.borrow_mut().push(Shortcut {
+            token,
+            keys,
+            run,
+            active,
+            quiet,
+        });
         let win = Rc::downgrade(self);
         crate::reactive::on_cleanup(move || {
             if let Some(win) = win.upgrade() {
                 win.shortcuts
                     .borrow_mut()
-                    .retain(|(candidate, _, _, _)| *candidate != token);
+                    .retain(|candidate| candidate.token != token);
             }
         });
     }
 
     /// The shortcut for a key press, given as [`pressed_keys`]: of those
-    /// that take the keys now, the one mounted last.
-    fn shortcut_for(&self, pressed: &[Keys]) -> Option<Rc<dyn Fn()>> {
-        let found = self
-            .shortcuts
-            .borrow()
-            .iter()
-            .rev()
-            .find_map(|(_, keys, run, active)| {
-                let keys = keys.keys()?;
-                (pressed.contains(&keys) && active.as_ref().is_none_or(|active| active()))
-                    .then(|| (keys, Rc::clone(run)))
-            })?;
-        // A key without a modifier does not fire while text is being edited.
-        let plain = !found
-            .0
-            .modifiers
-            .intersects(gtk::gdk::ModifierType::CONTROL_MASK | gtk::gdk::ModifierType::ALT_MASK);
+    /// that take the keys now, the one mounted last, and whether it is `quiet`.
+    fn shortcut_for(&self, pressed: &[Keys]) -> Option<(Rc<dyn Fn()>, bool)> {
         let editing = gtk::prelude::GtkWindowExt::focus(&self.window).is_some_and(|focus| {
             focus.is::<gtk::Text>() || focus.is::<gtk::TextView>() || focus.is::<gtk::Editable>()
         });
-        if plain && editing {
-            return None;
+        resolve_shortcut(&self.shortcuts.borrow(), pressed, editing)
+    }
+
+    /// Whether any active `quiet` shortcut includes the modifier `mask`.
+    fn has_quiet_modifier(&self, mask: gtk::gdk::ModifierType) -> bool {
+        has_quiet_modifier_in(&self.shortcuts.borrow(), mask)
+    }
+
+    /// Notify idle tracking that a non-quiet key arrived.
+    fn wake_idle(&self) {
+        if let Some(rest) = self.idle_rest.borrow().as_ref().cloned() {
+            rest();
         }
-        Some(found.1)
     }
 
     /// Input arrived: `window.idle` is false until the window rests again.
@@ -1261,30 +1305,54 @@ pub(crate) fn open(kind_id: &str) -> Result<String, Failure> {
     keys.set_propagation_phase(gtk::PropagationPhase::Capture);
     let shortcuts = Rc::downgrade(&win);
     keys.connect_key_pressed(move |keys, keyval, keycode, state| {
+        let Some(win) = shortcuts.upgrade() else {
+            return glib::Propagation::Proceed;
+        };
         let unshifted = unshifted_key(keys, keycode, state);
         // A shortcut input waiting for a key takes it, whatever it is.
-        let recorder = shortcuts
-            .upgrade()
-            .and_then(|win| win.recorder.borrow().clone());
+        let recorder = win.recorder.borrow().clone();
         if let Some(record) = recorder {
+            win.wake_idle();
             if let Some(keys) = recorded(keyval, unshifted, state) {
-                if let Some(win) = shortcuts.upgrade() {
-                    win.recorder.borrow_mut().take();
-                }
+                win.recorder.borrow_mut().take();
                 record(keys);
             }
             return glib::Propagation::Stop;
         }
+        // A bare modifier pressed for an enabled modified `quiet` shortcut
+        // does not wake `window.idle` ahead of the key it modifies.
+        let modifier = match keyval {
+            gtk::gdk::Key::Control_L | gtk::gdk::Key::Control_R => {
+                Some(gtk::gdk::ModifierType::CONTROL_MASK)
+            }
+            gtk::gdk::Key::Alt_L
+            | gtk::gdk::Key::Alt_R
+            | gtk::gdk::Key::Meta_L
+            | gtk::gdk::Key::Meta_R => Some(gtk::gdk::ModifierType::ALT_MASK),
+            gtk::gdk::Key::Shift_L | gtk::gdk::Key::Shift_R => {
+                Some(gtk::gdk::ModifierType::SHIFT_MASK)
+            }
+            _ => None,
+        };
+        if let Some(mask) = modifier {
+            if state.contains(gtk::gdk::ModifierType::SUPER_MASK) || !win.has_quiet_modifier(mask) {
+                win.wake_idle();
+            }
+            return glib::Propagation::Proceed;
+        }
         let pressed = pressed_keys(keyval, unshifted, state);
-        let run = shortcuts
-            .upgrade()
-            .and_then(|win| win.shortcut_for(&pressed));
-        match run {
-            Some(run) => {
+        match win.shortcut_for(&pressed) {
+            Some((run, quiet)) => {
+                if !quiet {
+                    win.wake_idle();
+                }
                 run();
                 glib::Propagation::Stop
             }
-            None => glib::Propagation::Proceed,
+            None => {
+                win.wake_idle();
+                glib::Propagation::Proceed
+            }
         }
     });
     window.add_controller(keys);
@@ -1462,14 +1530,8 @@ fn watch_input(win: &Rc<Win>, seconds: Option<f64>) -> Option<Rc<dyn Fn()>> {
         }
     });
     win.window.add_controller(pointer);
-    let keys = gtk::EventControllerKey::new();
-    keys.set_propagation_phase(gtk::PropagationPhase::Capture);
-    let typed = Rc::clone(&rest);
-    keys.connect_key_pressed(move |_, _, _, _| {
-        typed();
-        glib::Propagation::Proceed
-    });
-    win.window.add_controller(keys);
+    // Key input wakes `window.idle` through the window's key controller above,
+    // after `quiet` shortcuts have been distinguished from ordinary keys.
     let wheel = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::BOTH_AXES);
     wheel.set_propagation_phase(gtk::PropagationPhase::Capture);
     let scrolled = Rc::clone(&rest);
@@ -2099,6 +2161,64 @@ mod tests {
         assert_eq!(source.keys(), Some(parse_keys("alt+shift+p")));
         text.borrow_mut().clear();
         assert_eq!(source.keys(), None, "an empty text takes no keys");
+    }
+
+    #[test]
+    fn quiet_shortcuts_match_and_track_modifiers() {
+        let enabled = Rc::new(std::cell::Cell::new(true));
+        let is_on = Rc::clone(&enabled);
+        let noop: Rc<dyn Fn()> = Rc::new(|| {});
+        let shortcuts = vec![
+            Shortcut {
+                token: 1,
+                keys: KeySource::Fixed(parse_keys("right")),
+                run: Rc::clone(&noop),
+                active: Some(Rc::new(move || is_on.get())),
+                quiet: true,
+            },
+            Shortcut {
+                token: 2,
+                keys: KeySource::Fixed(parse_keys("cmd+left")),
+                run: Rc::clone(&noop),
+                active: None,
+                quiet: true,
+            },
+            Shortcut {
+                token: 3,
+                keys: KeySource::Fixed(parse_keys("space")),
+                run: Rc::clone(&noop),
+                active: None,
+                quiet: false,
+            },
+        ];
+        // Bare quiet shortcut matches outside text editing, not inside it.
+        let right = pressed_keys(Key::Right, None, ModifierType::empty());
+        assert_eq!(
+            resolve_shortcut(&shortcuts, &right, false).map(|(_, q)| q),
+            Some(true)
+        );
+        assert!(resolve_shortcut(&shortcuts, &right, true).is_none());
+        // Disabled quiet shortcut no longer matches.
+        enabled.set(false);
+        assert!(resolve_shortcut(&shortcuts, &right, false).is_none());
+        // Modified quiet shortcut matches even during text editing, and its
+        // modifier (Ctrl on Linux for `cmd`) stays quiet while Shift does not.
+        let ctrl_left = pressed_keys(Key::Left, None, ModifierType::CONTROL_MASK);
+        assert_eq!(
+            resolve_shortcut(&shortcuts, &ctrl_left, true).map(|(_, q)| q),
+            Some(true)
+        );
+        assert!(has_quiet_modifier_in(
+            &shortcuts,
+            ModifierType::CONTROL_MASK
+        ));
+        assert!(!has_quiet_modifier_in(&shortcuts, ModifierType::SHIFT_MASK));
+        // Ordinary shortcut returns quiet = false.
+        let space = pressed_keys(Key::space, None, ModifierType::empty());
+        assert_eq!(
+            resolve_shortcut(&shortcuts, &space, false).map(|(_, q)| q),
+            Some(false)
+        );
     }
 
     #[test]

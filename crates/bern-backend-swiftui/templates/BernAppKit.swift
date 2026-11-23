@@ -1647,26 +1647,9 @@ final class BernEventMonitor {
             .mouseMoved, .leftMouseDown, .rightMouseDown, .otherMouseDown,
             .leftMouseDragged, .scrollWheel, .keyDown,
         ]
-        monitor = NSEvent.addLocalMonitorForEvents(matching: events) { [weak self, weak context] event in
-            if let context, event.window === context.platform.nsWindow {
-                let mouseLocation = event.type == .mouseMoved ? NSEvent.mouseLocation : nil
-                let deltaX = event.type == .mouseMoved ? event.deltaX : 0
-                let deltaY = event.type == .mouseMoved ? event.deltaY : 0
-                MainActor.assumeIsolated {
-                    if let mouseLocation,
-                       let self,
-                       let last = self.lastMouseLocation,
-                       abs(mouseLocation.x - last.x) < 0.5,
-                       abs(mouseLocation.y - last.y) < 0.5,
-                       deltaX == 0,
-                       deltaY == 0 {
-                        return
-                    }
-                    if let mouseLocation {
-                        self?.lastMouseLocation = mouseLocation
-                    }
-                    self?.activity(after: seconds)
-                }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: events) { [weak self] event in
+            MainActor.assumeIsolated {
+                self?.handle(event: event, after: seconds)
             }
             return event
         }
@@ -1690,6 +1673,35 @@ final class BernEventMonitor {
         context = nil
         timer?.invalidate()
         timer = nil
+    }
+
+    /// Handles one local input event for this window; `quiet` shortcuts
+    /// neither wake an idle window nor postpone its countdown.
+    func handle(event: NSEvent, after seconds: Double) {
+        guard let context, event.window === context.platform.nsWindow else { return }
+        if event.type == .mouseMoved {
+            let mouseLocation = NSEvent.mouseLocation
+            if let last = lastMouseLocation,
+               abs(mouseLocation.x - last.x) < 0.5,
+               abs(mouseLocation.y - last.y) < 0.5,
+               event.deltaX == 0,
+               event.deltaY == 0 {
+                return
+            }
+            lastMouseLocation = mouseLocation
+        }
+        if event.type == .keyDown {
+            let editing = context.platform.nsWindow?.firstResponder is NSTextView
+            let quiet = !BernShortcuts.isRecording && context.quietShortcuts.contains { entry in
+                guard entry.enabled, let shortcut = entry.shortcut else { return false }
+                if editing && shortcut.modifiers.isDisjoint(with: [.command, .control, .option]) {
+                    return false
+                }
+                return BernShortcuts.matches(event: event, shortcut: shortcut)
+            }
+            if quiet { return }
+        }
+        activity(after: seconds)
     }
 
     /// The input monitor calls this only for an event in this window.

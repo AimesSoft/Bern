@@ -114,6 +114,7 @@ pub(crate) const FEATURES: &[&str] = &[
     feature::AXIS_PADDING,
     feature::UNTITLED_DETAIL,
     feature::IDLE_CONTROL,
+    feature::QUIET_SHORTCUTS,
     feature::FILL_BUTTONS,
     feature::GRID_CELLS,
     feature::TAB_ACCESSORY,

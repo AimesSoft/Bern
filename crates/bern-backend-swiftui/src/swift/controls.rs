@@ -87,9 +87,14 @@ impl Generator<'_> {
             self.keyboard(element, "key")
                 .map(|shortcut| format!("shortcut: {shortcut}"))
         };
+        let quiet = if element.keyword("quiet") == Some("true") {
+            ", quiet: true"
+        } else {
+            ""
+        };
         if let Some(source) = source {
             out.line(format!(
-                "BernKeyShortcut({source}, enabled: {enabled}) {{ {action} }}"
+                "BernKeyShortcut({source}, enabled: {enabled}{quiet}) {{ {action} }}"
             ));
         }
     }

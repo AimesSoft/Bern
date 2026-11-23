@@ -603,6 +603,19 @@ final class BernWindowContext {
     @ObservationIgnored var idleAreas: Set<UUID> = []
     @ObservationIgnored var idleAreasHovered: [UUID: Double] = [:]
     @ObservationIgnored var idleAreasChanged: (() -> Void)?
+    #if os(macOS)
+    /// Mounted `Shortcut(quiet: true)` entries in this window: their key
+    /// presses do not wake `window.idle` or restart its countdown.
+    final class QuietShortcut {
+        var shortcut: KeyboardShortcut?
+        var enabled: Bool
+        init(shortcut: KeyboardShortcut?, enabled: Bool) {
+            self.shortcut = shortcut
+            self.enabled = enabled
+        }
+    }
+    @ObservationIgnored var quietShortcuts: [QuietShortcut] = []
+    #endif
     /// The width of the window's content, for `window.compact` and its
     /// siblings; 0 until its first layout measures it.
     var width: CGFloat = 0

@@ -696,8 +696,13 @@ impl Generator<'_> {
             .as_ref()
             .map(|a| self.action(a))
             .unwrap_or_else(|| "Unit".into());
+        let quiet = if element.keyword("quiet") == Some("true") {
+            ", quiet = true"
+        } else {
+            ""
+        };
         out.line(format!(
-            "BernShortcut({}, {{ {enabled} }}) {{ {action} }}",
+            "BernShortcut({}, {{ {enabled} }}{quiet}) {{ {action} }}",
             self.shortcut_keys(element, "key")
                 .unwrap_or_else(|| string(""))
         ));

@@ -523,11 +523,12 @@ pub fn color_picker(
 // MARK: - Shortcuts
 
 /// `Shortcut`: a key combination that runs the action while mounted and
-/// enabled; it shows nothing.
-pub fn shortcut(c: &Ctx, key: String, enabled: bool, action: Option<Act>) -> El {
+/// enabled; it shows nothing. With `quiet`, its key is no input for
+/// `window.idle`.
+pub fn shortcut(c: &Ctx, key: String, enabled: bool, quiet: bool, action: Option<Act>) -> El {
     if enabled && c.enabled() {
         let press = crate::controls::press(c, None, action);
-        crate::controls::register_shortcut(c, Some(&key), &press);
+        crate::controls::register_shortcut_with_quiet(c, Some(&key), &press, quiet);
     }
     // Out of the flow, so its container's spacing does not count it.
     div().absolute().into_any_element()
