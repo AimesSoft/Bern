@@ -2329,6 +2329,15 @@ inline xaml::Style PresenterTheme(wchar_t const* target, std::string const& appe
             LR"("><Setter Property="RequestedTheme" Value=")" + std::wstring(dark ? L"Dark" : L"Light") + L"\" /></Style>")
                     .as<xaml::Style>();
         std::wstring_view kind(target);
+        // Preserve the WinUI 3 default presenter style (rounded corners,
+        // subtle border, padding and template); without BasedOn, an explicit
+        // presenter style bypasses XamlControlsResources' implicit style and
+        // falls back to the legacy square-cornered base style.
+        wchar_t const* baseKey = kind == L"MenuFlyoutPresenter" ? L"DefaultMenuFlyoutPresenterStyle"
+            : kind == L"FlyoutPresenter" ? L"DefaultFlyoutPresenterStyle" : nullptr;
+        if (baseKey) {
+            if (auto base = Styles::Named(baseKey)) style.BasedOn(base);
+        }
         wchar_t const* background = kind == L"MenuFlyoutPresenter" ? L"MenuFlyoutPresenterBackground" : kind == L"FlyoutPresenter" ? L"FlyoutPresenterBackground" : nullptr;
         wchar_t const* border = kind == L"MenuFlyoutPresenter" ? L"MenuFlyoutPresenterBorderBrush" : kind == L"FlyoutPresenter" ? L"FlyoutBorderThemeBrush" : nullptr;
         auto resources = xaml::Application::Current().Resources();
@@ -2415,9 +2424,18 @@ struct ThemedAcrylicBackdrop : media::SystemBackdropT<ThemedAcrylicBackdrop> {
 /// Attach a transient results flyout below a search box while it is in use.
 inline void AttachSearchResults(controls::AutoSuggestBox const& box, Ctx const& ctx, SearchProps const& props, Build const& results) {
     if (!props.field || !results) return;
-    auto content = MakeFlex(false, 4, xaml::Thickness{4, 4, 4, 4});
+    auto content = MakeFlex(false, 2, xaml::Thickness{4, 4, 4, 4});
     results(Parent::Of(content), ctx);
     controls::Flyout flyout;
+    auto configureListPresenter = [](xaml::Style const& look) {
+        // Match AutoSuggestBox's compact dropdown list geometry instead of
+        // FlyoutPresenter's dialog-sized FlyoutContentPadding.
+        look.Setters().Append(xaml::Setter(controls::Control::PaddingProperty(), winrt::box_value(xaml::Thickness{0, 0, 0, 0})));
+        look.Setters().Append(xaml::Setter(xaml::FrameworkElement::MinHeightProperty(), winrt::box_value(0.0)));
+        look.Setters().Append(xaml::Setter(xaml::FrameworkElement::MaxHeightProperty(), winrt::box_value(374.0)));
+        look.Setters().Append(xaml::Setter(controls::ScrollViewer::HorizontalScrollModeProperty(), winrt::box_value(controls::ScrollMode::Disabled)));
+        look.Setters().Append(xaml::Setter(controls::ScrollViewer::HorizontalScrollBarVisibilityProperty(), winrt::box_value(controls::ScrollBarVisibility::Disabled)));
+    };
 #if BERN_WINUI
     bool useAcrylic = DesktopAcrylicAvailable();
     winrt::com_ptr<ThemedAcrylicBackdrop> backdrop;
@@ -2427,12 +2445,13 @@ inline void AttachSearchResults(controls::AutoSuggestBox const& box, Ctx const& 
         backdrop = winrt::make_self<ThemedAcrylicBackdrop>(initialDark);
         flyout.SystemBackdrop(backdrop.as<media::SystemBackdrop>());
     }
-    auto applyStyle = [flyout, ctx, backdrop, useAcrylic] {
+    auto applyStyle = [flyout, ctx, backdrop, useAcrylic, configureListPresenter] {
         bool dark = ctx.appearance.empty() ? (ctx.win && ctx.win->root && IsDark(ctx.win->root)) : ctx.appearance == "dark";
         if (backdrop) backdrop->SetDark(dark);
         auto look = xaml::Markup::XamlReader::Load(LR"(<Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" TargetType="FlyoutPresenter" />)").as<xaml::Style>();
         if (auto themed = PresenterTheme(L"FlyoutPresenter", dark ? "dark" : "light")) look.BasedOn(themed);
         look.Setters().Append(xaml::Setter(xaml::FrameworkElement::RequestedThemeProperty(), winrt::box_value(dark ? xaml::ElementTheme::Dark : xaml::ElementTheme::Light)));
+        configureListPresenter(look);
         if (useAcrylic) {
             look.Setters().Append(xaml::Setter(controls::Control::BackgroundProperty(), media::SolidColorBrush(winrt::Windows::UI::Colors::Transparent())));
         }
@@ -2445,12 +2464,13 @@ inline void AttachSearchResults(controls::AutoSuggestBox const& box, Ctx const& 
         Reactive::OnCleanup([root, token] { root.ActualThemeChanged(token); });
     }
 #else
-    if (auto style = PresenterTheme(L"FlyoutPresenter", ctx.appearance)) flyout.FlyoutPresenterStyle(style);
+    auto look = xaml::Markup::XamlReader::Load(LR"(<Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" TargetType="FlyoutPresenter" />)").as<xaml::Style>();
+    if (auto themed = PresenterTheme(L"FlyoutPresenter", ctx.appearance)) look.BasedOn(themed);
+    else if (auto base = Styles::Named(L"DefaultFlyoutPresenterStyle")) look.BasedOn(base);
+    configureListPresenter(look);
+    flyout.FlyoutPresenterStyle(look);
 #endif
-    controls::ScrollViewer scroller;
-    scroller.Content(content);
-    scroller.MaxHeight(360);
-    flyout.Content(scroller);
+    flyout.Content(content);
     auto field = *props.field;
     auto weakBox = winrt::make_weak(box);
     auto open = std::make_shared<bool>(false);
@@ -2471,9 +2491,9 @@ inline void AttachSearchResults(controls::AutoSuggestBox const& box, Ctx const& 
             flyout.Hide();
         }
     };
-    flyout.Opened([open, weakBox, scroller](auto&&, auto&&) {
+    flyout.Opened([open, weakBox, content](auto&&, auto&&) {
         *open = true;
-        if (auto box = weakBox.get()) scroller.MinWidth((std::max)(200.0, box.ActualWidth()));
+        if (auto box = weakBox.get()) content.MinWidth((std::max)(200.0, box.ActualWidth() - 2.0));
         Snapshot::Schedule();
     });
     flyout.Closed([open](auto&&, auto&&) {
