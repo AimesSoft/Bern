@@ -2378,10 +2378,27 @@ struct ThemedAcrylicBackdrop : media::SystemBackdropT<ThemedAcrylicBackdrop> {
         : theme(dark ? winrt::Microsoft::UI::Composition::SystemBackdrops::SystemBackdropTheme::Dark
                      : winrt::Microsoft::UI::Composition::SystemBackdrops::SystemBackdropTheme::Light) {}
 
+    void ApplyProperties() {
+        if (!controller) return;
+        bool dark = theme == winrt::Microsoft::UI::Composition::SystemBackdrops::SystemBackdropTheme::Dark;
+        if (dark) {
+            controller.TintColor(winrt::Windows::UI::Color{255, 44, 44, 44});
+            controller.FallbackColor(winrt::Windows::UI::Color{255, 44, 44, 44});
+            controller.TintOpacity(0.05f);
+            controller.LuminosityOpacity(0.45f);
+        } else {
+            controller.TintColor(winrt::Windows::UI::Color{255, 255, 255, 255});
+            controller.FallbackColor(winrt::Windows::UI::Color{255, 249, 249, 249});
+            controller.TintOpacity(0.0f);
+            controller.LuminosityOpacity(0.25f);
+        }
+    }
+
     void SetDark(bool dark) {
         using winrt::Microsoft::UI::Composition::SystemBackdrops::SystemBackdropTheme;
         theme = dark ? SystemBackdropTheme::Dark : SystemBackdropTheme::Light;
         if (config) config.Theme(theme);
+        ApplyProperties();
     }
 
     void OnTargetConnected(winrt::Microsoft::UI::Composition::ICompositionSupportsSystemBackdrop const& target,
@@ -2395,6 +2412,7 @@ struct ThemedAcrylicBackdrop : media::SystemBackdropT<ThemedAcrylicBackdrop> {
         controller = DesktopAcrylicController();
         controller.Kind(DesktopAcrylicKind::Base);
         controller.SetSystemBackdropConfiguration(config);
+        ApplyProperties();
         controller.AddSystemBackdropTarget(target);
     }
 
@@ -2416,6 +2434,7 @@ struct ThemedAcrylicBackdrop : media::SystemBackdropT<ThemedAcrylicBackdrop> {
             config.IsInputActive(true);
             config.IsHighContrast(next.IsHighContrast());
             config.Theme(theme);
+            ApplyProperties();
         }
     }
 };
@@ -2437,17 +2456,19 @@ inline void AttachSearchResults(controls::AutoSuggestBox const& box, Ctx const& 
         look.Setters().Append(xaml::Setter(controls::ScrollViewer::HorizontalScrollBarVisibilityProperty(), winrt::box_value(controls::ScrollBarVisibility::Disabled)));
     };
 #if BERN_WINUI
-    // Inside a normal window, keep the results flyout in-window so WinUI 3's
-    // native FlyoutPresenterBackground (`AcrylicInAppFillColorDefaultBrush`)
-    // blurs the window's own sidebar/page content directly behind the list with
-    // luminous Windows 11 frosted glass (matching AutoSuggestBox). Only use a
-    // top-level desktop acrylic popup when hosted inside a fixed-appearance
-    // surface (such as a dark overlay over hardware video).
-    bool useDesktopAcrylic = !ctx.appearance.empty() && DesktopAcrylicAvailable();
+    // Use WinUI 3's DWM DesktopAcrylicController system backdrop on a
+    // windowed flyout (`ShouldConstrainToRootBounds(false)`): WinUI 3's
+    // default FlyoutPresenterBackground (`AcrylicInAppFillColorDefaultBrush`)
+    // and DesktopAcrylicKind::Base use ~0.85 luminosity opacity (nearly opaque
+    // over light sidebars), while Thin uses a dark gray #D3D3D3 light tint.
+    // Explicitly tuned DesktopAcrylicController properties provide clearly
+    // visible Windows 11 frosted glass in both light and dark themes.
+    bool useDesktopAcrylic = DesktopAcrylicAvailable();
     winrt::com_ptr<ThemedAcrylicBackdrop> backdrop;
+    bool initialDark = ctx.appearance.empty() ? (ctx.win && ctx.win->root && IsDark(ctx.win->root)) : ctx.appearance == "dark";
     if (useDesktopAcrylic) {
         flyout.ShouldConstrainToRootBounds(false);
-        backdrop = winrt::make_self<ThemedAcrylicBackdrop>(ctx.appearance == "dark");
+        backdrop = winrt::make_self<ThemedAcrylicBackdrop>(initialDark);
         flyout.SystemBackdrop(backdrop.as<media::SystemBackdrop>());
     } else {
         flyout.ShouldConstrainToRootBounds(true);
@@ -2458,10 +2479,10 @@ inline void AttachSearchResults(controls::AutoSuggestBox const& box, Ctx const& 
         auto look = xaml::Markup::XamlReader::Load(LR"(<Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" TargetType="FlyoutPresenter" />)").as<xaml::Style>();
         if (!ctx.appearance.empty()) {
             if (auto themed = PresenterTheme(L"FlyoutPresenter", dark ? "dark" : "light")) look.BasedOn(themed);
-            look.Setters().Append(xaml::Setter(xaml::FrameworkElement::RequestedThemeProperty(), winrt::box_value(dark ? xaml::ElementTheme::Dark : xaml::ElementTheme::Light)));
         } else if (auto base = Styles::Named(L"DefaultFlyoutPresenterStyle")) {
             look.BasedOn(base);
         }
+        look.Setters().Append(xaml::Setter(xaml::FrameworkElement::RequestedThemeProperty(), winrt::box_value(dark ? xaml::ElementTheme::Dark : xaml::ElementTheme::Light)));
         configureListPresenter(look);
         if (useDesktopAcrylic) {
             look.Setters().Append(xaml::Setter(controls::Control::BackgroundProperty(), media::SolidColorBrush(winrt::Windows::UI::Colors::Transparent())));
