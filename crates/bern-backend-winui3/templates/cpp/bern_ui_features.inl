@@ -1347,15 +1347,153 @@ struct KeyShortcutProps {
     /// The keys do not wake a window at rest.
     bool quiet = false;
     Act action;
+    /// `hold`: true while the keys are held longer than `holdAfter`
+    /// seconds; a shorter press runs the action as the keys are let go.
+    std::optional<Field> hold;
+    std::optional<double> holdAfter;
 };
+
+/// The key and modifiers a shortcut in Bern's form names.
+inline std::optional<std::pair<winrt::Windows::System::VirtualKey, winrt::Windows::System::VirtualKeyModifiers>> ChordOf(char const* keys) {
+    using winrt::Windows::System::VirtualKeyModifiers;
+    std::string all = keys ? keys : "";
+    std::vector<std::string> parts;
+    std::string part;
+    for (char c : all + "+") {
+        if (c == '+') {
+            if (!part.empty()) parts.push_back(part);
+            part.clear();
+        } else {
+            part += c;
+        }
+    }
+    if (parts.empty()) return std::nullopt;
+    auto key = KeyOf(parts.back());
+    if (!key) return std::nullopt;
+    auto modifiers = VirtualKeyModifiers::None;
+    for (size_t i = 0; i + 1 < parts.size(); ++i) {
+        if (parts[i] == "cmd" || parts[i] == "ctrl") modifiers |= VirtualKeyModifiers::Control;
+        else if (parts[i] == "alt") modifiers |= VirtualKeyModifiers::Menu;
+        else if (parts[i] == "shift") modifiers |= VirtualKeyModifiers::Shift;
+    }
+    return std::pair{*key, modifiers};
+}
+
+/// The modifiers held down now.
+inline winrt::Windows::System::VirtualKeyModifiers HeldModifiers() {
+    using winrt::Windows::System::VirtualKeyModifiers;
+    auto held = VirtualKeyModifiers::None;
+    if (GetKeyState(VK_CONTROL) < 0) held |= VirtualKeyModifiers::Control;
+    if (GetKeyState(VK_MENU) < 0) held |= VirtualKeyModifiers::Menu;
+    if (GetKeyState(VK_SHIFT) < 0) held |= VirtualKeyModifiers::Shift;
+    return held;
+}
+
+/// While mounted, `keys` told apart by how long they are held: let go
+/// within `after`, they run `tapped`; held longer, `hold` is true until
+/// they are let go. The keys repeating while held do nothing more. With
+/// `quiet` they do not wake a window at rest.
+inline void HoldKeys(Ctx const& ctx, char const* keys, std::function<bool()> isEnabled, std::function<void()> tapped, Field hold, double after, bool quiet) {
+    if (!ctx.win || !ctx.win->root) return;
+    auto chord = ChordOf(keys);
+    if (!chord) return;
+    auto [key, modifiers] = *chord;
+    struct State {
+        bool down = false;
+        bool held = false;
+        uint64_t generation = 0;
+    };
+    auto state = std::make_shared<State>();
+    auto setHold = [ctx, hold, state](bool on) {
+        if (state->held == on) return;
+        state->held = on;
+        SetDraft(ctx, hold, Value::Bool(on));
+    };
+    bool typed = (modifiers & (winrt::Windows::System::VirtualKeyModifiers::Control | winrt::Windows::System::VirtualKeyModifiers::Menu)) ==
+        winrt::Windows::System::VirtualKeyModifiers::None;
+    auto root = ctx.win->root;
+    auto inText = [typed, weak = winrt::make_weak(root)] {
+        if (!typed) return false;
+        auto element = weak.get();
+        if (!element || !element.XamlRoot()) return false;
+        auto focused = xaml::Input::FocusManager::GetFocusedElement(element.XamlRoot());
+        return focused && (focused.try_as<controls::TextBox>() || focused.try_as<controls::PasswordBox>());
+    };
+    auto down = xaml::Input::KeyEventHandler([=](auto&&, xaml::Input::KeyRoutedEventArgs const& args) {
+        if (shortcutRecording || args.Key() != key || HeldModifiers() != modifiers || inText()) return;
+        if (state->down) {
+            args.Handled(true);
+            return;
+        }
+        if (!isEnabled()) return;
+        state->down = true;
+        auto generation = ++state->generation;
+        Host::After(std::chrono::milliseconds(static_cast<int64_t>(after * 1000)), [state, generation, setHold] {
+            if (state->down && state->generation == generation) setHold(true);
+        });
+        args.Handled(true);
+    });
+    auto up = xaml::Input::KeyEventHandler([=](auto&&, xaml::Input::KeyRoutedEventArgs const& args) {
+        if (args.Key() != key || !state->down) return;
+        state->down = false;
+        ++state->generation;
+        if (state->held) setHold(false);
+        else if (tapped) tapped();
+        args.Handled(true);
+    });
+    // The same boxed handlers go in and come out again.
+    auto downBox = winrt::box_value(down);
+    auto upBox = winrt::box_value(up);
+    root.AddHandler(xaml::UIElement::KeyDownEvent(), downBox, true);
+    root.AddHandler(xaml::UIElement::KeyUpEvent(), upBox, true);
+    // Focus leaving the window would swallow the key's release.
+    auto lost = root.LosingFocus([state, setHold](auto&&, xaml::Input::LosingFocusEventArgs const& args) {
+        if (args.NewFocusedElement()) return;
+        state->down = false;
+        ++state->generation;
+        setHold(false);
+    });
+    if (quiet) {
+        auto entry = std::make_shared<Win::QuietKey>(Win::QuietKey{key, modifiers, isEnabled});
+        ctx.win->quietKeys.push_back(entry);
+        std::weak_ptr<bool> alive(ctx.win->life);
+        Reactive::OnCleanup([win = ctx.win, alive, entry] {
+            if (!alive.expired()) std::erase(win->quietKeys, entry);
+        });
+    }
+    Reactive::OnCleanup([weak = winrt::make_weak(root), downBox, upBox, lost, state, setHold] {
+        state->down = false;
+        ++state->generation;
+        if (state->held) setHold(false);
+        auto root = weak.get();
+        if (!root) return;
+        root.RemoveHandler(xaml::UIElement::KeyDownEvent(), downBox);
+        root.RemoveHandler(xaml::UIElement::KeyUpEvent(), upBox);
+        root.LosingFocus(lost);
+    });
+}
 
 /// `Shortcut`: its keys run the action while it is mounted and enabled,
 /// without a control on screen.
 inline void KeyShortcut(Parent const&, Ctx const& ctx, KeyShortcutProps props) {
     auto enabled = props.enabled;
     auto action = props.action;
+    std::function<bool()> isEnabledFirst = [ctx, enabled] { return !enabled || Reactive::Untrack([&] { return R::Truthy(enabled(ctx)); }); };
+    if (props.hold) {
+        std::function<void()> tapped;
+        if (action) tapped = [ctx, action] { action(ctx); };
+        double after = props.holdAfter.value_or(0.3);
+        if (props.bound)
+            Reactive::Run([ctx, keys = props.bound, isEnabledFirst, tapped, hold = *props.hold, after, quiet = props.quiet] {
+                auto normal = NormalizedShortcut(Utf8(keys(ctx)));
+                if (normal && !normal->empty()) HoldKeys(ctx, normal->c_str(), isEnabledFirst, tapped, hold, after, quiet);
+            });
+        else
+            HoldKeys(ctx, props.keys, isEnabledFirst, tapped, *props.hold, after, props.quiet);
+        return;
+    }
     if (!action) return;
-    std::function<bool()> isEnabled = [ctx, enabled] { return !enabled || Reactive::Untrack([&] { return R::Truthy(enabled(ctx)); }); };
+    std::function<bool()> isEnabled = isEnabledFirst;
     std::function<bool()> invoked = [ctx, isEnabled, action] {
         if (!isEnabled()) return false;
         action(ctx);
@@ -1610,6 +1748,8 @@ struct PopoverButtonProps {
     std::optional<double> iconSize;
     /// `shape: capsule` / `height`: sizes the trigger button like `Menu` and `IconButton`.
     std::optional<ControlShape> shape;
+    /// `placement`: `above` or `below` the button; else where Windows puts it.
+    char const* placement = nullptr;
 };
 
 /// A button that shows its children in a popover, such as a volume slider.
@@ -1658,6 +1798,7 @@ inline void PopoverButton(Parent const& p, Ctx const& ctx, PopoverButtonProps pr
             xaml::Automation::AutomationProperties::SetName(button, name);
         });
     auto popover = MakePopover(ctx, content, props.windowTheme, props.style);
+    PlaceFlyout(popover->flyout, props.placement);
     button.Flyout(popover->flyout);
     auto model = ModelOf(ctx, props.presented, nullptr, props.current, props.change);
     if (model.read) {

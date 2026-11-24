@@ -2100,9 +2100,13 @@ fn check_resources(
                 return;
             };
             for prop in element.props.values() {
-                if let ir::Prop::Resource { name } = prop
-                    && !resources.iter().any(|resource| &resource.name == name)
-                {
+                // A picture, or the application's own icon (`icon: "x.svg"`).
+                let name = match prop {
+                    ir::Prop::Resource { name } => name,
+                    ir::Prop::Icon { name } if name.to_ascii_lowercase().ends_with(".svg") => name,
+                    _ => continue,
+                };
+                if !resources.iter().any(|resource| &resource.name == name) {
                     diagnostics.push(
                         Diagnostic::error(format!(
                             "resource `{name}` is not declared; list it under [resources] in Bern.toml"

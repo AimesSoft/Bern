@@ -64,6 +64,12 @@
 | `untitled_detail` | 无标题详情 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `idle_control` | 按状态启停空闲检测（`Window(idle_enabled:)`） | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `quiet_shortcuts` | 不算空闲检测输入的快捷键（`Shortcut(quiet:)`） | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `app_icons` | 应用自己的图标：`icon: "icons/play.svg"` 指一个声明了的 SVG，构建时转成轮廓，按控件的前景色画 | — | — | — | — | — | — | 支持 |
+| `popup_placement` | `Menu`、`PopoverButton`、`Tooltip` 的 `placement: above / below` | — | — | — | — | — | — | 支持 |
+| `tooltip_keys` | `Tooltip(keys:)`：提示文字后面用按键框写出快捷键 | — | — | — | — | — | — | 支持 |
+| `vertical_sliders` | 竖着的滑块（`Slider(axis: vertical)`） | — | — | — | — | — | — | 支持 |
+| `hold_shortcuts` | 按按住多久区分的键（`Shortcut(hold:, hold_after:)`） | — | — | — | — | — | — | 支持 |
+| `native_lists` | 传进原生视图的列表（`NativeValue(value:)` 给 `Vec`） | — | — | — | — | — | — | 支持 |
 | `fill_buttons` | 横向撑满容器的系统按钮（`Button(width: fill)`） | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `page_search` | 页面里的系统搜索框（不在 `Toolbar` / `Sidebar` 里的 `Search`），结果列在框下 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `window_short` | 窗口高度低于紧凑断点（`window.short`），如手机横屏 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |

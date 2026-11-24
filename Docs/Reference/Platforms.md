@@ -64,6 +64,12 @@ The optional GPUI target (`ui = "gpui"`, macOS, Windows, Linux) is a first versi
 | `untitled_detail` | Untitled detail | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
 | `idle_control` | Turning idle detection on and off by state (`Window(idle_enabled:)`) | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
 | `quiet_shortcuts` | Shortcuts that are no input for idle detection (`Shortcut(quiet:)`) | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
+| `app_icons` | The application's own icons: `icon: "icons/play.svg"` names a declared SVG, outlined at build time and drawn in the control's foreground colour | — | — | — | — | — | — | Supported |
+| `popup_placement` | `placement: above / below` of `Menu`, `PopoverButton` and `Tooltip` | — | — | — | — | — | — | Supported |
+| `tooltip_keys` | `Tooltip(keys:)`: the shortcut in key caps after the tip's text | — | — | — | — | — | — | Supported |
+| `vertical_sliders` | Upright sliders (`Slider(axis: vertical)`) | — | — | — | — | — | — | Supported |
+| `hold_shortcuts` | Keys told apart by how long they are held (`Shortcut(hold:, hold_after:)`) | — | — | — | — | — | — | Supported |
+| `native_lists` | Lists passed into a native view (`NativeValue(value:)` with a `Vec`) | — | — | — | — | — | — | Supported |
 | `fill_buttons` | System buttons that fill the container horizontally (`Button(width: fill)`) | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
 | `page_search` | A system search field in the page (`Search` not inside a `Toolbar` / `Sidebar`), with results listed below the field | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
 | `window_short` | Window height below the compact breakpoint (`window.short`), such as a phone in landscape | Supported | Supported | Supported | Supported | Supported | Supported | Supported |

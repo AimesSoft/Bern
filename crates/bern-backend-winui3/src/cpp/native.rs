@@ -28,6 +28,12 @@ fn cpp_type(ty: &Type) -> &'static str {
             Type::Text => "std::optional<winrt::hstring>",
             _ => "std::optional<double>",
         },
+        Type::List { inner } => match inner.as_ref() {
+            Type::Bool => "std::vector<bool>",
+            Type::Int => "std::vector<int64_t>",
+            Type::Text => "std::vector<winrt::hstring>",
+            _ => "std::vector<double>",
+        },
         _ => "double",
     }
 }
@@ -47,6 +53,19 @@ fn unpack_cpp(expr_val: &str, ty: &Type) -> String {
             };
             format!(
                 "[&]() -> {} {{ auto opt = R::Some({expr_val}); return opt ? std::optional{{{some}}} : std::nullopt; }}()",
+                cpp_type(ty)
+            )
+        }
+        Type::List { inner } => {
+            let item = match inner.as_ref() {
+                Type::Bool => "R::Truthy(item)",
+                Type::Int => "static_cast<int64_t>(std::llround(R::AsDouble(item)))",
+                Type::Text => "winrt::to_hstring(R::Plain(item))",
+                _ => "R::AsDouble(item)",
+            };
+            format!(
+                "[&]() -> {} {{ {} out; for (auto const& item : R::AsList({expr_val})) out.push_back({item}); return out; }}()",
+                cpp_type(ty),
                 cpp_type(ty)
             )
         }

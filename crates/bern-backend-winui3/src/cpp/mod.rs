@@ -192,6 +192,9 @@ pub struct Generator<'a> {
     current_scope: std::cell::RefCell<String>,
     /// Whether the nodes being written are the items of a sidebar.
     in_sidebar: std::cell::Cell<bool>,
+    /// The application's own `.svg` icons as path data in a 20-unit square,
+    /// by name; see [`bern_target_api::app_icon`].
+    app_icons: Vec<(String, String)>,
 }
 
 impl<'a> Generator<'a> {
@@ -201,7 +204,14 @@ impl<'a> Generator<'a> {
             project_dir: None,
             current_scope: std::cell::RefCell::new(String::new()),
             in_sidebar: std::cell::Cell::new(false),
+            app_icons: Vec::new(),
         }
+    }
+
+    /// The outlines of the application's own icons, for the icon catalog.
+    pub fn with_app_icons(mut self, icons: Vec<(String, String)>) -> Self {
+        self.app_icons = icons;
+        self
     }
 
     pub fn with_project_dir(app: &'a Application, project_dir: &'a std::path::Path) -> Self {
@@ -210,6 +220,7 @@ impl<'a> Generator<'a> {
             project_dir: Some(project_dir),
             current_scope: std::cell::RefCell::new(String::new()),
             in_sidebar: std::cell::Cell::new(false),
+            app_icons: Vec::new(),
         }
     }
 

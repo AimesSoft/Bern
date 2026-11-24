@@ -546,6 +546,9 @@ const fn spec(
     }
 }
 
+/// Where a popover, menu or tip opens beside what opens it.
+pub const PLACEMENTS: &[&str] = &["above", "below"];
+
 pub const COMPONENTS: &[ComponentSpec] = &[
     ComponentSpec {
         placement: Placement::Root,
@@ -834,9 +837,11 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 req("key", PropKind::Shortcut),
                 opt("enabled", PropKind::Bool),
                 opt("quiet", PropKind::Flag),
+                opt("hold", PropKind::BoolField),
+                opt("hold_after", PropKind::Number),
             ],
             Children::None,
-            "A keyboard shortcut without a control of its own: the key runs the action while the shortcut is mounted and enabled; on a television, the remote's button that stands for the key; with `quiet` the key does not wake a window at rest, nor start its count toward `window.idle` again",
+            "A keyboard shortcut without a control of its own: the key runs the action while the shortcut is mounted and enabled; on a television, the remote's button that stands for the key; with `quiet` the key does not wake a window at rest, nor start its count toward `window.idle` again; with `hold` a press shorter than `hold_after` seconds (0.3 unless given) runs the action when the key is let go, and a longer one sets the session field `hold` true until the key is let go, without the action",
         )
     },
     ComponentSpec {
@@ -1128,9 +1133,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("presented", PropKind::BoolField),
                 opt("open", PropKind::Bool),
                 opt("shortcut", PropKind::Shortcut),
+                opt("placement", PropKind::Keyword(PLACEMENTS)),
             ],
             Children::Any,
-            "A button that shows its children in a popover; `presented` binds a session field, or `open` follows engine state and commits opening and dismissal through its action; `prominence: plain` draws no background, `font_size` sizes the icon, and `height` / `shape: capsule` size and shape the trigger button as on `Menu` and `IconButton`",
+            "A button that shows its children in a popover; `presented` binds a session field, or `open` follows engine state and commits opening and dismissal through its action; `prominence: plain` draws no background, `font_size` sizes the icon, and `height` / `shape: capsule` size and shape the trigger button as on `Menu` and `IconButton`; `placement: above` opens the popover above the button, `below` under it",
         )
     },
     spec(
@@ -1254,9 +1260,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("style", PropKind::Keyword(&["button", "icon"])),
                 opt("shape", PropKind::Keyword(&["capsule"])),
                 opt("height", PropKind::Length),
+                opt("placement", PropKind::Keyword(PLACEMENTS)),
             ],
             Children::Only(&["MenuItem", "Divider"]),
-            "Button opening a menu of commands; `style: icon` shows only the icon, as an `IconButton`, with `label` as its accessible name, and with `height` is a round button of that diameter",
+            "Button opening a menu of commands; `style: icon` shows only the icon, as an `IconButton`, with `label` as its accessible name, and with `height` is a round button of that diameter; `placement: above` opens the menu above the button, `below` under it",
         )
     },
     ComponentSpec {
@@ -1794,10 +1801,11 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("step", PropKind::Number),
                 opt("min_icon", PropKind::Icon),
                 opt("max_icon", PropKind::Icon),
+                opt("axis", PropKind::Keyword(&["horizontal", "vertical"])),
                 FEATURE,
             ],
             Children::None,
-            "Range value previewed in the session; the action runs on commit. `hover` holds where the pointer is along the track, from 0 at `min` to 1 at `max`, while it is over the slider, and `None` otherwise",
+            "Range value previewed in the session; the action runs on commit. `hover` holds where the pointer is along the track, from 0 at `min` to 1 at `max`, while it is over the slider, and `None` otherwise. `axis: vertical` stands it upright, `min` at the bottom, filling the height it is given",
         )
     },
     ComponentSpec {
@@ -2068,9 +2076,13 @@ pub const COMPONENTS: &[ComponentSpec] = &[
     ),
     spec(
         "Tooltip",
-        &[req("content", PropKind::DisplayText)],
+        &[
+            req("content", PropKind::DisplayText),
+            opt("keys", PropKind::Shortcut),
+            opt("placement", PropKind::Keyword(PLACEMENTS)),
+        ],
         Children::One,
-        "Native hover or long-press help text attached to its single child",
+        "Native hover or long-press help text attached to its single child; `keys` shows a shortcut after the text in key caps, as the platform writes it (it does not register the shortcut); `placement: above` shows the tip above the child, `below` under it",
     ),
     ComponentSpec {
         action: ActionRule::Optional,

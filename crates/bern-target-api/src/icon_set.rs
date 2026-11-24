@@ -130,7 +130,9 @@ pub fn check(app: &Application, set: &str, has: impl Fn(&str) -> bool) -> Vec<Di
     app.walk(&mut |node: &Node, _| {
         if let Node::Element(element) = node {
             for (name, prop) in &element.props {
+                // The application's own icons are checked by `app_icons`.
                 if let Prop::Icon { name: icon } = prop
+                    && !crate::app_icon::is_app_icon(icon)
                     && !has(icon)
                 {
                     diagnostics.push(

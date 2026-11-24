@@ -6,6 +6,7 @@
 //! imports a concrete target, and disabling one target leaves the others
 //! buildable.
 
+pub mod app_icon;
 pub mod brand_assets;
 pub mod eject;
 pub mod glue;
@@ -250,6 +251,25 @@ pub mod feature {
     /// `Shortcut(quiet: true)`: a key that is no input for `window.idle`.
     /// Without it the key wakes the window, as every other does.
     pub const QUIET_SHORTCUTS: &str = "quiet_shortcuts";
+    /// `icon: "icons/play.svg"`: the application's own icon, a declared
+    /// SVG drawn in the control's foreground colour. Without it the
+    /// control shows no icon.
+    pub const APP_ICONS: &str = "app_icons";
+    /// `placement: above / below` on `Menu`, `PopoverButton` and `Tooltip`.
+    /// Without it the platform chooses where they open.
+    pub const POPUP_PLACEMENT: &str = "popup_placement";
+    /// `Tooltip(keys:)`: the shortcut in key caps after the tip's text.
+    /// Without it the tip shows its text alone.
+    pub const TOOLTIP_KEYS: &str = "tooltip_keys";
+    /// `Slider(axis: vertical)`: an upright slider. Without it the slider
+    /// lies along its row.
+    pub const VERTICAL_SLIDERS: &str = "vertical_sliders";
+    /// `Shortcut(hold:)`: a key told apart by how long it is held. Without
+    /// it the key runs the action as it is pressed, and `hold` stays false.
+    pub const HOLD_SHORTCUTS: &str = "hold_shortcuts";
+    /// `NativeValue(value:)` with a `Vec` of bool, i64, f64 or String.
+    /// Without it a native view of the target cannot take a list.
+    pub const NATIVE_LISTS: &str = "native_lists";
     /// `Button(width: fill)`: a system button stretched across its
     /// container, as a phone's main action.
     pub const FILL_BUTTONS: &str = "fill_buttons";

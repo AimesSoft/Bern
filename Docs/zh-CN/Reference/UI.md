@@ -206,7 +206,7 @@ bern run --target web_app --port 4173
 
 - `Layout(size: tv)` 是电视上的布局，`Adaptive` 里最多一个，不影响其他尺寸的必需与回退规则；表达式可读 `window.tv`。tvOS 在构建时只保留电视显示的部分，所以手机与桌面布局里电视没有的能力（如 `pick:`）不会让 tvOS 构建失败。
 - `Layout(size: watch)` 是 Apple Watch（`watchos`）与 Wear OS（`wearos`）手表上的布局，`Adaptive` 里最多一个；表达式可读 `window.watch`。应用声明 `watchos` 或 `wearos` 目标时，所有可达的 `Adaptive` 都必须显式提供 `Layout(size: watch)`（不回落到手机 `compact`），`#[bern::features]` 也会单独校验 `watch` 覆盖；其他后端在检查前就会裁剪掉 `watch` 分支与仅被它引用的组件。`platform = "watchos"` 构建独立的 watchOS SwiftUI 应用（`MinimumOSVersion = 11.0`、`WKWatchOnly`，打包为 Watch-Only `-watchos.ipa`）；`platform = "wearos"` 使用 Wear Material 3 打出独立的手表 APK（默认 `minSdk = 26`，可通过 `android.min_sdk` 自定义，例如上架 Google Play 设为 `30`；声明 `android.hardware.type.watch`、默认 `android.standalone = true`，且发布打包默认同时产出 `arm64-v8a` 与 `armeabi-v7a`）。
-- `Shortcut(key:, enabled:, quiet:) => 动作` 是没有控件的快捷键，键的写法与控件的 `shortcut` 相同。电视上 `escape`、`space` 与方向键分别是遥控器的返回、播放/暂停与触控板方向（方向只在焦点无处可移时到达）。Android 手机与平板上，系统的返回（按钮或手势）先运行最后生效的 `escape` 快捷键，没有时才离开应用：按 Esc 关闭的页面或图层，按返回也会关闭。写 `quiet: true` 时，这个键不算 `window.idle` 的输入：既不唤醒静置的窗口，也不重新计时，例如播放器里不让操作栏出来的快进快退键。
+- `Shortcut(key:, enabled:, quiet:, hold:, hold_after:) => 动作` 是没有控件的快捷键，键的写法与控件的 `shortcut` 相同。电视上 `escape`、`space` 与方向键分别是遥控器的返回、播放/暂停与触控板方向（方向只在焦点无处可移时到达）。Android 手机与平板上，系统的返回（按钮或手势）先运行最后生效的 `escape` 快捷键，没有时才离开应用：按 Esc 关闭的页面或图层，按返回也会关闭。写 `quiet: true` 时，这个键不算 `window.idle` 的输入：既不唤醒静置的窗口，也不重新计时，例如播放器里不让操作栏出来的快进快退键。写了 `hold: draft.fast` 时，按下不到 `hold_after` 秒（不写为 0.3）就松开的，松开时执行动作；按得更久的，会话字段一直为真，直到松开，不执行动作：例如播放器里点一下快进、按住加速的键。只有 Windows 支持，其他目标警告，按下时执行动作。
 - `Button` / `IconButton` 的 `default_focus: true` 让界面出现时焦点从它开始；电视上每个页面都应给出一个。
 - `window.keyboard` 是否连着实体键盘：电脑上总是成立，手机与平板跟随键盘的连接与断开。只对键盘有用的内容（如快捷键设置）写在 `if window.keyboard { … }` 里，没接键盘的手机上就不出现。
 - `window.app_version` 是 `Bern.toml` 里 `[app]` 的 `version`，也就是各平台安装包上的版本号：`Text(content: tr! { "zh-Hans" => "版本 {version}"; version: window.app_version })`。它在构建时确定，所有目标都一样。组件库不属于任何应用，要用时通过参数传入。
@@ -489,7 +489,9 @@ Grid(min_width: 160, gap: 16, skeleton: app.loading, skeleton_count: 6) {
 
 ## 反馈提示、折叠面板、数字输入与动态选择器
 
-- **`Tooltip(content:)`**：为单个子控件附加悬停/聚焦提示，不改变布局。
+- **`Tooltip(content:)`**：为单个子控件附加悬停/聚焦提示，不改变布局。`keys: app.keys.play` 在文字后面用按键框写出这个快捷键（不注册快捷键），`placement: above` / `below` 让提示出现在子控件上方或下方；`Menu(placement:)`、`PopoverButton(placement:)` 也这样决定菜单和弹出层往哪边开，例如播放器底栏要往上弹。目前只有 Windows 支持，其他目标警告，照平台的位置显示。
+- **应用自己的图标**：`icon:` 写一个声明了的 `.svg` 资源，例如 `icon: "icons/play.svg"`，代替 Bern 图标集里的名字。构建时把它的填充、描线和文字转成一个填充轮廓，像系统图标一样按控件的前景色画。目前只有 Windows 支持（功能 `app_icons`），其他目标警告，不显示图标。
+- **`Slider(axis: vertical)`** 让滑块竖着放，`min` 在下面，高度跟着容器，例如弹出层里的音量滑块。目前只有 Windows 支持，其他目标警告，照常横着放。
 - **`Banner(severity:, title:, content:, icon:, dismiss_label:) { … } => dismiss`**：行内状态横幅（`info`、`success`、`warning`、`error`），使用各平台原生容器（WinUI 3 的 `InfoBar`，SwiftUI/GTK/Compose/Web/GPUI 的语义横幅），支持尾部操作按钮，绑定动作后自动显示关闭按钮。
 - **`Disclosure(id:, label:, icon:, expanded:, open:) { … }`**：可折叠展开区域，使用原生 `DisclosureGroup`（SwiftUI）、`Expander`（WinUI 3 / GTK）、Material 折叠区（Compose）与 `<details>`（Web）。支持草稿绑定（`expanded:`）、受控绑定（`open:` + `=> action`）以及省略绑定时的本地展开状态。
 - **`NumberInput(id:, label:, value:/current:, min:, max:, step:, precision:, enabled:)`**：带步进器与范围约束的数字输入控件（WinUI 3 `NumberBox`、GTK `SpinButton`、SwiftUI `TextField` + `Stepper`、Web `<input type="number">`）。

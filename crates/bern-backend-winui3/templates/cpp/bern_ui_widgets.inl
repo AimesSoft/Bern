@@ -128,6 +128,12 @@ inline controls::ColumnDefinition Column(xaml::GridLength width) {
     return column;
 }
 
+inline controls::RowDefinition GridRow(xaml::GridLength height) {
+    controls::RowDefinition row;
+    row.Height(height);
+    return row;
+}
+
 /// A card row of a form section holding `content`.
 inline controls::Border Card(xaml::UIElement const& content) {
     if (auto framework = content.try_as<xaml::FrameworkElement>(); framework && framework.VerticalAlignment() == xaml::VerticalAlignment::Stretch)
@@ -2733,6 +2739,9 @@ struct SliderProps {
     /// `hover`: where the pointer is along the track while it is over the
     /// slider, and none otherwise.
     std::optional<Field> hover;
+    /// `axis: vertical`: upright, the minimum at the bottom, as tall as it
+    /// is given.
+    bool vertical = false;
 };
 
 /// Where the pointer is along a slider's travel, from 0 at its minimum to
@@ -2740,6 +2749,22 @@ struct SliderProps {
 /// Positions relative to the track already run from its minimum end, the
 /// right one when it flows right to left.
 inline double SliderFraction(controls::Slider const& slider, xaml::Input::PointerRoutedEventArgs const& args) {
+    if (slider.Orientation() == controls::Orientation::Vertical) {
+        // Upright: the minimum is at the bottom unless reversed.
+        xaml::UIElement track = slider;
+        double height = slider.ActualHeight(), inset = 0;
+        if (auto thumb = TemplatePart(slider, L"VerticalThumb")) {
+            inset = thumb.ActualHeight();
+            if (auto frame = media::VisualTreeHelper::GetParent(thumb).try_as<xaml::FrameworkElement>()) {
+                track = frame;
+                height = frame.ActualHeight();
+            }
+        }
+        double travel = height - inset;
+        double y = args.GetCurrentPoint(track).Position().Y;
+        double fromTop = travel > 0 ? (std::clamp)((y - inset / 2) / travel, 0.0, 1.0) : 0.0;
+        return slider.IsDirectionReversed() ? fromTop : 1 - fromTop;
+    }
     xaml::UIElement track = slider;
     double width = slider.ActualWidth(), inset = 0;
     if (auto thumb = TemplatePart(slider, L"HorizontalThumb")) {
@@ -2770,8 +2795,15 @@ inline void Slider(Parent const& p, Ctx const& ctx, SliderProps props) {
     slider.StepFrequency(step);
     slider.SmallChange(step);
     slider.LargeChange((high - low) / 10);
-    slider.MinWidth(props.labelHidden ? 80 : 200);
-    slider.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+    if (props.vertical) {
+        slider.Orientation(controls::Orientation::Vertical);
+        slider.MinHeight(80);
+        slider.HorizontalAlignment(xaml::HorizontalAlignment::Center);
+        slider.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+    } else {
+        slider.MinWidth(props.labelHidden ? 80 : 200);
+        slider.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+    }
     auto run = Run(ctx, props.commit);
     auto snap = [low, high, explicitStep = props.step](double value) {
         if (explicitStep && *explicitStep > 0) value = low + std::round((value - low) / *explicitStep) * *explicitStep;
@@ -2844,26 +2876,48 @@ inline void Slider(Parent const& p, Ctx const& ctx, SliderProps props) {
         Reactive::OnCleanup([set] { set(std::nullopt); });
     }
     controls::Grid track;
-    track.ColumnSpacing(8);
-    track.ColumnDefinitions().Append(Column(AutoLength()));
-    track.ColumnDefinitions().Append(Column(Star()));
-    track.ColumnDefinitions().Append(Column(AutoLength()));
-    if (props.minIcon) {
-        auto icon = Icons::Icon(props.minIcon, 14);
-        icon.VerticalAlignment(xaml::VerticalAlignment::Center);
-        track.Children().Append(icon);
-    }
-    controls::Grid::SetColumn(slider, 1);
-    track.Children().Append(slider);
-    if (props.maxIcon) {
-        auto icon = Icons::Icon(props.maxIcon, 14);
-        icon.VerticalAlignment(xaml::VerticalAlignment::Center);
-        controls::Grid::SetColumn(icon, 2);
-        track.Children().Append(icon);
+    if (props.vertical) {
+        // Upright: the maximum's icon above, the minimum's below.
+        track.RowSpacing(8);
+        track.RowDefinitions().Append(GridRow(AutoLength()));
+        track.RowDefinitions().Append(GridRow(Star()));
+        track.RowDefinitions().Append(GridRow(AutoLength()));
+        if (props.maxIcon) {
+            auto icon = Icons::Icon(props.maxIcon, 14);
+            icon.HorizontalAlignment(xaml::HorizontalAlignment::Center);
+            track.Children().Append(icon);
+        }
+        controls::Grid::SetRow(slider, 1);
+        track.Children().Append(slider);
+        if (props.minIcon) {
+            auto icon = Icons::Icon(props.minIcon, 14);
+            icon.HorizontalAlignment(xaml::HorizontalAlignment::Center);
+            controls::Grid::SetRow(icon, 2);
+            track.Children().Append(icon);
+        }
+    } else {
+        track.ColumnSpacing(8);
+        track.ColumnDefinitions().Append(Column(AutoLength()));
+        track.ColumnDefinitions().Append(Column(Star()));
+        track.ColumnDefinitions().Append(Column(AutoLength()));
+        if (props.minIcon) {
+            auto icon = Icons::Icon(props.minIcon, 14);
+            icon.VerticalAlignment(xaml::VerticalAlignment::Center);
+            track.Children().Append(icon);
+        }
+        controls::Grid::SetColumn(slider, 1);
+        track.Children().Append(slider);
+        if (props.maxIcon) {
+            auto icon = Icons::Icon(props.maxIcon, 14);
+            icon.VerticalAlignment(xaml::VerticalAlignment::Center);
+            controls::Grid::SetColumn(icon, 2);
+            track.Children().Append(icon);
+        }
     }
     xaml::UIElement content = props.labelHidden ? xaml::UIElement(track) : xaml::UIElement(Stacked(text, track));
-    // A slider takes the width it is given, as on the other targets.
-    SetRole(content.as<xaml::FrameworkElement>(), L"bern-fill-width");
+    // A slider takes the width it is given, as on the other targets; an
+    // upright one the height.
+    SetRole(content.as<xaml::FrameworkElement>(), props.vertical ? L"bern-fill-height" : L"bern-fill-width");
     if (p.isList) p.Add(Card(content));
     else p.Add(content);
     Controls::Register(ctx, props.id, "slider", text, nullptr,
@@ -3473,17 +3527,82 @@ inline void DynamicPicker(Parent const& p, Ctx const& ctx, DynamicPickerProps pr
             }});
 }
 
-/// `Tooltip`: attaches native ToolTipService text to its single child without extra wrapper panels.
-inline void Tooltip(Parent const& p, Ctx const& ctx, Str content, Build const& children) {
+inline winrt::hstring ShortcutText(char const* keys);
+
+struct TooltipProps {
+    Str content;
+    /// `keys`: a shortcut shown after the text, one key cap per key.
+    char const* keys = nullptr;
+    /// `placement`: `above` or `below` the child; else where Windows puts it.
+    char const* placement = nullptr;
+};
+
+/// The tip's text, then each key of `keys` in a cap of its own.
+inline xaml::UIElement TooltipContent(winrt::hstring const& text, char const* keys) {
+    controls::StackPanel row;
+    row.Orientation(controls::Orientation::Horizontal);
+    row.Spacing(8);
+    controls::TextBlock words;
+    words.Text(text);
+    words.VerticalAlignment(xaml::VerticalAlignment::Center);
+    row.Children().Append(words);
+    controls::StackPanel caps;
+    caps.Orientation(controls::Orientation::Horizontal);
+    caps.Spacing(3);
+    std::wstring all(ShortcutText(keys));
+    std::wstring key;
+    auto cap = [&caps](std::wstring const& name) {
+        if (name.empty()) return;
+        controls::Border border;
+        border.CornerRadius({4, 4, 4, 4});
+        border.BorderThickness({1, 1, 1, 1});
+        border.Padding({5, 0, 5, 1});
+        border.MinWidth(20);
+        if (auto style = Styles::Themed(L"Border", {{L"BorderBrush", RoleKey("separator")}})) border.Style(style);
+        controls::TextBlock glyph;
+        glyph.Text(winrt::hstring(name));
+        glyph.FontSize(12);
+        glyph.HorizontalAlignment(xaml::HorizontalAlignment::Center);
+        border.Child(glyph);
+        caps.Children().Append(border);
+    };
+    for (wchar_t c : all) {
+        if (c == L'+' && !key.empty()) {
+            cap(key);
+            key.clear();
+        } else {
+            key += c;
+        }
+    }
+    cap(key);
+    row.Children().Append(caps);
+    return row;
+}
+
+/// `Tooltip`: attaches a native tip to its single child without extra
+/// wrapper panels: its text, the key caps of `keys` after it, `placement`
+/// above or below the child.
+inline void Tooltip(Parent const& p, Ctx const& ctx, TooltipProps props, Build const& children) {
     if (!p.region) return children(p, ctx);
     auto before = p.region->items.size();
     children(p, ctx);
-    auto text = Bound(ctx, content);
+    auto text = Bound(ctx, props.content);
     if (!text) return;
+    std::string_view placement = props.placement ? props.placement : "";
+    std::string keys = props.keys ? props.keys : "";
     for (auto i = before; i < p.region->items.size(); ++i) {
         if (auto const& element = p.region->items[i].element) {
-            Reactive::Run([element, text] {
-                controls::ToolTipService::SetToolTip(element, winrt::box_value(text()));
+            if (placement == "above") controls::ToolTipService::SetPlacement(element, controls::Primitives::PlacementMode::Top);
+            else if (placement == "below") controls::ToolTipService::SetPlacement(element, controls::Primitives::PlacementMode::Bottom);
+            Reactive::Run([element, text, keys] {
+                if (keys.empty()) {
+                    controls::ToolTipService::SetToolTip(element, winrt::box_value(text()));
+                    return;
+                }
+                controls::ToolTip tip;
+                tip.Content(TooltipContent(text(), keys.c_str()));
+                xaml::Automation::AutomationProperties::SetName(tip, text());
+                controls::ToolTipService::SetToolTip(element, tip);
             });
         }
     }
@@ -5913,7 +6032,17 @@ struct MenuLook {
     bool iconOnly = false;
     std::optional<ControlShape> shape;
     bool hideDisabled = false;
+    /// `placement`: `above` or `below` the button; else where Windows puts it.
+    char const* placement = nullptr;
 };
+
+/// Opens `flyout` above or below what shows it, as `placement` says; it
+/// stays where Windows puts it otherwise.
+inline void PlaceFlyout(controls::Primitives::FlyoutBase const& flyout, char const* placement) {
+    std::string_view where = placement ? placement : "";
+    if (where == "above") flyout.Placement(controls::Primitives::FlyoutPlacementMode::Top);
+    else if (where == "below") flyout.Placement(controls::Primitives::FlyoutPlacementMode::Bottom);
+}
 
 /// An item of a menu, ready before the menu exists: what it shows and
 /// what it does.
@@ -6095,6 +6224,7 @@ inline void Menu(Parent const& p, Ctx const& ctx, char const* id, Str const& lab
     controls::MenuFlyout flyout;
     MenuEntries(ctx, flyout, items, look.hideDisabled);
     if (auto style = PresenterTheme(L"MenuFlyoutPresenter", ctx.appearance)) flyout.MenuFlyoutPresenterStyle(style);
+    PlaceFlyout(flyout, look.placement);
     button.Flyout(flyout);
     auto open = std::make_shared<bool>(false);
     flyout.Opened([open](auto&&, auto&&) { *open = true; });
@@ -7009,10 +7139,11 @@ inline void Reorderable(Parent const& p, Ctx const& ctx, ReorderableProps props,
                 controls::Grid::SetColumn(grip, 0);
                 grid.Children().Append(grip);
 
-                controls::StackPanel contentBox;
-                contentBox.Orientation(controls::Orientation::Horizontal);
+                // A flex row, so a `Spacer` in the row pushes what follows it to
+                // the row's far end, as in any other `Row`.
+                auto contentBox = MakeFlex(true, 6);
                 contentBox.VerticalAlignment(xaml::VerticalAlignment::Center);
-                contentBox.Spacing(6);
+                contentBox.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
                 controls::Grid::SetColumn(contentBox, 1);
                 auto scope = std::make_unique<Scope>();
                 Value itemVal = list[i];
