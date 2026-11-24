@@ -1043,14 +1043,15 @@ inline bool OnScreen(Win const& win, xaml::UIElement const& element) {
 }
 
 /// How long the window waits before it rests: `seconds`; with `idle_area`s
-/// on screen and a mouse, the seconds of the area under the mouse, and none
-/// while it is over none or outside the window.
+/// on screen and a mouse, the seconds of the area under the mouse, none
+/// while it is over another part of the window, and `seconds` again once it
+/// has left the window: a mouse elsewhere on the screen keeps no controls
+/// up.
 inline std::optional<double> IdleWait(Win const& win, double seconds) {
     std::vector<std::pair<xaml::UIElement, double>> areas;
     for (auto const& [weak, wait] : win.idleAreas)
         if (auto area = weak.get(); area && OnScreen(win, area)) areas.emplace_back(area, wait);
-    if (areas.empty() || win.mouse == Win::Mouse::Unknown) return seconds;
-    if (win.mouse == Win::Mouse::Outside) return std::nullopt;
+    if (areas.empty() || win.mouse == Win::Mouse::Unknown || win.mouse == Win::Mouse::Outside) return seconds;
     // What takes the mouse there, topmost first: a control standing over
     // an area takes it off the area.
     try {
@@ -1068,7 +1069,8 @@ inline std::optional<double> IdleWait(Win const& win, double seconds) {
 /// in the window, and false at the next input; the keys of shortcuts with
 /// `quiet` are no input. With `idle_area`s on screen
 /// a mouse counts only while it rests over one, for that area's seconds:
-/// elsewhere, or outside the window, the window stays awake.
+/// elsewhere in the window the window stays awake; outside it, it rests
+/// after `seconds`.
 inline void TrackIdle(std::shared_ptr<Win> const& win, double seconds, std::function<bool()> enabled = nullptr) {
     auto generation = std::make_shared<int64_t>(0);
     auto on = std::make_shared<bool>(true);
@@ -1358,6 +1360,71 @@ inline void ShowCaptionTheme(Win& win) {
 }
 #endif
 
+#if BERN_WINUI
+/// The height of the strip that moves a window whose bar is hidden: the
+/// title bar's standard height.
+inline constexpr double kImmersiveDragHeight = 32;
+
+/// While the bar is hidden and the window is not full screen, the strip at
+/// the top of the window moves it, as its title bar did; the controls
+/// standing in it (and visible to the pointer) let the pointer through. Runs
+/// again after each layout, as controls come and go.
+inline void FitImmersiveDrag(Win& win) {
+    if (!win.window || win.owner || !win.root || !win.root.XamlRoot()) return;
+    using namespace winrt::Microsoft::UI::Input;
+    try {
+        auto source = InputNonClientPointerSource::GetForWindowId(win.window.AppWindow().Id());
+        if (!win.chromeHidden || win.fullscreen.Peek()) {
+            if (win.immersiveDrag.empty()) return;
+            win.immersiveDrag.clear();
+            source.ClearRegionRects(NonClientRegionKind::Passthrough);
+            source.ClearRegionRects(NonClientRegionKind::Caption);
+            return;
+        }
+        double scale = win.root.XamlRoot().RasterizationScale();
+        double width = win.root.ActualWidth();
+        auto toPixels = [scale](winrt::Windows::Foundation::Rect const& r) {
+            return winrt::Windows::Graphics::RectInt32{static_cast<int32_t>(r.X * scale), static_cast<int32_t>(r.Y * scale),
+                static_cast<int32_t>(std::ceil(r.Width * scale)), static_cast<int32_t>(std::ceil(r.Height * scale))};
+        };
+        winrt::Windows::Foundation::Rect strip{0, 0, static_cast<float>(width), static_cast<float>(kImmersiveDragHeight)};
+        std::vector<winrt::Windows::Graphics::RectInt32> through;
+        for (auto const& hit : media::VisualTreeHelper::FindElementsInHostCoordinates(strip, win.root)) {
+            auto control = hit.try_as<controls::Control>();
+            if (!control || !control.IsEnabled()) continue;
+            // Elements leaving, or under one that takes no pointer, do not count.
+            bool reachable = true;
+            for (xaml::DependencyObject node = control; node && node != win.root; node = media::VisualTreeHelper::GetParent(node))
+                if (auto element = node.try_as<xaml::UIElement>(); element && (!element.IsHitTestVisible() || element.Visibility() != xaml::Visibility::Visible)) {
+                    reachable = false;
+                    break;
+                }
+            if (!reachable) continue;
+            auto bounds = control.TransformToVisual(win.root).TransformBounds(
+                winrt::Windows::Foundation::Rect{0, 0, static_cast<float>(control.ActualWidth()), static_cast<float>(control.ActualHeight())});
+            // What covers the whole strip, such as a surface over the content,
+            // is no control standing in it.
+            if (bounds.X <= 0 && bounds.Y <= 0 && bounds.X + bounds.Width >= strip.Width && bounds.Y + bounds.Height >= strip.Height) continue;
+            // Only the part in the strip lets the pointer through.
+            float top = (std::max)(bounds.Y, 0.0f);
+            float bottom = (std::min)(bounds.Y + bounds.Height, strip.Height);
+            if (bottom <= top) continue;
+            through.push_back(toPixels(winrt::Windows::Foundation::Rect{bounds.X, top, bounds.Width, bottom - top}));
+        }
+        auto caption = toPixels(strip);
+        // The same regions as last time: nothing to tell the system.
+        auto next = through;
+        next.push_back(caption);
+        auto same = [](auto const& a, auto const& b) { return a.X == b.X && a.Y == b.Y && a.Width == b.Width && a.Height == b.Height; };
+        if (next.size() == win.immersiveDrag.size() && std::equal(next.begin(), next.end(), win.immersiveDrag.begin(), same)) return;
+        win.immersiveDrag = next;
+        source.SetRegionRects(NonClientRegionKind::Caption, winrt::array_view<winrt::Windows::Graphics::RectInt32 const>(&caption, 1));
+        source.SetRegionRects(NonClientRegionKind::Passthrough, winrt::array_view<winrt::Windows::Graphics::RectInt32 const>(through));
+    } catch (winrt::hresult_error const&) {
+    }
+}
+#endif
+
 /// Show or hide the window's title bar for `immersive` idle chrome hiding.
 inline void ShowChrome(Win& win, bool hide) {
     win.chromeHidden = hide;
@@ -1376,9 +1443,31 @@ inline void ShowChrome(Win& win, bool hide) {
     // The caption buttons go or come back, and their insets with them.
     win.titleBarInsets = {-1, -1, 0};
     if (!hide) {
+        // The strip's regions go; the bar registers its own again.
+        if (!win.immersiveDrag.empty()) {
+            win.immersiveDrag.clear();
+            try {
+                using namespace winrt::Microsoft::UI::Input;
+                InputNonClientPointerSource::GetForWindowId(win.window.AppWindow().Id()).ClearRegionRects(NonClientRegionKind::Passthrough);
+            } catch (winrt::hresult_error const&) {
+            }
+        }
         RestoreTitleBar(win);
     } else {
-        QueueTitleBarPassthrough(&win);
+        // While hidden the bar is gone, but the window still moves by the
+        // strip where it stood: what can be clicked there (a way back over
+        // the content) lets the pointer through.
+        win.passthroughRects.clear();
+        win.immersiveDrag.clear();
+        FitImmersiveDrag(win);
+        // The bar's last layout may register its own region once more.
+        std::weak_ptr<bool> alive(win.life);
+        Win* raw = &win;
+        Host::Post([alive, raw] {
+            if (alive.expired() || !raw->chromeHidden) return;
+            raw->immersiveDrag.clear();
+            FitImmersiveDrag(*raw);
+        });
     }
     if (win.titleBar) win.titleBar.InvalidateMeasure();
 #else
@@ -2052,6 +2141,11 @@ inline std::string Open(std::string const& kindId) {
     root.Children().Append(host);
     window.Content(root);
     window.SetTitleBar(titleBar);
+    // A window without its bar keeps the drag strip fitted to the controls
+    // standing in it.
+    root.LayoutUpdated([weakWin = std::weak_ptr<Win>(win)](auto&&, auto&&) {
+        if (auto current = weakWin.lock(); current && current->chromeHidden) FitImmersiveDrag(*current);
+    });
     titleBar.LayoutUpdated([weakWin = std::weak_ptr<Win>(win)](auto&&, auto&&) {
         if (auto current = weakWin.lock(); current && current->titleBar && current->window) {
             auto before = current->titleBarInsets;

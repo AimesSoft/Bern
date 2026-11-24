@@ -168,6 +168,8 @@ const FEATURES: &[&str] = &[
     bern_target_api::feature::QUIET_SHORTCUTS,
     bern_target_api::feature::APP_ICONS,
     bern_target_api::feature::POPUP_PLACEMENT,
+    bern_target_api::feature::SWITCH_KNOB,
+    bern_target_api::feature::BOLD_MENUS,
     bern_target_api::feature::TOOLTIP_KEYS,
     bern_target_api::feature::VERTICAL_SLIDERS,
     bern_target_api::feature::HOLD_SHORTCUTS,

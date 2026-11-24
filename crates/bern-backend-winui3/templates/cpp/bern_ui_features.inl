@@ -1528,15 +1528,28 @@ inline void ShortcutInput(Parent const& p, Ctx const& ctx, ShortcutInputProps pr
     auto empty = Bound(ctx, props.empty);
     auto isEnabled = Enabled(ctx, props.enabled);
     Cell<bool> recording(false);
+    // The shortcut as key caps, one per key, on a button with no frame of
+    // its own; while it waits, the prompt.
     controls::Button button;
+    Styles::MakeSubtle(button);
+    button.MinWidth(0);
+    button.MinHeight(0);
+    button.Padding(xaml::Thickness{2, 2, 2, 2});
     Reactive::Run([button, model, recording, prompt, empty] {
         if (recording.Get()) {
+            button.Padding(xaml::Thickness{8, 3, 8, 4});
             button.Content(winrt::box_value(prompt ? prompt() : bern::Text::Tr("bern.shortcut.prompt")));
             return;
         }
         auto keys = R::AsText(model.read());
         auto shown = keys.empty() ? winrt::hstring() : ShortcutText(keys.c_str());
-        button.Content(winrt::box_value(shown.empty() ? (empty ? empty() : bern::Text::Tr("bern.shortcut.none")) : shown));
+        if (shown.empty()) {
+            button.Padding(xaml::Thickness{8, 3, 8, 4});
+            button.Content(winrt::box_value(empty ? empty() : bern::Text::Tr("bern.shortcut.none")));
+            return;
+        }
+        button.Padding(xaml::Thickness{2, 2, 2, 2});
+        button.Content(KeyCaps(keys.c_str(), true));
     });
     Reactive::Run([recording] { shortcutRecording = recording.Get(); });
     Reactive::OnCleanup([recording] { if (recording.Peek()) shortcutRecording = false; });

@@ -258,6 +258,12 @@ pub mod feature {
     /// `placement: above / below` on `Menu`, `PopoverButton` and `Tooltip`.
     /// Without it the platform chooses where they open.
     pub const POPUP_PLACEMENT: &str = "popup_placement";
+    /// `Switch(variant:)`: the knob in the style's `foreground` while on.
+    /// Without it the knob keeps the platform's color.
+    pub const SWITCH_KNOB: &str = "switch_knob";
+    /// `Menu(bold: true)`: the menu button's label in bold. Without it the
+    /// label has the button's own weight.
+    pub const BOLD_MENUS: &str = "bold_menus";
     /// `Tooltip(keys:)`: the shortcut in key caps after the tip's text.
     /// Without it the tip shows its text alone.
     pub const TOOLTIP_KEYS: &str = "tooltip_keys";

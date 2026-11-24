@@ -1261,9 +1261,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("shape", PropKind::Keyword(&["capsule"])),
                 opt("height", PropKind::Length),
                 opt("placement", PropKind::Keyword(PLACEMENTS)),
+                opt("bold", PropKind::Flag),
             ],
             Children::Only(&["MenuItem", "Divider"]),
-            "Button opening a menu of commands; `style: icon` shows only the icon, as an `IconButton`, with `label` as its accessible name, and with `height` is a round button of that diameter; `placement: above` opens the menu above the button, `below` under it",
+            "Button opening a menu of commands; `style: icon` shows only the icon, as an `IconButton`, with `label` as its accessible name, and with `height` is a round button of that diameter (without an icon, the label itself, with no arrow); `placement: above` opens the menu above the button, `below` under it; `bold: true` sets its label in bold",
         )
     },
     ComponentSpec {
@@ -1759,9 +1760,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("icon", PropKind::Icon),
                 opt("shortcut", PropKind::Shortcut),
                 opt("login_item", PropKind::Flag),
+                opt("variant", PropKind::StyleVariant),
             ],
             Children::None,
-            "Boolean state; `style: button` is a button that stays pressed while on; `login_item: true` is whether the system opens the application at login, left out where there is no such thing",
+            "Boolean state; `style: button` is a button that stays pressed while on; `login_item: true` is whether the system opens the application at login, left out where there is no such thing; a `style!` variant's `foreground` colors the knob while it is on",
         )
     },
     ComponentSpec {

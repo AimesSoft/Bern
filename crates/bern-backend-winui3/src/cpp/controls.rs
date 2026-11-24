@@ -263,6 +263,7 @@ impl Generator<'_> {
                 (element.keyword("label_hidden") == Some("true")).then(|| "true".to_string()),
             ),
             ("shape", self.shape(element)),
+            ("look", self.style("Switch", element.keyword("variant"))),
         ]);
         out.line(format!("B::Switch(p, c, {});", designated(&fields)));
         self.shortcut(out, element, "activate");
@@ -848,6 +849,7 @@ impl Generator<'_> {
                     (element.keyword("hide_disabled") == Some("true")).then(|| "true".into()),
                 ),
                 ("placement", Self::keyword(element, "placement")),
+                ("bold", (element.keyword("bold") == Some("true")).then(|| "true".into())),
             ])
             .replacen('{', "B::MenuLook{", 1),
         ));

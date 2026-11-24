@@ -532,7 +532,7 @@ inline bool FillsRow(xaml::UIElement const& element) {
     if (Sized(element, false)) return false;
     auto inner = Unwrapped(element);
     auto role = RoleOf(inner);
-    if (role == L"bern-spacer" || role == L"bern-fill" || role == L"bern-canvas" || role == L"bern-fill-width" || role == L"bern-layers-w" || role == L"bern-layers-wh" ||
+    if (role == L"bern-spacer" || role == L"bern-fill" || role == L"bern-canvas" || role == L"bern-fill-width" || role == L"bern-native" || role == L"bern-layers-w" || role == L"bern-layers-wh" ||
         role == L"bern-rail-w" || role == L"bern-rail-wh")
         return true;
     if (role == L"bern-column" && FullWidth(inner)) return true;
@@ -1038,6 +1038,8 @@ inline void Refill(xaml::FrameworkElement element) {
         if (!parent) return;
         bool across = FillsRow(element), down = FillsColumn(element);
         auto role = std::wstring(RoleOf(parent));
+        // A native view of no size of its own covers the layers it stands in.
+        if (!down && RoleOf(Unwrapped(element)) == L"bern-native" && role.starts_with(L"bern-layers")) down = true;
         if (role.starts_with(L"bern-layers")) {
             if (across) element.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
             if (down) element.VerticalAlignment(xaml::VerticalAlignment::Stretch);
@@ -1122,6 +1124,8 @@ struct Parent {
         // What fills stretches across its container; the rest takes the
         // container's alignment.
         bool across = FillsRow(element), down = FillsColumn(element);
+        // A native view of no size of its own covers the layers it stands in.
+        if (!down && panel && RoleOf(Unwrapped(element)) == L"bern-native" && std::wstring_view(RoleOf(panel)).starts_with(L"bern-layers")) down = true;
         // A stretching container leaves an element that keeps its own size
         // (pictures, stacks) where it is, and a control that keeps its own
         // width (a button) at its leading edge, as on the other targets:
@@ -1667,6 +1671,11 @@ struct Win {
     /// in the appearance of the page shown last ("" for the window's).
     Cell<int> covering{0};
     std::vector<std::pair<uint64_t, std::string>> coverings;
+#if BERN_WINUI
+    /// The regions a window whose bar is hidden last gave the system for
+    /// its drag strip: the controls in it, then the strip.
+    std::vector<winrt::Windows::Graphics::RectInt32> immersiveDrag;
+#endif
     /// The appearances of non-covering `under_bars` layers that declare one,
     /// the one shown last at the end: a title bar that holds the page header
     /// stands on them. `barLook` counts their changes.

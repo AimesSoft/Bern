@@ -2913,7 +2913,7 @@ inline void Table(Parent const& p, Ctx const& ctx, TableProps props, std::vector
     if (!menu.empty()) {
         controls::MenuFlyout flyout;
         MenuEntries(ctx, flyout, menu);
-        if (auto style = PresenterTheme(L"MenuFlyoutPresenter", ctx.appearance)) flyout.MenuFlyoutPresenterStyle(style);
+        ThemeMenu(flyout, ctx.appearance);
         // A right click, the menu key or Shift+F10.
         list.ContextRequested([flyout, rowAt, ctx, selection](auto&&, xaml::Input::ContextRequestedEventArgs const& args) {
             auto row = rowAt(args.OriginalSource());

@@ -50,6 +50,8 @@ const CHECKS: &[(&str, Check)] = &[
     (feature::QUIET_SHORTCUTS, quiet_shortcuts),
     (feature::APP_ICONS, app_icons),
     (feature::POPUP_PLACEMENT, popup_placement),
+    (feature::SWITCH_KNOB, switch_knob),
+    (feature::BOLD_MENUS, bold_menus),
     (feature::TOOLTIP_KEYS, tooltip_keys),
     (feature::VERTICAL_SLIDERS, vertical_sliders),
     (feature::HOLD_SHORTCUTS, hold_shortcuts),
@@ -839,6 +841,42 @@ fn quiet_shortcuts(
                 descriptor.id
             ))
             .at(shortcut.source.clone()),
+        );
+    }
+}
+
+fn switch_knob(
+    descriptor: &TargetDescriptor,
+    app: &Application,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some(element) = first_element(app, |element| {
+        element.kind == "Switch" && element.keyword("variant").is_some()
+    }) {
+        diagnostics.push(
+            Diagnostic::warning(format!(
+                "target `{}` ignores the style of `Switch`: its knob keeps the platform's color",
+                descriptor.id
+            ))
+            .at(element.source.clone()),
+        );
+    }
+}
+
+fn bold_menus(
+    descriptor: &TargetDescriptor,
+    app: &Application,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some(element) = first_element(app, |element| {
+        element.kind == "Menu" && element.keyword("bold") == Some("true")
+    }) {
+        diagnostics.push(
+            Diagnostic::warning(format!(
+                "target `{}` ignores `bold` of `Menu`: its label has the button's own weight",
+                descriptor.id
+            ))
+            .at(element.source.clone()),
         );
     }
 }

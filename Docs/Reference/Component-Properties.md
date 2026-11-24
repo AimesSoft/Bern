@@ -282,7 +282,7 @@ The following properties are open only to layout elements for which `ComponentSp
 | `blur` | `Length`: blurs the element's picture by this radius (points), without going beyond the element's bounds and corner radius; can follow state, and with `animate` changes with its motion (`bound_blur`: implemented on all six targets) |
 | `opacity` | `NumberValue`: element opacity from 0 to 1; can follow state, and with `animate` changes with its motion (elements with their own `opacity` property — `Marquee`, `Skeleton`, `Shape`, `Series`, `Pattern` — apply it directly) |
 | `stagger` | `Number` |
-| `idle_area` | `Number`: the number of seconds the mouse must rest here before the window goes idle; when there are idle areas, the mouse resting elsewhere does not make the window idle |
+| `idle_area` | `Number`: the number of seconds the mouse must rest here before the window goes idle; when there are idle areas, the mouse resting elsewhere in the window does not make the window idle (once it leaves the window, the window goes idle after its `idle_after`; WinUI 3 so far) |
 | `at` | `NumberValue` |
 | `from` | `NumberValue` |
 | `to` | `NumberValue` |

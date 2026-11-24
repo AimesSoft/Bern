@@ -4662,15 +4662,18 @@ fn controlled_settings_reject_ambiguous_sources_and_non_enum_selections() {
 #[test]
 fn chip_pickers_take_no_button_size() {
     let label = r#"tr! { "en" => "Mode", "ja" => "モード" }"#;
-    for prop in ["shape: capsule", "height: 30"] {
-        let message = errors(&format!(
-            "Picker(id: mode, label: {label}, value: draft.mode, style: chips, {prop})"
-        ));
-        assert!(
-            message.contains("`style: chips` shows a chip per option"),
-            "{message}"
-        );
-    }
+    let message = errors(&format!(
+        "Picker(id: mode, label: {label}, value: draft.mode, style: chips, height: 30)"
+    ));
+    assert!(
+        message.contains("`style: chips` shows a chip per option"),
+        "{message}"
+    );
+    // `shape: capsule` draws each chip as a capsule.
+    compile_ui(&wrap(&format!(
+        "Column {{ Picker(id: mode, label: {label}, value: draft.mode, style: chips, shape: capsule) }}"
+    )))
+    .unwrap();
     compile_ui(&wrap(&format!(
         "Flow(gap: 10) {{ Spacer Picker(id: mode, label: {label}, value: draft.mode, style: chips, label_hidden: true) }}"
     )))

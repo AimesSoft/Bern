@@ -282,7 +282,7 @@ Query(id: results, query: app.search(draft.text, 20), presented: draft.show_resu
 | `blur` | `Length`：把元素的画面按这个半径（点）模糊，不越出元素的范围与圆角；可以跟随状态，配 `animate` 时按它的动效变化（`bound_blur`：六个目标都已实现） |
 | `opacity` | `NumberValue`：元素不透明度（0 到 1）；可以跟随状态，配 `animate` 时按它的动效变化（自带 `opacity` 属性的 `Marquee`、`Skeleton`、`Shape`、`Series`、`Pattern` 仍由组件自身处理） |
 | `stagger` | `Number` |
-| `idle_area` | `Number`：鼠标在此停住多少秒后窗口静置；有静置区时，鼠标停在别处不静置 |
+| `idle_area` | `Number`：鼠标在此停住多少秒后窗口静置；有静置区时，鼠标停在窗口里别处不静置（移出窗口后按窗口的 `idle_after` 静置；目前只有 WinUI 3 这样） |
 | `at` | `NumberValue` |
 | `from` | `NumberValue` |
 | `to` | `NumberValue` |

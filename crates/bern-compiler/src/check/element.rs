@@ -129,9 +129,10 @@ impl Checker<'_> {
         if parts.kind == "Picker"
             && matches!(parts.props.get("style"), Some(ir::Prop::Keyword { value }) if value == "chips")
         {
-            // Chips are one control per option; `shape` and `height` size
-            // the single button of a picker shown as a menu.
-            for prop in ["shape", "height"] {
+            // Chips are one control per option; `height` sizes the single
+            // button of a picker shown as a menu. `shape: capsule` draws
+            // each chip as a capsule.
+            for prop in ["height"] {
                 if let Some(given) = element.prop(prop) {
                     self.error(
                         given.name.span(),

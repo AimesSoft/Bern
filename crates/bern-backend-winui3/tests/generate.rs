@@ -807,6 +807,24 @@ pub fn app(app: inline_app::Client, windows: AppWindows) -> impl View {
     assert_eq!(line.matches('Z').count(), 3, "{line}");
 }
 
+/// A menu that opens from a region with an appearance of its own (a
+/// player's dark bar) takes that appearance's text and material, as a
+/// context menu there does.
+#[test]
+fn a_menu_takes_the_appearance_of_its_region() {
+    let widgets = include_str!("../templates/cpp/bern_ui_widgets.inl");
+    let start = widgets
+        .find("inline void ThemeMenu(")
+        .expect("menus are themed in one place");
+    let theme = &widgets[start..];
+    assert!(theme.contains("RequestedThemeProperty()"));
+    assert!(theme.contains("ThemedAcrylicBackdrop>(dark)"));
+    assert!(theme.contains("flyout.ShouldConstrainToRootBounds(true);"));
+    assert!(!widgets.contains("PresenterTheme(L\"MenuFlyoutPresenter\", ctx.appearance)"));
+    let structure = include_str!("../templates/cpp/bern_ui_structure.inl");
+    assert!(structure.contains("ThemeMenu(flyout, ctx.appearance);"));
+}
+
 /// A `quiet` shortcut's key is no input for `window.idle`: both the runtime
 /// template hooks, generated `.quiet = true` code, and target capability
 /// checking are verified end-to-end.

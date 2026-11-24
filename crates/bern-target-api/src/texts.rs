@@ -1479,6 +1479,27 @@ pub const FRAMEWORK_TEXTS: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     (
+        "bern.language.system",
+        &[
+            ("zh-Hans", "跟随系统"),
+            ("zh-Hant", "跟隨系統"),
+            ("en", "Use System Setting"),
+            ("ja", "システムに合わせる"),
+            ("ko", "시스템 설정 사용"),
+            ("ru", "Как в системе"),
+            ("de", "Systemeinstellung"),
+            ("fr", "Réglage du système"),
+            ("es", "Usar el del sistema"),
+            ("pt-BR", "Usar o do sistema"),
+            ("it", "Usa impostazione di sistema"),
+            ("tr", "Sistem ayarını kullan"),
+            ("vi", "Theo hệ thống"),
+            ("pl", "Jak w systemie"),
+            ("uk", "Як у системі"),
+            ("id", "Ikuti sistem"),
+        ],
+    ),
+    (
         "bern.shortcut.none",
         &[
             ("zh-Hans", "无"),

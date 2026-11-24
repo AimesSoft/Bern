@@ -61,8 +61,13 @@ pub const SUPPORT: &[StyleSupport] = &[
     // it, corners that clip its layers, and the shadow its texts, icons,
     // pictures and shapes cast.
     StyleSupport {
+        component: "Switch",
+        base: &["foreground"],
+        states: &[],
+    },
+    StyleSupport {
         component: "Stack",
-        base: &["background", "foreground", "corner", "shadow"],
+        base: &["background", "foreground", "border", "corner", "shadow"],
         states: &[],
     },
     StyleSupport {
