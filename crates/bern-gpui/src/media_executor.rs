@@ -1173,8 +1173,6 @@ mod platform {
     }
 
     struct GstApi {
-        gst_init_check:
-            unsafe extern "C" fn(*mut c_int, *mut *mut *mut c_char, *mut *mut c_void) -> c_int,
         gst_element_factory_make: unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c_void,
         gst_element_set_state: unsafe extern "C" fn(*mut c_void, c_int) -> c_int,
         gst_element_get_state:
@@ -1241,7 +1239,6 @@ mod platform {
                 return None;
             }
             Some(GstApi {
-                gst_init_check: init,
                 gst_element_factory_make: sym(gst, c"gst_element_factory_make")?,
                 gst_element_set_state: sym(gst, c"gst_element_set_state")?,
                 gst_element_get_state: sym(gst, c"gst_element_get_state")?,

@@ -921,7 +921,7 @@ mod platform {
         (entry.id, props, children)
     }
 
-    fn find_entry<'a>(entries: &'a [DbusEntry], id: i32) -> Option<&'a DbusEntry> {
+    fn find_entry(entries: &[DbusEntry], id: i32) -> Option<&DbusEntry> {
         for e in entries {
             if e.id == id {
                 return Some(e);
@@ -932,6 +932,9 @@ mod platform {
         }
         None
     }
+
+    type SniPixmap = (i32, i32, Vec<u8>);
+    type SniToolTip = (String, Vec<SniPixmap>, String, String);
 
     struct SniService {
         state: Arc<Mutex<Snapshot>>,
@@ -1005,7 +1008,7 @@ mod platform {
             String::new()
         }
         #[zbus(property)]
-        fn tool_tip(&self) -> (String, Vec<(i32, i32, Vec<u8>)>, String, String) {
+        fn tool_tip(&self) -> SniToolTip {
             let title = self
                 .state
                 .lock()
