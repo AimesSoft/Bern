@@ -1,12 +1,15 @@
 //! Colors from the Bern theme algorithm: a snapshot per mode and seed,
-//! generated once. The seed is the brand color, or the accent the
-//! application chooses at run time (`WindowSet(accent:)`).
+//! generated once, with optional runtime role overrides from
+//! `WindowSet(palette:)`. The seed is the brand color, or the accent the
+//! application chooses at run time (`WindowSet(accent:)` / `palette`).
 
 use bern_theme::{ContrastPolicy, Mode, Snapshot, Srgb};
 use gpui::Rgba;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
+
+type Pair = ((u8, u8, u8), (u8, u8, u8));
 
 /// The resolved colors of one mode.
 pub struct Theme {
@@ -30,26 +33,95 @@ pub(crate) fn rgba(color: Srgb, alpha: u8) -> Rgba {
     }
 }
 
+thread_local! {
+    /// Active runtime palette overrides from `WindowSet(palette:)`:
+    /// JSON `{ "<role>": { "light": "#RRGGBB", "dark": "#RRGGBB" } }`.
+    static PALETTE_RAW: RefCell<String> = const { RefCell::new(String::new()) };
+    static PALETTE_MAP: RefCell<BTreeMap<String, Pair>> = const { RefCell::new(BTreeMap::new()) };
+}
+
+fn parse_hex(value: &str) -> Option<(u8, u8, u8)> {
+    let hex = value.strip_prefix('#')?;
+    if hex.len() != 6 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let n = u32::from_str_radix(hex, 16).ok()?;
+    Some(((n >> 16) as u8, (n >> 8) as u8, n as u8))
+}
+
+/// Update runtime palette overrides from `WindowSet(palette:)`.
+pub(crate) fn set_palette(raw: &str) {
+    let unchanged = PALETTE_RAW.with(|current| *current.borrow() == raw);
+    if unchanged {
+        return;
+    }
+    PALETTE_RAW.with(|current| *current.borrow_mut() = raw.to_string());
+    let mut map = BTreeMap::new();
+    if let Ok(parsed) = serde_json::from_str::<BTreeMap<String, BTreeMap<String, String>>>(raw) {
+        for (role, pair) in parsed {
+            if !role
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'_')
+            {
+                continue;
+            }
+            if let (Some(light), Some(dark)) = (
+                pair.get("light").and_then(|s| parse_hex(s)),
+                pair.get("dark").and_then(|s| parse_hex(s)),
+            ) {
+                map.insert(role, (light, dark));
+            }
+        }
+    }
+    PALETTE_MAP.with(|slot| *slot.borrow_mut() = map);
+}
+
+/// The custom palette's `accent` override, if any, as `(light, dark)`.
+pub(crate) fn palette_accent() -> Option<Pair> {
+    PALETTE_MAP.with(|slot| slot.borrow().get("accent").copied())
+}
+
 impl Theme {
     /// The color of a theme role, such as `surface.canvas` or `accent`.
     /// A role the snapshot lacks is drawn in magenta, so a misspelt role
     /// shows at once.
     pub fn color(&self, role: &str) -> Rgba {
+        if role == "transparent" {
+            return CLEAR;
+        }
+        // Check runtime palette override first (for both exact and mapped names).
+        if let Some((light, dark)) = PALETTE_MAP.with(|map| map.borrow().get(role).copied()) {
+            let (r, g, b) = if self.dark { dark } else { light };
+            return rgba(Srgb::new(r, g, b), 0xff);
+        }
         // Roles the theme derives from others, as the Web target does.
         let role = match role {
-            "transparent" => return CLEAR,
             "fill.subtle" => "hover.overlay",
             "fill.strong" => "pressed.overlay",
             "selection.background" => "accent",
             "selection.foreground" => "on_accent",
             role => role,
         };
+        if let Some((light, dark)) = PALETTE_MAP.with(|map| map.borrow().get(role).copied()) {
+            let (r, g, b) = if self.dark { dark } else { light };
+            return rgba(Srgb::new(r, g, b), 0xff);
+        }
         self.snapshot
             .tokens
             .iter()
             .find(|token| token.name == role)
             .map(|token| rgba(token.color, token.alpha))
             .unwrap_or(rgba(Srgb::new(0xff, 0x00, 0xff), 0xff))
+    }
+
+    /// Resolve a role to `(r, g, b)` bytes for `WindowSet(accent:)` role accents.
+    pub fn role_rgb(&self, role: &str) -> (u8, u8, u8) {
+        let c = self.color(role);
+        (
+            (c.r.clamp(0.0, 1.0) * 255.0).round() as u8,
+            (c.g.clamp(0.0, 1.0) * 255.0).round() as u8,
+            (c.b.clamp(0.0, 1.0) * 255.0).round() as u8,
+        )
     }
 
     /// The role name of a recipe slot, such as the `background` of

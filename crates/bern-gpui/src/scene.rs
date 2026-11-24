@@ -195,8 +195,15 @@ pub enum Anchor {
 
 /// `Rail`: a strip along its axis placing each child at its fraction of the
 /// length; the children overlap in one cell, the strip as tall (or wide)
-/// as the largest.
-pub fn rail(c: &Ctx, vertical: bool, anchor: Anchor, children: Vec<(El, Placement)>) -> El {
+/// as the largest. With `overhang > 0`, the scale extends that far past both
+/// ends so fraction 0 stands before the rail's start.
+pub fn rail(
+    c: &Ctx,
+    vertical: bool,
+    anchor: Anchor,
+    overhang: f32,
+    children: Vec<(El, Placement)>,
+) -> El {
     let element = div().grid().grid_cols(1).grid_rows(1);
     let element = if vertical {
         element.h_full()
@@ -243,7 +250,32 @@ pub fn rail(c: &Ctx, vertical: bool, anchor: Anchor, children: Vec<(El, Placemen
             }
         }
     });
-    c.grow()
-        .apply(element.children(children))
-        .into_any_element()
+    let inner = element.children(children);
+    let wrapped = if overhang > 0.0 {
+        let outer = div().relative().overflow_hidden();
+        if vertical {
+            outer.h_full().child(
+                div()
+                    .absolute()
+                    .top(px(-overhang))
+                    .bottom(px(-overhang))
+                    .left_0()
+                    .right_0()
+                    .child(inner),
+            )
+        } else {
+            outer.w_full().child(
+                div()
+                    .absolute()
+                    .left(px(-overhang))
+                    .right(px(-overhang))
+                    .top_0()
+                    .bottom_0()
+                    .child(inner),
+            )
+        }
+    } else {
+        inner
+    };
+    c.grow().apply(wrapped).into_any_element()
 }

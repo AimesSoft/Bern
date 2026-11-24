@@ -1,20 +1,102 @@
 //! Native windows of the `WindowSet`: GPUI opens one platform window per
-//! instance on every desktop, and the session runtime learns of each.
+//! instance on every desktop, and the session runtime learns of each,
+//! including window facts (`bern_window_facts`), close confirmation
+//! (`bern_window_request_close` / `bern_window_confirm_close`), modal dialog
+//! blocking, presentation commands and screenshots.
 
 use crate::ctx::Win;
 use crate::host::{host, status, take};
-use crate::protocol::{Value, decode};
+use crate::protocol::{Value, Writer, decode};
 use crate::session::Control;
 use crate::units::px;
-use crate::{Appearance, Ctx, WindowDef, text, theme};
+use crate::{Appearance, CloseCheck, Ctx, Failure, WindowDef, text, theme};
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    App, AppContext, Bounds, Context, InteractiveElement, IntoElement, KeyDownEvent, KeyUpEvent,
-    ParentElement, Render, StatefulInteractiveElement, Styled, TitlebarOptions, WeakEntity, Window,
-    WindowAppearance, WindowBounds, WindowOptions, div, point, size,
+    AnyWindowHandle, App, AppContext, Bounds, Context, FontWeight, InteractiveElement, IntoElement,
+    KeyDownEvent, KeyUpEvent, MouseButton, ParentElement, Render, StatefulInteractiveElement,
+    Styled, TitlebarOptions, WeakEntity, Window, WindowAppearance, WindowBounds, WindowOptions,
+    div, point, size,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
+
+/// Pending close confirmation awaiting the user or `window.confirm_close`.
+#[derive(Clone, Debug)]
+pub(crate) struct PendingClose {
+    pub(crate) id: String,
+    pub(crate) message: String,
+    pub(crate) can_save: bool,
+    pub(crate) draft_revision: u64,
+}
+
+/// Outcome of `window.close` / `window.confirm_close`, matching the session
+/// catalog's `CloseResult` record.
+pub(crate) struct CloseResult {
+    pub(crate) outcome: u32, // 0 Closed, 1 Rejected, 2 ConfirmationRequired
+    pub(crate) window: String,
+    pub(crate) confirmation: Option<String>,
+    pub(crate) draft_revision: u64,
+    pub(crate) decisions: Vec<u32>,
+    pub(crate) message: Option<String>,
+    pub(crate) reason: Option<String>,
+}
+
+const CLOSED: u32 = 0;
+const REJECTED: u32 = 1;
+const CONFIRMATION_REQUIRED: u32 = 2;
+
+impl CloseResult {
+    pub(crate) fn closed(window: &str, draft_revision: u64) -> Self {
+        Self {
+            outcome: CLOSED,
+            window: window.to_string(),
+            confirmation: None,
+            draft_revision,
+            decisions: Vec::new(),
+            message: None,
+            reason: None,
+        }
+    }
+
+    pub(crate) fn rejected(window: &str, draft_revision: u64, reason: String) -> Self {
+        Self {
+            outcome: REJECTED,
+            window: window.to_string(),
+            confirmation: None,
+            draft_revision,
+            decisions: Vec::new(),
+            message: None,
+            reason: Some(reason),
+        }
+    }
+
+    pub(crate) fn to_value(&self) -> Value {
+        let opt = |value: &Option<String>| match value {
+            Some(text) => Value::some(Value::Text(text.clone())),
+            None => Value::none(),
+        };
+        Value::Record(vec![
+            Value::Enum {
+                variant: self.outcome,
+                fields: Vec::new(),
+            },
+            Value::Text(self.window.clone()),
+            opt(&self.confirmation),
+            Value::Int(self.draft_revision as i64),
+            Value::List(
+                self.decisions
+                    .iter()
+                    .map(|&d| Value::Enum {
+                        variant: d,
+                        fields: Vec::new(),
+                    })
+                    .collect(),
+            ),
+            opt(&self.message),
+            opt(&self.reason),
+        ])
+    }
+}
 
 /// The root view of a window instance: its content, built again on every
 /// render in the colors of the window's appearance.
@@ -26,6 +108,20 @@ struct WindowView {
 thread_local! {
     /// The root views of the open windows.
     static VIEWS: RefCell<Vec<WeakEntity<WindowView>>> = const { RefCell::new(Vec::new()) };
+    /// Open dialog window instance ids; while non-empty, non-dialog windows are blocked.
+    static OPEN_DIALOGS: RefCell<Vec<Rc<str>>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Whether `window_id` is currently blocked by an open modal dialog window
+/// or a close confirmation dialog on itself.
+pub(crate) fn is_blocked(window_id: &str) -> bool {
+    OPEN_DIALOGS.with(|dialogs| {
+        let dialogs = dialogs.borrow();
+        if !dialogs.is_empty() && !dialogs.iter().any(|id| id.as_ref() == window_id) {
+            return true;
+        }
+        false
+    })
 }
 
 /// Whether the window draws dark: the application's choice, else the
@@ -55,7 +151,7 @@ impl WindowView {
     fn ctx(&self, system: WindowAppearance, controls: Option<Rc<RefCell<Vec<Control>>>>) -> Ctx {
         let def = host().def;
         let dark = dark(&self.win, system);
-        // The accent the application chooses, else its brand.
+        // The palette and accent the application chooses, else its brand.
         let probe = Ctx::root(
             theme::of(dark, None),
             (None, None),
@@ -63,7 +159,12 @@ impl WindowView {
             "",
             None,
         );
-        let seeds = match def.accent.and_then(|accent| accent(&probe)) {
+        if let Some(palette) = def.palette {
+            theme::set_palette(&palette(&probe));
+        }
+        let seeds = match theme::palette_accent()
+            .or_else(|| def.accent.and_then(|accent| accent(&probe)))
+        {
             Some((light, dark)) => (Some(light), Some(dark)),
             None => (def.brand_seed, def.brand_seed),
         };
@@ -84,6 +185,36 @@ fn views() -> Vec<WeakEntity<WindowView>> {
         views.retain(|view| view.upgrade().is_some());
         views.clone()
     })
+}
+
+fn resizable(def: &WindowDef) -> bool {
+    (!def.utility && !def.dialog) || def.min_width.is_some() || def.min_height.is_some()
+}
+
+/// Report platform window facts to `bern_window_facts` (`source`: 0 Command, 1 System).
+fn report_facts(win: &Win, def: &WindowDef, window: &Window, source: u8, force: bool) {
+    let facts = crate::native::window_facts(window, resizable(def));
+    if !force && win.last_facts.get() == Some(facts) {
+        return;
+    }
+    win.last_facts.set(Some(facts));
+    // SAFETY: the handle is live while windows are open.
+    unsafe {
+        bern_ffi::bern_window_facts(
+            host().app(),
+            win.kind as u32,
+            win.generation,
+            source,
+            facts.visibility,
+            facts.size,
+            facts.x,
+            facts.y,
+            facts.width,
+            facts.height,
+            u8::from(facts.focused),
+            facts.actions,
+        );
+    }
 }
 
 /// Something every window shows changed: each builds its content again,
@@ -128,11 +259,377 @@ pub(crate) fn controls(cx: &mut App) -> Vec<Control> {
     listed.take()
 }
 
+/// Find an open window handle matching `window_id`.
+fn find_handle(window_id: &str, cx: &mut App) -> Result<AnyWindowHandle, Failure> {
+    cx.windows()
+        .into_iter()
+        .find(|handle| {
+            handle
+                .update(cx, |root, _, cx| {
+                    root.downcast::<gpui_base::Root>()
+                        .ok()
+                        .and_then(|root| root.read(cx).view().clone().downcast::<WindowView>().ok())
+                        .is_some_and(|view| view.read(cx).win.id.as_ref() == window_id)
+                })
+                .unwrap_or(false)
+        })
+        .ok_or_else(|| Failure::new("target_not_found", format!("no open window `{window_id}`")))
+}
+
+/// Find the default window for commands that take an optional window id
+/// (active window, else primary window, else first open window).
+fn default_handle(cx: &mut App) -> Result<AnyWindowHandle, Failure> {
+    let primary = host().def.primary;
+    let windows = cx.windows();
+    if let Some(active) = windows.iter().copied().find(|handle| {
+        handle
+            .update(cx, |_, window, _| window.is_window_active())
+            .unwrap_or(false)
+    }) {
+        return Ok(active);
+    }
+    if let Some(main) = windows.iter().copied().find(|handle| {
+        handle
+            .update(cx, |root, _, cx| {
+                root.downcast::<gpui_base::Root>()
+                    .ok()
+                    .and_then(|root| root.read(cx).view().clone().downcast::<WindowView>().ok())
+                    .is_some_and(|view| view.read(cx).def.id == primary)
+            })
+            .unwrap_or(false)
+    }) {
+        return Ok(main);
+    }
+    windows
+        .into_iter()
+        .next()
+        .ok_or_else(|| Failure::new("target_not_found", "no open window"))
+}
+
+fn view_info(handle: AnyWindowHandle, cx: &mut App) -> Option<(&'static WindowDef, Rc<Win>)> {
+    handle
+        .update(cx, |root, _, cx| {
+            let view = root
+                .downcast::<gpui_base::Root>()
+                .ok()
+                .and_then(|root| root.read(cx).view().clone().downcast::<WindowView>().ok())?;
+            let read = view.read(cx);
+            Some((read.def, Rc::clone(&read.win)))
+        })
+        .ok()
+        .flatten()
+}
+
+fn evaluate_close(def: &'static WindowDef, win: &Rc<Win>) -> Option<CloseCheck> {
+    let check = def.close?;
+    let ctx = Ctx::root(
+        theme::of(false, host().def.brand_seed),
+        (host().def.brand_seed, host().def.brand_seed),
+        Rc::clone(win),
+        def.id,
+        None,
+    );
+    Some(check(&ctx))
+}
+
+fn cleanup_closed(win: &Win) {
+    OPEN_DIALOGS.with(|dialogs| {
+        dialogs
+            .borrow_mut()
+            .retain(|id| id.as_ref() != win.id.as_ref())
+    });
+    crate::query::end(&win.id, true);
+    crate::media::end(&win.id, true);
+    crate::webpage::end(&win.id, true);
+    crate::skeleton::end(&win.id, true);
+    crate::motion::forget(&win.id);
+    // SAFETY: the handle is live while windows are open.
+    unsafe { bern_ffi::bern_window_closed(host().app(), win.kind as u32, win.generation) };
+}
+
+fn request_close_inner(
+    def: &'static WindowDef,
+    win: &Rc<Win>,
+    close_handle: Option<(AnyWindowHandle, &mut App)>,
+) -> Result<CloseResult, Failure> {
+    let check = evaluate_close(def, win);
+    let needs = check.as_ref().is_some_and(|check| check.needs_confirmation);
+    let can_save = check.as_ref().is_some_and(|check| check.save.is_some());
+    // SAFETY: the handle is live while the application runs.
+    let bytes = take(unsafe {
+        bern_ffi::bern_window_request_close(
+            host().app(),
+            win.kind as u32,
+            win.generation,
+            u8::from(needs),
+            u8::from(can_save),
+        )
+    });
+    let mut reader = status(&bytes)?;
+    let malformed = |error: crate::protocol::CodecError| Failure::new("invalid_reply", error.0);
+    if reader.u8().map_err(malformed)? == 0 {
+        win.allow_close.set(true);
+        win.pending_close.borrow_mut().take();
+        if let Some((handle, cx)) = close_handle {
+            let _ = handle.update(cx, |_, window, _| window.remove_window());
+        }
+        return Ok(CloseResult::closed(&win.id, 0));
+    }
+    let pending = PendingClose {
+        id: reader.text().map_err(malformed)?,
+        message: check.map(|check| check.message).unwrap_or_default(),
+        can_save,
+        draft_revision: reader.u64().map_err(malformed)?,
+    };
+    *win.pending_close.borrow_mut() = Some(pending.clone());
+    crate::host::redraw();
+    Ok(CloseResult {
+        outcome: CONFIRMATION_REQUIRED,
+        window: win.id.to_string(),
+        confirmation: Some(pending.id.clone()),
+        draft_revision: pending.draft_revision,
+        decisions: if pending.can_save {
+            vec![0, 1, 2]
+        } else {
+            vec![1, 2]
+        },
+        message: Some(pending.message),
+        reason: None,
+    })
+}
+
+fn confirm_close_inner(
+    def: &'static WindowDef,
+    win: &Rc<Win>,
+    handle: AnyWindowHandle,
+    confirmation: &str,
+    decision: u32,
+    cx: &mut App,
+    completion: Box<dyn FnOnce(Result<CloseResult, Failure>)>,
+) {
+    let mut writer = Writer::new();
+    writer.text(confirmation);
+    writer.u32(decision);
+    // SAFETY: the handle is live; the bytes are valid for this call.
+    let bytes = take(unsafe {
+        bern_ffi::bern_window_confirm_close(
+            host().app(),
+            win.kind as u32,
+            win.generation,
+            writer.bytes.as_ptr(),
+            writer.bytes.len(),
+        )
+    });
+    let revision = win
+        .pending_close
+        .borrow()
+        .as_ref()
+        .map(|pending| pending.draft_revision)
+        .unwrap_or(0);
+    let mut reader = match status(&bytes) {
+        Ok(reader) => reader,
+        Err(failure) => {
+            if failure.code == "stale_confirmation"
+                && win
+                    .pending_close
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|pending| pending.id == confirmation)
+            {
+                win.pending_close.borrow_mut().take();
+                changed(cx);
+            }
+            completion(Err(failure));
+            return;
+        }
+    };
+    let step = reader.u8().unwrap_or(2);
+    win.pending_close.borrow_mut().take();
+    changed(cx);
+    match step {
+        0 => {
+            win.allow_close.set(true);
+            let _ = handle.update(cx, |_, window, _| window.remove_window());
+            completion(Ok(CloseResult::closed(&win.id, revision)));
+        }
+        1 => {
+            let Some(save) = evaluate_close(def, win).and_then(|check| check.save) else {
+                completion(Err(Failure::new("invalid_params", "no save command")));
+                return;
+            };
+            let saved_win = Rc::clone(win);
+            let ctx = Ctx::root(
+                theme::of(false, host().def.brand_seed),
+                (host().def.brand_seed, host().def.brand_seed),
+                Rc::clone(win),
+                def.id,
+                None,
+            );
+            let window_id = win.id.to_string();
+            save(
+                &ctx,
+                Box::new(move |result| match result {
+                    Ok(()) => {
+                        saved_win.allow_close.set(true);
+                        crate::host::window_command_close_id(window_id.clone());
+                        completion(Ok(CloseResult::closed(&saved_win.id, revision)));
+                    }
+                    Err(failure) => completion(Ok(CloseResult::rejected(
+                        &saved_win.id,
+                        revision,
+                        format!("save_failed: {}: {}", failure.code, failure.message),
+                    ))),
+                }),
+            );
+        }
+        _ => completion(Ok(CloseResult::rejected(
+            &win.id,
+            revision,
+            "cancelled".into(),
+        ))),
+    }
+}
+
+/// Render the in-window close confirmation sheet over the window content.
+fn close_dialog_overlay(
+    ctx: &Ctx,
+    def: &'static WindowDef,
+    win: &Rc<Win>,
+    pending: &PendingClose,
+) -> gpui::AnyElement {
+    let detail = if pending.can_save {
+        text::tr("bern.close.save_detail")
+    } else {
+        text::tr("bern.close.discard_detail")
+    };
+    let decide = |decision: u32| {
+        let win = Rc::clone(win);
+        let confirmation = pending.id.clone();
+        move |_: &gpui::ClickEvent, window: &mut Window, cx: &mut App| {
+            cx.stop_propagation();
+            let handle = window.window_handle();
+            confirm_close_inner(
+                def,
+                &win,
+                handle,
+                &confirmation,
+                decision,
+                cx,
+                Box::new(|_| {}),
+            );
+        }
+    };
+    let cancel_bg = ctx.slot("button.standard", "rest", "background");
+    let cancel_fg = ctx.slot("button.standard", "rest", "foreground");
+    let border = ctx.color("control.border");
+    let destructive_bg = ctx.slot("button.destructive", "rest", "background");
+    let destructive_fg = ctx.slot("button.destructive", "rest", "foreground");
+    let primary_bg = ctx.slot("button.prominent", "rest", "background");
+    let primary_fg = ctx.slot("button.prominent", "rest", "foreground");
+
+    let mut buttons = div().flex().flex_row().justify_end().gap(px(8.0));
+    buttons = buttons.child(
+        div()
+            .id("bern-close-cancel")
+            .px(px(14.0))
+            .h(px(32.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(8.0))
+            .border_1()
+            .border_color(border)
+            .bg(cancel_bg)
+            .text_color(cancel_fg)
+            .text_size(px(13.0))
+            .font_weight(FontWeight::MEDIUM)
+            .child(text::tr("bern.close.cancel"))
+            .on_click(decide(2)),
+    );
+    buttons = buttons.child(
+        div()
+            .id("bern-close-discard")
+            .px(px(14.0))
+            .h(px(32.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(8.0))
+            .bg(destructive_bg)
+            .text_color(destructive_fg)
+            .text_size(px(13.0))
+            .font_weight(FontWeight::MEDIUM)
+            .child(if pending.can_save {
+                text::tr("bern.close.dont_save")
+            } else {
+                text::tr("bern.close.discard")
+            })
+            .on_click(decide(1)),
+    );
+    if pending.can_save {
+        buttons = buttons.child(
+            div()
+                .id("bern-close-save")
+                .px(px(14.0))
+                .h(px(32.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(px(8.0))
+                .bg(primary_bg)
+                .text_color(primary_fg)
+                .text_size(px(13.0))
+                .font_weight(FontWeight::MEDIUM)
+                .child(text::tr("bern.close.save"))
+                .on_click(decide(0)),
+        );
+    }
+
+    div()
+        .id("bern-close-backdrop")
+        .absolute()
+        .inset_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(ctx.color("scrim"))
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .child(
+            div()
+                .w(px(380.0))
+                .p(px(20.0))
+                .flex()
+                .flex_col()
+                .gap(px(12.0))
+                .rounded(px(12.0))
+                .border_1()
+                .border_color(border)
+                .bg(ctx.color("surface.raised"))
+                .child(
+                    div()
+                        .text_size(px(15.0))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(ctx.color("text.primary"))
+                        .child(pending.message.clone()),
+                )
+                .child(
+                    div()
+                        .text_size(px(13.0))
+                        .text_color(ctx.color("text.secondary"))
+                        .child(detail),
+                )
+                .child(buttons),
+        )
+        .into_any_element()
+}
+
 impl Render for WindowView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let frame_t0 = crate::trace::enabled().then(crate::trace::now);
         crate::host::menus_follow_language(cx);
         let viewport = window.viewport_size();
         self.win.fullscreen.set(window.is_fullscreen());
+        report_facts(&self.win, self.def, window, 1, false);
         // The frame the system leaves to the window: the title bar content
         // runs under or starts below, and on Linux a shadow around it.
         let frame = crate::chrome::frame(window, self.def.unified, self.win.bar_toolbar.get());
@@ -182,8 +679,10 @@ impl Render for WindowView {
         }
         crate::query::begin(&self.win.id);
         crate::media::begin(&self.win.id);
+        crate::webpage::begin(&self.win.id);
         crate::motion::begin(&self.win.id);
         crate::skeleton::begin(&self.win.id);
+        crate::host::begin_openers(&self.win.id);
         self.win.bar_toolbar_built.set(false);
         self.win.has_idle_areas.set(false);
         let content = (self.def.content)(&ctx.grown(crate::Grow::ALL));
@@ -200,6 +699,8 @@ impl Render for WindowView {
         }
         crate::query::end(&self.win.id, false);
         crate::media::end(&self.win.id, false);
+        crate::webpage::end(&self.win.id, false);
+        crate::host::end_openers();
         // Under a video the window paints nothing, so the video shows.
         let canvas = ctx.color("surface.canvas");
         let video = crate::media::has_video(&self.win.id);
@@ -213,6 +714,12 @@ impl Render for WindowView {
             cx.button_layout(),
             window,
         );
+        let close_overlay = self
+            .win
+            .pending_close
+            .borrow()
+            .as_ref()
+            .map(|pending| close_dialog_overlay(&ctx, self.def, &self.win, pending));
         let root = div()
             .id("bern-window")
             .relative()
@@ -227,12 +734,18 @@ impl Render for WindowView {
             .text_color(ctx.color("text.primary"))
             .on_key_down({
                 let win = Rc::clone(&self.win);
-                move |event: &KeyDownEvent, _, _| {
+                let def = self.def;
+                move |event: &KeyDownEvent, window, cx| {
                     if !crate::controls::is_quiet_keystroke(&event.keystroke) {
                         woke(&win);
                     }
                     if event.keystroke.key == "escape" {
-                        crate::overlay::close_all();
+                        if crate::overlay::any_open() {
+                            crate::overlay::close_all();
+                        } else if def.settings || def.dialog {
+                            let handle = window.window_handle();
+                            let _ = request_close_inner(def, &win, Some((handle, cx)));
+                        }
                     }
                 }
             })
@@ -260,7 +773,11 @@ impl Render for WindowView {
                 }
             })
             .child(content)
-            .children(title_bar);
+            .children(title_bar)
+            .children(close_overlay);
+        if let Some(t0) = frame_t0 {
+            crate::trace::frame(&self.win.id, t0, crate::trace::now());
+        }
         crate::chrome::around(&ctx, frame, root)
     }
 }
@@ -310,7 +827,9 @@ pub(crate) fn command(cx: &mut App, op: crate::WindowOp, kind_id: &str) {
             let _ = handle.update(cx, |_, window, _| window.activate_window());
         }
         (crate::WindowOp::Close, Some(handle)) => {
-            let _ = handle.update(cx, |_, window, _| window.remove_window());
+            if let Some((def, win)) = view_info(handle, cx) {
+                let _ = request_close_inner(def, &win, Some((handle, cx)));
+            }
         }
         (crate::WindowOp::ToggleFullscreen, Some(handle)) => {
             let _ = handle.update(cx, |_, window, _| window.toggle_fullscreen());
@@ -319,12 +838,33 @@ pub(crate) fn command(cx: &mut App, op: crate::WindowOp, kind_id: &str) {
     }
 }
 
+/// Force-close a window instance after an async save succeeded.
+pub(crate) fn force_close_id(window_id: &str, cx: &mut App) {
+    if let Ok(handle) = find_handle(window_id, cx) {
+        let _ = handle.update(cx, |_, window, _| window.remove_window());
+    }
+}
+
+/// Bring the primary window forward, reopening it if closed.
+pub(crate) fn reopen_primary(cx: &mut App) {
+    let primary = host().def.primary;
+    let _ = open_kind(primary, cx);
+}
+
+/// Open (or bring forward) the application's settings window, if declared.
+pub(crate) fn open_settings(cx: &mut App) {
+    let def = host().def;
+    if let Some(settings) = def.windows.iter().find(|w| w.settings) {
+        let _ = open_kind(settings.id, cx);
+    }
+}
+
 /// Open a window kind (or bring its open instance forward), returning its
 /// instance id.
-pub(crate) fn open_kind(kind_id: &str, cx: &mut App) -> Result<String, crate::Failure> {
+pub(crate) fn open_kind(kind_id: &str, cx: &mut App) -> Result<String, Failure> {
     let host = host();
     let Some(kind) = host.def.windows.iter().position(|def| def.id == kind_id) else {
-        return Err(crate::Failure::new(
+        return Err(Failure::new(
             "target_not_found",
             format!("no window kind `{kind_id}`"),
         ));
@@ -352,26 +892,150 @@ pub(crate) fn open_kind(kind_id: &str, cx: &mut App) -> Result<String, crate::Fa
     open(kind, &host.def.windows[kind], cx)
 }
 
-/// Close an open window instance by its instance id.
-pub(crate) fn close_instance(window_id: &str, cx: &mut App) -> Result<(), crate::Failure> {
-    let handle = cx.windows().into_iter().find(|handle| {
-        handle
-            .update(cx, |root, _, cx| {
-                root.downcast::<gpui_base::Root>()
-                    .ok()
-                    .and_then(|root| root.read(cx).view().clone().downcast::<WindowView>().ok())
-                    .is_some_and(|view| view.read(cx).win.id.as_ref() == window_id)
-            })
-            .unwrap_or(false)
-    });
-    let Some(handle) = handle else {
-        return Err(crate::Failure::new(
-            "target_not_found",
-            format!("no open window `{window_id}`"),
-        ));
-    };
-    let _ = handle.update(cx, |_, window, _| window.remove_window());
+/// Request closing an open window instance by id, running the close protocol.
+pub(crate) fn request_close_instance(
+    window_id: &str,
+    cx: &mut App,
+) -> Result<CloseResult, Failure> {
+    let handle = find_handle(window_id, cx)?;
+    let (def, win) = view_info(handle, cx)
+        .ok_or_else(|| Failure::new("target_not_found", format!("no open window `{window_id}`")))?;
+    request_close_inner(def, &win, Some((handle, cx)))
+}
+
+/// Decide a pending close confirmation for `window_id`.
+pub(crate) fn confirm_close_instance(
+    window_id: &str,
+    confirmation: &str,
+    decision: u32,
+    cx: &mut App,
+    completion: Box<dyn FnOnce(Result<CloseResult, Failure>)>,
+) -> Result<(), Failure> {
+    let handle = find_handle(window_id, cx)?;
+    let (def, win) = view_info(handle, cx)
+        .ok_or_else(|| Failure::new("target_not_found", format!("no open window `{window_id}`")))?;
+    confirm_close_inner(def, &win, handle, confirmation, decision, cx, completion);
     Ok(())
+}
+
+/// Activate (bring forward and focus) `window_id`.
+pub(crate) fn activate_instance(window_id: &str, cx: &mut App) -> Result<(), Failure> {
+    let handle = find_handle(window_id, cx)?;
+    let (def, win) = view_info(handle, cx)
+        .ok_or_else(|| Failure::new("target_not_found", format!("no open window `{window_id}`")))?;
+    let _ = handle.update(cx, |_, window, _| {
+        window.activate_window();
+        report_facts(&win, def, window, 0, true);
+    });
+    Ok(())
+}
+
+/// Minimize `window_id` and report updated facts.
+pub(crate) fn minimize_instance(window_id: &str, cx: &mut App) -> Result<(), Failure> {
+    let handle = find_handle(window_id, cx)?;
+    let (def, win) = view_info(handle, cx)
+        .ok_or_else(|| Failure::new("target_not_found", format!("no open window `{window_id}`")))?;
+    let mut outcome = Ok(());
+    let _ = handle.update(cx, |_, window, _| {
+        outcome = crate::native::minimize_window(window);
+        if outcome.is_ok() {
+            report_facts(&win, def, window, 0, true);
+        }
+    });
+    outcome
+}
+
+/// Restore `window_id` and report updated facts.
+pub(crate) fn restore_instance(window_id: &str, cx: &mut App) -> Result<(), Failure> {
+    let handle = find_handle(window_id, cx)?;
+    let (def, win) = view_info(handle, cx)
+        .ok_or_else(|| Failure::new("target_not_found", format!("no open window `{window_id}`")))?;
+    let mut outcome = Ok(());
+    let _ = handle.update(cx, |_, window, _| {
+        outcome = crate::native::restore_window(window);
+        if outcome.is_ok() {
+            report_facts(&win, def, window, 0, true);
+        }
+    });
+    outcome
+}
+
+/// Maximize `window_id` and report updated facts.
+pub(crate) fn maximize_instance(window_id: &str, cx: &mut App) -> Result<(), Failure> {
+    let handle = find_handle(window_id, cx)?;
+    let (def, win) = view_info(handle, cx)
+        .ok_or_else(|| Failure::new("target_not_found", format!("no open window `{window_id}`")))?;
+    let mut outcome = Ok(());
+    let _ = handle.update(cx, |_, window, _| {
+        outcome = crate::native::maximize_window(window);
+        if outcome.is_ok() {
+            report_facts(&win, def, window, 0, true);
+        }
+    });
+    outcome
+}
+
+/// Move `window_id` to `(x, y)` and report updated facts.
+pub(crate) fn move_instance(window_id: &str, x: f64, y: f64, cx: &mut App) -> Result<(), Failure> {
+    let handle = find_handle(window_id, cx)?;
+    let (def, win) = view_info(handle, cx)
+        .ok_or_else(|| Failure::new("target_not_found", format!("no open window `{window_id}`")))?;
+    let mut outcome = Ok(());
+    let _ = handle.update(cx, |_, window, _| {
+        outcome = crate::native::move_window(window, x, y);
+        if outcome.is_ok() {
+            report_facts(&win, def, window, 0, true);
+        }
+    });
+    outcome
+}
+
+/// Resize `window_id` to `(width, height)` and report updated facts.
+pub(crate) fn resize_instance(
+    window_id: &str,
+    width: f64,
+    height: f64,
+    cx: &mut App,
+) -> Result<(), Failure> {
+    let handle = find_handle(window_id, cx)?;
+    let (def, win) = view_info(handle, cx)
+        .ok_or_else(|| Failure::new("target_not_found", format!("no open window `{window_id}`")))?;
+    let mut outcome = Ok(());
+    let _ = handle.update(cx, |_, window, _| {
+        outcome = crate::native::resize_window(window, width, height);
+        if outcome.is_ok() {
+            report_facts(&win, def, window, 0, true);
+        }
+    });
+    outcome
+}
+
+/// Capture `window_id` (or the default window) as a `Screenshot` protocol record.
+pub(crate) fn screenshot_instance(window_id: Option<&str>, cx: &mut App) -> Result<Value, Failure> {
+    let handle = match window_id {
+        Some(id) => find_handle(id, cx)?,
+        None => default_handle(cx)?,
+    };
+    let (_, win) = view_info(handle, cx)
+        .ok_or_else(|| Failure::new("target_not_found", "window is no longer open"))?;
+    let mut captured: Result<(i64, i64, f64, Vec<u8>), Failure> = Err(Failure::new(
+        "capture_failed",
+        "window handle could not be updated",
+    ));
+    let _ = handle.update(cx, |_, window, _| {
+        captured = crate::native::capture_window_png(window);
+    });
+    let (width, height, scale, png) = captured?;
+    let data = crate::files::encode_base64(&png);
+    Ok(Value::Record(vec![
+        Value::Text(win.id.to_string()),
+        Value::Int(width),
+        Value::Int(height),
+        Value::Float(scale),
+        Value::Text("image/png".into()),
+        Value::Optional(None),
+        Value::Optional(Some(Box::new(Value::Text(data)))),
+    ]))
 }
 
 /// Close utility windows anchored to `overlay_id` when the overlay is hidden
@@ -434,13 +1098,11 @@ pub(crate) fn open_initial(cx: &mut App) {
 
 /// The instance the session runtime made: its generation, its id and the
 /// drafts of the sessions it hosts, by session index.
-/// A window instance: its generation, id and drafts.
 type Instance = (u64, Rc<str>, Vec<Option<Vec<Value>>>);
 
-fn instance(bytes: &[u8]) -> Result<Instance, crate::Failure> {
+fn instance(bytes: &[u8]) -> Result<Instance, Failure> {
     let host = host();
-    let malformed =
-        |error: crate::protocol::CodecError| crate::Failure::new("invalid_reply", error.0);
+    let malformed = |error: crate::protocol::CodecError| Failure::new("invalid_reply", error.0);
     let mut reply = status(bytes)?;
     let generation = reply.u64().map_err(malformed)?;
     let id: Rc<str> = reply.text().map_err(malformed)?.into();
@@ -449,7 +1111,7 @@ fn instance(bytes: &[u8]) -> Result<Instance, crate::Failure> {
     for _ in 0..count {
         let session = reply.u32().map_err(malformed)? as usize;
         let Some(def) = host.def.sessions.get(session) else {
-            return Err(crate::Failure::new("invalid_reply", "unknown session"));
+            return Err(Failure::new("invalid_reply", "unknown session"));
         };
         let values = def
             .fields
@@ -461,15 +1123,24 @@ fn instance(bytes: &[u8]) -> Result<Instance, crate::Failure> {
     Ok((generation, id, drafts))
 }
 
-fn open(kind: usize, def: &'static WindowDef, cx: &mut App) -> Result<String, crate::Failure> {
+fn open(kind: usize, def: &'static WindowDef, cx: &mut App) -> Result<String, Failure> {
+    let _ = crate::login_item::refresh();
     let host = host();
     // SAFETY: the handle is live while the application runs.
     let bytes = take(unsafe { bern_ffi::bern_window_opened(host.app(), kind as u32) });
     let (generation, id, drafts) = instance(&bytes)?;
-    let width = def.width.unwrap_or(if def.utility { 300.0 } else { 800.0 }) as f32;
-    let height = def
-        .height
-        .unwrap_or(if def.utility { 360.0 } else { 600.0 }) as f32;
+    let width = def.width.unwrap_or(if def.utility {
+        300.0
+    } else if def.dialog {
+        480.0
+    } else {
+        800.0
+    }) as f32;
+    let height = def.height.unwrap_or(if def.utility || def.dialog {
+        360.0
+    } else {
+        600.0
+    }) as f32;
     let mut bounds = Bounds::centered(None, size(px(width), px(height)), cx);
     let offscreen = offscreen();
     // Windows would give a window outside every display a size of its own:
@@ -485,6 +1156,9 @@ fn open(kind: usize, def: &'static WindowDef, cx: &mut App) -> Result<String, cr
         (width, height),
         def.idle_after,
     );
+    if def.dialog {
+        OPEN_DIALOGS.with(|dialogs| dialogs.borrow_mut().push(Rc::clone(&win.id)));
+    }
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         focus: !offscreen,
@@ -500,12 +1174,12 @@ fn open(kind: usize, def: &'static WindowDef, cx: &mut App) -> Result<String, cr
                 px(min_height.unwrap_or(0.0) as f32),
             )),
         },
-        kind: if def.utility {
+        kind: if def.utility || def.dialog {
             gpui::WindowKind::PopUp
         } else {
             gpui::WindowKind::Normal
         },
-        is_resizable: !def.utility || def.min_width.is_some() || def.min_height.is_some(),
+        is_resizable: resizable(def),
         app_id: Some(host.def.bundle_id.to_string()),
         window_decorations: crate::chrome::decorations(def.unified),
         // A frame drawn on Linux has a shadow around the window.
@@ -517,20 +1191,24 @@ fn open(kind: usize, def: &'static WindowDef, cx: &mut App) -> Result<String, cr
         ..Default::default()
     };
     let returned = win.id.to_string();
-    let instance = win.id.clone();
+    let close_win = Rc::clone(&win);
+    let facts_win = Rc::clone(&win);
     cx.open_window(options, move |window, cx| {
         if offscreen {
             crate::native::move_offscreen(window);
         }
-        // The session runtime forgets the instance when it closes, and its
-        // queries end.
+        crate::native::apply_window_icon(window);
+        report_facts(&facts_win, def, window, 1, true);
+        // The close handler evaluates declared close checks before letting
+        // the window close; once approved, cleans up and notifies bern-ffi.
         window.on_window_should_close(cx, move |_, _| {
-            crate::query::end(&instance, true);
-            crate::media::end(&instance, true);
-            crate::skeleton::end(&instance, true);
-            crate::motion::forget(&instance);
-            // SAFETY: the handle is live while windows are open.
-            unsafe { bern_ffi::bern_window_closed(host.app(), kind as u32, generation) };
+            if !close_win.allow_close.get() && def.close.is_some() {
+                match request_close_inner(def, &close_win, None) {
+                    Ok(result) if result.outcome == CLOSED => {}
+                    _ => return false,
+                }
+            }
+            cleanup_closed(&close_win);
             true
         });
         // The window goes idle when its `idle_after` passes without input.
@@ -561,9 +1239,11 @@ fn open(kind: usize, def: &'static WindowDef, cx: &mut App) -> Result<String, cr
             // Colors follow the window's light or dark appearance.
             cx.observe_window_appearance(window, |_, _, cx| cx.notify())
                 .detach();
-            // A window coming to the front tries what the network failed;
-            // losing focus releases any held shortcut cleanly.
-            cx.observe_window_activation(window, |_, window, _| {
+            // A window coming to the front tries what the network failed,
+            // refreshes reported facts, and releases any held shortcut on blur.
+            let act_win = Rc::clone(&win);
+            cx.observe_window_activation(window, move |_, window, _| {
+                report_facts(&act_win, def, window, 1, false);
                 if window.is_window_active() {
                     crate::pictures::try_again();
                 } else {
@@ -571,11 +1251,17 @@ fn open(kind: usize, def: &'static WindowDef, cx: &mut App) -> Result<String, cr
                 }
             })
             .detach();
+            // Keep reported facts in sync when the user resizes or moves.
+            let bnd_win = Rc::clone(&win);
+            cx.observe_window_bounds(window, move |_, window, _| {
+                report_facts(&bnd_win, def, window, 1, false);
+            })
+            .detach();
             WindowView { def, win }
         });
         VIEWS.with(|views| views.borrow_mut().push(view.downgrade()));
         cx.new(|cx| gpui_base::Root::new(view, window, cx))
     })
-    .map_err(|error| crate::Failure::new("window_failed", error.to_string()))?;
+    .map_err(|error| Failure::new("window_failed", error.to_string()))?;
     Ok(returned)
 }

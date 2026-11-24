@@ -16,8 +16,8 @@ mod native;
 use bern_ir::style::{ColorRef, ControlSize, StyleEffect, StyleState};
 use bern_ir::{
     Action, Application, BinaryOp, Binding, ComponentArg, ComponentDef, Element, Expr, ExprKind,
-    Node, ParamKind, Presentation, Prop, SessionOp, SourceLocation, Text, WindowChrome, WindowDef,
-    WindowInitial, WindowRole,
+    Node, ParamKind, Prop, SessionOp, SourceLocation, Text, WindowChrome, WindowDef, WindowInitial,
+    WindowRole,
 };
 use bern_protocol::{Type, Value};
 use bern_target_api::Diagnostic;
@@ -141,6 +141,7 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
     ),
     ("Spacer", &[]),
     ("Divider", &[]),
+    ("WindowButtons", &["edge"]),
     (
         "Text",
         &[
@@ -156,6 +157,10 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "mark",
             "bold",
             "selectable",
+            "lit",
+            "lit_path",
+            "lit_clock",
+            "lit_since",
         ],
     ),
     (
@@ -213,6 +218,7 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "save",
             "suggested_name",
             "files",
+            "paste",
             "shortcut",
             "shape",
             "height",
@@ -232,6 +238,7 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "save",
             "suggested_name",
             "files",
+            "paste",
             "prominence",
             "color",
             "height",
@@ -257,6 +264,8 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "height",
             "icon",
             "variant",
+            "shortcut",
+            "login_item",
         ],
     ),
     (
@@ -284,6 +293,7 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "label",
             "label_hidden",
             "value",
+            "current",
             "prompt",
             "kind",
             "submit",
@@ -304,6 +314,7 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "shape",
             "height",
             "placement",
+            "shortcut",
         ],
     ),
     ("Modal", &["width", "height", "cover"]),
@@ -325,10 +336,16 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
     ("Tabs", &["id", "selection", "fallback", "bar"]),
     ("Tab", &["value", "label", "icon", "display"]),
     ("TabAccessory", &["shown"]),
-    ("Drop", &["id", "label", "value", "files", "over"]),
+    ("Drop", &["id", "label", "value", "files", "over", "opens"]),
     ("Adaptive", &["id"]),
     ("Layout", &["size"]),
     ("ForEach", &["items", "key"]),
+    ("List", &["items", "key"]),
+    ("Table", &["id", "label", "items", "key", "selection"]),
+    ("TableColumn", &["title", "width", "sorted", "descending"]),
+    ("TableMenu", &[]),
+    ("Inspector", &["presented", "width"]),
+    ("Marquee", &["duration", "phase", "paused", "opacity"]),
     (
         "Skeleton",
         &[
@@ -531,6 +548,7 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "save",
             "suggested_name",
             "files",
+            "paste",
         ],
     ),
     ("PickerOption", &["value", "label"]),
@@ -548,6 +566,7 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "save",
             "suggested_name",
             "files",
+            "paste",
         ],
     ),
     ("ControlGroup", &["label", "height"]),
@@ -595,12 +614,15 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
     ("Watch", &["value"]),
     ("ScaleBox", &["width", "height"]),
     ("Positioned", &["x", "y", "width", "height", "bleed"]),
-    ("Rail", &["axis", "anchor"]),
+    ("Rail", &["axis", "anchor", "overhang"]),
     ("Navigation", &["path", "reset", "id"]),
     ("NavLink", &["id", "route"]),
     ("Destination", &[]),
     ("SplitView", &[]),
-    ("Sidebar", &["selection", "collapsed", "width", "id"]),
+    (
+        "Sidebar",
+        &["selection", "collapsed", "width", "id", "fallback"],
+    ),
     (
         "SidebarItem",
         &["value", "label", "icon", "badge", "variant"],
@@ -691,6 +713,22 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
     ),
     ("BottomSheet", &["detents", "drag_indicator"]),
     ("Refreshable", &["id", "refreshing"]),
+    (
+        "StatusItem",
+        &["label", "icon", "image", "login_item", "shown"],
+    ),
+    (
+        "WebPage",
+        &[
+            "url",
+            "cookies_file",
+            "cookie_domain",
+            "user_agent",
+            "content_mode",
+            "close_on",
+            "label",
+        ],
+    ),
 ];
 
 /// The names [`COMPONENTS`] lists, with the window catalog's.
@@ -705,6 +743,7 @@ pub const COMPONENT_NAMES: &[&str] = &[
     "ScrollView",
     "Spacer",
     "Divider",
+    "WindowButtons",
     "Text",
     "Label",
     "Svg",
@@ -728,6 +767,12 @@ pub const COMPONENT_NAMES: &[&str] = &[
     "Adaptive",
     "Layout",
     "ForEach",
+    "List",
+    "Table",
+    "TableColumn",
+    "TableMenu",
+    "Inspector",
+    "Marquee",
     "Query",
     "QueryStatusHeader",
     "Toolbar",
@@ -803,6 +848,8 @@ pub const COMPONENT_NAMES: &[&str] = &[
     "Reorderable",
     "BottomSheet",
     "Refreshable",
+    "StatusItem",
+    "WebPage",
 ];
 
 /// Icons the runtime draws itself, whatever the application declares.
@@ -820,7 +867,11 @@ const RUNTIME_ICONS: &[&str] = &[
     "info.circle",
     "magnifyingglass",
     "minus",
+    "pause.fill",
+    "play.fill",
     "plus",
+    "speaker.slash.fill",
+    "speaker.wave.3.fill",
     "tray",
     "xmark",
     "xmark.circle.fill",
@@ -1083,6 +1134,8 @@ impl<'a> Generator<'a> {
             out.push('\n');
             out.push_str(&self.menu_bar());
             out.push('\n');
+            out.push_str(&self.status_menu());
+            out.push('\n');
             out.push_str(&self.app_def(fingerprint, descriptor));
             self.window_catalog();
             files.push(("mod.rs".into(), out));
@@ -1120,6 +1173,7 @@ impl<'a> Generator<'a> {
         line(&self.styles());
         line(&self.window_theme());
         line(&self.menu_bar());
+        line(&self.status_menu());
         line("/// Strings of every supported language.");
         line("static STRINGS: b::text::StringTable = &[");
         for (language, table) in bern_target_api::texts::tables(app) {
@@ -1174,6 +1228,24 @@ impl<'a> Generator<'a> {
                 ));
             }
         }
+        if let Some(close) = &window.close {
+            let save = match &close.save {
+                Some(Action::Engine { command, args }) => {
+                    let values: Vec<_> = args.iter().map(|arg| self.expr(arg, None)).collect();
+                    format!(
+                        "Some(std::rc::Rc::new(|c: &b::Ctx, done: b::Done| b::dispatch_with(c, {command}, vec![{}], Some(done))))",
+                        values.join(", ")
+                    )
+                }
+                _ => "None".into(),
+            };
+            out.push_str(&format!(
+                "pub(crate) fn window_{}_close(c: &b::Ctx) -> b::CloseCheck {{\n    b::CloseCheck {{ needs_confirmation: {}, message: {}, save: {save} }}\n}}\n",
+                window.id,
+                self.condition(&close.when),
+                self.text(&close.message, None),
+            ));
+        }
         out
     }
 
@@ -1206,28 +1278,26 @@ impl<'a> Generator<'a> {
     /// shown yet.
     fn window_catalog(&self) {
         let catalog = &self.app.windows;
-        if catalog.palette.is_some() {
-            self.unsupported("`WindowSet(palette:)`".into(), None);
-        }
         for window in &catalog.windows {
             let mut unsupported = Vec::new();
-            if window.presentation != Presentation::Auto {
-                unsupported.push("presentation");
-            }
-            if !matches!(window.role, WindowRole::Standard | WindowRole::Utility) {
+            if !matches!(
+                window.role,
+                WindowRole::Standard
+                    | WindowRole::Settings
+                    | WindowRole::Utility
+                    | WindowRole::Dialog
+            ) {
                 unsupported.push("role");
             }
-            if window.close.is_some() {
-                unsupported.push("close");
-            }
-            // A desktop window has no orientation to turn (`landscape`).
+            // A desktop window has no orientation to turn (`landscape`), and
+            // `presentation` resolves to native desktop windows.
             for property in unsupported {
                 self.unsupported(format!("`Window(id: {}, {property}:)`", window.id), None);
             }
         }
     }
 
-    /// The accent and appearance the application chooses at run time.
+    /// The accent, palette and appearance the application chooses at run time.
     fn window_theme(&self) -> String {
         let catalog = &self.app.windows;
         let mut out = String::new();
@@ -1243,10 +1313,10 @@ impl<'a> Generator<'a> {
                             "Some({index}) => Some((({}, {}, {}), ({}, {}, {}))),",
                             light.red, light.green, light.blue, dark.red, dark.green, dark.blue
                         )),
-                        ColorRef::Role { role } => {
-                            self.unsupported(format!("the accent `{name}` of role `{role}`"), None);
-                            None
-                        }
+                        ColorRef::Role { role } => Some(format!(
+                            "Some({index}) => Some(c.role_accent({})),",
+                            string(role)
+                        )),
                     }
                 })
                 .collect();
@@ -1254,6 +1324,12 @@ impl<'a> Generator<'a> {
                 "fn window_accent(c: &b::Ctx) -> Option<((u8, u8, u8), (u8, u8, u8))> {{\n    match rt::tag(&{}) {{\n        {}\n        _ => None,\n    }}\n}}\n",
                 self.expr(expr, None),
                 arms.join("\n        ")
+            ));
+        }
+        if let Some(expr) = &catalog.palette {
+            out.push_str(&format!(
+                "fn window_palette(c: &b::Ctx) -> String {{\n    rt::as_text(&{})\n}}\n",
+                self.expr(expr, None),
             ));
         }
         if let Some(expr) = &catalog.appearance {
@@ -1400,11 +1476,13 @@ impl<'a> Generator<'a> {
                     .map(|id| format!("Some({})", string(id)))
                     .unwrap_or_else(|| "None".into());
                 format!(
-                    "b::WindowDef {{ id: {}, title: {}, open: {}, utility: {}, overlay: {overlay}, width: {}, height: {}, min_width: {}, min_height: {}, unified: {}, idle_after: {}, immersive: {}, idle_enabled: {}, engine_fields: &[{}], content: window_{} }},",
+                    "b::WindowDef {{ id: {}, title: {}, open: {}, settings: {}, utility: {}, dialog: {}, overlay: {overlay}, width: {}, height: {}, min_width: {}, min_height: {}, unified: {}, idle_after: {}, immersive: {}, idle_enabled: {}, close: {}, engine_fields: &[{}], content: window_{} }},",
                     string(&window.id),
                     string(&window.title.key),
                     window.initial == WindowInitial::Open,
+                    window.role == WindowRole::Settings,
                     window.role == WindowRole::Utility,
+                    window.role == WindowRole::Dialog,
                     size(window.width),
                     size(window.height),
                     size(window.min_width),
@@ -1417,6 +1495,10 @@ impl<'a> Generator<'a> {
                     },
                     match window.idle_enabled {
                         Some(_) => format!("Some(window_{}_idle_enabled)", window.id),
+                        None => "None".into(),
+                    },
+                    match window.close {
+                        Some(_) => format!("Some(window_{}_close)", window.id),
                         None => "None".into(),
                     },
                     engine_fields.join(", "),
@@ -1478,12 +1560,16 @@ pub fn app() -> b::AppDef {{
         expanded_below: {expanded},
         brand_seed: {brand},
         accent: {accent},
+        palette: {palette},
         appearance: {appearance},
         app_icon: {app_icon},
         window_icon: {window_icon},
         menu_bar: {menu_bar},
+        status_item: {status_item},
         icons: ICONS,
         text_weights: &[{text_weights}],
+        file_kinds: &[{file_kinds}],
+        opens: {opens},
     }}
 }}
 ",
@@ -1501,6 +1587,11 @@ pub fn app() -> b::AppDef {{
             expanded = size(layouts.and_then(|layouts| layouts.expanded_below)),
             accent = if app.windows.accent.is_some() {
                 "Some(window_accent)"
+            } else {
+                "None"
+            },
+            palette = if app.windows.palette.is_some() {
+                "Some(window_palette)"
             } else {
                 "None"
             },
@@ -1550,6 +1641,41 @@ pub fn app() -> b::AppDef {{
             } else {
                 "None"
             },
+            status_item = match &app.windows.status_item {
+                Some(item) => {
+                    let label = item
+                        .text("label")
+                        .map(|t| self.text(t, Some(&item.source)))
+                        .unwrap_or_else(|| "String::new()".into());
+                    let shown = match item.expr("shown") {
+                        Some(expr) => format!("Some(|c: &b::Ctx| {})", self.condition(expr)),
+                        None => "None".into(),
+                    };
+                    let image: Vec<String> = if item.resource("image").is_some() {
+                        crate::STATUS_SIDES
+                            .iter()
+                            .map(|side| format!("({side}, include_bytes!(\"status/{side}.png\"))"))
+                            .collect()
+                    } else {
+                        Vec::new()
+                    };
+                    format!(
+                        "Some(b::StatusItemDef {{ label: |c: &b::Ctx| {label}, menu: status_menu, login_item: {}, shown: {shown}, image: &[{}] }})",
+                        item.keyword("login_item") == Some("true"),
+                        image.join(", "),
+                    )
+                }
+                None => "None".into(),
+            },
+            file_kinds = bern_ir::spec::FILE_KIND_EXTENSIONS
+                .iter()
+                .map(|(kind, extensions)| {
+                    let exts: Vec<String> = extensions.iter().map(|ext| string(ext)).collect();
+                    format!("({}, &[{}])", string(kind), exts.join(", "))
+                })
+                .collect::<Vec<_>>()
+                .join(", "),
+            opens = string(&app.engine_kinds()),
         )
     }
 
@@ -1607,7 +1733,7 @@ pub fn app() -> b::AppDef {{
                     self.bar_entries(&child.children)
                 )),
                 "CommandItem" => out.push_str(&format!(
-                    "v.push(b::bar_item(c, {}, {}, {}, {}, {}, {}, {})); ",
+                    "v.push(b::bar_item(c, {}, {}, {}, {}, {}, {}, {}, {})); ",
                     string(child.id.as_deref().unwrap_or(&child.path)),
                     self.bar_label(child),
                     self.shortcut(child),
@@ -1617,11 +1743,133 @@ pub fn app() -> b::AppDef {{
                         .map(|checked| self.condition(checked))
                         .unwrap_or_else(|| "false".into()),
                     self.pick(child),
+                    self.paste_field(child),
                     self.action(child)
                 )),
                 other => self.unsupported(format!("`{other}` in a menu"), Some(&child.source)),
             },
         )
+    }
+
+    // MARK: - Status item
+
+    fn status_menu(&self) -> String {
+        let Some(item) = &self.app.windows.status_item else {
+            return String::new();
+        };
+        let mut body = String::new();
+        self.status_nodes(&mut body, &item.children);
+        format!(
+            "/// The application's items of the status item's menu.\nfn status_menu(c: &b::Ctx, m: &mut b::StatusMenu) {{\n    {body}\n}}\n"
+        )
+    }
+
+    fn status_nodes(&self, out: &mut String, nodes: &[Node]) {
+        for node in nodes {
+            match node {
+                Node::Element(element) => match element.kind.as_str() {
+                    "CommandItem" => {
+                        let at = Some(&element.source);
+                        let label = element
+                            .text("label")
+                            .map(|text| self.text(text, at))
+                            .unwrap_or_else(|| "String::new()".into());
+                        let enabled = self.enabled(element);
+                        let checked = match element.expr("checked") {
+                            Some(expr) => format!("Some({})", self.condition(expr)),
+                            None => "None".into(),
+                        };
+                        out.push_str(&format!(
+                            "m.item(c, {label}, {enabled}, {checked}, {}); ",
+                            self.action(element)
+                        ));
+                    }
+                    "CommandMenu" => {
+                        let label = element
+                            .text("label")
+                            .map(|text| self.text(text, Some(&element.source)))
+                            .unwrap_or_else(|| "String::new()".into());
+                        out.push_str(&format!("m.sub({label}, |m| {{ "));
+                        self.status_nodes(out, &element.children);
+                        out.push_str("}); ");
+                    }
+                    "Divider" => out.push_str("m.divider(); "),
+                    "ForEach" => {
+                        if let (Some(items), Some(template)) =
+                            (element.expr("items"), &element.template)
+                        {
+                            out.push_str(&format!(
+                                "for row in rt::as_list({}) {{ let c = &c.with_local({}, row); ",
+                                self.expr(items, Some(&element.source)),
+                                string(&template.var)
+                            ));
+                            self.status_nodes(out, &element.children);
+                            out.push_str("} ");
+                        }
+                    }
+                    _ => {}
+                },
+                Node::If(node) => {
+                    for (index, (condition, body)) in node.branches.iter().enumerate() {
+                        if index > 0 {
+                            out.push_str("else ");
+                        }
+                        out.push_str(&format!("if {} {{ ", self.condition(condition)));
+                        self.status_nodes(out, body);
+                        out.push_str("} ");
+                    }
+                    if !node.otherwise.is_empty() {
+                        out.push_str("else { ");
+                        self.status_nodes(out, &node.otherwise);
+                        out.push_str("} ");
+                    }
+                }
+                Node::IfLet(node) => {
+                    out.push_str(&format!(
+                        "if let Some(x) = rt::some({}) {{ let c = &c.with_local({}, x); ",
+                        self.expr(&node.value, None),
+                        string(&node.var)
+                    ));
+                    self.status_nodes(out, &node.then);
+                    out.push_str("} ");
+                    if !node.otherwise.is_empty() {
+                        out.push_str("else { ");
+                        self.status_nodes(out, &node.otherwise);
+                        out.push_str("} ");
+                    }
+                }
+                Node::Match(node) => {
+                    out.push_str(&format!(
+                        "{{ let m_val = {}; match rt::tag(&m_val) {{ ",
+                        self.expr(&node.value, None)
+                    ));
+                    let mut wildcard = false;
+                    for arm in &node.arms {
+                        match arm.variant {
+                            Some(variant) => out.push_str(&format!("Some({variant}) => {{ ")),
+                            None => {
+                                wildcard = true;
+                                out.push_str("_ => { ");
+                            }
+                        }
+                        for binding in &arm.bindings {
+                            out.push_str(&format!(
+                                "let c = &c.with_local({}, rt::payload(m_val.clone(), {})); ",
+                                string(&binding.name),
+                                binding.field
+                            ));
+                        }
+                        self.status_nodes(out, &arm.body);
+                        out.push_str("} ");
+                    }
+                    if !wildcard {
+                        out.push_str("_ => {} ");
+                    }
+                    out.push_str("} } ");
+                }
+                Node::Component(_) => {}
+            }
+        }
     }
 
     // MARK: - Styles
@@ -1662,6 +1910,15 @@ pub fn app() -> b::AppDef {{
                     )),
                     // The shared check reports what the target cannot show.
                     _ => {}
+                }
+            }
+            for (state, effects) in &resolved.states {
+                if *state == StyleState::Hover {
+                    for effect in effects {
+                        if let StyleEffect::Background { color } = effect {
+                            fields.push(format!("hover_background: Some({})", color_expr(color)));
+                        }
+                    }
                 }
             }
             fields.push("..b::Style::NONE".into());
@@ -1959,7 +2216,7 @@ pub fn app() -> b::AppDef {{
                 height: false,
             },
             "ScrollView" | "Form" | "Tabs" | "ScaleBox" | "SplitView" | "SplitPane"
-            | "Navigation" => Greed {
+            | "Navigation" | "Table" | "WebPage" => Greed {
                 width: true,
                 height: true,
             },
@@ -1977,12 +2234,12 @@ pub fn app() -> b::AppDef {{
             },
             "TextInput" | "NumberInput" | "DatePicker" | "TimePicker" | "EmptyState" | "Banner"
             | "Disclosure" | "TreeView" | "Reorderable" | "Refreshable" | "Progress" | "Slider"
-            | "Section" | "NavLink" | "SearchItem" => Greed {
+            | "Section" | "NavLink" | "SearchItem" | "List" | "Marquee" => Greed {
                 width: true,
                 height: false,
             },
-            "Tooltip" => self.children_greed(&element.children, parent),
-            "Alert" | "AlertAction" | "BottomSheet" => Greed {
+            "Tooltip" | "Slot" => self.children_greed(&element.children, parent),
+            "Alert" | "AlertAction" | "BottomSheet" | "WindowButtons" | "Inspector" => Greed {
                 width: false,
                 height: false,
             },
@@ -2301,11 +2558,12 @@ pub fn app() -> b::AppDef {{
                 self.for_each(out, element, axis)
             }
             Node::Element(element) if element.kind == "Slot" => {
-                // Modules contribute to slots; an application without them
-                // shows nothing there.
-                if !element.children.is_empty() {
-                    self.unsupported("contributions to a `Slot`".into(), Some(&element.source));
+                for child in &element.children {
+                    self.push(out, child, axis);
                 }
+            }
+            Node::Element(element) if element.kind == "Inspector" => {
+                // Realized by its enclosing container (`wrap_inspector`).
             }
             Node::Element(element) => {
                 let ctx = format!(
@@ -2679,7 +2937,37 @@ pub fn app() -> b::AppDef {{
             ),
             None => code,
         };
+        let code = self.wrap_inspector(&element.children, code);
         Some(format!("{{ let c = {scope}; {code} }}"))
+    }
+
+    fn paste_field(&self, element: &Element) -> String {
+        match element.field("paste") {
+            Some(field) => format!(
+                "Some({})",
+                field_ref(self.session_index(&field.session), field.field)
+            ),
+            None => "None".into(),
+        }
+    }
+
+    fn wrap_inspector(&self, children: &[Node], body: String) -> String {
+        let inspector = children.iter().find_map(|node| match node {
+            Node::Element(child) if child.kind == "Inspector" => Some(child),
+            _ => None,
+        });
+        let Some(inspector) = inspector else {
+            return body;
+        };
+        let Some(presented) = inspector.field("presented") else {
+            return body;
+        };
+        let width = self.optional_length(inspector, "width");
+        let panel = self.children(&inspector.children, Axis::Column);
+        format!(
+            "b::inspector(c, {}, {width}, {body}, {panel})",
+            field_ref(self.session_index(&presented.session), presented.field)
+        )
     }
 
     /// A query's lease belongs to the page even when the element (including
@@ -2907,9 +3195,7 @@ pub fn app() -> b::AppDef {{
             }
             "Divider" => "b::divider(c)".into(),
             "Video" => {
-                if element.keyword("controls") != Some("none") {
-                    self.unsupported("a `Video` with the standard control bar".into(), at);
-                }
+                let controls = element.keyword("controls") != Some("none");
                 let (source, player) = match (element.expr("source"), element.prop("player")) {
                     (Some(source), _) => (
                         format!("Some({})", self.expr(source, at)),
@@ -2921,7 +3207,7 @@ pub fn app() -> b::AppDef {{
                     _ => ("None".to_string(), "None".to_string()),
                 };
                 format!(
-                    "b::video(c, {}, b::VideoProps {{ player: {player}, source: {source}, label: {}, fit: {}, corner: {} }})",
+                    "b::video(c, {}, b::VideoProps {{ player: {player}, source: {source}, label: {}, fit: {}, corner: {}, controls: {controls} }})",
                     id(),
                     text("label"),
                     match element.keyword("fit") {
@@ -3165,8 +3451,120 @@ pub fn app() -> b::AppDef {{
                     },
                 }
             }
+            "WindowButtons" => format!(
+                "b::window_buttons(c, {})",
+                element.keyword("edge") == Some("trailing")
+            ),
+            "List" => {
+                if let (Some(items), Some(Prop::Key { field: key_idx, .. }), Some(template)) = (
+                    element.expr("items"),
+                    element.prop("key"),
+                    &element.template,
+                ) {
+                    let var = string(&template.var);
+                    let row_body = column(&element.children);
+                    format!(
+                        "{{ let mut rows: Vec<b::El> = Vec::new(); for item in rt::as_list({}) {{ let key = rt::key_text(&rt::at(item.clone(), &[{key_idx}])); let c = &c.with_key(key).with_local({var}, item); rows.extend({row_body}); }} b::list(c, rows) }}",
+                        self.expr(items, at)
+                    )
+                } else {
+                    format!("b::list(c, {})", column(&element.children))
+                }
+            }
+            "Table" => {
+                let items = element.expr("items")?;
+                let Some(Prop::Key { field: key_idx, .. }) = element.prop("key") else {
+                    return None;
+                };
+                let var = element
+                    .template
+                    .as_ref()
+                    .map(|t| t.var.as_str())
+                    .unwrap_or("item");
+                let selection = match element.field("selection") {
+                    Some(field) => format!(
+                        "Some({})",
+                        field_ref(self.session_index(&field.session), field.field)
+                    ),
+                    None => "None".into(),
+                };
+                let mut cols = Vec::new();
+                let mut table_menu = "None".to_string();
+                for node in &element.children {
+                    if let Node::Element(child) = node {
+                        match child.kind.as_str() {
+                            "TableColumn" => {
+                                let cat = Some(&child.source);
+                                let title = child
+                                    .text("title")
+                                    .map(|t| self.text(t, cat))
+                                    .unwrap_or_else(|| "String::new()".into());
+                                let width = self.optional_length(child, "width");
+                                let sorted = child
+                                    .expr("sorted")
+                                    .map(|e| self.condition(e))
+                                    .unwrap_or_else(|| "false".into());
+                                let descending = child
+                                    .expr("descending")
+                                    .map(|e| self.condition(e))
+                                    .unwrap_or_else(|| "false".into());
+                                let sort = self.action(child);
+                                let cell = child
+                                    .children
+                                    .first()
+                                    .and_then(|n| match n {
+                                        Node::Element(el) => self.element(el, "c"),
+                                        _ => None,
+                                    })
+                                    .unwrap_or_else(|| {
+                                        format!(
+                                            "b::row(c, b::Flex::default(), {})",
+                                            self.children(&child.children, Axis::Row)
+                                        )
+                                    });
+                                cols.push(format!(
+                                    "b::TableColumnDef {{ title: {title}, width: {width}, sorted: {sorted}, descending: {descending}, sort: {sort}, cell: std::rc::Rc::new(|c: &b::Ctx| {cell}) }}"
+                                ));
+                            }
+                            "TableMenu" => {
+                                table_menu = format!(
+                                    "Some(std::rc::Rc::new(|c: &b::Ctx| {}))",
+                                    self.menu_entries(&child.children)
+                                );
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                format!(
+                    "{{ let rows: Vec<b::TableRowData> = rt::as_list({}).into_iter().map(|item| {{ let key_value = rt::at(item.clone(), &[{key_idx}]); let key_text = rt::key_text(&key_value); b::TableRowData {{ key_text, key_value, item }} }}).collect(); b::table(c, {}, b::TableProps {{ label: {}, selection: {selection} }}, rows, vec![{}], {}, {}, {table_menu}) }}",
+                    self.expr(items, at),
+                    id(),
+                    text("label"),
+                    cols.join(", "),
+                    string(var),
+                    self.action(element),
+                )
+            }
+            "Marquee" => format!(
+                "b::marquee(c, {}, b::MarqueeProps {{ duration: {}, phase: {}, paused: {}, opacity: {} }}, {})",
+                id(),
+                self.length_value(element, "duration")
+                    .unwrap_or_else(|| "12.0".into()),
+                float(element.number("phase").unwrap_or(0.0)),
+                element
+                    .expr("paused")
+                    .map(|e| self.condition(e))
+                    .unwrap_or_else(|| "false".into()),
+                element
+                    .expr("opacity")
+                    .map(|e| format!("(rt::as_f64(&{}) as f32)", self.expr(e, at)))
+                    .or_else(|| element.number("opacity").map(float))
+                    .unwrap_or_else(|| "1.0".into()),
+                self.children(&element.children, Axis::Row),
+            ),
             "Text" => format!(
-                "b::text(c, {}, b::TextProps {{ style: b::TextStyle::{}, emphasis: b::Emphasis::{}, lines: {}, size: {}, color: {}, line_height: {}, markdown: {}, mark: {}, bold: {}, ruby: {}, selectable: {} }})",
+                "b::text(c, {}, b::TextProps {{ style: b::TextStyle::{}, emphasis: b::Emphasis::{}, lines: {}, size: {}, color: {}, line_height: {}, markdown: {}, mark: {}, bold: {}, ruby: {}, selectable: {}, lit: {}, lit_path: {}, lit_clock: {}, lit_since: {} }})",
                 text("content"),
                 pascal(element.keyword("style").unwrap_or("body")),
                 pascal(element.keyword("emphasis").unwrap_or("primary")),
@@ -3194,6 +3592,22 @@ pub fn app() -> b::AppDef {{
                     .map(|expr| format!("Some(rt::plain(&{}))", self.expr(expr, at)))
                     .unwrap_or_else(|| "None".into()),
                 element.keyword("selectable") == Some("true"),
+                match (element.expr("lit"), element.number("lit")) {
+                    (Some(expr), _) => format!("Some(rt::as_f64(&{}))", self.expr(expr, at)),
+                    (None, Some(n)) => format!("Some({n:?})"),
+                    (None, None) => "None".into(),
+                },
+                optional_text("lit_path"),
+                match (element.expr("lit_clock"), element.number("lit_clock")) {
+                    (Some(expr), _) => format!("Some(rt::as_f64(&{}))", self.expr(expr, at)),
+                    (None, Some(n)) => format!("Some({n:?})"),
+                    (None, None) => "None".into(),
+                },
+                match (element.expr("lit_since"), element.number("lit_since")) {
+                    (Some(expr), _) => format!("Some(rt::as_f64(&{}))", self.expr(expr, at)),
+                    (None, Some(n)) => format!("Some({n:?})"),
+                    (None, None) => "None".into(),
+                },
             ),
             "Label" => format!(
                 "b::label(c, {}, {}, b::TextStyle::{}, {}, {}, {})",
@@ -3374,7 +3788,7 @@ pub fn app() -> b::AppDef {{
                     })
                     .unwrap_or_else(|| "None".into());
                 let props = format!(
-                    "b::ButtonProps {{ double_tap: {double_tap}, label: {}, icon: {}, prominence: b::Prominence::{prominence}, role: b::Role::{role}, enabled: {}, shape: {}, height: {}, style: {}, pick: {}, shortcut: {}, cursor: {} }}",
+                    "b::ButtonProps {{ double_tap: {double_tap}, label: {}, icon: {}, prominence: b::Prominence::{prominence}, role: b::Role::{role}, enabled: {}, shape: {}, height: {}, style: {}, pick: {}, paste: {}, shortcut: {}, cursor: {} }}",
                     text("label"),
                     self.icon(element.icon("icon")),
                     self.enabled(element),
@@ -3382,6 +3796,7 @@ pub fn app() -> b::AppDef {{
                     self.optional_length(element, "height"),
                     self.control_style(element),
                     self.pick(element),
+                    self.paste_field(element),
                     self.shortcut(element),
                     match element.keyword("cursor") {
                         Some(cursor) => format!("Some({})", string(cursor)),
@@ -3422,7 +3837,7 @@ pub fn app() -> b::AppDef {{
                 }
             }
             "IconButton" => format!(
-                "b::icon_button(c, {}, {}, b::IconButtonProps {{ label: {}, prominence: b::Prominence::{}, color: {}, enabled: {}, height: {}, size: {}, style: {}, pick: {}, shortcut: {}, icon_progress: {}, badge_icon: {}, badge_visible: {} }}, {})",
+                "b::icon_button(c, {}, {}, b::IconButtonProps {{ label: {}, prominence: b::Prominence::{}, color: {}, enabled: {}, height: {}, size: {}, style: {}, pick: {}, paste: {}, shortcut: {}, icon_progress: {}, badge_icon: {}, badge_visible: {} }}, {})",
                 id(),
                 string(self.icon_name(element.icon("icon").unwrap_or("questionmark"))),
                 text("label"),
@@ -3440,6 +3855,7 @@ pub fn app() -> b::AppDef {{
                 self.optional_length(element, "font_size"),
                 self.control_style(element),
                 self.pick(element),
+                self.paste_field(element),
                 self.shortcut(element),
                 self.optional_length(element, "icon_progress"),
                 self.icon(element.icon("badge_icon")),
@@ -3450,9 +3866,13 @@ pub fn app() -> b::AppDef {{
                 self.action(element)
             ),
             "Switch" => {
-                let model = self.model(element, "checked")?;
+                let model = if element.keyword("login_item") == Some("true") {
+                    "b::login_model()".to_string()
+                } else {
+                    self.model(element, "checked")?
+                };
                 format!(
-                    "b::switch(c, {}, {}, {model}, b::SwitchProps {{ style: b::SwitchStyle::{}, label_hidden: {}, icon: {}, shape: {}, height: {}, look: {} }})",
+                    "b::switch(c, {}, {}, {model}, b::SwitchProps {{ style: b::SwitchStyle::{}, label_hidden: {}, icon: {}, shape: {}, height: {}, look: {}, shortcut: {} }})",
                     id(),
                     text("label"),
                     match element.keyword("style") {
@@ -3465,6 +3885,27 @@ pub fn app() -> b::AppDef {{
                     shape(),
                     self.optional_length(element, "height"),
                     self.surface_style("Switch", element),
+                    self.shortcut(element),
+                )
+            }
+            "WebPage" => {
+                let expr_str = |name: &str| match (element.expr(name), element.text(name)) {
+                    (Some(e), _) => format!("rt::plain(&{})", self.expr(e, at)),
+                    (None, Some(t)) => self.text(t, at),
+                    (None, None) => "String::new()".into(),
+                };
+                let mode = element.keyword("content_mode").unwrap_or("auto");
+                format!(
+                    "b::web_page(c, {}, b::WebPageProps {{ url: {}, cookies_file: {}, cookie_domain: {}, user_agent: {}, content_mode: {}, close_on: {}, label: {} }}, {})",
+                    id(),
+                    expr_str("url"),
+                    expr_str("cookies_file"),
+                    expr_str("cookie_domain"),
+                    expr_str("user_agent"),
+                    string(mode),
+                    expr_str("close_on"),
+                    text("label"),
+                    self.action(element),
                 )
             }
             "Picker" => {
@@ -3853,18 +4294,13 @@ pub fn app() -> b::AppDef {{
                 element.prop("label_hidden").is_some(),
             ),
             "TextInput" => {
-                let Some(field) = element.field("value") else {
-                    self.unsupported("a `TextInput` without a draft".into(), at);
-                    return None;
-                };
                 let kind = match element.keyword("kind").unwrap_or("plain") {
                     "secure" => "Secure",
                     "multiline" => "Multiline",
                     _ => "Text",
                 };
-                format!(
-                    "b::text_input(c, {}, b::InputProps {{ label: {}, label_hidden: {}, prompt: {}, kind: b::InputKind::{kind}, clear_on_submit: {}, clear_key: {}, ..Default::default() }}, {}, {})",
-                    id(),
+                let props = format!(
+                    "b::InputProps {{ label: {}, label_hidden: {}, prompt: {}, kind: b::InputKind::{kind}, clear_on_submit: {}, clear_key: {}, ..Default::default() }}",
                     text("label"),
                     element.prop("label_hidden").is_some(),
                     text("prompt"),
@@ -3873,9 +4309,25 @@ pub fn app() -> b::AppDef {{
                         Some(key) => format!("Some(rt::as_f64(&{}) as i64)", self.expr(key, at)),
                         None => "None".into(),
                     },
-                    field_ref(self.session_index(&field.session), field.field),
-                    self.action(element)
-                )
+                );
+                if let Some(field) = element.field("value") {
+                    format!(
+                        "b::text_input(c, {}, {props}, {}, {})",
+                        id(),
+                        field_ref(self.session_index(&field.session), field.field),
+                        self.action(element)
+                    )
+                } else if let Some(current) = element.expr("current") {
+                    format!(
+                        "b::text_input_controlled(c, {}, {props}, b::Model::Controlled({}, {}))",
+                        id(),
+                        self.expr(current, at),
+                        self.commit(element, current)
+                    )
+                } else {
+                    self.unsupported("a `TextInput` without a draft or `current`".into(), at);
+                    return None;
+                }
             }
             "PopoverButton" => {
                 let presented = if let Some(field) = element.field("presented") {
@@ -3893,7 +4345,7 @@ pub fn app() -> b::AppDef {{
                     "None".into()
                 };
                 format!(
-                    "b::popover_button(c, {}, {}, {}, b::PopoverProps {{ presented: {presented}, dark: {}, style: {}, plain: {}, size: {}, shape: {}, height: {}, placement: {} }}, || {})",
+                    "b::popover_button(c, {}, {}, {}, b::PopoverProps {{ presented: {presented}, dark: {}, style: {}, plain: {}, size: {}, shape: {}, height: {}, placement: {}, shortcut: {} }}, || {})",
                     id(),
                     text("label"),
                     self.icon(element.icon("icon")),
@@ -3911,6 +4363,7 @@ pub fn app() -> b::AppDef {{
                         Some(side) => format!("Some({})", string(side)),
                         None => "None".into(),
                     },
+                    self.shortcut(element),
                     column(&element.children)
                 )
             }
@@ -4139,7 +4592,10 @@ pub fn app() -> b::AppDef {{
                             self.push_element(out, child, &format!("({code}, {placement})"));
                         }
                     });
-                format!("b::rail(c, {vertical}, b::RailAnchor::{anchor}, {children})")
+                let overhang = self
+                    .length_value(element, "overhang")
+                    .unwrap_or_else(|| "0.0".into());
+                format!("b::rail(c, {vertical}, b::RailAnchor::{anchor}, {overhang}, {children})")
             }
             "Navigation" => {
                 let Some(path) = element.field("path") else {
@@ -4167,8 +4623,13 @@ pub fn app() -> b::AppDef {{
                 let pushed = destination
                     .map(|destination| column(&destination.children))
                     .unwrap_or_else(|| "Vec::new()".into());
+                let nav_id = element
+                    .id
+                    .as_deref()
+                    .map(|name| format!("Some({})", string(name)))
+                    .unwrap_or_else(|| "None".into());
                 let body = format!(
-                    "{{ let c = &c.in_navigation({field}); let path = rt::as_list(c.session({session}, {})); match path.last().cloned() {{ Some(route) => {{ let c = &c.with_local({}, route); b::navigation(c, {field}, path.len(), None, {pushed}) }} None => b::navigation(c, {field}, 0, None, {}) }} }}",
+                    "{{ let c = &c.in_navigation({field}); let path = rt::as_list(c.session({session}, {})); match path.last().cloned() {{ Some(route) => {{ let c = &c.with_local({}, route); b::navigation(c, {nav_id}, {field}, path.len(), None, {pushed}) }} None => b::navigation(c, {nav_id}, {field}, 0, None, {}) }} }}",
                     path.field,
                     string(&var),
                     column(&root)
@@ -4236,23 +4697,12 @@ pub fn app() -> b::AppDef {{
                     })
                     .cloned()
                     .collect();
-                // The title of the detail: the chosen item's label.
-                let mut labels = Vec::new();
-                sidebar.children.iter().for_each(|node| {
-                    node.walk(&mut |node| {
-                        if let Node::Element(item) = node
-                            && item.kind == "SidebarItem"
-                            && let (Some(value), Some(label)) =
-                                (item.expr("value"), item.text("label"))
-                        {
-                            labels.push(format!(
-                                "({}, {})",
-                                self.expr(value, Some(&item.source)),
-                                self.text(label, Some(&item.source))
-                            ));
-                        }
-                    })
-                });
+                // Mounted sidebar items through control flow, for title lookup and fallback.
+                let mounted_items = self.sidebar_items_expr(&items);
+                let fallback = match sidebar.expr("fallback") {
+                    Some(fb) => format!("Some({})", self.expr(fb, Some(&sidebar.source))),
+                    None => "None".into(),
+                };
                 let title = if detail
                     .prop("titled")
                     .and_then(|_| detail.expr("titled"))
@@ -4266,11 +4716,7 @@ pub fn app() -> b::AppDef {{
                     }) {
                     "None".to_string()
                 } else {
-                    format!(
-                        "b::sidebar_title(&c.session({session}, {}), vec![{}])",
-                        selection.field,
-                        labels.join(", ")
-                    )
+                    "b::sidebar_title(&selected, mounted_items)".to_string()
                 };
                 let collapsed = match sidebar.field("collapsed") {
                     Some(field) => format!(
@@ -4298,16 +4744,23 @@ pub fn app() -> b::AppDef {{
                     })
                     .cloned()
                     .collect();
+                let detail_view = self.wrap_inspector(
+                    &detail.children,
+                    format!(
+                        "b::detail(c, {title}, {collapsed}, {}, {}, {})",
+                        column(&detail_content),
+                        column(&detail_footer),
+                        self.surface_style("Detail", detail),
+                    ),
+                );
                 format!(
-                    "b::split_view(c, {collapsed}, {{ let c = &c.in_sidebar({selection_ref}); b::sidebar(c, {}, {}, {}, {}, {}) }}, b::detail(c, {title}, {collapsed}, {}, {}, {}))",
+                    "{{ let mounted_items = {mounted_items}; let selected = b::sidebar_selection(c, &mounted_items, c.session({session}, {}), {fallback}, {selection_ref}); b::split_view(c, {collapsed}, {{ let c = &c.in_sidebar({selection_ref}); b::sidebar(c, {}, {}, {}, {}, {}) }}, {detail_view}) }}",
+                    selection.field,
                     self.optional_length(sidebar, "width"),
                     column(&part("SidebarHeader")),
                     column(&items),
                     column(&part("SidebarFooter")),
                     self.surface_style("Sidebar", sidebar),
-                    column(&detail_content),
-                    column(&detail_footer),
-                    self.surface_style("Detail", detail),
                 )
             }
             "SidebarItem" => format!(
@@ -4325,18 +4778,24 @@ pub fn app() -> b::AppDef {{
                 self.control_style(element),
             ),
             "Canvas" => format!(
-                "b::canvas(c, {}, {}, vec![{}])",
+                "b::canvas(c, {}, {}, {})",
                 self.length(element, "width"),
                 self.length(element, "height"),
-                self.canvas_ops(element).join(", ")
+                self.canvas_ops_expr(element)
             ),
             "Drop" => {
                 let Some(field) = element.field("value") else {
                     self.unsupported("a `Drop` without a draft".into(), at);
                     return None;
                 };
+                let label = element
+                    .text("label")
+                    .map(|text| self.text(text, at))
+                    .unwrap_or_else(|| "String::new()".into());
+                let files = string(element.keyword("files").unwrap_or("any"));
+                let opens = element.keyword("opens") == Some("true");
                 format!(
-                    "b::drop_area(c, {}, {}, {}, {}, {})",
+                    "b::drop_area(c, {}, {label}, {files}, {opens}, {}, {}, {}, {})",
                     id(),
                     field_ref(self.session_index(&field.session), field.field),
                     match element.field("over") {
@@ -4383,6 +4842,124 @@ pub fn app() -> b::AppDef {{
             }
             _ => return None,
         })
+    }
+
+    /// Collect the `(value, label)` pairs of currently mounted `SidebarItem`s
+    /// through control flow and grouping containers (`Section`, `Column`, etc.).
+    fn sidebar_items_expr(&self, nodes: &[Node]) -> String {
+        fn collect(g: &Generator<'_>, out: &mut String, node: &Node) {
+            match node {
+                Node::Element(element) if element.kind == "SidebarItem" => {
+                    if let (Some(value), Some(label)) =
+                        (element.expr("value"), element.text("label"))
+                    {
+                        out.push_str(&format!(
+                            "v.push(({}, {})); ",
+                            g.expr(value, Some(&element.source)),
+                            g.text(label, Some(&element.source))
+                        ));
+                    }
+                }
+                Node::Element(element) if element.kind == "ForEach" => {
+                    if let (Some(items), Some(template), Some(Prop::Key { field, .. })) = (
+                        element.expr("items"),
+                        &element.template,
+                        element.prop("key"),
+                    ) {
+                        out.push_str(&format!(
+                            "for item in rt::as_list({}) {{ let key = rt::key_text(&rt::at(item.clone(), &[{field}])); let c = &c.with_local({}, item).with_key(key); ",
+                            g.expr(items, Some(&element.source)),
+                            string(&template.var)
+                        ));
+                        for child in &element.children {
+                            collect(g, out, child);
+                        }
+                        out.push_str("} ");
+                    }
+                }
+                Node::Element(element)
+                    if !matches!(element.kind.as_str(), "SidebarHeader" | "SidebarFooter") =>
+                {
+                    for child in &element.children {
+                        collect(g, out, child);
+                    }
+                }
+                Node::If(node) => {
+                    for (index, (condition, body)) in node.branches.iter().enumerate() {
+                        if index > 0 {
+                            out.push_str("else ");
+                        }
+                        out.push_str(&format!("if {} {{ ", g.condition(condition)));
+                        for child in body {
+                            collect(g, out, child);
+                        }
+                        out.push_str("} ");
+                    }
+                    if !node.otherwise.is_empty() {
+                        out.push_str("else { ");
+                        for child in &node.otherwise {
+                            collect(g, out, child);
+                        }
+                        out.push_str("} ");
+                    }
+                }
+                Node::IfLet(node) => {
+                    out.push_str(&format!(
+                        "if let Some(x) = rt::some({}) {{ let c = &c.with_local({}, x); ",
+                        g.expr(&node.value, None),
+                        string(&node.var)
+                    ));
+                    for child in &node.then {
+                        collect(g, out, child);
+                    }
+                    out.push_str("} ");
+                    if !node.otherwise.is_empty() {
+                        out.push_str("else { ");
+                        for child in &node.otherwise {
+                            collect(g, out, child);
+                        }
+                        out.push_str("} ");
+                    }
+                }
+                Node::Match(node) => {
+                    out.push_str(&format!(
+                        "{{ let m = {}; match rt::tag(&m) {{ ",
+                        g.expr(&node.value, None)
+                    ));
+                    let mut wildcard = false;
+                    for arm in &node.arms {
+                        match arm.variant {
+                            Some(variant) => out.push_str(&format!("Some({variant}) => {{ ")),
+                            None => {
+                                wildcard = true;
+                                out.push_str("_ => { ");
+                            }
+                        }
+                        for binding in &arm.bindings {
+                            out.push_str(&format!(
+                                "let c = &c.with_local({}, rt::payload(m.clone(), {})); ",
+                                string(&binding.name),
+                                binding.field
+                            ));
+                        }
+                        for child in &arm.body {
+                            collect(g, out, child);
+                        }
+                        out.push_str("} ");
+                    }
+                    if !wildcard {
+                        out.push_str("_ => {} ");
+                    }
+                    out.push_str("} } ");
+                }
+                _ => {}
+            }
+        }
+        let mut body = String::new();
+        for node in nodes {
+            collect(self, &mut body, node);
+        }
+        format!("{{ let mut v: Vec<(V, String)> = Vec::new(); {body} v }}")
     }
 
     /// The text a row shows first, the accessible name of a link.
@@ -4517,18 +5094,13 @@ pub fn app() -> b::AppDef {{
         }
     }
 
-    /// The drawing elements of a `Canvas`, in order.
-    fn canvas_ops(&self, element: &Element) -> Vec<String> {
+    /// The drawing elements of a `Canvas`, through any control flow (`if`, `if let`, `match`, `ForEach`).
+    fn canvas_ops_expr(&self, element: &Element) -> String {
         let role = |child: &Element, name: &str| match child.keyword(name) {
             Some(role) => format!("Some(b::Color::Role({}))", string(role)),
             None => "None".into(),
         };
-        let mut ops = Vec::new();
-        for node in &element.children {
-            let Node::Element(child) = node else {
-                self.unsupported("control flow in a `Canvas`".into(), Some(&element.source));
-                continue;
-            };
+        self.entries(&element.children, "b::Op", &|out, child| {
             for name in child.props.keys() {
                 let known = COMPONENTS
                     .iter()
@@ -4574,8 +5146,8 @@ pub fn app() -> b::AppDef {{
                         ),
                         None => "None".into(),
                     };
-                    ops.push(format!(
-                        "b::Op::Shape(b::ShapeOp {{ kind: b::ShapeKind::{kind}, x: {}, y: {}, width: {}, height: {}, corner: {}, fill: {}, picture: {}, fade: {fade}, stroke: {}, dash: {dash}, opacity: {} }})",
+                    out.push_str(&format!(
+                        "v.push(b::Op::Shape(b::ShapeOp {{ kind: b::ShapeKind::{kind}, x: {}, y: {}, width: {}, height: {}, corner: {}, fill: {}, picture: {}, fade: {fade}, stroke: {}, dash: {dash}, opacity: {} }})); ",
                         number("x", 0.0),
                         number("y", 0.0),
                         optional("width"),
@@ -4607,8 +5179,8 @@ pub fn app() -> b::AppDef {{
                         (None, Some(max)) => format!("Some({max:?})"),
                         (None, None) => "None".into(),
                     };
-                    ops.push(format!(
-                        "b::Op::Series(b::SeriesOp {{ values: {values}, area: {}, max: {max}, fill: {}, stroke: {}, opacity: {} }})",
+                    out.push_str(&format!(
+                        "v.push(b::Op::Series(b::SeriesOp {{ values: {values}, area: {}, max: {max}, fill: {}, stroke: {}, opacity: {} }})); ",
                         child.keyword("kind") == Some("area"),
                         role(child, "fill"),
                         stroke(child),
@@ -4620,7 +5192,7 @@ pub fn app() -> b::AppDef {{
                         .keyword("name")
                         .and_then(|name| self.app.style.pattern(name))
                     else {
-                        continue;
+                        return;
                     };
                     let bands: Vec<String> = pattern
                         .bands
@@ -4637,8 +5209,8 @@ pub fn app() -> b::AppDef {{
                             )
                         })
                         .collect();
-                    ops.push(format!(
-                        "b::Op::Pattern(b::PatternOp {{ bands: &[{}], twill: {}, opacity: {} }})",
+                    out.push_str(&format!(
+                        "v.push(b::Op::Pattern(b::PatternOp {{ bands: &[{}], twill: {}, opacity: {} }})); ",
                         bands.join(", "),
                         pattern.twill,
                         number("opacity", 1.0),
@@ -4646,8 +5218,7 @@ pub fn app() -> b::AppDef {{
                 }
                 _ => {}
             }
-        }
-        ops
+        })
     }
 
     /// `code`, the expression of `element`, with the pointer events it
@@ -4697,7 +5268,7 @@ pub fn app() -> b::AppDef {{
                         None => "None".into(),
                     };
                     out.push_str(&format!(
-                        "v.push(b::menu_item(c, {}, {}, {}, {}, {checked}, {}, {}, {}, {})); ",
+                        "v.push(b::menu_item(c, {}, {}, {}, {}, {checked}, {}, {}, {}, {}, {})); ",
                         string(child.id.as_deref().unwrap_or(&child.path)),
                         child
                             .text("label")
@@ -4707,6 +5278,7 @@ pub fn app() -> b::AppDef {{
                         child.keyword("role") == Some("destructive"),
                         self.enabled(child),
                         self.pick(child),
+                        self.paste_field(child),
                         self.shortcut(child),
                         self.action(child)
                     ));

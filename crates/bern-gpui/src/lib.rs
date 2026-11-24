@@ -21,15 +21,19 @@ mod content;
 mod controls;
 mod ctx;
 mod extra;
+mod files;
 mod filters;
 mod form;
 mod gestures;
 mod host;
 mod icons;
 mod layout;
+mod login_item;
 mod look;
 mod markdown;
+mod marquee;
 mod media;
+mod media_executor;
 mod menus;
 mod motion;
 mod native;
@@ -44,16 +48,25 @@ mod search;
 mod session;
 mod skeleton;
 mod spin;
+mod status;
 mod svg;
+mod table;
 pub use bar::{BarEntry, BarMenu, bar_item, bar_menu, bar_submenu};
+pub use login_item::login_model;
+pub use marquee::{MarqueeProps, marquee};
 pub use spin::Spin;
+pub use status::{StatusItemDef, StatusMenu};
 pub use svg::{SvgProps, svg};
+pub use table::{TableColumnDef, TableProps, TableRowData, table};
 pub mod text;
 mod theme;
+mod trace;
 mod units;
 pub mod value;
+mod webpage;
 mod windows;
 pub use gestures::{SwipeProps, swipe};
+pub use webpage::{WebPageProps, web_page};
 
 pub use behaviors::{
     ColorPickerProps, ShortcutInputProps, ShortcutProps, SliderProps, color_picker,
@@ -71,7 +84,7 @@ pub use content::{
 pub use controls::{
     ButtonProps, FilePrompt, IconButtonProps, InputKind, InputProps, PickerStyle, Prominence, Role,
     SwitchProps, SwitchStyle, button, button_with, drop_area, icon_button, language_picker, picker,
-    switch, text_input,
+    switch, text_input, text_input_controlled,
 };
 pub use ctx::{
     Act, Ctx, Field, Model, act, session_pop, session_push_str, session_set, session_toggle,
@@ -85,11 +98,12 @@ pub use extra::{
 pub use filters::{blur_scope, glow};
 pub use form::{FormProps, SectionProps, form, section};
 pub use gpui;
-pub use host::{WindowOp, dispatch, window_command};
+pub use host::{Done, WindowOp, dispatch, dispatch_with, window_command};
 pub use layout::{
     AccordionProps, Align, Flex, GridProps, Grow, Layers, Len, Pad, PreviewProps, Size, Style,
-    accordion, adaptive, column, cover, divider, flow, grid, idle_area, lazy_grid, native_host,
-    preview_list, reveal, row, scroll, spacer, stack, tab_selection, tabs,
+    accordion, adaptive, column, cover, divider, flow, grid, idle_area, inspector, lazy_grid, list,
+    native_host, preview_list, reveal, row, scroll, spacer, stack, tab_selection, tabs,
+    window_buttons,
 };
 pub use look::{ControlSize, ControlStyle, Look, Shape};
 pub use media::{MediaOp, VideoProps, media, video};
@@ -99,8 +113,8 @@ pub use motion::{
     left_row, moving, reflow_origin, reflowed, rows, staggered,
 };
 pub use navigation::{
-    detail, nav_link, navigation, navigation_reset, sidebar, sidebar_item, sidebar_title,
-    split_view,
+    detail, nav_link, navigation, navigation_reset, sidebar, sidebar_item, sidebar_selection,
+    sidebar_title, split_view,
 };
 pub use overlay::{ModalProps, PopoverProps, SplitProps, modal, popover_button, split_button};
 pub use pointer::{PointerEvents, pointer_events};
@@ -190,6 +204,8 @@ pub struct AppDef {
     /// The accent chosen at run time: its seed in the light and dark
     /// appearance.
     pub accent: Option<Accent>,
+    /// The runtime palette JSON chosen at run time (`WindowSet(palette:)`).
+    pub palette: Option<fn(&Ctx) -> String>,
     /// The appearance chosen at run time.
     pub appearance: Option<fn(&Ctx) -> Appearance>,
     /// The picture of `[app.icon]` among the resources, when it can be
@@ -201,11 +217,28 @@ pub struct AppDef {
     /// The application's menus in the menu bar (`MenuBar`), built with the
     /// primary window's context.
     pub menu_bar: Option<fn(&Ctx) -> Vec<BarMenu>>,
+    /// The application's system tray / menu bar status item (`StatusItem`).
+    pub status_item: Option<StatusItemDef>,
     /// The icons the application shows, as SVG documents by name.
     pub icons: &'static [(&'static str, &'static str)],
     /// Text styles with weights (and desktop sizes) of their own, from
     /// `text { … }` in `style!`.
     pub text_weights: &'static [(&'static str, u16, Option<f32>)],
+    /// Declared file kinds and their accepted extensions for `ui.set_file`
+    /// and open panels.
+    pub file_kinds: &'static [(&'static str, &'static [&'static str])],
+    /// File kinds the engine itself handles via `[[app.opens]]`.
+    pub opens: &'static str,
+}
+
+/// Callback invoked when the user chooses Save in a window close confirmation.
+pub type SaveHandler = std::rc::Rc<dyn Fn(&Ctx, Done)>;
+
+/// Outcome of a window's declared close check (`Window(confirm_close:, close_message:)`).
+pub struct CloseCheck {
+    pub needs_confirmation: bool,
+    pub message: String,
+    pub save: Option<SaveHandler>,
 }
 
 /// A window kind of the `WindowSet`.
@@ -215,8 +248,12 @@ pub struct WindowDef {
     pub title: &'static str,
     /// Opened when the application starts.
     pub open: bool,
+    /// Application settings window (`role: settings`).
+    pub settings: bool,
     /// Compact floating utility window (`role: utility`).
     pub utility: bool,
+    /// Modal dialog window (`role: dialog`).
+    pub dialog: bool,
     /// Name of a `bern::overlay` this utility window anchors beside.
     pub overlay: Option<&'static str>,
     pub width: Option<f64>,
@@ -232,6 +269,8 @@ pub struct WindowDef {
     pub immersive: Option<fn(&Ctx) -> bool>,
     /// While false, the window is never idle (`idle_enabled`).
     pub idle_enabled: Option<fn(&Ctx) -> bool>,
+    /// Declared close check, run when closing is requested.
+    pub close: Option<fn(&Ctx) -> CloseCheck>,
     /// Engine state fields read by this window and its components.
     pub engine_fields: &'static [usize],
     /// The window's content, built again on every render.

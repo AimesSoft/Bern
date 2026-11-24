@@ -15,15 +15,20 @@ use futures::StreamExt;
 use futures::channel::mpsc::{UnboundedSender, unbounded};
 use gpui::{App, KeyBinding, Menu, MenuItem, actions};
 use std::cell::{Cell, OnceCell, RefCell};
+use std::collections::HashMap;
 use std::ffi::c_void;
 use std::rc::Rc;
 use std::sync::{Mutex, OnceLock};
+
+/// Completion callback for an asynchronous engine command (`dispatch_with`).
+pub type Done = Box<dyn FnOnce(Result<(), Failure>)>;
 
 actions!(
     bern,
     [
         Quit,
         About,
+        OpenSettings,
         Hide,
         HideOthers,
         ShowAll,
@@ -43,12 +48,24 @@ enum Event {
     Query(u64, Vec<u8>),
     /// The media hub's state: every player.
     Media(Vec<u8>),
+    /// A media request routed to the built-in system media executor.
+    MediaRequest(Vec<u8>),
     /// Interface state changed: every window renders again.
     Redraw,
     /// The network changed: what it refused may come now.
     PicturesChanged,
     /// A window command of an action.
     Window(WindowOp, &'static str),
+    /// Force-close a window instance after an async save completed.
+    ForceClose(String),
+    /// Files or URLs handed to the application by the system ("Open With").
+    OpenUrls(Vec<String>),
+    /// Invoke a menu entry from the native `StatusItem`.
+    StatusAction(usize),
+    /// Reopen and activate the primary window from the native `StatusItem`.
+    StatusReopen,
+    /// Close callback triggered by `WebPage(close_on:)` click interception.
+    WebClose(String),
 }
 
 /// A window command an action runs.
@@ -63,6 +80,10 @@ pub enum WindowOp {
 /// Run a window command once the current event is handled.
 pub fn window_command(_c: &Ctx, op: WindowOp, window: &'static str) {
     send(Event::Window(op, window));
+}
+
+pub(crate) fn window_command_close_id(window_id: String) {
+    send(Event::ForceClose(window_id));
 }
 
 static EVENTS: OnceLock<Mutex<UnboundedSender<Event>>> = OnceLock::new();
@@ -85,12 +106,29 @@ pub(crate) fn pictures_changed() {
     send(Event::PicturesChanged);
 }
 
+/// Queue a `StatusItem` menu action to run on GPUI's main thread.
+pub(crate) fn send_status_action(id: usize) {
+    send(Event::StatusAction(id));
+}
+
+/// Queue reopening the primary window from the native `StatusItem`.
+#[allow(dead_code)]
+pub(crate) fn send_status_reopen() {
+    send(Event::StatusReopen);
+}
+
+/// Queue firing the `WebPage(close_on:)` action on GPUI's main thread.
+pub(crate) fn send_web_close(key: String) {
+    send(Event::WebClose(key));
+}
+
 pub(crate) struct Host {
     app: Cell<*mut BernApp>,
     pub(crate) def: &'static AppDef,
     engine: RefCell<Vec<Value>>,
     revision: Cell<u64>,
     next: Cell<u64>,
+    pending: RefCell<HashMap<u64, Done>>,
 }
 
 thread_local! {
@@ -161,9 +199,10 @@ extern "C" fn on_session_request(_: *mut c_void, request: u64, bytes: *const u8,
     send(Event::SessionRequest(request, copy(bytes, len)));
 }
 
-// The application's media kernel runs the players: the frontend executes
-// no media requests itself.
-extern "C" fn on_media_request(_: *mut c_void, _: *const u8, _: usize) {}
+// Routed to the built-in system media executor when no application media kernel attached.
+extern "C" fn on_media_request(_: *mut c_void, bytes: *const u8, len: usize) {
+    send(Event::MediaRequest(copy(bytes, len)));
+}
 extern "C" fn on_media_state(_: *mut c_void, bytes: *const u8, len: usize) {
     send(Event::Media(copy(bytes, len)));
 }
@@ -177,6 +216,7 @@ impl Host {
     }
 
     fn receive_state(&self, bytes: &[u8]) -> Vec<usize> {
+        let t0 = crate::trace::enabled().then(crate::trace::now);
         let mut reader = Reader::new(bytes);
         let (Ok(revision), Ok(count)) = (reader.u64(), reader.u32()) else {
             return Vec::new();
@@ -209,14 +249,27 @@ impl Host {
             engine[field] = value;
             touched.push(field);
         }
+        if let Some(t0) = t0 {
+            crate::trace::receive_state(revision, bytes.len(), t0, crate::trace::now());
+        }
         touched
     }
 
-    fn receive_reply(&self, _token: u64, bytes: &[u8]) {
+    fn receive_reply(&self, token: u64, bytes: &[u8]) {
+        let t0 = crate::trace::enabled().then(crate::trace::now);
         let mut reader = Reader::new(bytes);
-        if let (Ok(1), Ok(_)) = (reader.u8(), reader.u64()) {
-            let failure = read_failure(&mut reader);
+        let outcome = match (reader.u8(), reader.u64()) {
+            (Ok(0), Ok(_)) => Ok(()),
+            (Ok(1), Ok(_)) => Err(read_failure(&mut reader)),
+            _ => Ok(()),
+        };
+        if let Some(done) = self.pending.borrow_mut().remove(&token) {
+            done(outcome);
+        } else if let Err(failure) = outcome {
             eprintln!("bern: {}: {}", failure.code, failure.message);
+        }
+        if let Some(t0) = t0 {
+            crate::trace::receive_reply(token, t0, crate::trace::now());
         }
     }
 
@@ -229,9 +282,18 @@ impl Host {
 
 /// Dispatch engine command `command` with its arguments; a failure is
 /// reported on standard error.
-pub fn dispatch(_ctx: &Ctx, command: usize, args: Vec<Value>) {
+pub fn dispatch(ctx: &Ctx, command: usize, args: Vec<Value>) {
+    dispatch_with(ctx, command, args, None);
+}
+
+/// Dispatch engine command `command` with an optional completion callback.
+pub fn dispatch_with(_ctx: &Ctx, command: usize, args: Vec<Value>, done: Option<Done>) {
+    let t0 = crate::trace::enabled().then(crate::trace::now);
     let host = host();
     let Some(spec) = host.def.descriptor.commands.get(command) else {
+        if let Some(done) = done {
+            done(Err(Failure::new("unknown_command", "unknown command")));
+        }
         return;
     };
     let mut writer = Writer::new();
@@ -239,6 +301,9 @@ pub fn dispatch(_ctx: &Ctx, command: usize, args: Vec<Value>) {
         encode(value, &param.ty, &host.def.descriptor.types, &mut writer);
     }
     let token = host.token();
+    if let Some(done) = done {
+        host.pending.borrow_mut().insert(token, done);
+    }
     // SAFETY: the handle is live while the application runs; the parameter
     // bytes are valid for this call.
     unsafe {
@@ -249,6 +314,9 @@ pub fn dispatch(_ctx: &Ctx, command: usize, args: Vec<Value>) {
             writer.bytes.len(),
             token,
         )
+    }
+    if let Some(t0) = t0 {
+        crate::trace::dispatch(token, command, t0, crate::trace::now());
     }
 }
 
@@ -321,6 +389,7 @@ fn install(def: &'static AppDef) -> Rc<Host> {
         engine: RefCell::new(engine),
         revision: Cell::new(0),
         next: Cell::new(1),
+        pending: RefCell::new(HashMap::new()),
     });
     HOST.with(|cell| {
         let _ = cell.set(Rc::clone(&shared));
@@ -332,12 +401,24 @@ fn install(def: &'static AppDef) -> Rc<Host> {
 /// shortcuts; elsewhere the application menu with Quit.
 fn install_menus(def: &'static AppDef, cx: &mut App) {
     cx.on_action(|_: &Quit, cx| cx.quit());
+    let settings_window = def.windows.iter().find(|w| w.settings);
+    if settings_window.is_some() {
+        cx.on_action(|_: &OpenSettings, cx| windows::open_settings(cx));
+    }
     if !cfg!(target_os = "macos") {
         let name = text::tr(def.name);
-        cx.bind_keys([KeyBinding::new("ctrl-q", Quit, None)]);
+        let mut bindings = vec![KeyBinding::new("ctrl-q", Quit, None)];
+        let mut items = Vec::new();
+        if let Some(settings) = settings_window {
+            bindings.push(KeyBinding::new("ctrl-,", OpenSettings, None));
+            items.push(MenuItem::action(text::tr(settings.title), OpenSettings));
+            items.push(MenuItem::separator());
+        }
+        items.push(MenuItem::action(text::tr("bern.app.quit"), Quit));
+        cx.bind_keys(bindings);
         cx.set_menus(vec![Menu {
             name: name.clone().into(),
-            items: vec![MenuItem::action(text::tr("bern.app.quit"), Quit)],
+            items,
             disabled: false,
         }]);
         return;
@@ -358,13 +439,17 @@ fn install_menus(def: &'static AppDef, cx: &mut App) {
         crate::native::window_command(crate::native::WindowCommand::BringAllToFront)
     });
     crate::bar::install(cx);
-    cx.bind_keys([
+    let mut bindings = vec![
         KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("cmd-h", Hide, None),
         KeyBinding::new("alt-cmd-h", HideOthers, None),
         KeyBinding::new("cmd-w", CloseWindow, None),
         KeyBinding::new("cmd-m", Minimize, None),
-    ]);
+    ];
+    if settings_window.is_some() {
+        bindings.push(KeyBinding::new("cmd-,", OpenSettings, None));
+    }
+    cx.bind_keys(bindings);
     set_menus(def, cx);
 }
 
@@ -406,6 +491,10 @@ pub(crate) fn set_menus(def: &AppDef, cx: &mut App) {
         (about, false) => about,
     };
     app.push(MenuItem::separator());
+    if let Some(settings) = def.windows.iter().find(|w| w.settings) {
+        app.push(MenuItem::action(text::tr(settings.title), OpenSettings));
+        app.push(MenuItem::separator());
+    }
     if let (items, false) = group("app") {
         app.extend(items);
         app.push(MenuItem::separator());
@@ -512,82 +601,222 @@ fn platform() -> Rc<dyn gpui::Platform> {
     }
 }
 
+type OpenerEntry = (String, &'static str, Rc<dyn Fn(String)>);
+
+thread_local! {
+    /// Active `Drop(opens: true)` receivers, keyed by window id.
+    static OPENERS: RefCell<Vec<OpenerEntry>> = const { RefCell::new(Vec::new()) };
+    /// Files handed to the application before a matching `Drop(opens: true)` mounted.
+    static WAITING_URLS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+pub(crate) fn begin_openers(window_id: &str) {
+    OPENERS.with(|openers| openers.borrow_mut().retain(|(w, _, _)| w != window_id));
+}
+
+pub(crate) fn register_opener(window_id: &str, kinds: &'static str, deliver: Rc<dyn Fn(String)>) {
+    OPENERS.with(|openers| {
+        openers
+            .borrow_mut()
+            .push((window_id.to_string(), kinds, deliver));
+    });
+}
+
+type OpenUrlHandler = Rc<dyn Fn(String)>;
+
+pub(crate) fn end_openers() {
+    let pending: Vec<(String, OpenUrlHandler)> = WAITING_URLS.with(|waiting| {
+        let mut waiting = waiting.borrow_mut();
+        if waiting.is_empty() {
+            return Vec::new();
+        }
+        let mut matched = Vec::new();
+        let mut kept = Vec::new();
+        for url in waiting.drain(..) {
+            let taker = OPENERS.with(|openers| {
+                openers
+                    .borrow()
+                    .iter()
+                    .rev()
+                    .find(|(_, kinds, _)| crate::files::accepts(&url, kinds))
+                    .map(|(_, _, deliver)| Rc::clone(deliver))
+            });
+            match taker {
+                Some(deliver) => matched.push((url, deliver)),
+                None => kept.push(url),
+            }
+        }
+        *waiting = kept;
+        matched
+    });
+    for (url, deliver) in pending {
+        deliver(url);
+    }
+}
+
+fn normalize_open_url(raw: &str) -> String {
+    if raw.contains("://") {
+        return raw.to_string();
+    }
+    let path = std::path::Path::new(raw);
+    let abs = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    crate::files::path_to_file_url(&abs)
+}
+
+fn open_urls(urls: Vec<String>, cx: &mut App) {
+    if urls.is_empty() {
+        return;
+    }
+    windows::reopen_primary(cx);
+    let opens = host().def.opens;
+    for raw in urls {
+        let url = normalize_open_url(&raw);
+        let taker = OPENERS.with(|openers| {
+            openers
+                .borrow()
+                .iter()
+                .rev()
+                .find(|(_, kinds, _)| crate::files::accepts(&url, kinds))
+                .map(|(_, _, deliver)| Rc::clone(deliver))
+        });
+        match taker {
+            Some(deliver) => deliver(url),
+            None if !opens.is_empty() && crate::files::accepts(&url, opens) => {
+                bern_ffi::files::opened(&url);
+            }
+            None => {
+                WAITING_URLS.with(|waiting| waiting.borrow_mut().push(url));
+            }
+        }
+    }
+}
+
 pub(crate) fn run(def: &'static AppDef, start: StartEngine) {
     let shared = install(def);
     let (sender, mut events) = unbounded();
     let _ = EVENTS.set(Mutex::new(sender));
     let start = RefCell::new(Some(start));
-    gpui::Application::with_platform(platform())
+    let app = gpui::Application::with_platform(platform())
         .with_assets(crate::icons::Assets(def.icons))
-        .with_http_client(std::sync::Arc::new(crate::pictures::Patient))
-        .run(move |cx: &mut App| {
-            gpui_base::init(cx);
-            install_menus(def, cx);
-            crate::native::show_icon(def.app_icon);
-            // Buttons' shortcuts, wherever the keyboard is.
-            cx.observe_keystrokes(|event, _, cx| {
-                crate::controls::keystroke_pressed(&event.keystroke, cx);
-            })
-            .detach();
-            let Some(start) = start.borrow_mut().take() else {
-                return;
-            };
-            if let Err(message) = start_engine(&shared, start) {
-                eprintln!("bern: {message}");
-                cx.quit();
-                return;
-            }
-            cx.spawn(async move |cx| {
-                while let Some(event) = events.next().await {
-                    cx.update(|cx| match event {
-                        Event::State(bytes) => {
-                            let touched = host().receive_state(&bytes);
-                            windows::changed_fields(cx, &touched);
-                        }
-                        Event::Reply(token, bytes) => host().receive_reply(token, &bytes),
-                        Event::SessionRequest(request, bytes) => {
-                            crate::session::handle(request, &bytes, cx)
-                        }
-                        Event::Query(subscription, bytes) => {
-                            if crate::query::receive(subscription, &bytes) {
-                                windows::changed(cx);
-                            }
-                        }
-                        Event::Media(bytes) => {
-                            if crate::media::receive_state(&bytes) {
-                                windows::changed(cx);
-                            }
-                        }
-                        Event::Redraw => windows::changed(cx),
-                        Event::PicturesChanged => {
-                            crate::pictures::forget_refused(cx);
+        .with_http_client(std::sync::Arc::new(crate::pictures::Patient));
+    app.on_open_urls(|urls| send(Event::OpenUrls(urls)));
+    app.run(move |cx: &mut App| {
+        gpui_base::init(cx);
+        install_menus(def, cx);
+        crate::native::show_icon(def.app_icon);
+        // Buttons' shortcuts, wherever the keyboard is.
+        cx.observe_keystrokes(|event, _, cx| {
+            crate::controls::keystroke_pressed(&event.keystroke, cx);
+        })
+        .detach();
+        let Some(start) = start.borrow_mut().take() else {
+            return;
+        };
+        if let Err(message) = start_engine(&shared, start) {
+            eprintln!("bern: {message}");
+            cx.quit();
+            return;
+        }
+        cx.spawn(async move |cx| {
+            while let Some(event) = events.next().await {
+                cx.update(|cx| match event {
+                    Event::State(bytes) => {
+                        let touched = host().receive_state(&bytes);
+                        windows::changed_fields(cx, &touched);
+                        crate::status::sync(cx);
+                    }
+                    Event::Reply(token, bytes) => host().receive_reply(token, &bytes),
+                    Event::SessionRequest(request, bytes) => {
+                        crate::session::handle(request, &bytes, cx)
+                    }
+                    Event::Query(subscription, bytes) => {
+                        let t0 = crate::trace::enabled().then(crate::trace::now);
+                        if crate::query::receive(subscription, &bytes) {
                             windows::changed(cx);
                         }
-                        Event::Window(op, window) => windows::command(cx, op, window),
-                    });
+                        if let Some(t0) = t0 {
+                            crate::trace::receive_query(subscription, t0, crate::trace::now());
+                        }
+                    }
+                    Event::Media(bytes) => {
+                        if crate::media::receive_state(&bytes) {
+                            windows::changed(cx);
+                        }
+                    }
+                    Event::MediaRequest(bytes) => crate::media_executor::perform(&bytes),
+                    Event::Redraw => {
+                        windows::changed(cx);
+                        crate::status::sync(cx);
+                    }
+                    Event::PicturesChanged => {
+                        crate::pictures::forget_refused(cx);
+                        windows::changed(cx);
+                    }
+                    Event::Window(op, window) => windows::command(cx, op, window),
+                    Event::ForceClose(id) => windows::force_close_id(&id, cx),
+                    Event::OpenUrls(urls) => open_urls(urls, cx),
+                    Event::StatusAction(id) => crate::status::invoke_action(id, cx),
+                    Event::StatusReopen => {
+                        cx.activate(true);
+                        windows::reopen_primary(cx);
+                    }
+                    Event::WebClose(key) => crate::webpage::fire_close(&key),
+                });
+            }
+        })
+        .detach();
+        // The application ends with its last window unless a visible `StatusItem`
+        // keeps it running in the status area.
+        cx.on_window_closed(|cx, _| {
+            if cx.windows().is_empty() && !crate::status::keeps_running() {
+                cx.quit();
+            }
+        })
+        .detach();
+        cx.on_app_quit(|_| {
+            crate::status::remove();
+            stop_engine();
+            async {}
+        })
+        .detach();
+        crate::status::init(def, cx);
+        if crate::media_executor::active() {
+            cx.spawn(async move |cx| {
+                loop {
+                    let active = cx.update(|_| crate::media_executor::poll());
+                    let delay = if active {
+                        if cfg!(target_os = "macos") {
+                            std::time::Duration::from_millis(100)
+                        } else {
+                            std::time::Duration::from_millis(16)
+                        }
+                    } else {
+                        std::time::Duration::from_millis(200)
+                    };
+                    futures_timer::Delay::new(delay).await;
                 }
             })
             .detach();
-            // The application ends with its last window, and the engine stops
-            // before the process exits.
-            cx.on_window_closed(|cx, _| {
-                if cx.windows().is_empty() {
-                    cx.quit();
-                }
-            })
-            .detach();
-            cx.on_app_quit(|_| {
-                stop_engine();
-                async {}
-            })
-            .detach();
+        }
+        let at_login =
+            def.status_item.is_some() && std::env::args().skip(1).any(|arg| arg == "--at-login");
+        if !at_login {
             windows::open_initial(cx);
-        });
+        }
+        let cli_urls: Vec<String> = std::env::args()
+            .skip(1)
+            .filter(|arg| !arg.starts_with('-'))
+            .collect();
+        if !cli_urls.is_empty() {
+            send(Event::OpenUrls(cli_urls));
+        }
+    });
     stop_engine();
 }
 
 /// Stop the engine once, whichever way the application ends.
 fn stop_engine() {
+    crate::media_executor::detach();
     let host = host();
     let app = host.app.replace(std::ptr::null_mut());
     if !app.is_null() {

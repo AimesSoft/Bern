@@ -18,8 +18,8 @@ use bern_ir::style::StyleState;
 use bern_ir::{Application, IR_VERSION};
 use bern_target_api::{
     BuildContext, BuildPlan, BuildStep, ColorSource, Diagnostic, GeneratedFile, MediaSupport, Run,
-    StyleSupport, Target, TargetConfig, TargetDescriptor, WindowCapabilities, check_common,
-    feature, skill,
+    Signing, StyleSupport, Target, TargetConfig, TargetDescriptor, WindowCapabilities, archive,
+    check_common, dist_dir, feature, files_below, package_architecture, skill,
 };
 use std::path::PathBuf;
 
@@ -39,14 +39,6 @@ impl Gpui {
 }
 
 /// The further parts of the IR this target builds.
-/// What the macOS target shows besides [`FEATURES`]: the menu bar, which
-/// the other systems GPUI runs on do not have.
-static MAC_FEATURES: std::sync::LazyLock<Vec<&'static str>> = std::sync::LazyLock::new(|| {
-    let mut features = FEATURES.to_vec();
-    features.push(feature::MENU_BAR);
-    features
-});
-
 const FEATURES: &[&str] = &[
     feature::TEXT_FORMATS,
     feature::TEXT_LINES,
@@ -55,6 +47,7 @@ const FEATURES: &[&str] = &[
     feature::SCALED_SCENE,
     feature::MODAL_FLOW_TIMER,
     feature::CONTROLLED_VALUES,
+    feature::CONTROLLED_TEXT,
     feature::FILL_BUTTONS,
     feature::MODAL_COVER,
     feature::FORM_LAYOUT,
@@ -63,7 +56,11 @@ const FEATURES: &[&str] = &[
     feature::SESSION_ACTIONS,
     feature::BOUND_LENGTHS,
     feature::RUNTIME_THEME,
+    feature::RUNTIME_PALETTE,
     feature::FILE_PICK,
+    feature::PASTE,
+    feature::TABLE,
+    feature::MENU_BAR,
     feature::SHORTCUTS,
     feature::IMAGE_CORNERS,
     feature::IMAGE_TEMPLATE,
@@ -86,6 +83,8 @@ const FEATURES: &[&str] = &[
     feature::ACCORDION_LAYOUT,
     feature::IDLE_CONTROL,
     feature::QUIET_SHORTCUTS,
+    feature::DIALOG_WINDOWS,
+    feature::WINDOW_LANDSCAPE,
     feature::WINDOW_SHORT,
     feature::CAPSULE_CONTROLS,
     feature::ICON_LABELS,
@@ -119,7 +118,13 @@ const FEATURES: &[&str] = &[
     feature::VERTICAL_SLIDERS,
     feature::HOLD_SHORTCUTS,
     feature::NATIVE_LISTS,
+    feature::STATUS_ITEM,
+    feature::LOGIN_SWITCH,
+    feature::WEB_CONTENT_MODE,
 ];
+
+/// PNG pixel sizes generated for `StatusItem(image:)`.
+pub(crate) const STATUS_SIDES: [u32; 6] = [16, 22, 24, 32, 48, 64];
 
 const CONTROL_STATES: &[&str] = &[
     "background",
@@ -148,7 +153,7 @@ const STYLES: &[StyleSupport] = &[
     StyleSupport {
         component: "Stack",
         base: &["background", "foreground", "border", "corner", "shadow"],
-        states: &[],
+        states: &[(StyleState::Hover, ROW_STATES)],
     },
     StyleSupport {
         component: "Switch",
@@ -272,15 +277,11 @@ pub(crate) fn icon_pictures(app: &Application, platform: &str) -> Vec<(String, S
     pictures
 }
 
-/// The application as this target builds it: GPUI has no WebView (`WebPage` is
-/// unavailable), while static SVGs lower to `Image` and animated SVGs compile
-/// to `BSVG` scenes played natively in Rust.
+/// The application as this target builds it: native WebViews (`WKWebView` /
+/// `WebView2` / `WebKitGTK`) host `WebPage`, static SVGs lower to `Image`, and
+/// animated SVGs compile to `BSVG` scenes played natively in Rust.
 fn prepared(app: &Application, config: &TargetConfig) -> Application {
-    let config = TargetConfig {
-        webview: Some(false),
-        ..config.clone()
-    };
-    bern_target_api::svg::prepare(app, &config)
+    bern_target_api::svg::prepare(app, config)
 }
 
 pub fn product_name(app: &Application) -> String {
@@ -712,11 +713,16 @@ impl Target for Gpui {
                 floating: true,
             },
             channels: &["ipc"],
-            // The application's media kernel plays; views give it surfaces.
+            // Built-in native media executor per platform; an application-supplied
+            // media kernel still claims priority at startup when registered.
             media: Some(MediaSupport {
                 contract_versions: bern_media::MEDIA_CONTRACT_VERSION
                     ..=bern_media::MEDIA_CONTRACT_VERSION,
-                backend: "app-kernel",
+                backend: match self.platform {
+                    "macos" => "avfoundation",
+                    "windows" => "media-foundation",
+                    _ => "gstreamer",
+                },
                 backend_version: "1",
                 presenter: "gpui-surface",
                 presenter_version: "1",
@@ -747,15 +753,18 @@ impl Target for Gpui {
                 "spin_period",
                 "blur",
                 "glow",
+                "glow_opacity",
                 "idle_area",
             ],
             window_chrome: true,
             text_marks: true,
             dynamic_items: true,
             features: if self.platform == "macos" {
-                &MAC_FEATURES
-            } else {
                 FEATURES
+            } else {
+                // `WEB_CONTENT_MODE` is the final entry in `FEATURES` and is
+                // supported natively via WebKit's `preferredContentMode` on macOS.
+                &FEATURES[..FEATURES.len() - 1]
             },
         }
     }
@@ -837,6 +846,22 @@ impl Target for Gpui {
             serde_json::to_string_pretty(&manifest).expect("manifest"),
         ));
         files.extend(bern_target_api::svg::static_files(app, context)?);
+        if let Some(name) = bern_target_api::icon::status_image(app) {
+            let path = bern_target_api::svg::resource_path(context, name);
+            for side in STATUS_SIDES {
+                files.push(GeneratedFile {
+                    path: format!("app/src/status/{side}.png").into(),
+                    contents: bern_target_api::icon::status_picture(
+                        &path,
+                        side,
+                        bern_target_api::icon::ON_LIGHT,
+                    )
+                    .map_err(|message| {
+                        vec![Diagnostic::error(format!("StatusItem image: {message}"))]
+                    })?,
+                });
+            }
+        }
         if self.platform == "macos" {
             files.extend(mac_bundle_files(app, context)?);
         }
@@ -940,6 +965,20 @@ impl Target for Gpui {
         })
     }
 
+    fn package(
+        &self,
+        app: &Application,
+        context: &BuildContext,
+        signing: &Signing,
+    ) -> Result<BuildPlan, Vec<Diagnostic>> {
+        let app = &prepared(app, &context.target);
+        match self.platform {
+            "macos" => package_macos(app, context, signing),
+            "windows" => package_windows(app, context, signing),
+            _ => package_linux(app, context),
+        }
+    }
+
     fn supports_prebuilt_eject(&self) -> bool {
         false
     }
@@ -1005,6 +1044,22 @@ impl Target for Gpui {
                 path: PathBuf::from("resources").join(svg_file.path),
                 contents: svg_file.contents,
             });
+        }
+        if let Some(name) = bern_target_api::icon::status_image(app) {
+            let path = bern_target_api::svg::resource_path(context, name);
+            for side in STATUS_SIDES {
+                files.push(GeneratedFile {
+                    path: format!("src/ui/status/{side}.png").into(),
+                    contents: bern_target_api::icon::status_picture(
+                        &path,
+                        side,
+                        bern_target_api::icon::ON_LIGHT,
+                    )
+                    .map_err(|message| {
+                        vec![Diagnostic::error(format!("StatusItem image: {message}"))]
+                    })?,
+                });
+            }
         }
         for (shipped, declared) in icon_pictures(app, self.platform) {
             let src = context.project_dir.join(&declared);
@@ -1091,4 +1146,413 @@ impl Target for Gpui {
             notes: vec!["Run `cargo run` inside the ejected folder to build and run.".into()],
         })
     }
+}
+
+fn package_macos(
+    app: &Application,
+    context: &BuildContext,
+    signing: &Signing,
+) -> Result<BuildPlan, Vec<Diagnostic>> {
+    if signing.macos_notary_profile.is_some() && signing.macos_identity.is_none() {
+        return Err(vec![Diagnostic::error(
+            "BERN_MACOS_NOTARY_PROFILE needs BERN_MACOS_SIGNING_IDENTITY: notarization takes a Developer ID signature",
+        )]);
+    }
+    let product = product_name(app);
+    let executable = bern_target_api::glue::program(app);
+    let output = &context.output_dir;
+    let stage = output.join("package");
+    let volume = stage.join("volume");
+    let staged = volume.join(format!("{product}.app"));
+    let helpers = staged.join("Contents/Helpers");
+    let dist = dist_dir(context);
+    let image = dist.join(format!(
+        "{product}-{}-macos-{}.dmg",
+        app.app.version,
+        package_architecture()
+    ));
+    let name = app
+        .app
+        .name
+        .get(&app.languages.default)
+        .map(str::to_string)
+        .unwrap_or_else(|| product.clone());
+    let run = |description: &str, program: &str, args: Vec<String>| BuildStep::Run {
+        description: description.into(),
+        program: program.into(),
+        args,
+        cwd: output.clone(),
+        env: vec![],
+    };
+    let path = |p: &std::path::Path| p.display().to_string();
+    let sign = |target: &std::path::Path| -> Vec<String> {
+        match &signing.macos_identity {
+            Some(identity) => vec![
+                "--force".into(),
+                "--options".into(),
+                "runtime".into(),
+                "--timestamp".into(),
+                "--sign".into(),
+                identity.clone(),
+                path(target),
+            ],
+            None => vec!["--force".into(), "--sign".into(), "-".into(), path(target)],
+        }
+    };
+    let mut steps = vec![
+        BuildStep::RemoveIfExists {
+            path: stage.clone(),
+        },
+        BuildStep::CreateDir {
+            path: volume.clone(),
+        },
+        BuildStep::CreateDir { path: dist.clone() },
+        BuildStep::RemoveIfExists {
+            path: image.clone(),
+        },
+        run(
+            "Copy the app",
+            "ditto",
+            vec![path(&output.join(format!("{product}.app"))), path(&staged)],
+        ),
+        run(
+            "Sign the command line",
+            "codesign",
+            sign(&helpers.join(&executable)),
+        ),
+        run("Sign the app", "codesign", sign(&staged)),
+        run(
+            "Link Applications",
+            "ln",
+            vec![
+                "-s".into(),
+                "/Applications".into(),
+                path(&volume.join("Applications")),
+            ],
+        ),
+    ];
+    let diskutil = std::process::Command::new("diskutil")
+        .args(["image", "create", "from", "--help"])
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if diskutil {
+        steps.push(run(
+            "Make the disk image",
+            "diskutil",
+            vec![
+                "image".into(),
+                "create".into(),
+                "from".into(),
+                "--format".into(),
+                "ULMO".into(),
+                "--volumeName".into(),
+                name,
+                path(&volume),
+                path(&image),
+            ],
+        ));
+    } else {
+        steps.push(run(
+            "Make the disk image",
+            "hdiutil",
+            vec![
+                "create".into(),
+                "-volname".into(),
+                name,
+                "-srcfolder".into(),
+                path(&volume),
+                "-ov".into(),
+                "-format".into(),
+                "ULMO".into(),
+                path(&image),
+            ],
+        ));
+    }
+    let mut notes = Vec::new();
+    match (&signing.macos_identity, &signing.macos_notary_profile) {
+        (Some(identity), profile) => {
+            steps.push(run(
+                "Sign the disk image",
+                "codesign",
+                vec![
+                    "--force".into(),
+                    "--timestamp".into(),
+                    "--sign".into(),
+                    identity.clone(),
+                    path(&image),
+                ],
+            ));
+            if let Some(profile) = profile {
+                steps.push(run(
+                    "Notarize the disk image",
+                    "xcrun",
+                    vec![
+                        "notarytool".into(),
+                        "submit".into(),
+                        path(&image),
+                        "--keychain-profile".into(),
+                        profile.clone(),
+                        "--wait".into(),
+                    ],
+                ));
+                steps.push(run(
+                    "Staple the notarization",
+                    "xcrun",
+                    vec!["stapler".into(), "staple".into(), path(&image)],
+                ));
+            } else {
+                notes.push(
+                    "the disk image is signed but not notarized; Gatekeeper on other Macs warns about it (set BERN_MACOS_NOTARY_PROFILE)"
+                        .into(),
+                );
+            }
+        }
+        (None, _) => notes.push(
+            "the app is signed for this Mac only; Gatekeeper on other Macs refuses it (set BERN_MACOS_SIGNING_IDENTITY to a Developer ID Application identity)"
+                .into(),
+        ),
+    }
+    Ok(BuildPlan {
+        steps,
+        products: vec![image],
+        run: None,
+        notes,
+    })
+}
+
+fn package_windows(
+    app: &Application,
+    context: &BuildContext,
+    signing: &Signing,
+) -> Result<BuildPlan, Vec<Diagnostic>> {
+    let product = product_name(app);
+    let executable = format!("{}.exe", bern_target_api::glue::program(app));
+    let output = &context.output_dir;
+    let bundle = output.join(&product);
+    let stage = output.join("package");
+    let staged = stage.join(&product);
+    let dist = dist_dir(context);
+    let mut files = files_below(&bundle).map_err(|error| {
+        vec![Diagnostic::error(format!(
+            "cannot read {}: {error}",
+            bundle.display()
+        ))]
+    })?;
+    files.push((
+        output.join("bin").join(&executable),
+        PathBuf::from("bin").join(&executable),
+    ));
+    if skill::listens(&context.target.channels) {
+        files.push((output.join(skill::path(app)), skill::path(app)));
+    }
+    let (zip_step, zip) = archive(
+        &staged,
+        &dist.join(format!(
+            "{product}-{}-windows-{}",
+            app.app.version,
+            package_architecture()
+        )),
+    );
+    let mut steps = vec![
+        BuildStep::RemoveIfExists {
+            path: stage.clone(),
+        },
+        BuildStep::CreateDir { path: dist.clone() },
+        BuildStep::Mirror {
+            dir: staged.clone(),
+            files: files.clone(),
+            keep: vec![],
+        },
+        BuildStep::RemoveIfExists { path: zip.clone() },
+    ];
+    let mut notes = Vec::new();
+    if let Some(cert) = &signing.windows_certificate {
+        for (_, rel) in &files {
+            if rel.extension().is_some_and(|ext| ext == "exe") {
+                let mut args = vec![
+                    "sign".into(),
+                    "/fd".into(),
+                    "SHA256".into(),
+                    "/tr".into(),
+                    "http://timestamp.digicert.com".into(),
+                    "/td".into(),
+                    "SHA256".into(),
+                    "/f".into(),
+                    cert.clone(),
+                ];
+                if let Some(password) = &signing.windows_certificate_password {
+                    args.push("/p".into());
+                    args.push(password.clone());
+                }
+                args.push(staged.join(rel).display().to_string());
+                steps.push(BuildStep::Run {
+                    description: format!("Sign {}", rel.display()),
+                    program: "signtool".into(),
+                    args,
+                    cwd: stage.clone(),
+                    env: vec![],
+                });
+            }
+        }
+    } else {
+        notes.push(
+            "the packaged executables are not signed: SmartScreen warns about them (set BERN_WINDOWS_CERTIFICATE)"
+                .into(),
+        );
+    }
+    steps.push(zip_step);
+    Ok(BuildPlan {
+        steps,
+        products: vec![zip],
+        run: None,
+        notes,
+    })
+}
+
+fn package_linux(app: &Application, context: &BuildContext) -> Result<BuildPlan, Vec<Diagnostic>> {
+    let product = product_name(app);
+    let executable = bern_target_api::glue::program(app);
+    let output = &context.output_dir;
+    let bundle = output.join(&product);
+    let stage = output.join("package");
+    let portable = stage.join(&product);
+    let dist = dist_dir(context);
+    let id = &app.app.bundle_id;
+    let mut files = files_below(&bundle).map_err(|error| {
+        vec![Diagnostic::error(format!(
+            "cannot read {}: {error}",
+            bundle.display()
+        ))]
+    })?;
+    files.push((
+        output.join("bin").join(&executable),
+        PathBuf::from("bin").join(&executable),
+    ));
+    if skill::listens(&context.target.channels) {
+        files.push((output.join(skill::path(app)), skill::path(app)));
+    }
+    let (archive_step, archive_file) = archive(
+        &portable,
+        &dist.join(format!(
+            "{product}-{}-linux-{}",
+            app.app.version,
+            package_architecture()
+        )),
+    );
+    let mut steps = vec![
+        BuildStep::RemoveIfExists {
+            path: stage.clone(),
+        },
+        BuildStep::CreateDir { path: dist.clone() },
+        BuildStep::Mirror {
+            dir: portable,
+            files: files.clone(),
+            keep: vec![],
+        },
+        BuildStep::RemoveIfExists {
+            path: archive_file.clone(),
+        },
+        archive_step,
+    ];
+    let mut products = vec![archive_file];
+    let mut notes = Vec::new();
+    let dpkg = std::process::Command::new("dpkg-deb")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if dpkg {
+        let root = stage.join("deb");
+        let installed = PathBuf::from("/opt").join(id);
+        let deb_arch = match std::env::consts::ARCH {
+            "aarch64" => "arm64",
+            "x86_64" => "amd64",
+            other => other,
+        };
+        let deb = dist.join(format!(
+            "{product}-{}-linux-{}.deb",
+            app.app.version,
+            package_architecture()
+        ));
+        let installed_size: u64 = files
+            .iter()
+            .filter_map(|(source, _)| std::fs::metadata(source).ok())
+            .map(|m| m.len())
+            .sum();
+        let app_name = app.app.name.get(&app.languages.default).unwrap_or(&product);
+        let desktop_content = format!(
+            "[Desktop Entry]\nType=Application\nName={app_name}\nExec={} %U\nIcon={id}\nTerminal=false\nCategories=Utility;\nStartupWMClass={id}\n",
+            installed.join(&executable).display()
+        );
+        let pkg_name: String = id
+            .to_ascii_lowercase()
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || matches!(c, '.' | '+' | '-') {
+                    c
+                } else {
+                    '-'
+                }
+            })
+            .collect();
+        let control = format!(
+            "Package: {pkg_name}\nVersion: {}\nSection: utils\nPriority: optional\nArchitecture: {deb_arch}\nInstalled-Size: {}\nMaintainer: Bern\nDescription: {app_name}\n",
+            app.app.version,
+            installed_size.div_ceil(1024).max(1),
+        );
+        steps.extend([
+            BuildStep::Mirror {
+                dir: root.join(installed.strip_prefix("/").expect("absolute")),
+                files,
+                keep: vec![],
+            },
+            BuildStep::Write {
+                path: root
+                    .join("usr/share/applications")
+                    .join(format!("{id}.desktop")),
+                contents: desktop_content.into_bytes(),
+            },
+            BuildStep::CreateDir {
+                path: root.join("usr/bin"),
+            },
+            BuildStep::Run {
+                description: "Link the launcher".into(),
+                program: "ln".into(),
+                args: vec![
+                    "-s".into(),
+                    installed.join(&executable).display().to_string(),
+                    root.join("usr/bin").join(&executable).display().to_string(),
+                ],
+                cwd: stage.clone(),
+                env: vec![],
+            },
+            BuildStep::Write {
+                path: root.join("DEBIAN/control"),
+                contents: control.into_bytes(),
+            },
+            BuildStep::RemoveIfExists { path: deb.clone() },
+            BuildStep::Run {
+                description: "Make the Debian package".into(),
+                program: "dpkg-deb".into(),
+                args: vec![
+                    "--root-owner-group".into(),
+                    "--build".into(),
+                    root.display().to_string(),
+                    deb.display().to_string(),
+                ],
+                cwd: stage.clone(),
+                env: vec![],
+            },
+        ]);
+        products.insert(0, deb);
+    } else {
+        notes.push(
+            "dpkg-deb is not installed here, so only the .tar.gz archive was generated".into(),
+        );
+    }
+    Ok(BuildPlan {
+        steps,
+        products,
+        run: None,
+        notes,
+    })
 }

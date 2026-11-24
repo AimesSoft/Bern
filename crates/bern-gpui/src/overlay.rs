@@ -58,6 +58,10 @@ pub(crate) fn is_open(target: &str) -> bool {
     OPEN.with(|open| open.borrow().contains(target))
 }
 
+pub(crate) fn any_open() -> bool {
+    OPEN.with(|open| !open.borrow().is_empty())
+}
+
 pub(crate) fn set_open(target: &str, open: bool) {
     let changed = OPEN.with(|set| {
         let mut set = set.borrow_mut();
@@ -132,7 +136,11 @@ fn panel_with(
             let gap = gpui::px(6.0);
             let middle = c.win().inset.get() + window_width / 2.0;
             let trailing = f32::from(button.center().x) > middle;
-            let x = if trailing { button.right() } else { button.left() };
+            let x = if trailing {
+                button.right()
+            } else {
+                button.left()
+            };
             let (anchor, y) = if above {
                 (
                     if trailing {
@@ -326,6 +334,9 @@ pub fn popover_button(
             ..Actions::default()
         },
     });
+    if enabled {
+        crate::controls::register_shortcut(c, props.shortcut.as_deref(), &toggle);
+    }
     // With an icon the label is only its accessible name.
     let button = match icon {
         Some(icon) => icon_opener(
@@ -394,6 +405,8 @@ pub struct PopoverProps {
     pub height: Option<f32>,
     /// Preferred side (`"above"` or `"below"`).
     pub placement: Option<&'static str>,
+    /// Keyboard shortcut that toggles the popover.
+    pub shortcut: Option<String>,
 }
 
 /// An item of a menu: its label, whether it is checked and what choosing

@@ -1,9 +1,10 @@
-//! Session commands of external entries: `ui.inspect` lists the controls of
-//! the open windows, and `ui.activate`, `ui.edit`, `ui.submit`,
-//! `ui.set_bool` and `ui.select` run a control's actions through the same
-//! closures pointer and keyboard input run; `ui.language` and
-//! `ui.set_language` read and switch the interface language. The others
-//! are refused at once rather than left to time out.
+//! Session commands of external entries: `ui.inspect`, `ui.activate`,
+//! `ui.edit`, `ui.submit`, `ui.set_bool`, `ui.set_number`, `ui.select`,
+//! `ui.back`, `ui.focus`, `ui.set_file`, `ui.language`, `ui.set_language`,
+//! and all window management commands (`window.open`, `window.close`,
+//! `window.activate`, `window.confirm_close`, `window.minimize`,
+//! `window.restore`, `window.maximize`, `window.move`, `window.resize`,
+//! `window.sync_overlay`, `window.screenshot`).
 //!
 //! GPUI builds elements while a window draws, and a window hidden behind
 //! others does not draw; the controls are therefore listed by building
@@ -29,6 +30,14 @@ pub(crate) struct Actions {
     pub(crate) set_bool: Option<Rc<dyn Fn(bool)>>,
     /// Choose an option by its label or the name of its value.
     pub(crate) select: Option<Select>,
+    /// Pop one level of navigation; false when already at root.
+    pub(crate) back: Option<Rc<dyn Fn() -> bool>>,
+    /// Give keyboard focus to this control.
+    pub(crate) focus: Option<crate::ctx::Press>,
+    /// Deliver a validated `file://` or `http(s)://` URL to a file picker or drop area.
+    pub(crate) set_file: Option<Rc<dyn Fn(String)>>,
+    /// Accepted file kinds for `set_file` (default `"any"`).
+    pub(crate) file_kinds: Option<&'static str>,
 }
 
 /// Public entry point for generated `NativeView` wrappers to register a
@@ -69,7 +78,7 @@ pub fn register_native(
             submit: actions.submit,
             set_number: actions.set_number,
             set_bool: actions.set_bool,
-            select: None,
+            ..Actions::default()
         },
     });
 }
@@ -126,13 +135,20 @@ fn inspect(controls: Vec<Control>) -> Value {
         controls
             .into_iter()
             .map(|control| {
-                let reason = (!control.enabled).then(|| "disabled".to_string());
+                let blocked = windows::is_blocked(&control.window);
+                let reason = if blocked {
+                    Some("blocked_by_modal".to_string())
+                } else if !control.enabled {
+                    Some("disabled".to_string())
+                } else {
+                    None
+                };
                 Value::Record(vec![
                     Value::Text(control.target),
                     Value::Text(control.window.to_string()),
                     Value::Text(control.role.to_string()),
                     Value::Text(control.label),
-                    Value::Bool(control.enabled),
+                    Value::Bool(control.enabled && !blocked),
                     optional(control.value),
                     optional(reason),
                 ])
@@ -154,6 +170,10 @@ fn find(controls: Vec<Control>, target: &str) -> Result<Control, Failure> {
             "target_ambiguous",
             format!("`{target}` is mounted in several places"),
         )),
+        (Some(control), None) if windows::is_blocked(&control.window) => Err(Failure::new(
+            "target_blocked",
+            format!("`{target}` is blocked by a modal dialog"),
+        )),
         (Some(control), None) if !control.enabled => Err(Failure::new(
             "target_disabled",
             format!("`{target}` is disabled"),
@@ -172,10 +192,15 @@ fn unsupported(control: &Control, action: &str) -> Failure {
     )
 }
 
-fn run(index: u32, reader: &mut Reader<'_>, cx: &mut App) -> Result<Value, Failure> {
+fn run(
+    request: u64,
+    index: u32,
+    reader: &mut Reader<'_>,
+    cx: &mut App,
+) -> Result<Option<Value>, Failure> {
     let malformed = |error: crate::protocol::CodecError| Failure::new("invalid_request", error.0);
     match SessionCommand::ALL.get(index as usize) {
-        Some(SessionCommand::Inspect) => Ok(inspect(windows::controls(cx))),
+        Some(SessionCommand::Inspect) => Ok(Some(inspect(windows::controls(cx)))),
         Some(SessionCommand::Activate) => {
             let target = reader.text().map_err(malformed)?;
             let control = find(windows::controls(cx), &target)?;
@@ -185,7 +210,7 @@ fn run(index: u32, reader: &mut Reader<'_>, cx: &mut App) -> Result<Value, Failu
                 .clone()
                 .ok_or_else(|| unsupported(&control, "activate"))?;
             activate(cx);
-            Ok(Value::Unit)
+            Ok(Some(Value::Unit))
         }
         Some(SessionCommand::Edit) => {
             let target = reader.text().map_err(malformed)?;
@@ -197,7 +222,7 @@ fn run(index: u32, reader: &mut Reader<'_>, cx: &mut App) -> Result<Value, Failu
                 .clone()
                 .ok_or_else(|| unsupported(&control, "edit"))?;
             edit(value);
-            Ok(Value::Unit)
+            Ok(Some(Value::Unit))
         }
         Some(SessionCommand::Submit) => {
             let target = reader.text().map_err(malformed)?;
@@ -208,7 +233,7 @@ fn run(index: u32, reader: &mut Reader<'_>, cx: &mut App) -> Result<Value, Failu
                 .clone()
                 .ok_or_else(|| unsupported(&control, "submit"))?;
             submit();
-            Ok(Value::Unit)
+            Ok(Some(Value::Unit))
         }
         Some(SessionCommand::SetBool) => {
             let target = reader.text().map_err(malformed)?;
@@ -220,7 +245,7 @@ fn run(index: u32, reader: &mut Reader<'_>, cx: &mut App) -> Result<Value, Failu
                 .clone()
                 .ok_or_else(|| unsupported(&control, "set_bool"))?;
             set(value);
-            Ok(Value::Unit)
+            Ok(Some(Value::Unit))
         }
         Some(SessionCommand::SetNumber) => {
             let target = reader.text().map_err(malformed)?;
@@ -235,7 +260,7 @@ fn run(index: u32, reader: &mut Reader<'_>, cx: &mut App) -> Result<Value, Failu
                 .clone()
                 .ok_or_else(|| unsupported(&control, "set_number"))?;
             set(value);
-            Ok(Value::Unit)
+            Ok(Some(Value::Unit))
         }
         Some(SessionCommand::Select) => {
             let target = reader.text().map_err(malformed)?;
@@ -247,7 +272,7 @@ fn run(index: u32, reader: &mut Reader<'_>, cx: &mut App) -> Result<Value, Failu
                 .clone()
                 .ok_or_else(|| unsupported(&control, "select"))?;
             if select(&option) {
-                Ok(Value::Unit)
+                Ok(Some(Value::Unit))
             } else {
                 Err(Failure::new(
                     "invalid_option",
@@ -255,11 +280,68 @@ fn run(index: u32, reader: &mut Reader<'_>, cx: &mut App) -> Result<Value, Failu
                 ))
             }
         }
-        Some(SessionCommand::Language) => Ok(Value::Text(crate::text::language())),
+        Some(SessionCommand::Back) => {
+            let target = reader.text().map_err(malformed)?;
+            let control = find(windows::controls(cx), &target)?;
+            let back = control
+                .actions
+                .back
+                .clone()
+                .ok_or_else(|| unsupported(&control, "back"))?;
+            if back() {
+                Ok(Some(Value::Unit))
+            } else {
+                Err(Failure::new("target_unavailable", "nothing to go back to"))
+            }
+        }
+        Some(SessionCommand::Focus) => {
+            let target = reader.text().map_err(malformed)?;
+            let control = find(windows::controls(cx), &target)?;
+            let focus = control
+                .actions
+                .focus
+                .clone()
+                .ok_or_else(|| unsupported(&control, "focus"))?;
+            focus(cx);
+            Ok(Some(Value::Unit))
+        }
+        Some(SessionCommand::SetFile) => {
+            let target = reader.text().map_err(malformed)?;
+            let url = reader.text().map_err(malformed)?;
+            let control = find(windows::controls(cx), &target)?;
+            let give = control
+                .actions
+                .set_file
+                .clone()
+                .ok_or_else(|| unsupported(&control, "set_file"))?;
+            let scheme = url
+                .split_once("://")
+                .map(|(scheme, rest)| (scheme.to_ascii_lowercase(), rest))
+                .filter(|(_, rest)| !rest.is_empty());
+            if !matches!(
+                scheme.as_ref().map(|(scheme, _)| scheme.as_str()),
+                Some("file" | "http" | "https")
+            ) {
+                return Err(Failure::new(
+                    "invalid_url",
+                    format!("`{url}` is not a file:// or http(s) URL"),
+                ));
+            }
+            let kinds = control.actions.file_kinds.unwrap_or("any");
+            if !crate::files::accepts(&url, kinds) {
+                return Err(Failure::new(
+                    "unsupported_file",
+                    format!("`{}` takes {kinds}, not `{url}`", control.target),
+                ));
+            }
+            give(url);
+            Ok(Some(Value::Unit))
+        }
+        Some(SessionCommand::Language) => Ok(Some(Value::Text(crate::text::language()))),
         Some(SessionCommand::SetLanguage) => {
             let tag = reader.text().map_err(malformed)?;
             if crate::text::set_language(&tag) {
-                Ok(Value::Unit)
+                Ok(Some(Value::Unit))
             } else {
                 Err(Failure::new(
                     "unsupported_language",
@@ -273,20 +355,86 @@ fn run(index: u32, reader: &mut Reader<'_>, cx: &mut App) -> Result<Value, Failu
         Some(SessionCommand::WindowOpen) => {
             let kind_id = reader.text().map_err(malformed)?;
             let id = windows::open_kind(&kind_id, cx)?;
-            Ok(Value::Text(id))
+            Ok(Some(Value::Text(id)))
         }
         Some(SessionCommand::WindowClose) => {
             let window_id = reader.text().map_err(malformed)?;
-            windows::close_instance(&window_id, cx)?;
-            Ok(Value::Enum {
-                variant: 0,
-                fields: Vec::new(),
-            })
+            let result = windows::request_close_instance(&window_id, cx)?;
+            Ok(Some(result.to_value()))
+        }
+        Some(SessionCommand::WindowActivate) => {
+            let window_id = reader.text().map_err(malformed)?;
+            windows::activate_instance(&window_id, cx)?;
+            Ok(Some(Value::Unit))
+        }
+        Some(SessionCommand::WindowConfirmClose) => {
+            let window_id = reader.text().map_err(malformed)?;
+            let confirmation = reader.text().map_err(malformed)?;
+            let decision = reader.u32().map_err(malformed)?;
+            if decision > 2 {
+                return Err(Failure::new("invalid_params", "unknown close decision"));
+            }
+            windows::confirm_close_instance(
+                &window_id,
+                &confirmation,
+                decision,
+                cx,
+                Box::new(move |outcome| match outcome {
+                    Ok(result) => complete(request, index, result.to_value()),
+                    Err(failure) => fail(request, &failure),
+                }),
+            )?;
+            Ok(None)
+        }
+        Some(SessionCommand::WindowList) => Err(Failure::new(
+            "unknown_command",
+            "window.list is answered by the runtime",
+        )),
+        Some(SessionCommand::WindowMinimize) => {
+            let window_id = reader.text().map_err(malformed)?;
+            windows::minimize_instance(&window_id, cx)?;
+            Ok(Some(Value::Unit))
+        }
+        Some(SessionCommand::WindowRestore) => {
+            let window_id = reader.text().map_err(malformed)?;
+            windows::restore_instance(&window_id, cx)?;
+            Ok(Some(Value::Unit))
+        }
+        Some(SessionCommand::WindowMaximize) => {
+            let window_id = reader.text().map_err(malformed)?;
+            windows::maximize_instance(&window_id, cx)?;
+            Ok(Some(Value::Unit))
+        }
+        Some(SessionCommand::WindowMove) => {
+            let window_id = reader.text().map_err(malformed)?;
+            let x = reader.f64().map_err(malformed)?;
+            let y = reader.f64().map_err(malformed)?;
+            windows::move_instance(&window_id, x, y, cx)?;
+            Ok(Some(Value::Unit))
+        }
+        Some(SessionCommand::WindowResize) => {
+            let window_id = reader.text().map_err(malformed)?;
+            let width = reader.f64().map_err(malformed)?;
+            let height = reader.f64().map_err(malformed)?;
+            windows::resize_instance(&window_id, width, height, cx)?;
+            Ok(Some(Value::Unit))
         }
         Some(SessionCommand::WindowSyncOverlay) => {
             let overlay_id = reader.text().map_err(malformed)?;
             windows::sync_overlay(&overlay_id, cx);
-            Ok(Value::Unit)
+            Ok(Some(Value::Unit))
+        }
+        Some(SessionCommand::WindowScreenshot) => {
+            let target_id = if reader.u8().map_err(malformed)? != 0 {
+                Some(reader.text().map_err(malformed)?)
+            } else {
+                None
+            };
+            if reader.u8().map_err(malformed)? != 0 {
+                let _ = reader.text().map_err(malformed)?;
+            }
+            let result = windows::screenshot_instance(target_id.as_deref(), cx)?;
+            Ok(Some(result))
         }
         Some(command) => Err(Failure::new(
             "ui_unavailable",
@@ -303,8 +451,9 @@ pub(crate) fn handle(request: u64, bytes: &[u8], cx: &mut App) {
         Ok(index) => index,
         Err(error) => return fail(request, &Failure::new("invalid_request", error.0)),
     };
-    match run(index, &mut reader, cx) {
-        Ok(value) => complete(request, index, value),
+    match run(request, index, &mut reader, cx) {
+        Ok(Some(value)) => complete(request, index, value),
+        Ok(None) => {}
         Err(failure) => fail(request, &failure),
     }
 }

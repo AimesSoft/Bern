@@ -398,13 +398,10 @@ pub fn KeyShortcut(_p: &Parent, ctx: &Ctx, props: KeyShortcutProps, action: Opti
         .hold
         .map(|field| (field, props.hold_after.unwrap_or(0.3).max(0.01)));
     match &props.bound {
-        Some(keys) => ctx.win().add_bound_shortcut_hold(
-            bound_text(ctx, keys),
-            run,
-            active,
-            props.quiet,
-            hold,
-        ),
+        Some(keys) => {
+            ctx.win()
+                .add_bound_shortcut_hold(bound_text(ctx, keys), run, active, props.quiet, hold)
+        }
         None => ctx
             .win()
             .add_shortcut_hold(props.keys, run, active, props.quiet, hold),

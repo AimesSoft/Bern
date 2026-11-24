@@ -337,22 +337,13 @@ pub fn slider(c: &Ctx, id: &'static str, label: String, model: Model, props: Sli
     if props.vertical {
         let col = c
             .grow()
-            .apply(
+            .apply(div().flex().flex_col().items_center().gap(px(8.0)).h_full())
+            .children((!props.label_hidden).then(|| {
                 div()
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .gap(px(8.0))
-                    .h_full(),
-            )
-            .children(
-                (!props.label_hidden).then(|| {
-                    div()
-                        .text_size(px(13.0))
-                        .text_color(c.color("text.primary"))
-                        .child(label)
-                }),
-            )
+                    .text_size(px(13.0))
+                    .text_color(c.color("text.primary"))
+                    .child(label)
+            }))
             .children(
                 props
                     .max_icon

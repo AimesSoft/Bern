@@ -1489,8 +1489,7 @@ pub(crate) fn open(kind_id: &str) -> Result<String, Failure> {
             }
             if active.held.replace(false) {
                 win.write(active.field, Value::Bool(false));
-            } else if win.recorder.borrow().is_none()
-                && active.active.as_ref().is_none_or(|f| f())
+            } else if win.recorder.borrow().is_none() && active.active.as_ref().is_none_or(|f| f())
             {
                 (active.run)();
             }

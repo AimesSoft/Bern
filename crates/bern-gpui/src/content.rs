@@ -142,6 +142,14 @@ pub struct TextProps {
     pub ruby: Option<String>,
     /// Whether the user may select and copy the text.
     pub selectable: bool,
+    /// Character progress lit so far (`Text(lit:)`): negative means fully lit.
+    pub lit: Option<f64>,
+    /// Timed character route (`Text(lit_path:)`).
+    pub lit_path: Option<String>,
+    /// Clock seconds for `lit_path` (`Text(lit_clock:)`).
+    pub lit_clock: Option<f64>,
+    /// Unix epoch seconds when `lit_clock` was captured (`Text(lit_since:)`).
+    pub lit_since: Option<f64>,
 }
 
 /// `Text`.
@@ -235,10 +243,109 @@ pub fn text(c: &Ctx, content: String, props: TextProps) -> El {
     } else {
         element
     };
+    if let Some(lit_val) = props.lit {
+        let route = props
+            .lit_path
+            .as_deref()
+            .filter(|p| !p.is_empty())
+            .map(|path| {
+                bern_ffi::overlay::Route::new(
+                    path,
+                    props.lit_clock.unwrap_or(0.0),
+                    props.lit_since.unwrap_or(0.0),
+                )
+            });
+        return element
+            .child(LitText {
+                text: content,
+                color,
+                lit: lit_val,
+                route,
+            })
+            .into_any_element();
+    }
     if !props.markdown {
         return element.child(content).into_any_element();
     }
     element.child(markdown(c, &content)).into_any_element()
+}
+
+/// Karaoke-style progressively lit text (`Text(lit:, lit_path:, lit_clock:, lit_since:)`).
+#[derive(gpui::IntoElement)]
+struct LitText {
+    text: String,
+    color: gpui::Rgba,
+    lit: f64,
+    route: Option<bern_ffi::overlay::Route>,
+}
+
+impl gpui::RenderOnce for LitText {
+    fn render(self, window: &mut gpui::Window, _cx: &mut gpui::App) -> impl IntoElement {
+        const FADED: f32 = 0.4;
+        let place = if self.lit < 0.0 {
+            self.lit
+        } else if let Some(route) = &self.route {
+            if route.moving() {
+                window.request_animation_frame();
+            }
+            if route.points.is_empty() {
+                self.lit
+            } else {
+                route.place()
+            }
+        } else {
+            self.lit
+        };
+        if place < 0.0 {
+            return gpui::StyledText::new(self.text).into_any_element();
+        }
+        let offsets: Vec<usize> = self
+            .text
+            .char_indices()
+            .map(|(idx, _)| idx)
+            .chain(std::iter::once(self.text.len()))
+            .collect();
+        let char_count = offsets.len().saturating_sub(1);
+        let whole = (place.floor().max(0.0) as usize).min(char_count);
+        let fract = if whole < char_count {
+            place.fract().clamp(0.0, 1.0) as f32
+        } else {
+            0.0
+        };
+        let mut highlights: Vec<(std::ops::Range<usize>, gpui::HighlightStyle)> = Vec::new();
+        if whole < char_count {
+            if fract > 0.01 {
+                let edge_alpha = FADED + (1.0 - FADED) * fract;
+                highlights.push((
+                    offsets[whole]..offsets[whole + 1],
+                    gpui::HighlightStyle {
+                        color: Some(self.color.opacity(edge_alpha).into()),
+                        ..Default::default()
+                    },
+                ));
+                if whole + 1 < char_count {
+                    highlights.push((
+                        offsets[whole + 1]..self.text.len(),
+                        gpui::HighlightStyle {
+                            color: Some(self.color.opacity(FADED).into()),
+                            ..Default::default()
+                        },
+                    ));
+                }
+            } else {
+                highlights.push((
+                    offsets[whole]..self.text.len(),
+                    gpui::HighlightStyle {
+                        color: Some(self.color.opacity(FADED).into()),
+                        ..Default::default()
+                    },
+                ));
+            }
+        }
+        gpui::StyledText::new(self.text)
+            .with_highlights(highlights)
+            .into_any_element()
+    }
 }
 
 /// Resolve scalar indices once, before native shaping uses UTF-8 offsets.

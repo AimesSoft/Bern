@@ -2657,9 +2657,7 @@ pub fn Tooltip(p: &Parent, ctx: &Ctx, props: TooltipProps, build: Build) {
             let t = text.clone();
             let k = Rc::clone(&keys_fn);
             widget.connect_query_tooltip(move |_, _, _, _, tooltip| {
-                let body = crate::reactive::untrack(|| {
-                    t.as_ref().map(|f| f()).unwrap_or_default()
-                });
+                let body = crate::reactive::untrack(|| t.as_ref().map(|f| f()).unwrap_or_default());
                 let raw_keys = crate::reactive::untrack(|| k());
                 let formatted = crate::windows::shortcut_text(&raw_keys);
                 if body.is_empty() && formatted.is_empty() {

@@ -17,7 +17,11 @@ thread_local! {
 
 /// Register application `.svg` icons into a per-build symbolic icon directory
 /// added to GTK's icon theme search path so every widget tints them natively.
-pub(crate) fn install(app_id: &str, fingerprint: u64, icons: &'static [(&'static str, &'static str)]) {
+pub(crate) fn install(
+    app_id: &str,
+    fingerprint: u64,
+    icons: &'static [(&'static str, &'static str)],
+) {
     if icons.is_empty() {
         return;
     }
@@ -27,9 +31,8 @@ pub(crate) fn install(app_id: &str, fingerprint: u64, icons: &'static [(&'static
     let _ = std::fs::create_dir_all(&dir);
     let mut mapped = Vec::with_capacity(icons.len());
     for (index, (bern_name, svg)) in icons.iter().enumerate() {
-        let theme_name: &'static str = Box::leak(
-            format!("bern-app-icon-{index}-symbolic").into_boxed_str(),
-        );
+        let theme_name: &'static str =
+            Box::leak(format!("bern-app-icon-{index}-symbolic").into_boxed_str());
         let file = dir.join(format!("{theme_name}.svg"));
         let _ = std::fs::write(&file, svg.as_bytes());
         mapped.push((*bern_name, theme_name));

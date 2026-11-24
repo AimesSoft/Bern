@@ -124,24 +124,21 @@ impl TooltipBubble {
             .text_size(px(12.0))
             .shadow_md()
             .child(self.text.clone())
-            .when_some(
-                self.keys.as_ref().filter(|k| !k.is_empty()),
-                |el, keys| {
-                    el.child(
-                        div()
-                            .px(px(5.0))
-                            .py(px(1.0))
-                            .rounded(px(4.0))
-                            .bg(self.key_bg)
-                            .border_1()
-                            .border_color(self.border)
-                            .text_color(self.key_fg)
-                            .text_size(px(11.0))
-                            .font_weight(FontWeight::MEDIUM)
-                            .child(keys.clone()),
-                    )
-                },
-            )
+            .when_some(self.keys.as_ref().filter(|k| !k.is_empty()), |el, keys| {
+                el.child(
+                    div()
+                        .px(px(5.0))
+                        .py(px(1.0))
+                        .rounded(px(4.0))
+                        .bg(self.key_bg)
+                        .border_1()
+                        .border_color(self.border)
+                        .text_color(self.key_fg)
+                        .text_size(px(11.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(keys.clone()),
+                )
+            })
     }
 }
 
@@ -258,8 +255,12 @@ pub fn tooltip(c: &Ctx, key: &'static str, props: TooltipProps, child: El) -> El
                     .offset(point(px(0.0), px(if above { -6.0 } else { 6.0 }))),
             };
             el.child(
-                deferred(placed.snap_to_window_with_margin(px(8.0)).child(bubble.view()))
-                    .with_priority(2),
+                deferred(
+                    placed
+                        .snap_to_window_with_margin(px(8.0))
+                        .child(bubble.view()),
+                )
+                .with_priority(2),
             )
         })
         .into_any_element()
@@ -1346,6 +1347,7 @@ pub fn tree_view(
         has_children: bool,
         open: bool,
     }
+    #[allow(clippy::too_many_arguments)]
     fn walk(
         idx: usize,
         depth: usize,
@@ -1809,7 +1811,7 @@ pub fn reorderable(
         Rc::new(move |text: String| {
             let trimmed = text.trim();
             let parts: Vec<&str> = trimmed
-                .split(|ch: char| ch == ':' || ch == ',' || ch == '-' || ch == '>')
+                .split([':', ',', '-', '>'])
                 .filter(|s| !s.is_empty())
                 .collect();
             if parts.len() == 2

@@ -109,6 +109,12 @@ pub(crate) struct Win {
     pub(crate) paused: Cell<bool>,
     /// `immersive` holds.
     pub(crate) immersive: Cell<bool>,
+    /// Pending close confirmation dialog, if the window asked before closing.
+    pub(crate) pending_close: RefCell<Option<crate::windows::PendingClose>>,
+    /// The close protocol approved closing this window without asking again.
+    pub(crate) allow_close: Cell<bool>,
+    /// Last reported platform window facts, to avoid redundant FFI calls.
+    pub(crate) last_facts: Cell<Option<crate::native::WindowFacts>>,
 }
 
 impl Win {
@@ -144,6 +150,9 @@ impl Win {
             fullscreen: Cell::new(false),
             paused: Cell::new(false),
             immersive: Cell::new(false),
+            pending_close: RefCell::new(None),
+            allow_close: Cell::new(false),
+            last_facts: Cell::new(None),
         })
     }
 
@@ -324,6 +333,29 @@ pub type Corners = [f32; 4];
 pub struct Ctx(Rc<Inner>);
 
 impl Ctx {
+    /// A context detached from any open window, used by background surfaces
+    /// such as `StatusItem` when all windows are closed.
+    pub(crate) fn detached(scope: &str) -> Self {
+        let def = host().def;
+        let drafts: Vec<Option<Vec<Value>>> = def
+            .sessions
+            .iter()
+            .map(|session| {
+                Some(
+                    session
+                        .fields
+                        .iter()
+                        .map(|(_, _, initial)| initial.clone())
+                        .collect(),
+                )
+            })
+            .collect();
+        let win = Win::new(0, 0, Rc::from(scope), drafts, (0.0, 0.0), None);
+        let theme = crate::theme::of(false, def.brand_seed);
+        let seeds = (def.brand_seed, def.brand_seed);
+        Self::root(theme, seeds, win, scope, None)
+    }
+
     pub(crate) fn root(
         theme: Rc<Theme>,
         seeds: Seeds,
@@ -785,6 +817,13 @@ impl Ctx {
     /// Resolve a Bern semantic color role in the hosting window's theme.
     pub fn theme_color(&self, role: &str) -> Rgba {
         self.color(role)
+    }
+
+    /// Resolve a theme role to light and dark RGB byte tuples for `WindowSet(accent:)`.
+    pub fn role_accent(&self, role: &str) -> ((u8, u8, u8), (u8, u8, u8)) {
+        let light = crate::theme::of(false, self.0.seeds.0).role_rgb(role);
+        let dark = crate::theme::of(true, self.0.seeds.1).role_rgb(role);
+        (light, dark)
     }
 
     /// The color of a recipe slot, such as the `background` of
