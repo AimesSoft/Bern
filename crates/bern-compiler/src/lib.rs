@@ -2082,11 +2082,13 @@ fn prove_contracts(
 }
 
 /// Pictures come from declared resources, in library components and in
-/// the `root` window set too.
+/// the `root` window set too. Declared `.svg` app icons are outlined here
+/// so broken files or missing `<text>` fonts fail `bern check` early.
 fn check_resources(
     components: &[ir::ComponentDef],
     root: Option<&ir::Element>,
     resources: &[ir::ResourceDef],
+    project_dir: &std::path::Path,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let root = root.cloned().map(ir::Node::Element);
@@ -2094,6 +2096,7 @@ fn check_resources(
         .iter()
         .map(|component| &component.body)
         .chain(root.as_ref());
+    let mut outlined: BTreeMap<String, Result<(), String>> = BTreeMap::new();
     for tree in trees {
         tree.walk(&mut |node| {
             let ir::Node::Element(element) = node else {
@@ -2101,9 +2104,11 @@ fn check_resources(
             };
             for prop in element.props.values() {
                 // A picture, or the application's own icon (`icon: "x.svg"`).
-                let name = match prop {
-                    ir::Prop::Resource { name } => name,
-                    ir::Prop::Icon { name } if name.to_ascii_lowercase().ends_with(".svg") => name,
+                let (name, is_app_icon) = match prop {
+                    ir::Prop::Resource { name } => (name, false),
+                    ir::Prop::Icon { name } if bern_target_api::app_icon::is_app_icon(name) => {
+                        (name, true)
+                    }
                     _ => continue,
                 };
                 if !resources.iter().any(|resource| &resource.name == name) {
@@ -2113,6 +2118,17 @@ fn check_resources(
                         ))
                         .at(element.source.clone()),
                     );
+                } else if is_app_icon {
+                    let result = outlined.entry(name.clone()).or_insert_with(|| {
+                        let path = project_dir.join(name);
+                        bern_target_api::app_icon::outline(&path).map(|_| ())
+                    });
+                    if let Err(message) = result {
+                        diagnostics.push(
+                            Diagnostic::error(format!("icon `{name}`: {message}"))
+                                .at(element.source.clone()),
+                        );
+                    }
                 }
             }
         });
@@ -2265,6 +2281,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
         &lowered,
         root_element.as_ref(),
         &config.resources,
+        &config.dir,
         &mut diagnostics,
     );
 

@@ -1653,6 +1653,8 @@ pub struct SwitchProps {
     /// The label names the switch for assistive technology only.
     pub label_hidden: bool,
     pub shape: Shape,
+    /// `style! { Switch... { foreground: ... } }`: knob color when on.
+    pub look: Option<&'static crate::style::StyleDef>,
 }
 
 #[allow(non_snake_case)]
@@ -1681,6 +1683,9 @@ pub fn Switch(p: &Parent, ctx: &Ctx, props: SwitchProps) {
     let active: glib::Object;
     if p.is_list() && !checkbox {
         let row = adw::SwitchRow::new();
+        if let Some(look) = props.look {
+            row.add_css_class(&format!("bern-switch-{}", look.name));
+        }
         if let Some(label) = label.clone() {
             let shown = row.clone();
             effect(move || shown.set_title(&label()));
@@ -1708,6 +1713,9 @@ pub fn Switch(p: &Parent, ctx: &Ctx, props: SwitchProps) {
         active = check.upcast();
     } else {
         let switch = gtk::Switch::new();
+        if let Some(look) = props.look {
+            switch.add_css_class(&format!("bern-switch-{}", look.name));
+        }
         shape(ctx, switch.upcast_ref(), &props.shape);
         control = beside(shown_label.clone(), &switch).upcast();
         active = switch.upcast();
@@ -1864,6 +1872,8 @@ pub struct SliderProps {
     /// The label names the slider for assistive technology only.
     pub label_hidden: bool,
     pub continuous: bool,
+    /// `axis: vertical`: min at the bottom, max at the top.
+    pub vertical: bool,
     /// `hover`: where the pointer is along the track while it is over the
     /// slider, from 0 at `min` to 1 at `max`, and `None` otherwise.
     pub hover: Option<crate::ctx::Field>,
@@ -1881,9 +1891,20 @@ pub fn Slider(p: &Parent, ctx: &Ctx, props: SliderProps, commit: Option<Act>) {
     let label = props.label.as_ref().map(|label| bound_text(ctx, label));
     let (min, max) = (props.min.unwrap_or(0.0), props.max.unwrap_or(1.0));
     let increment = props.step.unwrap_or((max - min) / 100.0).max(f64::EPSILON);
-    let scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, min, max, increment);
+    let orientation = if props.vertical {
+        gtk::Orientation::Vertical
+    } else {
+        gtk::Orientation::Horizontal
+    };
+    let scale = gtk::Scale::with_range(orientation, min, max, increment);
     scale.set_draw_value(false);
-    scale.set_hexpand(true);
+    if props.vertical {
+        scale.set_inverted(true);
+        scale.set_vexpand(true);
+        scale.set_hexpand(false);
+    } else {
+        scale.set_hexpand(true);
+    }
     if let Some(step) = props.step {
         scale.set_round_digits(if step.fract() == 0.0 { 0 } else { -1 });
     }
@@ -1960,20 +1981,39 @@ pub fn Slider(p: &Parent, ctx: &Ctx, props: SliderProps, commit: Option<Act>) {
         }
     });
     if let Some(field) = props.hover {
-        hover_track(ctx, &scale, field);
+        hover_track(ctx, &scale, field, props.vertical);
     }
-    let track = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    if let Some(icon) = props.min_icon {
-        let image = icons::image(icon);
-        image.add_css_class("dim-label");
-        track.append(&image);
-    }
-    track.append(&scale);
-    if let Some(icon) = props.max_icon {
-        let image = icons::image(icon);
-        image.add_css_class("dim-label");
-        track.append(&image);
-    }
+    let track = if props.vertical {
+        let track = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        track.set_vexpand(true);
+        track.set_halign(gtk::Align::Center);
+        if let Some(icon) = props.max_icon {
+            let image = icons::image(icon);
+            image.add_css_class("dim-label");
+            track.append(&image);
+        }
+        track.append(&scale);
+        if let Some(icon) = props.min_icon {
+            let image = icons::image(icon);
+            image.add_css_class("dim-label");
+            track.append(&image);
+        }
+        track
+    } else {
+        let track = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        if let Some(icon) = props.min_icon {
+            let image = icons::image(icon);
+            image.add_css_class("dim-label");
+            track.append(&image);
+        }
+        track.append(&scale);
+        if let Some(icon) = props.max_icon {
+            let image = icons::image(icon);
+            image.add_css_class("dim-label");
+            track.append(&image);
+        }
+        track
+    };
     if let Some(label) = label.clone() {
         let shown = scale.clone();
         effect(move || {
@@ -2010,19 +2050,34 @@ pub fn Slider(p: &Parent, ctx: &Ctx, props: SliderProps, commit: Option<Act>) {
 /// Keep `field` at where the pointer is along the scale's track while it
 /// is over the scale, and `None` once it leaves. It is this window's draft
 /// only: the value, its preview and the commit are the slider's own.
-fn hover_track(ctx: &Ctx, scale: &gtk::Scale, field: crate::ctx::Field) {
+fn hover_track(ctx: &Ctx, scale: &gtk::Scale, field: crate::ctx::Field, vertical: bool) {
     let bound = Bound::new(ctx, field);
     let weak = scale.downgrade();
-    let point: Rc<dyn Fn(Option<f64>)> = Rc::new(move |x| {
-        let fraction = x.and_then(|x| {
+    type HoverPoint = Rc<dyn Fn(Option<(f64, f64)>)>;
+    let point: HoverPoint = Rc::new(move |pos| {
+        let fraction = pos.and_then(|(x, y)| {
             let scale = weak.upgrade()?;
             let trough = scale.range_rect();
             let (start, end) = scale.slider_range();
-            let flipped = scale.is_inverted() != (scale.direction() == gtk::TextDirection::Rtl);
+            let (coord, origin, span, flipped) = if vertical {
+                (
+                    y,
+                    f64::from(trough.y()),
+                    f64::from(trough.height()),
+                    scale.is_inverted(),
+                )
+            } else {
+                (
+                    x,
+                    f64::from(trough.x()),
+                    f64::from(trough.width()),
+                    scale.is_inverted() != (scale.direction() == gtk::TextDirection::Rtl),
+                )
+            };
             Some(crate::gesture_state::track_fraction(
-                x,
-                f64::from(trough.x()),
-                f64::from(trough.width()),
+                coord,
+                origin,
+                span,
                 f64::from((end - start).max(0)),
                 flipped,
             ))
@@ -2035,11 +2090,11 @@ fn hover_track(ctx: &Ctx, scale: &gtk::Scale, field: crate::ctx::Field) {
     let motion = gtk::EventControllerMotion::new();
     {
         let point = Rc::clone(&point);
-        motion.connect_enter(move |_, x, _| point(Some(x)));
+        motion.connect_enter(move |_, x, y| point(Some((x, y))));
     }
     {
         let point = Rc::clone(&point);
-        motion.connect_motion(move |_, x, _| point(Some(x)));
+        motion.connect_motion(move |_, x, y| point(Some((x, y))));
     }
     {
         let point = Rc::clone(&point);
@@ -2129,6 +2184,9 @@ pub fn Picker(p: &Parent, ctx: &Ctx, props: PickerProps) {
         for index in 0..props.options.len() {
             let button = gtk::ToggleButton::new();
             button.set_valign(gtk::Align::Center);
+            if props.shape.capsule {
+                button.add_css_class("bern-capsule");
+            }
             if let Some(first) = buttons.first() {
                 button.set_group(Some(first));
             }
@@ -2404,6 +2462,7 @@ pub fn DynamicPicker(p: &Parent, ctx: &Ctx, props: DynamicPickerProps) {
             let group = gtk::Box::new(gtk::Orientation::Horizontal, 0);
             group.add_css_class("linked");
             group.set_valign(gtk::Align::Center);
+            shape(ctx, group.upcast_ref(), &props.shape);
             group.upcast::<gtk::Widget>()
         };
         let holder_ref = holder.clone();
@@ -2412,6 +2471,7 @@ pub fn DynamicPicker(p: &Parent, ctx: &Ctx, props: DynamicPickerProps) {
         let read_val = bound.clone();
         let choose = Rc::clone(&choose_val);
         let is_chips = props.style == Some("chips");
+        let capsule_chips = is_chips && props.shape.capsule;
         effect(move || {
             let cur_items = read_items();
             let cur_val = read_val.get();
@@ -2423,6 +2483,9 @@ pub fn DynamicPicker(p: &Parent, ctx: &Ctx, props: DynamicPickerProps) {
             for (key, _, lbl) in &cur_items {
                 let btn = gtk::ToggleButton::with_label(lbl);
                 btn.set_valign(gtk::Align::Center);
+                if capsule_chips {
+                    btn.add_css_class("bern-capsule");
+                }
                 if let Some(first) = &first_btn {
                     btn.set_group(Some(first));
                 } else {
@@ -2569,12 +2632,63 @@ pub fn DynamicPicker(p: &Parent, ctx: &Ctx, props: DynamicPickerProps) {
     );
 }
 
+#[derive(Default)]
+pub struct TooltipProps {
+    pub content: Option<Str>,
+    pub keys: Option<&'static str>,
+    pub bound_keys: Option<Str>,
+    pub placement: Option<&'static str>,
+}
+
 #[allow(non_snake_case)]
-pub fn Tooltip(p: &Parent, ctx: &Ctx, content: Option<Str>, build: Build) {
+pub fn Tooltip(p: &Parent, ctx: &Ctx, props: TooltipProps, build: Build) {
     let region = p.region();
     build(&region, ctx);
-    let Some(content) = content else { return };
-    let text = bound_text(ctx, &content);
+    let _ = props.placement;
+    let text = props.content.as_ref().map(|c| bound_text(ctx, c));
+    let keys_fn: Option<Rc<dyn Fn() -> String>> = match (&props.bound_keys, props.keys) {
+        (Some(bound), _) => Some(bound_text(ctx, bound)),
+        (None, Some(lit)) => Some(Rc::new(move || lit.to_string())),
+        (None, None) => None,
+    };
+    if let Some(keys_fn) = keys_fn {
+        for widget in region.widgets() {
+            widget.set_has_tooltip(true);
+            let t = text.clone();
+            let k = Rc::clone(&keys_fn);
+            widget.connect_query_tooltip(move |_, _, _, _, tooltip| {
+                let body = crate::reactive::untrack(|| {
+                    t.as_ref().map(|f| f()).unwrap_or_default()
+                });
+                let raw_keys = crate::reactive::untrack(|| k());
+                let formatted = crate::windows::shortcut_text(&raw_keys);
+                if body.is_empty() && formatted.is_empty() {
+                    return false;
+                }
+                if formatted.is_empty() {
+                    tooltip.set_text(Some(&body));
+                    return true;
+                }
+                let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+                row.set_valign(gtk::Align::Center);
+                if !body.is_empty() {
+                    let lbl = gtk::Label::new(Some(&body));
+                    row.append(&lbl);
+                }
+                let caps = gtk::Box::new(gtk::Orientation::Horizontal, 3);
+                for part in formatted.split('+') {
+                    let cap = gtk::Label::new(Some(part));
+                    cap.add_css_class("bern-keycap");
+                    caps.append(&cap);
+                }
+                row.append(&caps);
+                tooltip.set_custom(Some(&row));
+                true
+            });
+        }
+        return;
+    }
+    let Some(text) = text else { return };
     for widget in region.widgets() {
         let w = widget.clone();
         let t = Rc::clone(&text);
@@ -5124,9 +5238,12 @@ pub struct LanguagePickerProps {
 #[allow(non_snake_case)]
 pub fn LanguagePicker(p: &Parent, ctx: &Ctx, props: LanguagePickerProps) {
     let supported: Rc<Vec<String>> = Rc::new(text::with(|language| language.supported.clone()));
-    let names: Vec<String> = supported.iter().map(|tag| text::autonym(tag)).collect();
-    let names: Vec<&str> = names.iter().map(String::as_str).collect();
-    let model = gtk::StringList::new(&names);
+    let initial_system = text::tr("bern.language.system");
+    let mut names: Vec<String> = Vec::with_capacity(supported.len() + 1);
+    names.push(initial_system);
+    names.extend(supported.iter().map(|tag| text::autonym(tag)));
+    let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
+    let model = gtk::StringList::new(&name_refs);
     let label = props.label.as_ref().map(|label| bound_text(ctx, label));
     let (owner, widget): (glib::Object, gtk::Widget) = if p.is_list() && !props.label_hidden {
         let row = adw::ComboRow::new();
@@ -5137,22 +5254,35 @@ pub fn LanguagePicker(p: &Parent, ctx: &Ctx, props: LanguagePickerProps) {
         }
         (row.clone().upcast(), row.upcast())
     } else {
-        let dropdown = gtk::DropDown::new(Some(model), None::<gtk::Expression>);
+        let dropdown = gtk::DropDown::new(Some(model.clone()), None::<gtk::Expression>);
         (dropdown.clone().upcast(), dropdown.upcast())
     };
     let updating = Rc::new(Cell::new(false));
     let guard = Rc::clone(&updating);
     let shown = owner.clone();
     let tags = Rc::clone(&supported);
+    let list_model = model.clone();
     effect(move || {
         let current = text::language();
-        if let Some(index) = tags.iter().position(|tag| *tag == current)
-            && shown.property::<u32>("selected") != index as u32
-        {
-            guard.set(true);
-            shown.set_property("selected", index as u32);
-            guard.set(false);
+        let system_label = text::tr("bern.language.system");
+        let follows = text::follows_system();
+        let target = if follows {
+            Some(0u32)
+        } else {
+            tags.iter()
+                .position(|tag| *tag == current)
+                .map(|i| (i + 1) as u32)
+        };
+        guard.set(true);
+        if list_model.string(0).as_deref() != Some(system_label.as_str()) {
+            list_model.splice(0, 1, &[system_label.as_str()]);
         }
+        if let Some(index) = target
+            && shown.property::<u32>("selected") != index
+        {
+            shown.set_property("selected", index);
+        }
+        guard.set(false);
     });
     let tags = Rc::clone(&supported);
     owner.connect_notify_local(Some("selected"), move |owner, _| {
@@ -5160,8 +5290,12 @@ pub fn LanguagePicker(p: &Parent, ctx: &Ctx, props: LanguagePickerProps) {
             return;
         }
         let index = owner.property::<u32>("selected") as usize;
-        if let Some(tag) = tags.get(index) {
-            let tag = tag.clone();
+        let tag = if index == 0 {
+            Some("system".to_string())
+        } else {
+            tags.get(index - 1).cloned()
+        };
+        if let Some(tag) = tag {
             // Text bindings update after the selection change finishes.
             glib::idle_add_local_once(move || {
                 text::set_language(&tag);
@@ -5210,10 +5344,15 @@ pub struct MenuProps {
     pub label: Option<Str>,
     pub icon: Option<&'static str>,
     /// `style: icon`: a round button showing only the icon, the label as
-    /// its tooltip and accessible name.
+    /// its tooltip and accessible name; without an icon, shows its text
+    /// trigger without a dropdown arrow.
     pub icon_only: bool,
     pub hide_disabled: bool,
     pub shape: Shape,
+    /// Preferred side (`above` / `below`) for the popup menu.
+    pub placement: Option<&'static str>,
+    /// `bold: true`: bold trigger label.
+    pub bold: bool,
 }
 
 /// A menu button. Each item is registered on the button, so external
@@ -5222,17 +5361,34 @@ pub struct MenuProps {
 pub fn Menu(p: &Parent, ctx: &Ctx, props: MenuProps, items: Vec<Option<MenuItem>>) {
     let button = gtk::MenuButton::new();
     let label = props.label.as_ref().map(|label| bound_text(ctx, label));
+    if props.bold {
+        button.add_css_class("bern-bold");
+    }
+    match props.placement {
+        Some("above") => button.set_direction(gtk::ArrowType::Up),
+        Some("below") => button.set_direction(gtk::ArrowType::Down),
+        _ => {}
+    }
     if props.icon_only {
-        button.set_icon_name(icons::name(props.icon.unwrap_or("ellipsis")));
-        button.add_css_class("flat");
-        button.add_css_class("circular");
-        if let Some(label) = label.clone() {
-            let named = button.clone();
-            effect(move || {
-                let text = label();
-                named.set_tooltip_text(Some(&text));
-                named.update_property(&[gtk::accessible::Property::Label(&text)]);
-            });
+        if let Some(icon) = props.icon {
+            button.set_icon_name(icons::name(icon));
+            button.add_css_class("flat");
+            button.add_css_class("circular");
+            if let Some(label) = label.clone() {
+                let named = button.clone();
+                effect(move || {
+                    let text = label();
+                    named.set_tooltip_text(Some(&text));
+                    named.update_property(&[gtk::accessible::Property::Label(&text)]);
+                });
+            }
+        } else {
+            button.add_css_class("flat");
+            button.set_always_show_arrow(false);
+            if let Some(label) = label.clone() {
+                let shown = button.clone();
+                effect(move || shown.set_label(&label()));
+            }
         }
     } else {
         match (props.icon, label.clone()) {

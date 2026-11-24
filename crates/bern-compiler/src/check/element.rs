@@ -132,15 +132,11 @@ impl Checker<'_> {
             // Chips are one control per option; `height` sizes the single
             // button of a picker shown as a menu. `shape: capsule` draws
             // each chip as a capsule.
-            for prop in ["height"] {
-                if let Some(given) = element.prop(prop) {
-                    self.error(
-                        given.name.span(),
-                        format!(
-                            "`style: chips` shows a chip per option, so `{prop}:` has no button to size; leave it out"
-                        ),
-                    );
-                }
+            if let Some(given) = element.prop("height") {
+                self.error(
+                    given.name.span(),
+                    "`style: chips` shows a chip per option, so `height:` has no button to size; leave it out",
+                );
             }
         }
         // The shortcut a user chooses is state: the action keeps it.
@@ -153,6 +149,18 @@ impl Checker<'_> {
                     .map_or(element.span, |prop| prop.value.span()),
                 "`current` is the shortcut the state holds, such as `app.keys.open`; the action keeps the one chosen",
             );
+        }
+        if parts.kind == "Shortcut"
+            && let Some(ir::Prop::Number { value }) = parts.props.get("hold_after")
+        {
+            let span = element
+                .prop("hold_after")
+                .map_or(element.span, |prop| prop.value.span());
+            if !parts.props.contains_key("hold") {
+                self.error(span, "`hold_after` on `Shortcut` requires `hold`");
+            } else if !value.is_finite() || *value <= 0.0 {
+                self.error(span, "`hold_after` on `Shortcut` must be greater than 0");
+            }
         }
         if parts.kind == "TreeView"
             && let Some(Type::Record { name: rec_name }) = parts.item_ty.as_ref()

@@ -239,7 +239,8 @@ impl Target for SwiftUiIos {
         let product = product_name(app);
         let bundle = PathBuf::from(format!("{product}.app"));
         let frontends = FrontEnds::of(&context.target);
-        let mut files = swift_sources(app, frontends);
+        let app_icons = crate::app_icon_contours(app, context)?;
+        let mut files = swift_sources(app, frontends, app_icons);
         files.extend([
             GeneratedFile::text("Sources/bern.h", HEADER),
             GeneratedFile::text("glue/Cargo.toml", glue::cargo_toml(context, app)),
@@ -1020,7 +1021,11 @@ enum Part {
 
 /// The Swift of the front ends a target builds: in `Sources` the one the
 /// executable is, and in `Sources17` the framework's, in an app of both.
-fn swift_sources(app: &Application, frontends: FrontEnds) -> Vec<GeneratedFile> {
+fn swift_sources(
+    app: &Application,
+    frontends: FrontEnds,
+    app_icons: Vec<(String, Vec<bern_target_api::app_icon::Contour>)>,
+) -> Vec<GeneratedFile> {
     let sources = [
         ("BernRuntime.swift", crate::runtime_with_svg(app, RUNTIME)),
         ("BernMedia.swift", MEDIA.to_string()),
@@ -1028,7 +1033,9 @@ fn swift_sources(app: &Application, frontends: FrontEnds) -> Vec<GeneratedFile> 
         ("BernUIKit.swift", UIKIT.to_string()),
         (
             "BernGenerated.swift",
-            Generator::new(app, Platform::Ios).generate(app.protocol.fingerprint()),
+            Generator::new(app, Platform::Ios)
+                .with_app_icons(app_icons)
+                .generate(app.protocol.fingerprint()),
         ),
     ];
     let mut files = Vec::new();

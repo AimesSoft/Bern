@@ -506,7 +506,9 @@ impl<'a> Generator<'a> {
                     layer: if repeats {
                         own.layer
                     } else {
-                        ctx.layer && direct && matches!(element.kind.as_str(), "Rail" | "Canvas")
+                        ctx.layer
+                            && direct
+                            && matches!(element.kind.as_str(), "Rail" | "Canvas" | "NativeView")
                     },
                     ..own
                 };

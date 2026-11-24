@@ -863,11 +863,7 @@ fn switch_knob(
     }
 }
 
-fn bold_menus(
-    descriptor: &TargetDescriptor,
-    app: &Application,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
+fn bold_menus(descriptor: &TargetDescriptor, app: &Application, diagnostics: &mut Vec<Diagnostic>) {
     if let Some(element) = first_element(app, |element| {
         element.kind == "Menu" && element.keyword("bold") == Some("true")
     }) {
@@ -906,7 +902,7 @@ fn tooltip_keys(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     if let Some(element) = first_element(app, |element| {
-        element.kind == "Tooltip" && element.keyword("keys").is_some()
+        element.kind == "Tooltip" && element.prop("keys").is_some()
     }) {
         diagnostics.push(
             Diagnostic::warning(format!(
@@ -1363,9 +1359,11 @@ fn bound_shortcuts(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let bound = |element: &bern_ir::Element| {
-        ["shortcut", "key"].iter().any(|name| {
+        ["shortcut", "key", "keys"].iter().any(|name| {
             matches!(element.prop(name), Some(bern_ir::Prop::Expr { .. }))
-                && (*name == "shortcut" || element.kind == "Shortcut")
+                && (*name == "shortcut"
+                    || (*name == "key" && element.kind == "Shortcut")
+                    || (*name == "keys" && element.kind == "Tooltip"))
         })
     };
     let in_menu_bar = app.windows.menu_bar.as_ref().and_then(|bar| {

@@ -971,7 +971,10 @@ fn a_slider_reports_where_the_pointer_hovers() {
     let plain = bern_backend_gpui::Generator::new(&app, "macos").generate(0, "{}");
     // The showcase has diagnostics of its own elsewhere; hover adds none.
     let before = bern_backend_gpui::Generator::new(&app, "macos").check();
-    assert!(plain.contains("max_icon: None, hover: None }"), "{plain}");
+    assert!(
+        plain.contains("max_icon: None, hover: None, vertical: false }"),
+        "{plain}"
+    );
     let field = slider.field("value").unwrap().clone();
     slider.props.insert("hover".into(), Prop::Field { field });
     app.components[0].body = Node::Element(slider);
@@ -1329,10 +1332,258 @@ pub fn app(app: controls::Client, windows: AppWindows) -> impl View {
         "Some(\"status.success\")",
         "color: Some(\"status.error\")",
         "cursor: Some(\"pointer\")",
-        "b::shortcut(c, \"right\".to_string(),",
-        ", true, Some(",
-        "b::shortcut(c, \"space\".to_string(), true, false, Some(",
+        "b::shortcut(c, b::ShortcutProps { key: \"right\".to_string(),",
+        "quiet: true, hold: None, hold_after: 0.3 }, Some(",
+        "b::shortcut(c, b::ShortcutProps { key: \"space\".to_string(), enabled: true, quiet: false, hold: None, hold_after: 0.3 }, Some(",
         "b::image_url(c, rt::url(",
+    ] {
+        assert!(
+            generated.contains(expected),
+            "missing `{expected}`:\n{generated}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn player_controls_and_app_icons_generate_for_gpui() {
+    let protocol = r#"
+#[bern::protocol(namespace = "player", version = 1)]
+pub mod player {
+    use bern::prelude::*;
+
+    #[value]
+    pub enum Mode {
+        #[label(tr! { "en" => "Fit" })]
+        Fit,
+        #[label(tr! { "en" => "Fill" })]
+        Fill,
+    }
+
+    #[value]
+    pub struct TrackItem {
+        pub id: String,
+        #[content]
+        pub title: String,
+    }
+
+    #[state]
+    pub struct State {
+        pub volume: f64,
+        pub muted: bool,
+        pub tags: Vec<String>,
+        pub queue: Vec<TrackItem>,
+        pub hint_key: String,
+    }
+
+    #[commands]
+    pub trait Commands {
+        fn set_volume(&mut self, volume: f64) -> Result<(), CommandError>;
+        fn toggle_mute(&mut self, muted: bool) -> Result<(), CommandError>;
+        fn seek_step(&mut self) -> Result<(), CommandError>;
+        fn move_item(&mut self, from: i64, to: i64) -> Result<(), CommandError>;
+    }
+}
+"#;
+    let ui = r#"
+use bern::prelude::*;
+use player_protocol::player::{self, Mode};
+
+style! {
+    Stack.framed {
+        border: border(control.border, width: 1),
+        corner: 8,
+    }
+    Switch.accent_knob {
+        foreground: accent,
+    }
+}
+
+#[bern::session]
+pub struct Draft {
+    pub mode: Mode,
+    pub boosting: bool,
+    pub from_idx: i64,
+    pub to_idx: i64,
+}
+
+#[component]
+pub fn player_bar(app: player::Client, #[session] draft: Draft) -> impl View {
+    ui! {
+        Stack(variant: framed, idle_area: 2.0) {
+            NativeView(id: canvas, label: tr! { "en" => "Canvas" }, gpui: "canvas.rs") {
+                NativeValue(name: tags, value: app.tags)
+                NativeAction(id: ping, label: tr! { "en" => "Ping" }) => app.seek_step()
+                Fallback {
+                    Text(content: tr! { "en" => "Video" })
+                }
+            }
+            Row(gap: 8) {
+                Tooltip(content: tr! { "en" => "Play" }, keys: app.hint_key, placement: above) {
+                    IconButton(id: play, icon: "icons/play.svg", label: tr! { "en" => "Play" }) => app.seek_step()
+                }
+                PopoverButton(id: vol_pop, label: tr! { "en" => "Volume" }, icon: "plus.circle", placement: above) {
+                    Slider(
+                        id: vol,
+                        label: tr! { "en" => "Volume" },
+                        label_hidden: true,
+                        current: app.volume,
+                        min: 0.0,
+                        max: 1.0,
+                        axis: vertical
+                    ) => app.set_volume(app.volume)
+                }
+                Menu(id: speed_menu, label: tr! { "en" => "Speed" }, style: icon, bold: true, placement: above) {
+                    MenuItem(id: fast, label: tr! { "en" => "2x" }, icon: "arrow.uturn.backward") => app.seek_step()
+                }
+                Switch(id: mute_sw, label: tr! { "en" => "Mute" }, checked: app.muted, variant: accent_knob) => app.toggle_mute(app.muted)
+                Picker(id: mode_seg, label: tr! { "en" => "Mode" }, value: draft.mode, style: segmented, shape: capsule, height: 28)
+                Picker(id: mode_chips, label: tr! { "en" => "Chips" }, value: draft.mode, style: chips, shape: capsule)
+                LanguagePicker(id: lang, label: tr! { "en" => "Language" })
+                Reorderable(
+                    id: queue,
+                    label: tr! { "en" => "Queue" },
+                    items: app.queue,
+                    key: id,
+                    move_from: draft.from_idx,
+                    move_to: draft.to_idx
+                ) |item| {
+                    Text(content: item.title)
+                    Spacer
+                    Label(title: tr! { "en" => "Drag" }, icon: "line.3.horizontal", display: icon)
+                } => app.move_item(draft.from_idx, draft.to_idx)
+                Shortcut(key: "right", hold: draft.boosting, hold_after: 0.25, quiet: true) => app.seek_step()
+            }
+        }
+    }
+}
+
+#[component]
+pub fn app(app: player::Client, windows: AppWindows) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Player" }, initial: open, idle_after: 3.0) {
+                player_bar(app: app)
+            }
+        }
+    }
+}
+"#;
+    let root = workspace();
+    let dir =
+        std::env::temp_dir().join(format!("bern-gpui-player-controls-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    for (package, source) in [
+        ("player-protocol", protocol),
+        ("player-ui", ui),
+        ("player-core", ""),
+    ] {
+        std::fs::create_dir_all(dir.join(package).join("src")).unwrap();
+        std::fs::write(
+            dir.join(package).join("Cargo.toml"),
+            format!("[package]\nname = \"{package}\"\n"),
+        )
+        .unwrap();
+        std::fs::write(dir.join(package).join("src/lib.rs"), source).unwrap();
+    }
+    std::fs::write(dir.join("player-ui/src/canvas.rs"), "pub fn render() {}\n").unwrap();
+    std::fs::create_dir_all(dir.join("icons")).unwrap();
+    std::fs::write(
+        dir.join("icons/play.svg"),
+        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("Bern.toml"),
+        r#"
+[app]
+id = "player"
+bundle_id = "dev.bern.player"
+version = "0.1.0"
+name = { "en" = "Player" }
+
+[languages]
+supported = ["en"]
+default = "en"
+
+[resources]
+paths = ["icons/play.svg"]
+
+[protocol]
+package = "player-protocol"
+source = "player-protocol/src/lib.rs"
+
+[engine]
+package = "player-core"
+type = "player_core::Engine"
+
+[ui]
+package = "player-ui"
+sources = ["player-ui/src/lib.rs"]
+root = "app"
+
+[targets.macos]
+platform = "macos"
+ui = "gpui"
+"#,
+    )
+    .unwrap();
+    let config = bern_compiler::config::load(&dir.join("Bern.toml")).unwrap();
+    let compiled = bern_compiler::compile(&config).unwrap_or_else(|errors| {
+        panic!(
+            "{}",
+            errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    });
+    let target = config.targets.first().unwrap().clone();
+    let problems = Gpui::MACOS.check(&compiled.app, &target);
+    assert!(problems.is_empty(), "{problems:?}");
+    let files = Gpui::MACOS
+        .generate(
+            &compiled.app,
+            &BuildContext {
+                project_dir: config.dir.clone(),
+                workspace_dir: root.clone(),
+                output_dir: dir.join("out"),
+                target,
+                protocol_package: config.protocol_package.name.clone(),
+                protocol_path: config.protocol_package.dir.clone(),
+                protocol_module: compiled.protocol_module.clone(),
+                engine_package: config.engine_package.name.clone(),
+                engine_path: config.engine_package.dir.clone(),
+                engine_type: config.engine_type.clone(),
+                modules: Vec::new(),
+                framework: Framework::Path(root.join("crates")),
+                release: false,
+            },
+        )
+        .unwrap();
+    let generated = files
+        .iter()
+        .find(|f| f.path.ends_with("ui.rs"))
+        .map(|f| String::from_utf8_lossy(&f.contents).into_owned())
+        .unwrap();
+    for expected in [
+        "b::idle_area(c, \"0#idle\", 2.0",
+        "b::native_host(c,",
+        "b::Grow { flex: true, width: true, height: false, keep: false }",
+        "b::tooltip(c, \"0.1.0\", b::TooltipProps {",
+        "placement: Some(\"above\")",
+        "vertical: true",
+        "bold: true",
+        "look: Some(&STYLE_2)",
+        "b::PickerStyle::Chips",
+        "b::language_picker(c,",
+        "b::reorderable(c, \"queue\",",
+        "hold_after: 0.25",
+        "border: Some((b::Color::Role(\"control.border\"), 1.0))",
+        "pub tags: Vec<String>",
+        "\"icons/play.svg\"",
+        "\"line.3.horizontal\"",
     ] {
         assert!(
             generated.contains(expected),

@@ -168,6 +168,7 @@ impl Generator<'_> {
             &element.children,
             &Ctx {
                 layers: moving_layer,
+                in_stack: true,
                 ..ctx.clone()
             },
         );

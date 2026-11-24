@@ -579,13 +579,13 @@ std::vector<std::string> const& Supported() { return supported; }
 
 bool SetLanguage(std::string const& tag) {
     if (std::find(supported.begin(), supported.end(), tag) == supported.end()) return false;
+    KeepLanguage(tag);
     Reactive::Batch([&] {
+        followsSystem.Set(false);
         language.Set(tag);
         strings.Set(TableFor(tag));
     });
     bern_platform_language(reinterpret_cast<uint8_t const*>(tag.data()), tag.size());
-    KeepLanguage(tag);
-    followsSystem.Set(false);
     return true;
 }
 

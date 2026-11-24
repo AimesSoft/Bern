@@ -37,6 +37,8 @@ pub struct SliderProps {
     /// Where the pointer is along the track while it is over it, from 0 at
     /// `min` to 1 at `max`; `None` otherwise.
     pub hover: Option<crate::Field>,
+    /// Vertical track (`min` at bottom, `max` at top).
+    pub vertical: bool,
 }
 
 /// The value at a fraction of the track, on a step.
@@ -82,44 +84,96 @@ impl RenderOnce for Track {
             0.0
         };
         let [track, fill, thumb] = self.colors;
-        let at = move |x: Pixels, bounds: Bounds<Pixels>| {
-            let width = f64::from(bounds.size.width).max(1.0);
-            snapped(&props, f64::from(x - bounds.origin.x) / width)
+        let vertical = props.vertical;
+        let at = move |pos: gpui::Point<Pixels>, bounds: Bounds<Pixels>| {
+            let fraction = if vertical {
+                let height = f64::from(bounds.size.height).max(1.0);
+                1.0 - f64::from(pos.y - bounds.origin.y) / height
+            } else {
+                let width = f64::from(bounds.size.width).max(1.0);
+                f64::from(pos.x - bounds.origin.x) / width
+            };
+            snapped(&props, fraction)
         };
         let measured = Rc::clone(&bounds);
-        let element = div()
-            .id(self.key)
-            .relative()
-            .flex_1()
-            .h(px(24.0))
-            .flex()
-            .items_center()
-            .child(
-                canvas(move |bounds, _, _| measured.set(bounds), |_, _, _, _| {})
-                    .absolute()
-                    .size_full(),
-            )
-            .child(
-                div().w_full().h(px(4.0)).rounded(px(2.0)).bg(track).child(
+        let element = if vertical {
+            div()
+                .id(self.key)
+                .relative()
+                .flex_1()
+                .w(px(24.0))
+                .min_h(px(120.0))
+                .flex()
+                .justify_center()
+                .child(
+                    canvas(move |bounds, _, _| measured.set(bounds), |_, _, _, _| {})
+                        .absolute()
+                        .size_full(),
+                )
+                .child(
                     div()
+                        .w(px(4.0))
                         .h_full()
-                        .w(relative(fraction as f32))
                         .rounded(px(2.0))
-                        .bg(fill),
-                ),
-            )
-            .child(
-                div()
-                    .absolute()
-                    .left(relative(fraction as f32))
-                    .ml(px(-9.0))
-                    .size(px(18.0))
-                    .rounded_full()
-                    .bg(thumb)
-                    .border_1()
-                    .border_color(fill)
-                    .shadow_sm(),
-            );
+                        .bg(track)
+                        .flex()
+                        .flex_col()
+                        .justify_end()
+                        .child(
+                            div()
+                                .w_full()
+                                .h(relative(fraction as f32))
+                                .rounded(px(2.0))
+                                .bg(fill),
+                        ),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .bottom(relative(fraction as f32))
+                        .mb(px(-9.0))
+                        .size(px(18.0))
+                        .rounded_full()
+                        .bg(thumb)
+                        .border_1()
+                        .border_color(fill)
+                        .shadow_sm(),
+                )
+        } else {
+            div()
+                .id(self.key)
+                .relative()
+                .flex_1()
+                .h(px(24.0))
+                .flex()
+                .items_center()
+                .child(
+                    canvas(move |bounds, _, _| measured.set(bounds), |_, _, _, _| {})
+                        .absolute()
+                        .size_full(),
+                )
+                .child(
+                    div().w_full().h(px(4.0)).rounded(px(2.0)).bg(track).child(
+                        div()
+                            .h_full()
+                            .w(relative(fraction as f32))
+                            .rounded(px(2.0))
+                            .bg(fill),
+                    ),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .left(relative(fraction as f32))
+                        .ml(px(-9.0))
+                        .size(px(18.0))
+                        .rounded_full()
+                        .bg(thumb)
+                        .border_1()
+                        .border_color(fill)
+                        .shadow_sm(),
+                )
+        };
         let element = match self.hover {
             Some(hover) => {
                 let (moving, left) = (Rc::clone(&hover), hover);
@@ -127,8 +181,13 @@ impl RenderOnce for Track {
                 element
                     .on_mouse_move(move |event: &MouseMoveEvent, _, _| {
                         let bounds = measured.get();
-                        let width = f64::from(bounds.size.width).max(1.0);
-                        let fraction = f64::from(event.position.x - bounds.origin.x) / width;
+                        let fraction = if vertical {
+                            let height = f64::from(bounds.size.height).max(1.0);
+                            1.0 - f64::from(event.position.y - bounds.origin.y) / height
+                        } else {
+                            let width = f64::from(bounds.size.width).max(1.0);
+                            f64::from(event.position.x - bounds.origin.x) / width
+                        };
                         moving(Some(fraction.clamp(0.0, 1.0)));
                     })
                     .on_hover(move |hovered, _, _| {
@@ -151,11 +210,11 @@ impl RenderOnce for Track {
                 // The slider takes the press: what lies under it does not.
                 cx.stop_propagation();
                 dragging_down.set(true);
-                preview(at(event.position.x, down.get()));
+                preview(at(event.position, down.get()));
             })
             .on_mouse_move(move |event: &MouseMoveEvent, _, _| {
                 if dragging_move.get() && event.pressed_button == Some(MouseButton::Left) {
-                    preview_move(at(event.position.x, moving.get()));
+                    preview_move(at(event.position, moving.get()));
                 }
             })
             .on_mouse_up_out(MouseButton::Left, {
@@ -164,13 +223,13 @@ impl RenderOnce for Track {
                 let bounds = Rc::clone(&up);
                 move |event: &MouseUpEvent, _, _| {
                     if dragging.replace(false) {
-                        commit(at(event.position.x, bounds.get()));
+                        commit(at(event.position, bounds.get()));
                     }
                 }
             })
             .on_mouse_up(MouseButton::Left, move |event: &MouseUpEvent, _, _| {
                 if dragging_up.replace(false) {
-                    commit(at(event.position.x, up.get()));
+                    commit(at(event.position, up.get()));
                 }
             })
     }
@@ -275,6 +334,38 @@ pub fn slider(c: &Ctx, id: &'static str, label: String, model: Model, props: Sli
         hover,
         colors,
     };
+    if props.vertical {
+        let col = c
+            .grow()
+            .apply(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(px(8.0))
+                    .h_full(),
+            )
+            .children(
+                (!props.label_hidden).then(|| {
+                    div()
+                        .text_size(px(13.0))
+                        .text_color(c.color("text.primary"))
+                        .child(label)
+                }),
+            )
+            .children(
+                props
+                    .max_icon
+                    .map(|icon| icons::icon(icon, 16.0, icon_color)),
+            )
+            .child(track)
+            .children(
+                props
+                    .min_icon
+                    .map(|icon| icons::icon(icon, 16.0, icon_color)),
+            );
+        return col.into_any_element();
+    }
     let row = div()
         .flex()
         .flex_row()
@@ -445,6 +536,7 @@ pub fn color_picker(
                         min_icon: None,
                         max_icon: None,
                         hover: None,
+                        vertical: false,
                     },
                     value,
                     enabled,
@@ -522,13 +614,35 @@ pub fn color_picker(
 
 // MARK: - Shortcuts
 
+/// Properties of a `Shortcut` declaration.
+#[derive(Clone, Debug)]
+pub struct ShortcutProps {
+    pub key: String,
+    pub enabled: bool,
+    pub quiet: bool,
+    pub hold: Option<crate::Field>,
+    pub hold_after: f64,
+}
+
 /// `Shortcut`: a key combination that runs the action while mounted and
 /// enabled; it shows nothing. With `quiet`, its key is no input for
-/// `window.idle`.
-pub fn shortcut(c: &Ctx, key: String, enabled: bool, quiet: bool, action: Option<Act>) -> El {
-    if enabled && c.enabled() {
+/// `window.idle`. With `hold`, holding past `hold_after` seconds sets the
+/// draft field true until release instead of running the tap action.
+pub fn shortcut(c: &Ctx, props: ShortcutProps, action: Option<Act>) -> El {
+    if props.enabled && c.enabled() {
         let press = crate::controls::press(c, None, action);
-        crate::controls::register_shortcut_with_quiet(c, Some(&key), &press, quiet);
+        if let Some(hold) = props.hold {
+            crate::controls::register_hold_shortcut(
+                c,
+                Some(&props.key),
+                &press,
+                props.quiet,
+                hold,
+                props.hold_after,
+            );
+        } else {
+            crate::controls::register_shortcut_with_quiet(c, Some(&props.key), &press, props.quiet);
+        }
     }
     // Out of the flow, so its container's spacing does not count it.
     div().absolute().into_any_element()

@@ -56,8 +56,9 @@ mod windows;
 pub use gestures::{SwipeProps, swipe};
 
 pub use behaviors::{
-    ColorPickerProps, ShortcutInputProps, SliderProps, color_picker, focus_on_appear, focus_region,
-    pinch, screen_brightness, shortcut, shortcut_input, slider, timer, toast, watch,
+    ColorPickerProps, ShortcutInputProps, ShortcutProps, SliderProps, color_picker,
+    focus_on_appear, focus_region, pinch, screen_brightness, shortcut, shortcut_input, slider,
+    timer, toast, watch,
 };
 pub use bern_ffi;
 pub use bern_ffi::protocol;
@@ -77,9 +78,9 @@ pub use ctx::{
 };
 pub use extra::{
     AlertActionSpec, AvatarProps, BannerProps, BottomSheetProps, DatePickerProps, NumberInputProps,
-    ReorderableProps, SplitPaneProps, TimePickerProps, TreeViewProps, alert, avatar, badge, banner,
-    bottom_sheet, date_picker, disclosure, empty_state, number_input, refreshable, reorderable,
-    split_pane, time_picker, tooltip, tree_view,
+    ReorderableProps, SplitPaneProps, TimePickerProps, TooltipProps, TreeViewProps, alert, avatar,
+    badge, banner, bottom_sheet, date_picker, disclosure, empty_state, number_input, refreshable,
+    reorderable, split_pane, time_picker, tooltip, tree_view,
 };
 pub use filters::{blur_scope, glow};
 pub use form::{FormProps, SectionProps, form, section};
@@ -87,8 +88,8 @@ pub use gpui;
 pub use host::{WindowOp, dispatch, window_command};
 pub use layout::{
     AccordionProps, Align, Flex, GridProps, Grow, Layers, Len, Pad, PreviewProps, Size, Style,
-    accordion, adaptive, column, cover, divider, flow, grid, lazy_grid, preview_list, reveal, row,
-    scroll, spacer, stack, tab_selection, tabs,
+    accordion, adaptive, column, cover, divider, flow, grid, idle_area, lazy_grid, native_host,
+    preview_list, reveal, row, scroll, spacer, stack, tab_selection, tabs,
 };
 pub use look::{ControlSize, ControlStyle, Look, Shape};
 pub use media::{MediaOp, VideoProps, media, video};

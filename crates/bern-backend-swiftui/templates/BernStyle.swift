@@ -210,9 +210,9 @@ extension View {
     /// Content shown over the view from it: a popover, or on tvOS, which
     /// has none, a sheet over the screen, as tvOS shows such content.
     @ViewBuilder func bernPopover<Content: View>(
-        isPresented: Binding<Bool>, @ViewBuilder content: @escaping () -> Content
+        isPresented: Binding<Bool>, placement: String? = nil, @ViewBuilder content: @escaping () -> Content
     ) -> some View {
-        modifier(BernPopoverPresentation(requested: isPresented, panel: content))
+        modifier(BernPopoverPresentation(requested: isPresented, placement: placement, panel: content))
     }
 
     /// A toggle shown as a button that stays down while on: the platform's
@@ -267,6 +267,7 @@ extension View {
 /// a command in one popover opens another (quick settings → full settings).
 private struct BernPopoverPresentation<Panel: View>: ViewModifier {
     @Binding var requested: Bool
+    var placement: String? = nil
     @ViewBuilder let panel: () -> Panel
     @Environment(BernWindowContext.self) private var window
     @State private var id = UUID()
@@ -302,7 +303,12 @@ private struct BernPopoverPresentation<Panel: View>: ViewModifier {
         #if os(tvOS) || os(watchOS)
         content.sheet(isPresented: $presented, content: panel)
         #elseif os(macOS)
-        content.popover(isPresented: $presented, arrowEdge: .bottom) {
+        let edge: Edge = switch placement {
+        case "above": .top
+        case "below": .bottom
+        default: .bottom
+        }
+        content.popover(isPresented: $presented, arrowEdge: edge) {
             panel()
                 .environment(\.bernDetailFooter, nil)
                 .onExitCommand {
@@ -322,9 +328,15 @@ private struct BernPopoverPresentation<Panel: View>: ViewModifier {
         // screen put the popover above it, off the screen. Without one the
         // system puts the popover where it fits, as it always did.
         if #available(iOS 18.0, *) {
-            content.popover(isPresented: $presented, attachmentAnchor: .rect(.bounds), arrowEdge: nil, content: panel)
+            let edge: Edge? = switch placement {
+            case "above": .bottom
+            case "below": .top
+            default: nil
+            }
+            content.popover(isPresented: $presented, attachmentAnchor: .rect(.bounds), arrowEdge: edge, content: panel)
         } else {
-            content.popover(isPresented: $presented, attachmentAnchor: .rect(.bounds), arrowEdge: .top, content: panel)
+            let edge: Edge = placement == "above" ? .bottom : .top
+            content.popover(isPresented: $presented, attachmentAnchor: .rect(.bounds), arrowEdge: edge, content: panel)
         }
         #endif
     }
@@ -1409,7 +1421,7 @@ struct BernSidebarLabel: View {
         Label {
             Text(verbatim: title)
         } icon: {
-            Image(systemName: systemImage).foregroundStyle(accent ?? Color.accentColor)
+            BernIcon(name: systemImage).foregroundStyle(accent ?? Color.accentColor)
         }
     }
 }
@@ -1621,7 +1633,7 @@ struct BernSplitButton<Content: View>: View {
 
     @ViewBuilder private var toggleLabel: some View {
         if let systemImage {
-            Label(label, systemImage: systemImage).labelStyle(.titleAndIcon)
+            BernIconLabel(title: label, icon: systemImage).labelStyle(.titleAndIcon)
         } else {
             Text(verbatim: label)
         }
@@ -1632,7 +1644,7 @@ struct BernSplitButton<Content: View>: View {
     @ViewBuilder private var capsuleLabel: some View {
         if let systemImage {
             HStack(spacing: 6) {
-                Image(systemName: systemImage).frame(width: 16, height: 16).accessibilityHidden(true)
+                BernIcon(name: systemImage, size: 16).frame(width: 16, height: 16).accessibilityHidden(true)
                 Text(verbatim: label)
             }
         } else {
@@ -1876,7 +1888,7 @@ struct BernSidebarRow<Value: Hashable>: View {
         let iconForeground = look.foreground?.color ?? (neutralFill ? accent ?? Color.accentColor : foreground)
         HStack(spacing: 7) {
             if let systemImage {
-                Image(systemName: systemImage)
+                BernIcon(name: systemImage)
                     .frame(width: 18)
                     .foregroundStyle(iconForeground)
             }
@@ -5458,27 +5470,28 @@ extension View {
     /// track while it is over it, from 0 at the minimum to 1 at the
     /// maximum, and nil once it leaves. The thumb's center travels the
     /// track less a thumb's width, so the ends of the track are 0 and 1.
-    func bernSliderHover(_ hover: SwiftUI.Binding<Double?>) -> some View {
-        modifier(BernSliderHover(hover: hover))
+    func bernSliderHover(_ hover: SwiftUI.Binding<Double?>, vertical: Bool = false) -> some View {
+        modifier(BernSliderHover(hover: hover, vertical: vertical))
     }
 }
 
 private struct BernSliderHover: ViewModifier {
     let hover: SwiftUI.Binding<Double?>
+    let vertical: Bool
     @Environment(\.layoutDirection) private var direction
-    @State private var width: CGFloat = 0
+    @State private var size: CGSize = .zero
 
     func body(content: Content) -> some View {
         #if os(macOS) || os(iOS)
         content
             .background(GeometryReader { proxy in
                 Color.clear
-                    .onAppear { width = proxy.size.width }
-                    .onChange(of: proxy.size.width) { _, size in width = size }
+                    .onAppear { size = proxy.size }
+                    .onChange(of: proxy.size) { _, next in size = next }
             })
             .onContinuousHover(coordinateSpace: .local) { phase in
                 switch phase {
-                case .active(let at): report(at.x)
+                case .active(let at): report(vertical ? at.y : at.x)
                 case .ended: report(nil)
                 }
             }
@@ -5500,9 +5513,11 @@ private struct BernSliderHover: ViewModifier {
     }
 
     private func report(_ at: CGFloat?) {
-        let room = width - thumb
-        let next = at.map { x -> Double in
-            let along = room > 0 ? min(1, max(0, Double((x - thumb / 2) / room))) : 0
+        let span = vertical ? size.height : size.width
+        let room = span - thumb
+        let next = at.map { pos -> Double in
+            let along = room > 0 ? min(1, max(0, Double((pos - thumb / 2) / room))) : 0
+            if vertical { return 1 - along }
             return direction == .rightToLeft ? 1 - along : along
         }
         if hover.wrappedValue != next { hover.wrappedValue = next }
@@ -6232,6 +6247,7 @@ struct BernPopoverButton<Content: View>: View {
     var style: BernStyle? = nil
     /// The icon's size in points, as an `IconButton`'s `font_size`.
     var iconSize: CGFloat? = nil
+    var placement: String? = nil
     @ViewBuilder let content: () -> Content
     @Environment(\.colorScheme) private var scheme
     @Environment(\.bernWindowScheme) private var windowScheme
@@ -6249,10 +6265,12 @@ struct BernPopoverButton<Content: View>: View {
         let openFg = scheme == .dark ? SwiftUI.Color.white : SwiftUI.Color.black
         let hasFill: Bool = {
             guard let systemImage, !systemImage.hasSuffix(".fill") else { return true }
+            if BernAppIcons.path(systemImage) != nil { return true }
+            let resolved = BernAppIcons.systemName(systemImage)
             #if canImport(AppKit)
-            return NSImage(systemSymbolName: systemImage + ".fill", accessibilityDescription: nil) != nil
+            return NSImage(systemSymbolName: resolved + ".fill", accessibilityDescription: nil) != nil
             #elseif canImport(UIKit)
-            return UIImage(systemName: systemImage + ".fill") != nil
+            return UIImage(systemName: resolved + ".fill") != nil
             #else
             return true
             #endif
@@ -6261,11 +6279,14 @@ struct BernPopoverButton<Content: View>: View {
             showing.wrappedValue.toggle()
         } label: {
             SwiftUI.Group {
-                if let systemImage, let iconSize {
-                    SwiftUI.Label(label, systemImage: systemImage).labelStyle(.iconOnly)
+                if let systemImage, BernAppIcons.path(systemImage) != nil {
+                    BernIcon(name: systemImage, size: iconSize)
+                        .accessibilityLabel(SwiftUI.Text(verbatim: label))
+                } else if let systemImage, let iconSize {
+                    SwiftUI.Label(label, systemImage: BernAppIcons.systemName(systemImage)).labelStyle(.iconOnly)
                         .font(.system(size: iconSize))
                 } else if let systemImage {
-                    SwiftUI.Label(label, systemImage: systemImage).labelStyle(.iconOnly)
+                    SwiftUI.Label(label, systemImage: BernAppIcons.systemName(systemImage)).labelStyle(.iconOnly)
                 } else {
                     SwiftUI.Text(verbatim: label)
                 }
@@ -6277,7 +6298,7 @@ struct BernPopoverButton<Content: View>: View {
             .animation(.snappy(duration: 0.18), value: isOpen)
         }
         .help(label)
-        .bernPopover(isPresented: showing) {
+        .bernPopover(isPresented: showing, placement: placement) {
             #if os(watchOS)
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) { content() }
@@ -6870,7 +6891,7 @@ struct BernSearchRow: View {
     var body: some View {
         HStack(spacing: 12) {
             if let icon {
-                Image(systemName: icon).font(.system(size: bernTelevision ? 16 : 14)).foregroundStyle(.secondary)
+                BernIcon(name: icon, size: bernTelevision ? 16 : 14).foregroundStyle(.secondary)
                     .frame(width: bernTelevision ? 30 : 26, height: bernTelevision ? 30 : 26)
                     .background(.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
             }
@@ -7009,16 +7030,27 @@ struct BernSurface: ViewModifier {
     @ViewBuilder
     private func surface(_ content: Content, look: BernLook) -> some View {
         if let corner = style.corner {
+            let shape = RoundedRectangle(cornerRadius: corner, style: .continuous)
             content
                 .bernForeground(look.foreground?.color)
-                .background(RoundedRectangle(cornerRadius: corner, style: .continuous).fill(look.background?.color ?? Color.clear))
-                .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+                .background(shape.fill(look.background?.color ?? Color.clear))
+                .clipShape(shape)
+                .overlay {
+                    if let border = look.border {
+                        shape.strokeBorder(border.color, lineWidth: look.borderWidth)
+                    }
+                }
         } else {
             // A square surface, such as a page's, also fills the safe areas
             // around it: under the status bar and the bars of the window.
             content
                 .bernForeground(look.foreground?.color)
                 .background(look.background?.color ?? Color.clear)
+                .overlay {
+                    if let border = look.border {
+                        Rectangle().strokeBorder(border.color, lineWidth: look.borderWidth)
+                    }
+                }
         }
     }
 }
@@ -8158,6 +8190,218 @@ struct BernKeyShortcut: View {
     #endif
 }
 
+/// `Shortcut(hold:, hold_after:)`: holding the key past `holdAfter` sets `hold`
+/// true until release; releasing sooner fires `action` as a tap.
+struct BernHoldKeyShortcut: View {
+    #if !os(tvOS) && !os(watchOS)
+    let shortcut: KeyboardShortcut?
+    #endif
+    let enabled: Bool
+    let quiet: Bool
+    @Binding var hold: Bool
+    let holdAfter: Double
+    let action: () -> Void
+    #if os(macOS)
+    @Environment(BernWindowContext.self) private var window: BernWindowContext?
+    @State private var controller = HoldController()
+    #endif
+
+    #if !os(tvOS) && !os(watchOS)
+    init(
+        shortcut: KeyboardShortcut?, enabled: Bool, quiet: Bool = false,
+        hold: Binding<Bool>, holdAfter: Double, action: @escaping () -> Void
+    ) {
+        self.shortcut = shortcut
+        self.enabled = enabled
+        self.quiet = quiet
+        self._hold = hold
+        self.holdAfter = holdAfter
+        self.action = action
+    }
+    #endif
+
+    var body: some View {
+        #if os(macOS)
+        Color.clear.frame(width: 0, height: 0).accessibilityHidden(true)
+            .onAppear { sync(mounted: true) }
+            .onDisappear { sync(mounted: false) }
+            .onChange(of: enabled) { _, _ in sync(mounted: true) }
+            .onChange(of: shortcut?.key) { _, _ in sync(mounted: true) }
+            .onChange(of: shortcut?.modifiers.rawValue) { _, _ in sync(mounted: true) }
+            .onChange(of: holdAfter) { _, _ in sync(mounted: true) }
+        #elseif os(iOS)
+        Button("", action: action)
+            .keyboardShortcut(shortcut)
+            .disabled(!enabled || shortcut == nil)
+            .opacity(0)
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+        #else
+        EmptyView()
+        #endif
+    }
+
+    #if os(macOS)
+    private func sync(mounted: Bool) {
+        controller.update(
+            mounted: mounted,
+            window: window,
+            shortcut: shortcut,
+            enabled: enabled,
+            quiet: quiet,
+            holdAfter: holdAfter,
+            setHold: { hold = $0 },
+            action: action
+        )
+    }
+
+    @MainActor
+    private final class HoldController {
+        private var monitor: Any?
+        private var observers: [NSObjectProtocol] = []
+        private var timer: DispatchWorkItem?
+        private var activeKeyCode: UInt16?
+        private var held = false
+        private weak var window: BernWindowContext?
+        private var shortcut: KeyboardShortcut?
+        private var enabled = false
+        private var quiet = false
+        private var holdAfter = 0.3
+        private var setHold: (Bool) -> Void = { _ in }
+        private var action: () -> Void = {}
+        private var quietEntry: BernWindowContext.QuietShortcut?
+
+        func update(
+            mounted: Bool,
+            window: BernWindowContext?,
+            shortcut: KeyboardShortcut?,
+            enabled: Bool,
+            quiet: Bool,
+            holdAfter: Double,
+            setHold: @escaping (Bool) -> Void,
+            action: @escaping () -> Void
+        ) {
+            let keyChanged = self.shortcut?.key != shortcut?.key
+                || self.shortcut?.modifiers != shortcut?.modifiers
+            if !mounted || !enabled || keyChanged {
+                cancel()
+            }
+            self.window = window
+            self.shortcut = shortcut
+            self.enabled = enabled
+            self.quiet = quiet
+            self.holdAfter = max(0.01, holdAfter)
+            self.setHold = setHold
+            self.action = action
+            syncQuiet(mounted: mounted)
+            if mounted {
+                install()
+            } else {
+                teardown()
+            }
+        }
+
+        private func syncQuiet(mounted: Bool) {
+            guard let window else { return }
+            if !mounted || !quiet {
+                if let entry = quietEntry {
+                    window.quietShortcuts.removeAll { $0 === entry }
+                    quietEntry = nil
+                }
+                return
+            }
+            if let entry = quietEntry {
+                entry.shortcut = shortcut
+                entry.enabled = enabled
+            } else {
+                let entry = BernWindowContext.QuietShortcut(shortcut: shortcut, enabled: enabled)
+                window.quietShortcuts.append(entry)
+                quietEntry = entry
+            }
+        }
+
+        private func install() {
+            guard monitor == nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
+                let consume = MainActor.assumeIsolated {
+                    self?.handle(event) ?? false
+                }
+                return consume ? nil : event
+            }
+            let names: [Notification.Name] = [
+                NSWindow.didResignKeyNotification,
+                NSApplication.didResignActiveNotification,
+            ]
+            observers = names.map { name in
+                NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.cancel() }
+                }
+            }
+        }
+
+        private func teardown() {
+            cancel()
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+            for observer in observers { NotificationCenter.default.removeObserver(observer) }
+            observers.removeAll()
+        }
+
+        private func cancel() {
+            timer?.cancel()
+            timer = nil
+            activeKeyCode = nil
+            if held {
+                held = false
+                setHold(false)
+            }
+        }
+
+        private func handle(_ event: NSEvent) -> Bool {
+            if event.type == .keyUp {
+                guard let active = activeKeyCode, event.keyCode == active else { return false }
+                timer?.cancel()
+                timer = nil
+                activeKeyCode = nil
+                let wasHeld = held
+                held = false
+                if wasHeld {
+                    setHold(false)
+                } else if enabled && !BernShortcuts.isRecording {
+                    action()
+                }
+                return true
+            }
+            guard enabled, let shortcut, !BernShortcuts.isRecording,
+                  let nsWindow = window?.platform.nsWindow, event.window === nsWindow
+            else { return false }
+            if activeKeyCode == event.keyCode {
+                return true
+            }
+            guard !event.isARepeat else { return false }
+            let editing = nsWindow.firstResponder is NSTextView
+            if editing && shortcut.modifiers.isDisjoint(with: [.command, .control, .option]) {
+                return false
+            }
+            guard BernShortcuts.matches(event: event, shortcut: shortcut) else { return false }
+            activeKeyCode = event.keyCode
+            held = false
+            timer?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, self.activeKeyCode != nil else { return }
+                    self.held = true
+                    self.setHold(true)
+                }
+            }
+            timer = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + holdAfter, execute: work)
+            return true
+        }
+    }
+    #endif
+}
+
 // MARK: - Shortcut inputs
 
 /// `ShortcutInput`: a button showing the shortcut as the platform writes
@@ -8565,9 +8809,15 @@ private struct BernBrightnessScreenProbe: UIViewRepresentable {
 
 extension View {
     @ViewBuilder
-    func bernTooltip(_ text: String) -> some View {
+    func bernTooltip(_ text: String, keys: String? = nil) -> some View {
         #if os(macOS) || os(iOS)
-        self.help(text)
+        let shown: String = {
+            guard let keys, !keys.isEmpty else { return text }
+            let formatted = BernShortcuts.display(keys)
+            guard !formatted.isEmpty else { return text }
+            return text.isEmpty ? formatted : "\(text) (\(formatted))"
+        }()
+        self.help(shown)
         #else
         self
         #endif
@@ -8595,7 +8845,7 @@ struct BernBanner<Actions: View>: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            Image(systemName: systemImage)
+            BernIcon(name: systemImage, size: 16)
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(tint)
                 .accessibilityHidden(true)
@@ -8684,7 +8934,7 @@ struct BernDisclosure<Content: View>: View {
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.secondary)
                     if let systemImage {
-                        Image(systemName: systemImage)
+                        BernIcon(name: systemImage)
                     }
                     Text(verbatim: label)
                     Spacer(minLength: 0)
@@ -8714,7 +8964,7 @@ struct BernDisclosure<Content: View>: View {
             .padding(.top, 6)
         } label: {
             if let systemImage {
-                Label(label, systemImage: systemImage)
+                BernIconLabel(title: label, icon: systemImage)
             } else {
                 Text(verbatim: label)
             }
@@ -9376,7 +9626,7 @@ struct BernEmptyState<Actions: View>: View {
         if #available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *) {
             ContentUnavailableView {
                 if let systemImage, !systemImage.isEmpty {
-                    Label(title, systemImage: systemImage)
+                    BernIconLabel(title: title, icon: systemImage)
                 } else {
                     Text(verbatim: title)
                 }
@@ -9390,7 +9640,7 @@ struct BernEmptyState<Actions: View>: View {
         } else {
             VStack(spacing: 10) {
                 if let systemImage, !systemImage.isEmpty {
-                    Image(systemName: systemImage)
+                    BernIcon(name: systemImage, size: 36)
                         .font(.system(size: 36, weight: .regular))
                         .foregroundStyle(.secondary)
                         .accessibilityHidden(true)
@@ -9436,7 +9686,7 @@ struct BernBadge: View {
         let border: Color = tint?.opacity(0.28) ?? Color.primary.opacity(0.14)
         HStack(spacing: 4) {
             if let systemImage, !systemImage.isEmpty {
-                Image(systemName: systemImage)
+                BernIcon(name: systemImage, size: 11)
                     .font(.caption2.weight(.semibold))
                     .accessibilityHidden(true)
             }

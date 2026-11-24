@@ -88,7 +88,17 @@ pub(crate) fn close_all() {
 /// A panel below its button, over everything else, on the window's
 /// raised surface; a press outside it closes it.
 pub(crate) fn panel(c: &Ctx, target: &str, content: impl IntoElement) -> impl IntoElement {
-    panel_with(c, target, content, None, None)
+    panel_with(c, target, content, None, None, None)
+}
+
+/// A panel placed above or below its button.
+pub(crate) fn panel_placed(
+    c: &Ctx,
+    target: &str,
+    content: impl IntoElement,
+    placement: Option<&'static str>,
+) -> impl IntoElement {
+    panel_with(c, target, content, None, None, placement)
 }
 
 /// A panel that a press outside closes: by `dismiss` when its open state
@@ -99,6 +109,7 @@ fn panel_with(
     content: impl IntoElement,
     dismiss: Option<crate::ctx::Press>,
     style: Option<&'static Style>,
+    placement: Option<&'static str>,
 ) -> impl IntoElement {
     let close = target.to_string();
     let background = match style.and_then(|style| style.background) {
@@ -109,29 +120,50 @@ fn panel_with(
         Some(foreground) => color(c, foreground),
         None => c.color("text.primary"),
     };
-    // Just under its button: from the button's trailing edge when the
+    // Just above or below its button: from the button's trailing edge when the
     // button is in the window's trailing half, else from its leading edge,
     // so the panel stays by it instead of being pushed back from the
     // window's edge.
     let window_width = c.win().width.get();
     let place = OPENERS.with(|openers| openers.borrow().get(target).copied());
+    let above = placement == Some("above");
     let placed = match place {
         Some(button) => {
             let gap = gpui::px(6.0);
             let middle = c.win().inset.get() + window_width / 2.0;
-            let (anchor, x) = if f32::from(button.center().x) > middle {
-                (Anchor::TopRight, button.right())
+            let trailing = f32::from(button.center().x) > middle;
+            let x = if trailing { button.right() } else { button.left() };
+            let (anchor, y) = if above {
+                (
+                    if trailing {
+                        Anchor::BottomRight
+                    } else {
+                        Anchor::BottomLeft
+                    },
+                    button.top() - gap,
+                )
             } else {
-                (Anchor::TopLeft, button.left())
+                (
+                    if trailing {
+                        Anchor::TopRight
+                    } else {
+                        Anchor::TopLeft
+                    },
+                    button.bottom() + gap,
+                )
             };
             anchored()
                 .position_mode(AnchoredPositionMode::Window)
                 .anchor(anchor)
-                .position(point(x, button.bottom() + gap))
+                .position(point(x, y))
         }
         None => anchored()
-            .anchor(Anchor::TopLeft)
-            .offset(point(px(0.0), px(6.0))),
+            .anchor(if above {
+                Anchor::BottomLeft
+            } else {
+                Anchor::TopLeft
+            })
+            .offset(point(px(0.0), px(if above { -6.0 } else { 6.0 }))),
     };
     deferred(
         placed.snap_to_window_with_margin(px(8.0)).child(
@@ -330,7 +362,14 @@ pub fn popover_button(
         .child(opener_place(&target))
         .when(open, |element| {
             let body = div().flex().flex_col().children(content());
-            element.child(panel_with(&panel_ctx, &target, body, close, props.style))
+            element.child(panel_with(
+                &panel_ctx,
+                &target,
+                body,
+                close,
+                props.style,
+                props.placement,
+            ))
         })
         .into_any_element()
 }
@@ -353,6 +392,8 @@ pub struct PopoverProps {
     pub shape: crate::look::Shape,
     /// The trigger button's height / diameter (`height`).
     pub height: Option<f32>,
+    /// Preferred side (`"above"` or `"below"`).
+    pub placement: Option<&'static str>,
 }
 
 /// An item of a menu: its label, whether it is checked and what choosing

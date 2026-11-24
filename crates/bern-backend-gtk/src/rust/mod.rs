@@ -127,9 +127,12 @@ fn literal(value: &Value) -> String {
 pub struct Generator<'a> {
     app: &'a Application,
     project_dir: Option<&'a std::path::Path>,
+    app_icons: Vec<(String, String)>,
     current_scope: std::cell::RefCell<String>,
     /// Whether the nodes being generated are a sidebar's items.
     in_sidebar: Cell<bool>,
+    /// Whether the nodes being generated are direct children of a `Stack`.
+    in_stack: Cell<bool>,
 }
 
 impl<'a> Generator<'a> {
@@ -137,8 +140,10 @@ impl<'a> Generator<'a> {
         Self {
             app,
             project_dir: None,
+            app_icons: Vec::new(),
             current_scope: std::cell::RefCell::new(String::new()),
             in_sidebar: Cell::new(false),
+            in_stack: Cell::new(false),
         }
     }
 
@@ -146,9 +151,16 @@ impl<'a> Generator<'a> {
         Self {
             app,
             project_dir: Some(project_dir),
+            app_icons: Vec::new(),
             current_scope: std::cell::RefCell::new(String::new()),
             in_sidebar: Cell::new(false),
+            in_stack: Cell::new(false),
         }
+    }
+
+    pub fn with_app_icons(mut self, app_icons: Vec<(String, String)>) -> Self {
+        self.app_icons = app_icons;
+        self
     }
 
     fn types(&self) -> &TypeTable {
@@ -237,6 +249,13 @@ impl<'a> Generator<'a> {
         out.open("pub(crate) static STYLES: &[b::StyleDef] = &[");
         for resolved in style::used(self.app) {
             out.line(format!("{},", style::declaration(self.app, &resolved)));
+        }
+        out.close("];");
+        out.line("");
+        out.line("/// Outlined application `.svg` icons registered as symbolic theme icons.");
+        out.open("pub(crate) static APP_ICONS: &[(&str, &str)] = &[");
+        for (name, svg) in &self.app_icons {
+            out.line(format!("({}, {}),", string(name), string(svg)));
         }
         out.close("];");
         out.line("");
@@ -500,6 +519,7 @@ impl<'a> Generator<'a> {
             )
         ));
         out.line("styles: STYLES,");
+        out.line("app_icons: APP_ICONS,");
         let text_styles: Vec<String> = app
             .style
             .text_weights

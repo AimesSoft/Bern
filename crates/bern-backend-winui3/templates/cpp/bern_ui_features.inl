@@ -1389,6 +1389,13 @@ inline winrt::Windows::System::VirtualKeyModifiers HeldModifiers() {
     return held;
 }
 
+/// Whether `root`'s focused element is a text editor that consumes plain keys.
+inline bool TextControlFocused(xaml::FrameworkElement const& root) {
+    if (!root || !root.XamlRoot()) return false;
+    auto focused = xaml::Input::FocusManager::GetFocusedElement(root.XamlRoot());
+    return focused && (focused.try_as<controls::TextBox>() || focused.try_as<controls::PasswordBox>() || focused.try_as<controls::RichEditBox>());
+}
+
 /// While mounted, `keys` told apart by how long they are held: let go
 /// within `after`, they run `tapped`; held longer, `hold` is true until
 /// they are let go. The keys repeating while held do nothing more. With
@@ -1398,6 +1405,7 @@ inline void HoldKeys(Ctx const& ctx, char const* keys, std::function<bool()> isE
     auto chord = ChordOf(keys);
     if (!chord) return;
     auto [key, modifiers] = *chord;
+    double delay = after > 0 ? after : 0.3;
     struct State {
         bool down = false;
         bool held = false;
@@ -1409,36 +1417,45 @@ inline void HoldKeys(Ctx const& ctx, char const* keys, std::function<bool()> isE
         state->held = on;
         SetDraft(ctx, hold, Value::Bool(on));
     };
+    auto release = [state, setHold] {
+        if (!state->down && !state->held) return;
+        state->down = false;
+        ++state->generation;
+        setHold(false);
+    };
     bool typed = (modifiers & (winrt::Windows::System::VirtualKeyModifiers::Control | winrt::Windows::System::VirtualKeyModifiers::Menu)) ==
         winrt::Windows::System::VirtualKeyModifiers::None;
     auto root = ctx.win->root;
-    auto inText = [typed, weak = winrt::make_weak(root)] {
+    auto weakRoot = winrt::make_weak(root);
+    auto inText = [typed, weakRoot] {
         if (!typed) return false;
-        auto element = weak.get();
-        if (!element || !element.XamlRoot()) return false;
-        auto focused = xaml::Input::FocusManager::GetFocusedElement(element.XamlRoot());
-        return focused && (focused.try_as<controls::TextBox>() || focused.try_as<controls::PasswordBox>());
+        auto element = weakRoot.get();
+        return element && TextControlFocused(element);
     };
-    auto down = xaml::Input::KeyEventHandler([=](auto&&, xaml::Input::KeyRoutedEventArgs const& args) {
-        if (shortcutRecording || args.Key() != key || HeldModifiers() != modifiers || inText()) return;
+    auto down = xaml::Input::KeyEventHandler([key, modifiers, state, isEnabled, delay, setHold, inText](auto&&, xaml::Input::KeyRoutedEventArgs const& args) {
+        if (args.Handled() || shortcutRecording || args.Key() != key) return;
+        if (GetKeyState(VK_LWIN) < 0 || GetKeyState(VK_RWIN) < 0) return;
+        if (HeldModifiers() != modifiers || inText()) return;
         if (state->down) {
             args.Handled(true);
             return;
         }
+        // Ignore auto-repeat events for a key pressed before the window focused.
+        if (args.KeyStatus().WasKeyDown) return;
         if (!isEnabled()) return;
         state->down = true;
         auto generation = ++state->generation;
-        Host::After(std::chrono::milliseconds(static_cast<int64_t>(after * 1000)), [state, generation, setHold] {
+        Host::After(std::chrono::milliseconds(static_cast<int64_t>(delay * 1000)), [state, generation, setHold] {
             if (state->down && state->generation == generation) setHold(true);
         });
         args.Handled(true);
     });
-    auto up = xaml::Input::KeyEventHandler([=](auto&&, xaml::Input::KeyRoutedEventArgs const& args) {
+    auto up = xaml::Input::KeyEventHandler([key, state, setHold, tapped, isEnabled](auto&&, xaml::Input::KeyRoutedEventArgs const& args) {
         if (args.Key() != key || !state->down) return;
         state->down = false;
         ++state->generation;
         if (state->held) setHold(false);
-        else if (tapped) tapped();
+        else if (tapped && !shortcutRecording && isEnabled()) tapped();
         args.Handled(true);
     });
     // The same boxed handlers go in and come out again.
@@ -1446,26 +1463,26 @@ inline void HoldKeys(Ctx const& ctx, char const* keys, std::function<bool()> isE
     auto upBox = winrt::box_value(up);
     root.AddHandler(xaml::UIElement::KeyDownEvent(), downBox, true);
     root.AddHandler(xaml::UIElement::KeyUpEvent(), upBox, true);
-    // Focus leaving the window would swallow the key's release.
-    auto lost = root.LosingFocus([state, setHold](auto&&, xaml::Input::LosingFocusEventArgs const& args) {
-        if (args.NewFocusedElement()) return;
-        state->down = false;
-        ++state->generation;
-        setHold(false);
+    // Focus leaving the window (WM_ACTIVATE or LosingFocus) releases any hold.
+    auto lost = root.LosingFocus([release](auto&&, xaml::Input::LosingFocusEventArgs const& args) {
+        if (!args.NewFocusedElement()) release();
     });
+    auto deactivateCb = std::make_shared<std::function<void()>>(release);
+    ctx.win->onDeactivate.push_back(deactivateCb);
+    std::weak_ptr<bool> alive(ctx.win->life);
+    Win* win = ctx.win;
     if (quiet) {
-        auto entry = std::make_shared<Win::QuietKey>(Win::QuietKey{key, modifiers, isEnabled});
-        ctx.win->quietKeys.push_back(entry);
-        std::weak_ptr<bool> alive(ctx.win->life);
-        Reactive::OnCleanup([win = ctx.win, alive, entry] {
+        auto quietEnabled = [state, isEnabled, inText] { return !inText() && (state->down || isEnabled()); };
+        auto entry = std::make_shared<Win::QuietKey>(Win::QuietKey{key, modifiers, std::move(quietEnabled), true});
+        win->quietKeys.push_back(entry);
+        Reactive::OnCleanup([win, alive, entry] {
             if (!alive.expired()) std::erase(win->quietKeys, entry);
         });
     }
-    Reactive::OnCleanup([weak = winrt::make_weak(root), downBox, upBox, lost, state, setHold] {
-        state->down = false;
-        ++state->generation;
-        if (state->held) setHold(false);
-        auto root = weak.get();
+    Reactive::OnCleanup([weakRoot, downBox, upBox, lost, win, alive, deactivateCb, release] {
+        release();
+        if (!alive.expired()) std::erase(win->onDeactivate, deactivateCb);
+        auto root = weakRoot.get();
         if (!root) return;
         root.RemoveHandler(xaml::UIElement::KeyDownEvent(), downBox);
         root.RemoveHandler(xaml::UIElement::KeyUpEvent(), upBox);

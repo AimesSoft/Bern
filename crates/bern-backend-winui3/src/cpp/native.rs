@@ -369,13 +369,25 @@ impl Generator<'_> {
         out.line("_theme.role = [c](char const* role) { bool dark = c.win && c.win->root ? B::IsDark(c.win->root) : false; return B::ColorOf(c.win, dark, B::Paint(role)); };");
 
         out.line(format!("auto _el = {ns}::build(_props, _actions, _theme);"));
-        if element.prop("width").is_none() {
-            // Without a width of its own it fills across; with no height of its
-            // own either it is `bern-native`, which in a stack's layers also
-            // fills down and covers them, as a picture does.
-            out.line("if (_el) { if (auto _fw = _el.try_as<xaml::FrameworkElement>(); _fw && std::isnan(_fw.Width())) { _fw.HorizontalAlignment(xaml::HorizontalAlignment::Stretch); SetRole(_fw, std::isnan(_fw.Height()) ? L\"bern-native\" : L\"bern-fill-width\"); } p.Add(_el); }");
-        } else {
-            out.line("if (_el) { p.Add(_el); }");
+        match (
+            element.prop("width").is_none(),
+            element.prop("height").is_none(),
+        ) {
+            (true, true) => {
+                // Without a width of its own it fills across; with no height of its
+                // own either it is `bern-native`, which in a stack's layers also
+                // fills down and covers them, as a picture does.
+                out.line("if (_el) { if (auto _fw = _el.try_as<xaml::FrameworkElement>(); _fw && std::isnan(_fw.Width())) { _fw.HorizontalAlignment(xaml::HorizontalAlignment::Stretch); SetRole(_fw, std::isnan(_fw.Height()) ? L\"bern-native\" : L\"bern-fill-width\"); } p.Add(_el); }");
+            }
+            (true, false) => {
+                out.line("if (_el) { if (auto _fw = _el.try_as<xaml::FrameworkElement>(); _fw && std::isnan(_fw.Width())) { _fw.HorizontalAlignment(xaml::HorizontalAlignment::Stretch); SetRole(_fw, L\"bern-fill-width\"); } p.Add(_el); }");
+            }
+            (false, true) => {
+                out.line("if (_el) { if (auto _fw = _el.try_as<xaml::FrameworkElement>(); _fw && std::isnan(_fw.Height())) { _fw.VerticalAlignment(xaml::VerticalAlignment::Stretch); SetRole(_fw, L\"bern-fill-height\"); } p.Add(_el); }");
+            }
+            (false, false) => {
+                out.line("if (_el) { p.Add(_el); }");
+            }
         }
 
         // Register all declared Bern functional entries in `Controls` for CLI access.

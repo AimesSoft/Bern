@@ -8,13 +8,14 @@ fn ios_popovers_leave_the_arrow_edge_to_the_system() {
     let end = source[start..].find("private func release()").unwrap() + start;
     let presentation = &source[start..end];
     assert!(presentation.contains("#if os(tvOS) || os(watchOS)\n        content.sheet("));
-    assert!(presentation.contains(
-        "#elseif os(macOS)\n        content.popover(isPresented: $presented, arrowEdge: .bottom)"
-    ));
+    assert!(presentation.contains("case \"above\": .top"));
+    assert!(presentation.contains("case \"below\": .bottom"));
+    assert!(presentation.contains("default: .bottom"));
+    assert!(presentation.contains("content.popover(isPresented: $presented, arrowEdge: edge)"));
     let ios = presentation.split("#else").last().unwrap();
     assert!(ios.contains("if #available(iOS 18.0, *)"));
-    assert!(ios.contains("attachmentAnchor: .rect(.bounds), arrowEdge: nil"));
-    assert!(!ios.contains("arrowEdge: .bottom"));
+    assert!(ios.contains("default: nil"));
+    assert!(ios.contains("attachmentAnchor: .rect(.bounds), arrowEdge: edge"));
 }
 
 #[test]

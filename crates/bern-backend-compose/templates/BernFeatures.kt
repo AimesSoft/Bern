@@ -129,6 +129,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.FilledTonalIconToggleButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -162,6 +163,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import kotlinx.coroutines.delay
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -366,9 +369,21 @@ object BernShortcuts {
         val action: () -> Unit,
         val active: () -> Boolean,
         val quiet: Boolean = false,
+        val hold: ((Boolean) -> Unit)? = null,
+        val holdAfter: Double = 0.3,
+    )
+
+    private class ActiveHold(
+        val token: Any,
+        val keyCode: Int,
+        val entry: Entry,
+        var fired: Boolean = false,
+        var timer: Runnable? = null,
     )
 
     private val entries = LinkedHashMap<Any, Entry>()
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var activeHold: ActiveHold? = null
 
     /// Back pressed down that a shortcut took: its release is the
     /// shortcut's too, so the system does not go back as well.
@@ -380,12 +395,25 @@ object BernShortcuts {
         action: () -> Unit,
         active: () -> Boolean = { true },
         quiet: Boolean = false,
+        hold: ((Boolean) -> Unit)? = null,
+        holdAfter: Double = 0.3,
     ) {
-        entries[token] = Entry(shortcut, action, active, quiet)
+        entries[token] = Entry(shortcut, action, active, quiet, hold, holdAfter)
     }
 
     fun remove(token: Any) {
+        if (activeHold?.token === token) cancelHold()
         entries.remove(token)
+    }
+
+    fun cancelHold() {
+        val current = activeHold ?: return
+        activeHold = null
+        current.timer?.let { mainHandler.removeCallbacks(it) }
+        current.timer = null
+        if (current.fired) {
+            current.entry.hold?.invoke(false)
+        }
     }
 
     /// Runs the action whose shortcut `event` presses; whether one did.
@@ -444,6 +472,23 @@ object BernShortcuts {
             tookBack = false
             return true
         }
+        val held = activeHold
+        if (held != null && code == held.keyCode) {
+            if (event.type == KeyEventType.KeyUp) {
+                activeHold = null
+                held.timer?.let { mainHandler.removeCallbacks(it) }
+                held.timer = null
+                if (held.fired) {
+                    held.entry.hold?.invoke(false)
+                } else {
+                    held.entry.action()
+                }
+                return true
+            }
+            if (event.type == KeyEventType.KeyDown && event.nativeKeyEvent.repeatCount > 0) {
+                return true
+            }
+        }
         recorder?.let { record ->
             if (event.type == KeyEventType.KeyDown) {
                 if (notifyIdle) keys += 1
@@ -469,10 +514,28 @@ object BernShortcuts {
             add(key)
         }.joinToString("+")
         // Of the shortcuts that take the keys now, the one composed last.
-        val entry = entries.values.lastOrNull {
-            it.shortcut.replace("ctrl+", "cmd+").replace("cmd+cmd+", "cmd+") == pressed && it.active()
+        val match = entries.entries.lastOrNull { (_, entry) ->
+            entry.shortcut.replace("ctrl+", "cmd+").replace("cmd+cmd+", "cmd+") == pressed && entry.active()
         } ?: return false
+        val entry = match.value
         val quiet = entry.quiet
+        if (entry.hold != null) {
+            if (event.nativeKeyEvent.repeatCount > 0) return true
+            if (notifyIdle && !quiet) keys += 1
+            cancelHold()
+            val state = ActiveHold(match.key, code, entry)
+            val delayMs = (entry.holdAfter * 1000.0).toLong().coerceAtLeast(1L)
+            val task = Runnable {
+                if (activeHold === state) {
+                    state.fired = true
+                    entry.hold.invoke(true)
+                }
+            }
+            state.timer = task
+            activeHold = state
+            mainHandler.postDelayed(task, delayMs)
+            return true
+        }
         if (notifyIdle && !quiet) keys += 1
         if (back) {
             tookBack = true
@@ -617,9 +680,16 @@ fun BernShortcutInput(
 /// remote: what closes on Escape elsewhere closes on Back, before Back
 /// leaves the app. Back reaches the app as a callback, never as a key.
 @Composable
-fun BernShortcut(shortcut: String, active: () -> Boolean = { true }, quiet: Boolean = false, action: () -> Unit) {
+fun BernShortcut(
+    shortcut: String,
+    active: () -> Boolean = { true },
+    quiet: Boolean = false,
+    hold: ((Boolean) -> Unit)? = null,
+    holdAfter: Double = 0.3,
+    action: () -> Unit,
+) {
     val token = remember { Any() }
-    SideEffect { BernShortcuts.register(token, shortcut, action, active, quiet) }
+    SideEffect { BernShortcuts.register(token, shortcut, action, active, quiet, hold, holdAfter) }
     DisposableEffect(token) { onDispose { BernShortcuts.remove(token) } }
     if (shortcut == "escape") {
         val current by rememberUpdatedState(action)
@@ -3030,12 +3100,14 @@ fun BernPopoverButton(
     style: BernStyle? = null,
     iconSize: Float? = null,
     shape: BernShape? = null,
+    placement: String? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     var own by remember { mutableStateOf(false) }
     val showing = presented ?: own
     val show: (Boolean) -> Unit = { value -> if (onPresented != null) onPresented(value) else own = value }
     val iconModifier = if (iconSize != null) Modifier.size(bernIconSize(iconSize)) else Modifier
+    val density = LocalDensity.current
     BernControl(
         target, "popover_button", label,
         actions = BernControlActions(activate = { show(true) }, value = { if (showing) "open" else "closed" }),
@@ -3065,11 +3137,9 @@ fun BernPopoverButton(
         } else bernDark()
         BernAppearance(panelDark) {
             val palette = bernPalette()
-            DropdownMenu(
-                expanded = showing, onDismissRequest = { show(false) },
-                containerColor = style?.base?.background?.let(palette::color) ?: MaterialTheme.colorScheme.surfaceContainer,
-                tonalElevation = if (style?.base?.background != null) 0.dp else 3.dp,
-            ) {
+            val containerColor = style?.base?.background?.let(palette::color) ?: MaterialTheme.colorScheme.surfaceContainer
+            val elevation = if (style?.base?.background != null) 0.dp else 3.dp
+            val body: @Composable () -> Unit = {
                 BernPopupContent {
                     CompositionLocalProvider(LocalContentColor provides (style?.base?.foreground?.let(palette::color) ?: MaterialTheme.colorScheme.onSurface)) {
                         Column(
@@ -3079,6 +3149,30 @@ fun BernPopoverButton(
                         )
                     }
                 }
+            }
+            if (placement != null) {
+                if (showing) {
+                    val gapPx = with(density) { 4.dp.roundToPx() }
+                    Popup(
+                        popupPositionProvider = BernPopupPositionProvider(placement, gapPx),
+                        onDismissRequest = { show(false) },
+                        properties = PopupProperties(focusable = true),
+                    ) {
+                        Surface(
+                            shape = MenuDefaults.shape,
+                            color = containerColor,
+                            tonalElevation = elevation,
+                            shadowElevation = MenuDefaults.ShadowElevation,
+                            content = body,
+                        )
+                    }
+                }
+            } else {
+                DropdownMenu(
+                    expanded = showing, onDismissRequest = { show(false) },
+                    containerColor = containerColor,
+                    tonalElevation = elevation,
+                ) { body() }
             }
         }
     }

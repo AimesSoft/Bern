@@ -247,6 +247,16 @@ impl Generator<'_> {
         out.line("BernFiles.opened(intent)");
         out.close("}");
         out.line("");
+        out.open("override fun onPause() {");
+        out.line("BernShortcuts.cancelHold()");
+        out.line("super.onPause()");
+        out.close("}");
+        out.line("");
+        out.open("override fun onWindowFocusChanged(hasFocus: Boolean) {");
+        out.line("super.onWindowFocusChanged(hasFocus)");
+        out.line("if (!hasFocus) BernShortcuts.cancelHold()");
+        out.close("}");
+        out.line("");
         out.line("/// Keyboard shortcuts come first, whether or not a control has focus:");
         out.line("/// Compose sends keys only to the focused control and its parents.");
         out.line("/// On a television the remote's arrows move the focus first, and a");

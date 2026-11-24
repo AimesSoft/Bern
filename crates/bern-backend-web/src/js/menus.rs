@@ -133,6 +133,11 @@ impl Generator<'_> {
                 ("style", Self::keyword(element, "style")),
                 ("shape", Self::keyword(element, "shape")),
                 ("height", self.length(element, "height")),
+                (
+                    "bold",
+                    (element.keyword("bold") == Some("true")).then(|| "true".into()),
+                ),
+                ("placement", Self::keyword(element, "placement")),
             ])
         ));
         for node in &element.children {

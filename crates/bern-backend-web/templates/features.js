@@ -780,6 +780,7 @@ function cssColor(value) {
   if (value.role) return roleVar(value.role);
   return `light-dark(${value.light}, ${value.dark})`;
 }
+B.hooks.cssColor = cssColor;
 
 const INDICATOR = {
   leading: (w) => `inset ${w}px 0 0 0`, trailing: (w) => `inset -${w}px 0 0 0`,
@@ -1904,9 +1905,9 @@ function scrollEffect(node, scale, opacity, originX = 0.5, originY = 0.5) {
 
 /// `window.idle` turns true after `seconds` without pointer, touch, wheel
 /// or key input in the window, and false at the next input. With
-/// `idle_area`s on the page, a mouse counts only while it rests over one,
-/// for that area's seconds: elsewhere, or outside the window, the window
-/// stays awake.
+/// `idle_area`s on the page, a mouse inside the window counts only while it
+/// rests over one, for that area's seconds: over other controls it stays
+/// awake, and once the mouse leaves the window it falls back to `seconds`.
 B.hooks.idle = (win, seconds, enabled = () => true) => {
   let timer = 0;
   // What the mouse is over, null once it left the window; touch and pens
@@ -1921,7 +1922,7 @@ B.hooks.idle = (win, seconds, enabled = () => true) => {
   // How long the input that came last lets the window rest, or null when
   // it keeps the window awake.
   const quiet = () => {
-    if (mouseOver === undefined || !win.element.querySelector(".bern-idle-area")) return seconds;
+    if (mouseOver === undefined || mouseOver === null || !win.element.querySelector(".bern-idle-area")) return seconds;
     // Waking the window can mount a toolbar underneath a stationary mouse.
     // Recheck the live hit target, including after its entrance animation;
     // the pointer event's original video target is no longer authoritative.
@@ -1929,9 +1930,8 @@ B.hooks.idle = (win, seconds, enabled = () => true) => {
     const area = hit?.closest?.(".bern-idle-area");
     return area ? Number(area.dataset.idleAfter) : null;
   };
-  const rest = () => {
+  const arm = () => {
     clearTimeout(timer);
-    if (win.idle.peek()) win.idle.set(false);
     const wait = quiet();
     if (enabled() && wait !== null) timer = setTimeout(() => {
       const typing = document.activeElement?.matches("input:not([type=range]),textarea");
@@ -1939,9 +1939,20 @@ B.hooks.idle = (win, seconds, enabled = () => true) => {
       if (typing || popup || quiet() === null) rest(); else win.idle.set(true);
     }, wait * 1000);
   };
+  const rest = () => {
+    clearTimeout(timer);
+    if (win.idle.peek()) win.idle.set(false);
+    arm();
+  };
   const events = ["pointermove", "pointerdown", "wheel", "touchstart"];
   const keydown = (event) => { if (!quietKeyEvents.has(event)) rest(); };
-  const leave = (event) => { if (event.pointerType === "mouse") { mouseOver = null; mousePoint = null; rest(); } };
+  const leave = (event) => {
+    if (event.pointerType === "mouse") {
+      mouseOver = null;
+      mousePoint = null;
+      if (!win.idle.peek()) arm();
+    }
+  };
   // The pointer is known before the input that wakes the window counts.
   for (const name of ["pointermove", "pointerdown"]) win.element.addEventListener(name, track, { capture: true, passive: true });
   for (const name of events) win.element.addEventListener(name, rest, { capture: true, passive: true });
@@ -3016,18 +3027,39 @@ export function pressedKeys(event) {
 let listening = false;
 /// The `ShortcutInput` waiting for a key: no shortcut takes keys meanwhile.
 let recordingInput = null;
+/// Currently held `Shortcut(hold:)` entry, waiting for its threshold or
+/// held active until keyup / window blur.
+let activeHold = null;
+
+function cancelHold() {
+  if (!activeHold) return;
+  const h = activeHold;
+  activeHold = null;
+  clearTimeout(h.timer);
+  if (h.fired) h.entry.hold.set(false);
+}
+
+function keyName(event) {
+  return KEY_NAMES[event.key] ?? (event.code?.startsWith?.("Key") ? event.code.slice(3).toLowerCase()
+    : event.code?.startsWith?.("Digit") ? event.code.slice(5) : String(event.key ?? "").toLowerCase());
+}
 
 /// `spec` runs `run` while it is mounted; `active`, when given, says
 /// whether it takes the key now. Of the shortcuts that take a key, the one
 /// mounted last runs. A shortcut that follows state is a getter, read at
 /// each key press; a text that is empty or no shortcut takes no key. With
-/// `quiet`, its key is no input for `window.idle`.
-export function shortcut(spec, run, active, quiet = false) {
+/// `quiet`, its key is no input for `window.idle`. With `hold`, holding for
+/// `holdAfter` seconds sets `hold` true until release instead of running `run`.
+export function shortcut(spec, run, active, quiet = false, hold = null, holdAfter = 0.3) {
   const fixed = typeof spec === "function" ? null : normalized(spec);
   const keys = fixed === null ? () => normalized(String(untrack(spec) ?? "")) : () => fixed;
-  const entry = { keys, run, active, quiet: Boolean(quiet) };
+  const entry = { keys, run, active, quiet: Boolean(quiet), hold, holdAfter: Number(holdAfter ?? 0.3) };
   shortcuts.push(entry);
-  onCleanup(() => shortcuts.splice(shortcuts.indexOf(entry), 1));
+  onCleanup(() => {
+    if (activeHold?.entry === entry) cancelHold();
+    const at = shortcuts.indexOf(entry);
+    if (at >= 0) shortcuts.splice(at, 1);
+  });
   if (listening) return;
   listening = true;
   document.addEventListener("keydown", (event) => {
@@ -3050,23 +3082,54 @@ export function shortcut(spec, run, active, quiet = false) {
     // window-level shortcut (for example leaving the player) can act on it.
     if (event.key === "Escape" && document.querySelector('[popover="auto"]:popover-open')) return;
     const keys = pressed(event);
+    if (activeHold && activeHold.key === keys) {
+      if (activeHold.entry.quiet) quietKeyEvents.add(event);
+      event.preventDefault();
+      return;
+    }
     const found = [...shortcuts].reverse().find((one) => one.keys() === keys && (!one.active || one.active()));
     if (!found) return;
     const editing = event.target?.closest?.("input, textarea, [contenteditable]");
     if (editing && !/^(cmd|ctrl|alt)\+/.test(keys)) return;
     if (found.quiet) quietKeyEvents.add(event);
     event.preventDefault();
-    found.run();
+    if (found.hold) {
+      if (event.repeat) return;
+      cancelHold();
+      const state = { entry: found, key: keys, baseKey: keys.split("+").pop(), fired: false, timer: 0 };
+      state.timer = setTimeout(() => {
+        if (activeHold !== state) return;
+        state.fired = true;
+        found.hold.set(true);
+      }, Math.max(0, found.holdAfter) * 1000);
+      activeHold = state;
+      return;
+    }
+    found.run?.();
   }, true);
+  document.addEventListener("keyup", (event) => {
+    if (!activeHold) return;
+    const released = keyName(event);
+    const modReleased = ["Shift", "Control", "Alt", "Meta"].includes(event.key) && activeHold.key.includes("+");
+    if (released !== activeHold.baseKey && !modReleased) return;
+    const h = activeHold;
+    activeHold = null;
+    clearTimeout(h.timer);
+    if (h.entry.quiet) quietKeyEvents.add(event);
+    if (h.fired) h.entry.hold.set(false);
+    else h.entry.run?.();
+  }, true);
+  globalThis.addEventListener?.("blur", cancelHold);
+  document.addEventListener?.("visibilitychange", () => { if (document.hidden) cancelHold(); });
 }
 
 /// `Shortcut`: `key` runs `action` while it is mounted and enabled, without
 /// a control on the page.
-export function KeyShortcut(p, ctx, { key, enabled, quiet }, action) {
-  if (!action) return;
+export function KeyShortcut(p, ctx, { key, enabled, quiet, hold, holdAfter }, action) {
+  if (!action && !hold) return;
   const active = enabled === undefined ? undefined
     : () => Boolean(typeof enabled === "function" ? untrack(enabled) : enabled);
-  shortcut(key, () => untrack(action), active, Boolean(quiet));
+  shortcut(key, action ? () => untrack(action) : null, active, Boolean(quiet), hold ?? null, holdAfter ?? 0.3);
 }
 
 /// `ShortcutInput`: a button showing the shortcut as this computer writes
@@ -3202,7 +3265,7 @@ export function Place(p, ctx, { at, from, to, motion }, build) {
 /// The children mount while the popover shows. `presented`, when given,
 /// follows the popover and opens or closes it; external entries open it
 /// with `activate`.
-export function PopoverButton(p, ctx, { id, label, icon: glyph, prominence, fontSize, shape, height, presented, windowTheme = false, style }, content) {
+export function PopoverButton(p, ctx, { id, label, icon: glyph, prominence, fontSize, shape, height, placement, presented, windowTheme = false, style }, content) {
   const panelId = `bern-popover-${Math.random().toString(36).slice(2)}`;
   const iconOnly = Boolean(glyph);
   const iconKind = prominence === "prominent" ? " bern-icon-button-prominent" : prominence === "plain" ? " bern-icon-button-plain" : "";
@@ -3270,7 +3333,7 @@ export function PopoverButton(p, ctx, { id, label, icon: glyph, prominence, font
           owner = new B.Scope(null);
           untrack(() => B.within(owner, () => content(panel, ctx)));
         }
-        B.placePopover(panel, trigger);
+        B.placePopover(panel, trigger, placement);
         panel.style.minWidth = `${Math.max(240, trigger.getBoundingClientRect().width)}px`;
       } else {
         clear();

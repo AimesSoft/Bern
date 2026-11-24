@@ -110,7 +110,8 @@ impl Generator<'_> {
             return true;
         }
         match element.kind.as_str() {
-            "TextInput" | "Search" | "Slider" | "ScrollView" | "Table" | "ShortcutInput" => true,
+            "TextInput" | "Search" | "ScrollView" | "Table" | "ShortcutInput" => true,
+            "Slider" => element.keyword("axis") != Some("vertical"),
             "Picker" => element.keyword("style") == Some("segmented"),
             "Rail" => element.keyword("axis") != Some("vertical"),
             "Video" => element.keyword("sizing") == Some("fill"),
@@ -420,7 +421,20 @@ impl Generator<'_> {
                     ""
                 }
             }
-            "TextInput" | "Slider" | "Search" if ctx.scope == Scope::Row => ".weight(1f)",
+            "TextInput" | "Search" if ctx.scope == Scope::Row => ".weight(1f)",
+            "Slider" => {
+                let vertical = element.keyword("axis") == Some("vertical");
+                if (vertical
+                    && ctx.scope == Scope::Column
+                    && !ctx.scroll_content
+                    && element.prop("height").is_none())
+                    || (!vertical && ctx.scope == Scope::Row)
+                {
+                    ".weight(1f)"
+                } else {
+                    ""
+                }
+            }
             "Scroll" => {
                 let horizontal = element.keyword("axis") == Some("horizontal");
                 match (ctx.scope, horizontal) {
@@ -701,8 +715,17 @@ impl Generator<'_> {
         } else {
             ""
         };
+        let hold = self
+            .field(element, "hold")
+            .map(|field| {
+                format!(
+                    ", hold = {{ it: Boolean -> {field} = it }}, holdAfter = {}",
+                    double(element.number("hold_after").unwrap_or(0.3))
+                )
+            })
+            .unwrap_or_default();
         out.line(format!(
-            "BernShortcut({}, {{ {enabled} }}{quiet}) {{ {action} }}",
+            "BernShortcut({}, {{ {enabled} }}{quiet}{hold}) {{ {action} }}",
             self.shortcut_keys(element, "key")
                 .unwrap_or_else(|| string(""))
         ));

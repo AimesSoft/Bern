@@ -17,6 +17,7 @@ import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -440,6 +441,9 @@ fun BernStack(
     }
     if (shape != null) surface = surface.clip(shape)
     style?.base?.background?.let { surface = surface.background(palette.color(it)) }
+    style?.base?.border?.let {
+        surface = surface.border(style.base.borderWidth.dp, palette.color(it), shape ?: RectangleShape)
+    }
     val foreground = style?.base?.foreground?.let(palette::color)
     Box(surface, contentAlignment = alignment) {
         if (foreground != null) {

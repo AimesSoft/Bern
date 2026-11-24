@@ -322,7 +322,18 @@ final class BernLanguage: @unchecked Sendable {
     /// The languages the bundle is localized for.
     let supported: [String]
     private(set) var current: String
+    private(set) var followsSystem: Bool
     private(set) var bundle: Bundle
+
+    /// The tag shown in `LanguagePicker`: `"system"` while following the OS.
+    var selection: String { followsSystem ? "system" : current }
+
+    private static func systemLanguage(in declared: [String]) -> String {
+        Bundle.main.preferredLocalizations.first { declared.contains($0) }
+            ?? Bundle.main.preferredLocalizations.first
+            ?? declared.first
+            ?? "en"
+    }
 
     private init() {
         // The bundle lists a language once per source of localizations.
@@ -332,7 +343,8 @@ final class BernLanguage: @unchecked Sendable {
         }
         supported = declared
         let kept = UserDefaults.standard.string(forKey: Self.keptLanguage).flatMap { declared.contains($0) ? $0 : nil }
-        let initial = kept ?? Bundle.main.preferredLocalizations.first ?? declared.first ?? "en"
+        followsSystem = kept == nil
+        let initial = kept ?? Self.systemLanguage(in: declared)
         current = initial
         bundle = Self.bundle(for: initial)
         Self.publish(initial)
@@ -349,10 +361,20 @@ final class BernLanguage: @unchecked Sendable {
         Bundle.main.path(forResource: language, ofType: "lproj").flatMap(Bundle.init(path:)) ?? .main
     }
 
-    /// Switch to a supported language; false for any other tag.
+    /// Switch to a supported language or `"system"`; false for any other tag.
     @discardableResult
     func select(_ language: String) -> Bool {
+        if language == "system" {
+            let resolved = Self.systemLanguage(in: supported)
+            followsSystem = true
+            bundle = Self.bundle(for: resolved)
+            current = resolved
+            Self.publish(resolved)
+            UserDefaults.standard.removeObject(forKey: Self.keptLanguage)
+            return true
+        }
         guard supported.contains(language) else { return false }
+        followsSystem = false
         bundle = Self.bundle(for: language)
         current = language
         Self.publish(language)
@@ -602,6 +624,7 @@ final class BernWindowContext {
     /// an idle window, not hover changes caused by layout or drawing.
     @ObservationIgnored var idleAreas: Set<UUID> = []
     @ObservationIgnored var idleAreasHovered: [UUID: Double] = [:]
+    @ObservationIgnored var pointerInsideWindow = false
     @ObservationIgnored var idleAreasChanged: (() -> Void)?
     #if os(macOS)
     /// Mounted `Shortcut(quiet: true)` entries in this window: their key
@@ -3694,6 +3717,292 @@ struct BernSliderLabelHidden: ViewModifier {
     func body(content: Content) -> some View { if hidden { content.labelsHidden() } else { content } }
 }
 
+#if os(macOS)
+private struct BernAppKitVerticalSlider: NSViewRepresentable {
+    @Binding var value: Double
+    let minimum: Double
+    let maximum: Double
+    let step: Double?
+    let label: String
+    let onEditingChanged: (Bool) -> Void
+
+    final class Coordinator: NSObject {
+        var value: Binding<Double>
+        var minimum: Double
+        var maximum: Double
+        var step: Double?
+        var onEditingChanged: (Bool) -> Void
+        var editing = false
+
+        init(value: Binding<Double>, minimum: Double, maximum: Double, step: Double?,
+             onEditingChanged: @escaping (Bool) -> Void) {
+            self.value = value
+            self.minimum = minimum
+            self.maximum = maximum
+            self.step = step
+            self.onEditingChanged = onEditingChanged
+        }
+
+        private func snap(_ raw: Double) -> Double {
+            var next = min(maximum, max(minimum, raw))
+            if let step, step.isFinite, step > 0 {
+                next = minimum + ((next - minimum) / step).rounded() * step
+                next = min(maximum, max(minimum, next))
+            }
+            return next
+        }
+
+        @MainActor @objc func changed(_ sender: NSSlider) {
+            let next = snap(sender.doubleValue)
+            if sender.doubleValue != next { sender.doubleValue = next }
+            let eventType = NSApp.currentEvent?.type
+            if eventType == .leftMouseDown || eventType == .leftMouseDragged {
+                if !editing {
+                    editing = true
+                    onEditingChanged(true)
+                }
+                if value.wrappedValue != next { value.wrappedValue = next }
+            } else if eventType == .leftMouseUp {
+                if value.wrappedValue != next { value.wrappedValue = next }
+                if editing {
+                    editing = false
+                    onEditingChanged(false)
+                }
+            } else {
+                if value.wrappedValue != next { value.wrappedValue = next }
+                onEditingChanged(true)
+                onEditingChanged(false)
+            }
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(value: $value, minimum: minimum, maximum: maximum, step: step, onEditingChanged: onEditingChanged)
+    }
+
+    func makeNSView(context: Context) -> NSSlider {
+        let slider = NSSlider(value: value, minValue: minimum, maxValue: maximum,
+                              target: context.coordinator, action: #selector(Coordinator.changed(_:)))
+        slider.isVertical = true
+        slider.isContinuous = true
+        slider.focusRingType = .none
+        slider.setAccessibilityLabel(label)
+        return slider
+    }
+
+    func updateNSView(_ slider: NSSlider, context: Context) {
+        context.coordinator.value = $value
+        context.coordinator.minimum = minimum
+        context.coordinator.maximum = maximum
+        context.coordinator.step = step
+        context.coordinator.onEditingChanged = onEditingChanged
+        if slider.minValue != minimum { slider.minValue = minimum }
+        if slider.maxValue != maximum { slider.maxValue = maximum }
+        if !context.coordinator.editing && abs(slider.doubleValue - value) > 1e-9 {
+            slider.doubleValue = value
+        }
+        slider.setAccessibilityLabel(label)
+    }
+}
+#endif
+
+/// A vertical slider (`axis: vertical`): `min` at the bottom, `max` at the top,
+/// using AppKit's vertical `NSSlider` on macOS and an accessible vertical drag
+/// track on touch/watch platforms.
+struct BernVerticalSlider: View {
+    @Binding var value: Double
+    let minimum: Double
+    let maximum: Double
+    let step: Double?
+    let label: String
+    let labelHidden: Bool
+    let minimumIcon: String?
+    let maximumIcon: String?
+    let onEditingChanged: (Bool) -> Void
+    @Environment(\.bernAccent) private var accent
+    @State private var dragging = false
+
+    private var span: Double { maximum - minimum }
+    private var fraction: Double {
+        guard span.isFinite, span > 0 else { return 0 }
+        return min(1, max(0, (value - minimum) / span))
+    }
+
+    private func snap(_ raw: Double) -> Double {
+        var next = min(maximum, max(minimum, raw))
+        if let step, step.isFinite, step > 0 {
+            next = minimum + ((next - minimum) / step).rounded() * step
+            next = min(maximum, max(minimum, next))
+        }
+        return next
+    }
+
+    var body: some View {
+        BernSliderInteraction(value: $value, minimum: minimum, maximum: maximum, step: step, onEditingChanged: onEditingChanged) { binding, edit in
+            VStack(spacing: 6) {
+                if !labelHidden && !label.isEmpty {
+                    Text(verbatim: label)
+                }
+                if let maximumIcon {
+                    BernIcon(name: maximumIcon).foregroundStyle(.secondary).accessibilityHidden(true)
+                }
+                #if os(macOS)
+                BernAppKitVerticalSlider(
+                    value: binding,
+                    minimum: minimum,
+                    maximum: maximum,
+                    step: step,
+                    label: label,
+                    onEditingChanged: edit
+                )
+                .frame(width: 24)
+                .frame(minHeight: 60, maxHeight: .infinity)
+                #else
+                GeometryReader { proxy in
+                    let thumb: CGFloat = 22
+                    let trackHeight = max(1, proxy.size.height - thumb)
+                    let filled = trackHeight * fraction
+                    ZStack(alignment: .bottom) {
+                        Capsule()
+                            .fill(Color.primary.opacity(0.18))
+                            .frame(width: 4)
+                            .padding(.vertical, thumb / 2)
+                        Capsule()
+                            .fill(accent ?? Color.accentColor)
+                            .frame(width: 4, height: filled)
+                            .padding(.bottom, thumb / 2)
+                        Circle()
+                            .fill(Color.white)
+                            .frame(width: thumb, height: thumb)
+                            .shadow(color: .black.opacity(0.22), radius: 2, y: 1)
+                            .offset(y: -filled)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+                    #if !os(tvOS)
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { gesture in
+                                if !dragging {
+                                    dragging = true
+                                    edit(true)
+                                }
+                                let f = min(1, max(0, 1 - Double((gesture.location.y - thumb / 2) / trackHeight)))
+                                let next = snap(minimum + f * span)
+                                if binding.wrappedValue != next { binding.wrappedValue = next }
+                            }
+                            .onEnded { gesture in
+                                let f = min(1, max(0, 1 - Double((gesture.location.y - thumb / 2) / trackHeight)))
+                                let next = snap(minimum + f * span)
+                                if binding.wrappedValue != next { binding.wrappedValue = next }
+                                dragging = false
+                                edit(false)
+                            }
+                    )
+                    #endif
+                }
+                .frame(width: 28)
+                .frame(minHeight: 60, maxHeight: .infinity)
+                .accessibilityElement()
+                .accessibilityLabel(Text(verbatim: label))
+                .accessibilityValue(Text(verbatim: BernText.text(value)))
+                .accessibilityAdjustableAction { direction in
+                    let delta = step ?? (span / 20.0)
+                    let next = snap(value + (direction == .increment ? delta : -delta))
+                    edit(true)
+                    binding.wrappedValue = next
+                    edit(false)
+                }
+                #endif
+                if let minimumIcon {
+                    BernIcon(name: minimumIcon).foregroundStyle(.secondary).accessibilityHidden(true)
+                }
+            }
+        }
+    }
+}
+
+struct BernControlledVerticalSlider: View {
+    let value: Double
+    let minimum: Double
+    let maximum: Double
+    let step: Double?
+    let label: String
+    let labelHidden: Bool
+    let continuous: Bool
+    let minimumIcon: String?
+    let maximumIcon: String?
+    let commit: (Double) -> Void
+    @State private var preview = 0.0
+    @State private var editing = false
+    @State private var lastSubmitted: Double?
+    @State private var lastCommitAt = -Double.infinity
+    @State private var pendingCommit: Task<Void, Never>?
+
+    private var previewBinding: Binding<Double> {
+        Binding(get: { preview }, set: { next in
+            preview = next
+            if continuous { scheduleCommit() }
+        })
+    }
+
+    var body: some View {
+        BernVerticalSlider(
+            value: previewBinding,
+            minimum: minimum,
+            maximum: maximum,
+            step: step,
+            label: label,
+            labelHidden: labelHidden,
+            minimumIcon: minimumIcon,
+            maximumIcon: maximumIcon,
+            onEditingChanged: edit
+        )
+        .bernAccentTint()
+        .onAppear { preview = value; lastSubmitted = value }
+        .onChange(of: value) { _, newValue in
+            if !editing && pendingCommit == nil { preview = newValue; lastSubmitted = newValue }
+        }
+        .onDisappear {
+            pendingCommit?.cancel()
+            pendingCommit = nil
+            if continuous && editing { submit() }
+        }
+    }
+
+    private func scheduleCommit() {
+        let remaining = 1.0 / 30.0 - (ProcessInfo.processInfo.systemUptime - lastCommitAt)
+        if remaining <= 0 {
+            pendingCommit?.cancel()
+            pendingCommit = nil
+            submit()
+        } else if pendingCommit == nil {
+            pendingCommit = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+                guard !Task.isCancelled else { return }
+                pendingCommit = nil
+                submit()
+            }
+        }
+    }
+
+    private func submit() {
+        guard lastSubmitted != preview else { return }
+        lastSubmitted = preview
+        lastCommitAt = ProcessInfo.processInfo.systemUptime
+        commit(preview)
+    }
+
+    private func edit(_ active: Bool) {
+        editing = active
+        if !active {
+            pendingCommit?.cancel()
+            pendingCommit = nil
+            if continuous { submit() } else { commit(preview) }
+        }
+    }
+}
+
 #if os(macOS) || os(iOS)
 struct BernControlledColorPicker: View {
     let value: Double
@@ -3969,6 +4278,80 @@ enum BernTiming {
     }
 }
 
+// MARK: - Application icons
+
+/// Registry of application `.svg` icons outlined in a 20×20 coordinate square.
+@MainActor
+enum BernAppIcons {
+    private static var lookup: ((String) -> SwiftUI.Path?)?
+
+    static func install(_ provider: @escaping (String) -> SwiftUI.Path?) {
+        lookup = provider
+    }
+
+    static func path(_ name: String) -> SwiftUI.Path? {
+        lookup?(name)
+    }
+
+    static func systemName(_ name: String) -> String {
+        switch name {
+        case "line.2.horizontal": return "equal"
+        default: return name
+        }
+    }
+}
+
+struct BernVectorIconShape: Shape {
+    let source: SwiftUI.Path
+
+    func path(in rect: CGRect) -> SwiftUI.Path {
+        let side = min(rect.width, rect.height)
+        guard side > 0 else { return SwiftUI.Path() }
+        let scale = side / 20.0
+        let dx = rect.minX + (rect.width - side) * 0.5
+        let dy = rect.minY + (rect.height - side) * 0.5
+        var transform = CGAffineTransform(translationX: dx, y: dy)
+        transform = transform.scaledBy(x: scale, y: scale)
+        return source.applying(transform)
+    }
+}
+
+/// Renders either an outlined application `.svg` icon or a system SF Symbol.
+struct BernIcon: View {
+    let name: String
+    var size: CGFloat? = nil
+
+    var body: some View {
+        if let path = BernAppIcons.path(name) {
+            let side = size ?? 16
+            BernVectorIconShape(source: path)
+                .fill(style: FillStyle(eoFill: false))
+                .frame(width: side, height: side)
+        } else if let size {
+            SwiftUI.Image(systemName: BernAppIcons.systemName(name))
+                .font(.system(size: size))
+        } else {
+            SwiftUI.Image(systemName: BernAppIcons.systemName(name))
+        }
+    }
+}
+
+/// A title + icon label that accepts both application `.svg` icons and SF Symbols.
+struct BernIconLabel: View {
+    let title: String
+    let icon: String
+    var bold: Bool = false
+
+    var body: some View {
+        SwiftUI.Label {
+            SwiftUI.Text(verbatim: title)
+                .fontWeight(bold ? .bold : nil)
+        } icon: {
+            BernIcon(name: icon)
+        }
+    }
+}
+
 /// Decorations share the symbol's own bounds; neither changes button layout.
 struct BernIconGlyph: View {
     let name: String
@@ -3983,11 +4366,11 @@ struct BernIconGlyph: View {
     }
 
     var body: some View {
-        Image(systemName: name)
+        BernIcon(name: name)
             .symbolRenderingMode(.monochrome)
             .overlay {
                 GeometryReader { geometry in
-                    Image(systemName: name)
+                    BernIcon(name: name)
                         .symbolRenderingMode(.monochrome)
                         .foregroundStyle(accent ?? Color.accentColor)
                         .frame(width: geometry.size.width, height: geometry.size.height)
@@ -4002,9 +4385,7 @@ struct BernIconGlyph: View {
                 if let badge, badgeVisible {
                     GeometryReader { geometry in
                         let side = min(geometry.size.width, geometry.size.height)
-                        Image(systemName: badge)
-                            .resizable()
-                            .scaledToFit()
+                        BernIcon(name: badge, size: side * 0.4)
                             .foregroundStyle(accent ?? Color.accentColor)
                             .frame(width: side * 0.4, height: side * 0.4)
                             .padding(side * 0.06)

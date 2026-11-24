@@ -573,6 +573,7 @@ pub fn run(def: AppDef, start: StartEngine) -> glib::ExitCode {
         snapshot::apply_appearance();
         keep_adwaita_icons();
         install_icon(host().def.bundle_id);
+        crate::icons::install(host().def.id, host().def.fingerprint, host().def.app_icons);
         crate::style::install(host().def.styles, host().def.text_styles);
         if let Some((red, green, blue)) = host().def.brand_seed {
             let provider = gtk::CssProvider::new();
@@ -692,6 +693,7 @@ pub(crate) mod tests {
             expanded_below: None,
             brand_seed: None,
             styles: &[],
+            app_icons: &[],
             text_styles: &[],
             theme: None,
             file_kinds: &[],

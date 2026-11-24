@@ -2,7 +2,7 @@
 
 # Platform capabilities and verification scope
 
-Updated: 2026-11-21. The tables below are compiled from [bern-target-api](../../crates/bern-target-api/src/lib.rs) and each backend's `TargetDescriptor.features`. macOS and iOS share one SwiftUI list; tvOS and watchOS share the SwiftUI generator with them, and their lists are given separately in the [tvOS descriptor](../../crates/bern-backend-swiftui/src/tvos.rs) and [watchOS descriptor](../../crates/bern-backend-swiftui/src/watchos.rs).
+Updated: 2026-11-25. The tables below are compiled from [bern-target-api](../../crates/bern-target-api/src/lib.rs) and each backend's `TargetDescriptor.features`. macOS and iOS share one SwiftUI list; tvOS and watchOS share the SwiftUI generator with them, and their lists are given separately in the [tvOS descriptor](../../crates/bern-backend-swiftui/src/tvos.rs) and [watchOS descriptor](../../crates/bern-backend-swiftui/src/watchos.rs).
 
 The optional GPUI target (`ui = "gpui"`, macOS, Windows, Linux) is a first version, built and run on all three platforms, and is not included in the tables below; the components and features it declares are in the [GPUI platform guide](../Platforms/GPUI.md).
 
@@ -64,12 +64,14 @@ The optional GPUI target (`ui = "gpui"`, macOS, Windows, Linux) is a first versi
 | `untitled_detail` | Untitled detail | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
 | `idle_control` | Turning idle detection on and off by state (`Window(idle_enabled:)`) | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
 | `quiet_shortcuts` | Shortcuts that are no input for idle detection (`Shortcut(quiet:)`) | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
-| `app_icons` | The application's own icons: `icon: "icons/play.svg"` names a declared SVG, outlined at build time and drawn in the control's foreground colour | — | — | — | — | — | — | Supported |
-| `popup_placement` | `placement: above / below` of `Menu`, `PopoverButton` and `Tooltip` | — | — | — | — | — | — | Supported |
-| `tooltip_keys` | `Tooltip(keys:)`: the shortcut in key caps after the tip's text | — | — | — | — | — | — | Supported |
-| `vertical_sliders` | Upright sliders (`Slider(axis: vertical)`) | — | — | — | — | — | — | Supported |
-| `hold_shortcuts` | Keys told apart by how long they are held (`Shortcut(hold:, hold_after:)`) | — | — | — | — | — | — | Supported |
-| `native_lists` | Lists passed into a native view (`NativeValue(value:)` with a `Vec`) | — | — | — | — | — | — | Supported |
+| `app_icons` | The application's own icons: `icon: "icons/play.svg"` names a declared SVG, outlined at build time and drawn in the control's foreground colour | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
+| `popup_placement` | `placement: above / below` of `Menu`, `PopoverButton` and `Tooltip` | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
+| `tooltip_keys` | `Tooltip(keys:)`: the shortcut in key caps after the tip's text (appended in `.help(...)` on SwiftUI) | Supported | Supported | — | Supported | Supported | Supported | Supported |
+| `vertical_sliders` | Upright sliders (`Slider(axis: vertical)`) | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
+| `hold_shortcuts` | Keys told apart by how long they are held (`Shortcut(hold:, hold_after:)`) | Supported | Supported | — | Supported | Supported | Supported | Supported |
+| `native_lists` | Lists passed into a native view (`NativeValue(value:)` with a `Vec`) | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
+| `switch_knob` | Custom switch knob colour (`Switch(variant:)` `foreground`) | — (system knob, warning) | — (system knob, warning) | — (system knob, warning) | Supported | Supported | Supported | Supported |
+| `bold_menus` | Bold menu trigger text (`Menu(bold: true)`) | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
 | `fill_buttons` | System buttons that fill the container horizontally (`Button(width: fill)`) | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
 | `page_search` | A system search field in the page (`Search` not inside a `Toolbar` / `Sidebar`), with results listed below the field | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
 | `window_short` | Window height below the compact breakpoint (`window.short`), such as a phone in landscape | Supported | Supported | Supported | Supported | Supported | Supported | Supported |
@@ -97,7 +99,7 @@ The optional GPUI target (`ui = "gpui"`, macOS, Windows, Linux) is a first versi
 | Capability | Current scope |
 | --- | --- |
 | `Window(idle_enabled:)` | All six targets consume the on/off state (capability `idle_control`): when it is false, `window.idle` stays false and no time is counted; when it becomes true, timing restarts |
-| Idle area (`idle_area`) | The motion capabilities of all seven targets declare it. On macOS, Web, Android, Linux and Windows, when the page has an idle area, the window goes idle only when the mouse rests over the idle area; resting elsewhere or leaving the window keeps it awake, and touch, remote and keyboard still follow `idle_after`; on iOS and tvOS the idle area does not change the timing (also on an iPad with a mouse attached). macOS measured with the playback screen of a real app; Web has runtime tests; Android compiles and packages, both Windows frontends compile with MSVC, and the Linux runtime passes Clippy on GTK 4 on macOS, but none of these three has been run and measured |
+| Idle area (`idle_area`) | The motion capabilities of all targets (including GPUI) declare it. On macOS, Web, Android, Linux, Windows and GPUI, when the page has an idle area, the window goes idle when the mouse rests over the idle area for its own delay, keeps awake while resting elsewhere inside the window, and falls back to the window's `idle_after` once the pointer leaves the window; touch, remote and keyboard still follow `idle_after`; on iOS and tvOS the idle area does not change the timing (also on an iPad with a mouse attached) |
 | `Window(landscape:)` on the web | Locks to landscape through the Screen Orientation API: browsers lock only on phones and tablets, most also require the page to be full screen or running as an installed app, and Safari on iOS does not offer locking; when refused, the device orientation is kept and the request is made again on entering full screen. Covered by runtime tests, not measured in a phone browser |
 | Image Hero across split columns | macOS uses a window-level overlay, Web uses a viewport-level copy; iOS and other macOS views keep using matched geometry. Continuous-frame handoff for Video is verified separately |
 | Local persistence | The native FFI host provides file storage, and the Web app uses same-origin localStorage; nothing is persisted when no storage host is installed |

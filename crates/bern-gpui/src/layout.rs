@@ -105,6 +105,8 @@ pub enum Align {
 pub struct Style {
     pub background: Option<Color>,
     pub foreground: Option<Color>,
+    /// Color and width of the border.
+    pub border: Option<(Color, f32)>,
     pub corner: Option<f32>,
     /// Blur radius, offset down and opacity of the shadow.
     pub shadow: Option<(f32, f32, f32)>,
@@ -115,6 +117,7 @@ impl Style {
     pub const NONE: Style = Style {
         background: None,
         foreground: None,
+        border: None,
         corner: None,
         shadow: None,
     };
@@ -151,6 +154,11 @@ pub(crate) fn styled(c: &Ctx, element: Div, style: Option<&Style>) -> Div {
     }
     if let Some(foreground) = style.foreground {
         element = element.text_color(color(c, foreground));
+    }
+    if let Some((border_color, width)) = style.border {
+        element = element
+            .border(px(width))
+            .border_color(color(c, border_color));
     }
     match style.corner {
         Some(corner) => element = element.rounded(px(corner)).overflow_hidden(),
@@ -215,6 +223,40 @@ pub fn reveal(c: &Ctx, content: El) -> El {
                 .group_hover(REVEAL, |style| style.opacity(1.0))
                 .child(content),
         )
+        .into_any_element()
+}
+
+/// Wrapper for an unsized `NativeView`: fills width in columns and both axes
+/// when layered inside a `Stack`.
+pub fn native_host(c: &Ctx, child: El) -> El {
+    c.grow()
+        .apply(div().flex().flex_col().min_w(px(0.0)).min_h(px(0.0)))
+        .child(child)
+        .into_any_element()
+}
+
+/// Marks a region whose hover counts down to `window.idle` after `seconds`;
+/// resting over other controls keeps the window awake until the pointer leaves.
+pub fn idle_area(c: &Ctx, key: &'static str, seconds: f64, child: El) -> El {
+    let win = std::rc::Rc::clone(c.win());
+    win.has_idle_areas.set(true);
+    c.grow()
+        .apply(
+            div()
+                .id(c.element_id(key))
+                .flex()
+                .flex_col()
+                .min_w(px(0.0))
+                .min_h(px(0.0)),
+        )
+        .on_hover(move |hovered, _, _| {
+            if *hovered {
+                win.hovered_idle_area.set(Some(seconds));
+            } else if win.hovered_idle_area.get() == Some(seconds) {
+                win.hovered_idle_area.set(None);
+            }
+        })
+        .child(child)
         .into_any_element()
 }
 

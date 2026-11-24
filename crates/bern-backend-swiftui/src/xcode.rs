@@ -932,7 +932,11 @@ pub(crate) fn eject_apple(
     files.push(GeneratedFile::text(bridging_header.clone(), HEADER));
 
     // 2. Split generated Swift sources (`fingerprint = 0` relaxes protocol check).
-    for (rel, content) in Generator::new(app, platform).generate_split(0) {
+    let app_icons = crate::app_icon_contours(app, context)?;
+    for (rel, content) in Generator::new(app, platform)
+        .with_app_icons(app_icons)
+        .generate_split(0)
+    {
         let path = PathBuf::from("Sources").join(rel);
         swift_files.push(path.clone());
         files.push(GeneratedFile::text(path, rewrite(content)));

@@ -4681,6 +4681,24 @@ fn chip_pickers_take_no_button_size() {
 }
 
 #[test]
+fn hold_after_requires_hold_and_positive_seconds() {
+    let missing_hold = errors(r#"Shortcut(key: "right", hold_after: 0.3) => app.add(1)"#);
+    assert!(
+        missing_hold.contains("`hold_after` on `Shortcut` requires `hold`"),
+        "{missing_hold}"
+    );
+    let zero = errors(r#"Shortcut(key: "right", hold: draft.on, hold_after: 0) => app.add(1)"#);
+    assert!(
+        zero.contains("`hold_after` on `Shortcut` must be greater than 0"),
+        "{zero}"
+    );
+    compile_ui(&wrap(
+        r#"Column { Shortcut(key: "right", hold: draft.on, hold_after: 0.25) => app.add(1) }"#,
+    ))
+    .unwrap();
+}
+
+#[test]
 fn player_scene_and_controlled_slider_validate_sources() {
     let label = r#"tr! { "en" => "Position", "ja" => "位置" }"#;
     for (body, message) in [

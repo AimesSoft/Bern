@@ -78,13 +78,15 @@ impl Generator<'_> {
     /// A menu button and its items; dividers are `None`.
     pub(super) fn menu(&self, out: &mut Out, element: &Element) {
         out.open(format!(
-            "b::Menu(p, c, b::MenuProps {{ id: {}, label: {}, icon: {}, icon_only: {}, shape: {}, hide_disabled: {} }}, vec![",
+            "b::Menu(p, c, b::MenuProps {{ id: {}, label: {}, icon: {}, icon_only: {}, shape: {}, hide_disabled: {}, placement: {}, bold: {} }}, vec![",
             self.id(element),
             some(self.text_prop(element, "label")),
             Self::icon(element, "icon"),
             element.keyword("style") == Some("icon"),
             self.shape(element),
             element.keyword("hide_disabled") == Some("true"),
+            Self::keyword(element, "placement"),
+            element.keyword("bold") == Some("true"),
         ));
         let mut shortcuts = Vec::new();
         for node in &element.children {

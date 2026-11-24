@@ -610,17 +610,36 @@ impl Generator<'_> {
                 Some(icon) if tab.keyword("display") == Some("icon") => {
                     if self.platform == Platform::Macos {
                         out.open("if bernTabShowsIcon(bernWindow) {");
-                        out.line(format!(
-                            "SwiftUI.Label({label}, systemImage: {}).labelStyle(.iconOnly)",
-                            string(icon)
-                        ));
+                        if Self::uses_custom_icon(icon) {
+                            out.line(format!(
+                                "BernIcon(name: {}).accessibilityLabel(SwiftUI.Text(verbatim: {label}))",
+                                string(icon)
+                            ));
+                        } else {
+                            out.line(format!(
+                                "SwiftUI.Label({label}, systemImage: {}).labelStyle(.iconOnly)",
+                                string(icon)
+                            ));
+                        }
                         out.close("} else {");
                         out.indent += 1;
+                        if Self::uses_custom_icon(icon) {
+                            out.line(format!(
+                                "BernIconLabel(title: {label}, icon: {})",
+                                string(icon)
+                            ));
+                        } else {
+                            out.line(format!(
+                                "SwiftUI.Label({label}, systemImage: {})",
+                                string(icon)
+                            ));
+                        }
+                        out.close("}");
+                    } else if Self::uses_custom_icon(icon) {
                         out.line(format!(
-                            "SwiftUI.Label({label}, systemImage: {})",
+                            "BernIcon(name: {}).accessibilityLabel(SwiftUI.Text(verbatim: {label}))",
                             string(icon)
                         ));
-                        out.close("}");
                     } else {
                         out.line(format!(
                             "SwiftUI.Image(systemName: {}).accessibilityLabel(SwiftUI.Text(verbatim: {label}))",
@@ -628,6 +647,10 @@ impl Generator<'_> {
                         ));
                     }
                 }
+                Some(icon) if Self::uses_custom_icon(icon) => out.line(format!(
+                    "BernIconLabel(title: {label}, icon: {})",
+                    string(icon)
+                )),
                 Some(icon) => out.line(format!(
                     "SwiftUI.Label({label}, systemImage: {})",
                     string(icon)

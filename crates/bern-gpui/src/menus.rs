@@ -75,12 +75,16 @@ pub fn menu_item(
 #[derive(Clone, Copy, Debug, Default)]
 pub struct MenuProps {
     pub icon: Option<&'static str>,
-    /// The icon alone, as an icon button.
+    /// The icon alone, as an icon button (or plain text without arrow when no icon).
     pub icon_only: bool,
     pub shape: Shape,
     pub height: Option<f32>,
     /// Leave disabled items out instead of dimming them.
     pub hide_disabled: bool,
+    /// Render the trigger label in bold.
+    pub bold: bool,
+    /// Preferred side (`"above"` or `"below"`).
+    pub placement: Option<&'static str>,
 }
 
 /// `Menu`: a button that opens its commands below it.
@@ -112,7 +116,12 @@ pub fn menu(
             ..Actions::default()
         },
     });
-    let button = if props.icon_only {
+    let weight = if props.bold {
+        FontWeight::BOLD
+    } else {
+        FontWeight::MEDIUM
+    };
+    let button = if props.icon_only && props.icon.is_some() {
         let side = props.height.unwrap_or(36.0);
         let recipe = if props.height.is_some() {
             "button.standard"
@@ -147,6 +156,37 @@ pub fn menu(
                 .icon
                 .map(|icon| icons::icon(icon, 18.0, colors.foreground)),
         )
+    } else if props.icon_only {
+        let (height, padding, text) = look::metrics(None, props.shape);
+        let height = props.height.unwrap_or(height);
+        let colors = Colors::recipe(
+            c,
+            "icon_button",
+            if enabled { "rest" } else { "disabled" },
+            false,
+        );
+        let hover = c.color("hover.overlay");
+        look::paint(
+            div()
+                .id(c.element_id(id))
+                .flex()
+                .flex_row()
+                .flex_none()
+                .items_center()
+                .justify_center()
+                .h(px(height))
+                .px(px(padding.min(10.0)))
+                .rounded(px(if props.shape == Shape::Default {
+                    8.0
+                } else {
+                    height / 2.0
+                }))
+                .text_size(px(text))
+                .font_weight(weight),
+            colors,
+        )
+        .hover(move |style| style.bg(hover))
+        .child(label)
     } else {
         let (height, padding, text) = look::metrics(None, props.shape);
         let height = props.height.unwrap_or(height);
@@ -173,7 +213,7 @@ pub fn menu(
                     height / 2.0
                 }))
                 .text_size(px(text))
-                .font_weight(FontWeight::MEDIUM),
+                .font_weight(weight),
             colors,
         )
         .hover(move |style| style.bg(hover))
@@ -200,7 +240,12 @@ pub fn menu(
         .child(button)
         .child(crate::overlay::opener_place(&target))
         .when(open, |element| {
-            element.child(crate::overlay::panel(c, &target, list))
+            element.child(crate::overlay::panel_placed(
+                c,
+                &target,
+                list,
+                props.placement,
+            ))
         })
         .into_any_element()
 }

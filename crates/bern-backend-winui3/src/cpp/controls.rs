@@ -344,6 +344,7 @@ impl Generator<'_> {
         let props = designated(&[
             ("content", self.text_prop(element, "content")),
             ("keys", Self::keyword(element, "keys")),
+            ("boundKeys", self.shortcut_keys(element, "keys")),
             ("placement", Self::keyword(element, "placement")),
         ])
         .replacen('{', "B::TooltipProps{", 1);
@@ -849,7 +850,10 @@ impl Generator<'_> {
                     (element.keyword("hide_disabled") == Some("true")).then(|| "true".into()),
                 ),
                 ("placement", Self::keyword(element, "placement")),
-                ("bold", (element.keyword("bold") == Some("true")).then(|| "true".into())),
+                (
+                    "bold",
+                    (element.keyword("bold") == Some("true")).then(|| "true".into()),
+                ),
             ])
             .replacen('{', "B::MenuLook{", 1),
         ));

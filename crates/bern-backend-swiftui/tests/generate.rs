@@ -3376,3 +3376,291 @@ pub fn app(app: tab_wrap::Client, windows: AppWindows) -> impl View {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn player_controls_and_app_icons_typecheck_on_apple() {
+    let protocol = r#"
+#[bern::protocol(namespace = "player_proto", version = 1)]
+pub mod player_proto {
+    use bern::protocol::*;
+
+    #[value]
+    pub enum Mode {
+        #[label(tr! { "en" => "One" })]
+        One,
+        #[label(tr! { "en" => "Two" })]
+        Two,
+    }
+
+    #[value]
+    pub struct RowItem {
+        pub id: String,
+        #[content]
+        pub title: String,
+    }
+
+    #[state]
+    pub struct State {
+        pub play_key: String,
+        pub volume: f64,
+        pub enabled: bool,
+        pub tags: Vec<String>,
+        pub rows: Vec<RowItem>,
+    }
+
+    #[commands]
+    pub trait Commands {
+        fn toggle(&mut self) -> Result<(), CommandError>;
+        fn set_volume(&mut self, value: f64) -> Result<(), CommandError>;
+        fn set_enabled(&mut self, value: bool) -> Result<(), CommandError>;
+        fn reorder(&mut self, from: i64, to: i64) -> Result<(), CommandError>;
+    }
+}
+"#;
+    let ui = r#"
+use bern::prelude::*;
+use player_proto::player_proto::{self, Mode};
+
+style! {
+    Stack.framed {
+        border: border(control.border, width: 1),
+        corner: 8,
+    }
+    Switch.bright {
+        foreground: accent,
+    }
+}
+
+#[bern::session]
+pub struct Draft {
+    pub boosting: bool,
+    pub level: f64,
+    pub hover: Option<f64>,
+    pub mode: Mode,
+    pub move_from: i64,
+    pub move_to: i64,
+}
+
+#[component]
+pub fn main_view(app: player_proto::Client, #[session] draft: Draft) -> impl View {
+    ui! {
+        Column(gap: 8) {
+            Shortcut(key: "right", hold: draft.boosting, hold_after: 0.35, quiet: true) => app.toggle()
+            Tooltip(content: tr! { "en" => "Play" }, keys: app.play_key) {
+                IconButton(id: play, icon: "icons/custom.svg", label: tr! { "en" => "Play" }) => app.toggle()
+            }
+            Tooltip(content: tr! { "en" => "Equal" }, keys: "space", placement: above) {
+                IconButton(id: eq, icon: "line.2.horizontal", label: tr! { "en" => "Equal" }) => app.toggle()
+            }
+            Menu(id: speed, label: tr! { "en" => "1.0x" }, style: icon, bold: true, placement: above) {
+                MenuItem(id: fast, label: tr! { "en" => "2.0x" }, icon: "arrow.uturn.backward") => app.toggle()
+            }
+            PopoverButton(id: vol_pop, icon: "plus.circle", label: tr! { "en" => "Volume" }, placement: above) {
+                Slider(
+                    id: vol,
+                    label: tr! { "en" => "Volume" },
+                    label_hidden: true,
+                    axis: vertical,
+                    current: app.volume,
+                    min: 0.0,
+                    max: 1.0,
+                    min_icon: "speaker.fill",
+                    max_icon: "speaker.wave.3.fill",
+                    hover: draft.hover,
+                    continuous: true
+                ) => app.set_volume(app.volume)
+            }
+            Slider(
+                id: draft_vol,
+                label: tr! { "en" => "Level" },
+                axis: vertical,
+                value: draft.level,
+                min: 0.0,
+                max: 1.0
+            )
+            Switch(id: sw, label: tr! { "en" => "Bright" }, checked: app.enabled, variant: bright) => app.set_enabled(app.enabled)
+            Picker(id: seg, label: tr! { "en" => "Mode" }, value: draft.mode, style: segmented, shape: capsule)
+            Picker(id: ch, label: tr! { "en" => "Chips" }, value: draft.mode, style: chips, shape: capsule)
+            LanguagePicker(id: lang, label: tr! { "en" => "Language" })
+            Reorderable(
+                id: order,
+                label: tr! { "en" => "Order" },
+                items: app.rows,
+                key: id,
+                move_from: draft.move_from,
+                move_to: draft.move_to
+            ) |item| {
+                Text(content: item.title)
+                Spacer()
+                Label(title: tr! { "en" => "Drag" }, icon: "line.3.horizontal", display: icon)
+            } => app.reorder(draft.move_from, draft.move_to)
+            Stack(variant: framed, height: 120) {
+                NativeView(id: canvas, label: tr! { "en" => "Canvas" }, swiftui: "canvas.swift") {
+                    NativeValue(name: tags, value: app.tags)
+                    NativeAction(id: ping, label: tr! { "en" => "Ping" }) => app.toggle()
+                }
+            }
+        }
+    }
+}
+
+#[component]
+pub fn app(app: player_proto::Client, windows: AppWindows) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Player" }, initial: open, idle_after: 3.0) {
+                main_view(app: app)
+            }
+        }
+    }
+}
+"#;
+    let native_swift = r#"
+import SwiftUI
+
+struct CanvasNativeView: View {
+    let props: CanvasNativeProps
+    let actions: CanvasNativeActions
+    let theme: BernNativeTheme
+
+    var body: some View {
+        Text(verbatim: props.tags.joined(separator: ","))
+    }
+}
+"#;
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M5 3l14 9-14 9V3z" fill="currentColor"/></svg>"#;
+    let root = workspace();
+    let dir = std::env::temp_dir().join(format!("bern-swiftui-player-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    for (package, source) in [
+        ("player-proto", protocol),
+        ("player-ui", ui),
+        ("player-core", ""),
+    ] {
+        std::fs::create_dir_all(dir.join(package).join("src")).unwrap();
+        std::fs::write(
+            dir.join(package).join("Cargo.toml"),
+            format!("[package]\nname = \"{package}\"\n"),
+        )
+        .unwrap();
+        std::fs::write(dir.join(package).join("src/lib.rs"), source).unwrap();
+    }
+    std::fs::write(dir.join("player-ui/src/canvas.swift"), native_swift).unwrap();
+    std::fs::create_dir_all(dir.join("icons")).unwrap();
+    std::fs::write(dir.join("icons/custom.svg"), svg).unwrap();
+    std::fs::write(
+        dir.join("Bern.toml"),
+        "[app]\nid = \"player\"\nbundle_id = \"dev.bern.player\"\nversion = \"0.1.0\"\nname = { \"en\" = \"Player\" }\n[languages]\nsupported = [\"en\"]\ndefault = \"en\"\n[protocol]\npackage = \"player-proto\"\nsource = \"player-proto/src/lib.rs\"\n[engine]\npackage = \"player-core\"\ntype = \"player_core::Engine\"\n[ui]\npackage = \"player-ui\"\nsources = [\"player-ui/src/lib.rs\"]\nroot = \"app\"\n[resources]\npaths = [\"icons/custom.svg\"]\n[targets.macos]\nplatform = \"macos\"\n",
+    )
+    .unwrap();
+    let config = bern_compiler::config::load(&dir.join("Bern.toml")).unwrap();
+    let compiled = bern_compiler::compile(&config).unwrap_or_else(|errors| {
+        panic!(
+            "{}",
+            errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    });
+    let target = config.targets[0].clone();
+    let problems = SwiftUiMacos.check(&compiled.app, &target);
+    assert!(
+        problems.iter().all(|d| !d.is_error()),
+        "SwiftUI check should only warn on switch_knob, not error: {problems:?}"
+    );
+    assert!(
+        problems
+            .iter()
+            .any(|d| d.message.contains("switch_knob") || d.message.contains("Switch")),
+        "expected switch_knob warning on SwiftUI: {problems:?}"
+    );
+    let output = dir.join("out-macos");
+    let context = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: output.clone(),
+        target,
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    let files = SwiftUiMacos.generate(&compiled.app, &context).unwrap();
+    for file in &files {
+        let path = output.join(&file.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, &file.contents).unwrap();
+    }
+    let sources = output.join("Sources");
+    let generated = std::fs::read_to_string(sources.join("BernGenerated.swift")).unwrap();
+    for expected in [
+        "enum BernAppIconCatalog {",
+        "BernAppIcons.install(BernAppIconCatalog.path)",
+        "BernHoldKeyShortcut(",
+        "BernControlledVerticalSlider(",
+        "BernVerticalSlider(",
+        "placement: \"above\"",
+        ".fontWeight(.bold)",
+        ".bernTooltip(",
+        "bern.language.system",
+        "let tags: [String]",
+    ] {
+        assert!(
+            generated.contains(expected),
+            "BernGenerated.swift lacks `{expected}`:\n{generated}"
+        );
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let mut cmd = Command::new("xcrun");
+        cmd.args([
+            "swiftc",
+            "-typecheck",
+            "-swift-version",
+            "6",
+            "-parse-as-library",
+        ])
+        .arg("-target")
+        .arg(format!("arm64-apple-macos{MINIMUM_MACOS}"))
+        .arg("-module-cache-path")
+        .arg(cache::module_cache(&root))
+        .arg("-import-objc-header")
+        .arg(sources.join("bern.h"))
+        .arg(sources.join("BernRuntime.swift"))
+        .arg(sources.join("BernMedia.swift"))
+        .arg(sources.join("BernStyle.swift"))
+        .arg(sources.join("BernAppKit.swift"))
+        .arg(sources.join("BernGenerated.swift"));
+        cmd.arg(dir.join("player-ui/src/canvas.swift"));
+        for file in &files {
+            if file.path.extension().and_then(|e| e.to_str()) == Some("swift")
+                && !matches!(
+                    file.path.file_name().and_then(|n| n.to_str()),
+                    Some(
+                        "BernRuntime.swift"
+                            | "BernMedia.swift"
+                            | "BernStyle.swift"
+                            | "BernAppKit.swift"
+                            | "BernGenerated.swift"
+                    )
+                )
+            {
+                cmd.arg(output.join(&file.path));
+            }
+        }
+        let result = cmd.output().unwrap();
+        assert!(
+            result.status.success(),
+            "swiftc rejected player controls Swift code:\n{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -825,6 +825,56 @@ fn a_menu_takes_the_appearance_of_its_region() {
     assert!(structure.contains("ThemeMenu(flyout, ctx.appearance);"));
 }
 
+/// Regression checks for PR #173 fixes: bound `Tooltip(keys:)`, `HoldKeys`
+/// quiet/deactivation safety, `ClearImmersiveDrag` clearing `Caption`, and
+/// `Stack` recognizing `bern-native`.
+#[test]
+fn player_control_fixes_are_wired_in_winui3() {
+    let ui = r#"
+use bern::prelude::*;
+use inline_app_protocol::inline_app;
+
+#[session(id = "main")]
+pub struct Draft {
+    pub fast: bool,
+    pub key: String,
+}
+
+#[component]
+pub fn app(app: inline_app::Client, windows: AppWindows, #[session] draft: Draft) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Player" }, initial: open) {
+                Column {
+                    Shortcut(key: "right", hold: draft.fast, hold_after: 0.25, quiet: true) => app.bump()
+                    Tooltip(content: tr! { "en" => "Play" }, keys: draft.key, placement: above) {
+                        Button(id: play, label: tr! { "en" => "Play" }) => app.bump()
+                    }
+                }
+            }
+        }
+    }
+}
+"#;
+    let (problems, files) = generate_inline("player-fixes", ui, "", &[]);
+    assert!(problems.is_empty(), "{problems:?}");
+    let generated = generated_text(&files, "app/app_ui.inl");
+    assert!(generated.contains(".boundKeys ="), "{generated}");
+    assert!(generated.contains(".placement = \"above\""), "{generated}");
+    assert!(generated.contains(".hold ="), "{generated}");
+    assert!(generated.contains(".quiet = true"), "{generated}");
+
+    let windows = include_str!("../templates/cpp/bern_ui_windows.inl");
+    assert!(windows.contains("ClearRegionRects(NonClientRegionKind::Caption)"));
+    assert!(windows.contains("if (quiet->direct && quiet->key == args.Key()"));
+    assert!(windows.contains("QueueImmersiveDrag"));
+    assert!(windows.contains("win->onDeactivate"));
+
+    let widgets = include_str!("../templates/cpp/bern_ui_widgets.inl");
+    assert!(widgets.contains("r == L\"bern-native\""));
+    assert!(widgets.contains("WeightNamed(\"bold\")"));
+}
+
 /// A `quiet` shortcut's key is no input for `window.idle`: both the runtime
 /// template hooks, generated `.quiet = true` code, and target capability
 /// checking are verified end-to-end.

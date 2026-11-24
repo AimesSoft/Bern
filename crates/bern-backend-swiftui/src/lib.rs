@@ -192,6 +192,13 @@ pub(crate) const FEATURES: &[&str] = &[
     bern_target_api::feature::UNTITLED_DETAIL,
     bern_target_api::feature::IDLE_CONTROL,
     bern_target_api::feature::QUIET_SHORTCUTS,
+    bern_target_api::feature::APP_ICONS,
+    bern_target_api::feature::POPUP_PLACEMENT,
+    bern_target_api::feature::BOLD_MENUS,
+    bern_target_api::feature::TOOLTIP_KEYS,
+    bern_target_api::feature::VERTICAL_SLIDERS,
+    bern_target_api::feature::HOLD_SHORTCUTS,
+    bern_target_api::feature::NATIVE_LISTS,
     bern_target_api::feature::FILL_BUTTONS,
     bern_target_api::feature::GRID_CELLS,
     bern_target_api::feature::TAB_ACCESSORY,
@@ -222,6 +229,23 @@ pub(crate) fn runtime_source(template: &str, engine_kinds: &str) -> String {
         .replace("/*bern:file-extensions*/", &table.join(", "))
         .replace("/*bern:engine-opens*/", engine_kinds)
 }
+/// The application's own `.svg` icons, outlined into 20-unit contours for
+/// SwiftUI `Path` drawing in the control's foreground style.
+pub(crate) fn app_icon_contours(
+    app: &Application,
+    context: &BuildContext,
+) -> Result<Vec<(String, Vec<bern_target_api::app_icon::Contour>)>, Vec<Diagnostic>> {
+    bern_target_api::app_icon::used(app)
+        .into_iter()
+        .map(|name| {
+            let path = bern_target_api::svg::resource_path(context, &name);
+            bern_target_api::app_icon::outline_contours(&path)
+                .map(|contours| (name.clone(), contours))
+                .map_err(|message| vec![Diagnostic::error(format!("icon `{name}`: {message}"))])
+        })
+        .collect()
+}
+
 pub(crate) fn runtime_with_svg(app: &Application, source: &str) -> String {
     let mut source = runtime_source(source, &app.engine_kinds());
     if bern_target_api::svg::svg_used(app) {
@@ -419,6 +443,7 @@ impl Target for SwiftUiMacos {
         bern_target_api::svg::validate(app, context)?;
         let product = product_name(app);
         let bundle = PathBuf::from(format!("{product}.app"));
+        let app_icons = app_icon_contours(app, context)?;
         let mut files = vec![
             GeneratedFile::text(
                 "Sources/BernRuntime.swift",
@@ -430,7 +455,9 @@ impl Target for SwiftUiMacos {
             GeneratedFile::text("Sources/bern.h", HEADER),
             GeneratedFile::text(
                 "Sources/BernGenerated.swift",
-                Generator::new(app, Platform::Macos).generate(app.protocol.fingerprint()),
+                Generator::new(app, Platform::Macos)
+                    .with_app_icons(app_icons)
+                    .generate(app.protocol.fingerprint()),
             ),
             GeneratedFile::text("glue/Cargo.toml", glue::cargo_toml(context, app)),
             GeneratedFile::text(

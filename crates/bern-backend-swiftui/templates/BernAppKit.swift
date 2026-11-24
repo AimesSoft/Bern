@@ -1453,6 +1453,13 @@ struct BernWindowBehavior: ViewModifier {
             .modifier(BernUnifiedBarAppearance(enabled: unified))
             .ignoresSafeArea(.all, edges: immersive ? .top : [])
             .modifier(BernPointerVisibility(hidden: hidePointer))
+            .onContinuousHover { phase in
+                let inside = if case .active = phase { true } else { false }
+                if context.pointerInsideWindow != inside {
+                    context.pointerInsideWindow = inside
+                    context.idleAreasChanged?()
+                }
+            }
             .onAppear {
                 apply(attempts: 20)
                 syncPointerVisibility(hidePointer)
@@ -1644,7 +1651,7 @@ final class BernEventMonitor {
         lastMouseLocation = NSEvent.mouseLocation
         context.platform.nsWindow?.acceptsMouseMovedEvents = true
         let events: NSEvent.EventTypeMask = [
-            .mouseMoved, .leftMouseDown, .rightMouseDown, .otherMouseDown,
+            .mouseMoved, .mouseExited, .leftMouseDown, .rightMouseDown, .otherMouseDown,
             .leftMouseDragged, .scrollWheel, .keyDown,
         ]
         monitor = NSEvent.addLocalMonitorForEvents(matching: events) { [weak self] event in
@@ -1679,6 +1686,10 @@ final class BernEventMonitor {
     /// neither wake an idle window nor postpone its countdown.
     func handle(event: NSEvent, after seconds: Double) {
         guard let context, event.window === context.platform.nsWindow else { return }
+        if event.type == .mouseExited {
+            reset(context, after: seconds, activity: false)
+            return
+        }
         if event.type == .mouseMoved {
             let mouseLocation = NSEvent.mouseLocation
             if let last = lastMouseLocation,
@@ -1721,13 +1732,19 @@ final class BernEventMonitor {
         }
         timer?.invalidate()
         timer = nil
-        // With `idle_area`s on screen, only a pointer resting over one
-        // counts, for that area's seconds: elsewhere, or outside the
-        // window, it stays awake.
+        // With `idle_area`s on screen, a pointer resting over one counts
+        // for that area's seconds; over a non-idle area inside the window
+        // it stays awake; once the pointer leaves the window it falls back
+        // to the window's `idle_after` seconds.
         var wait = seconds
         if !context.idleAreas.isEmpty {
-            guard let area = context.idleAreasHovered.values.min() else { return }
-            wait = area
+            if let area = context.idleAreasHovered.values.min() {
+                wait = area
+            } else {
+                let inside = context.pointerInsideWindow
+                    || (context.platform.nsWindow.map { $0.frame.contains(NSEvent.mouseLocation) } ?? false)
+                if inside { return }
+            }
         }
         // Eligibility changes do not postpone the input deadline either:
         // frequent redraws must still let an awake window become idle.

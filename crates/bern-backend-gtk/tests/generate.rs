@@ -326,7 +326,7 @@ fn planner_and_gallery_build_for_gtk() {
         // Escape closes the details; the dialog's focus starts on its
         // button; the margins ask whether the window is a television's
         // (never, on a desktop).
-        "b::KeyShortcut(p, c, b::KeyShortcutProps { keys: \"escape\", bound: None, enabled: None, quiet: false }",
+        "b::KeyShortcut(p, c, b::KeyShortcutProps { keys: \"escape\", bound: None, enabled: None, quiet: false, hold: None, hold_after: None }",
         "b::default_focus(c, ",
         "c.window(\"tv\")",
         // Keys that type into the search, which suggests.
@@ -2008,7 +2008,7 @@ fn pointer_events_slider_hover_and_player_state_reach_the_runtime() {
         "b::Button(p, c, b::ButtonProps { id: \"wheel\", ",
         "menu: vec![], double_tap: None, cursor: None }, Some(b::act(",
         "capture_wheel: true }",
-        "label_hidden: false, continuous: false, hover: Some(b::Field { session: 0, field: 1 }) }",
+        "label_hidden: false, continuous: false, vertical: false, hover: Some(b::Field { session: 0, field: 1 }) }",
         "b::player_state(\"preview\", \"progress\")",
         "rt::truthy(&b::player_state(\"preview\", \"playing\"))",
         "b::player_state(\"preview\", \"position_ms\")",
@@ -2171,4 +2171,157 @@ pub fn app(app: controls::Client, windows: AppWindows, #[session] draft: Draft) 
         1,
         "Marquee owns its opacity:\n{generated}"
     );
+}
+
+#[test]
+fn player_controls_and_app_icons_generate_for_gtk() {
+    let protocol = r#"
+#[bern::protocol(namespace = "player_gtk", version = 1)]
+pub mod player_gtk {
+    use bern::protocol::*;
+
+    #[value]
+    pub enum Mode {
+        #[label(tr! { "en" => "One" })]
+        One,
+        #[label(tr! { "en" => "Two" })]
+        Two,
+    }
+
+    #[state]
+    pub struct State {
+        pub play_key: String,
+        pub volume: f64,
+        pub enabled: bool,
+        pub tags: Vec<String>,
+    }
+
+    #[commands]
+    pub trait Commands {
+        fn toggle(&mut self) -> Result<(), CommandError>;
+        fn set_volume(&mut self, value: f64) -> Result<(), CommandError>;
+        fn set_enabled(&mut self, value: bool) -> Result<(), CommandError>;
+    }
+}
+"#;
+    let ui = r#"
+use bern::prelude::*;
+use player_gtk::player_gtk::{self, Mode};
+
+style! {
+    Stack.framed {
+        border: border(control.border, width: 1),
+        corner: 8,
+    }
+    Switch.bright {
+        foreground: accent,
+    }
+}
+
+#[bern::session]
+pub struct Draft {
+    pub boosting: bool,
+    pub level: f64,
+    pub mode: Mode,
+}
+
+#[component]
+pub fn app(app: player_gtk::Client, windows: AppWindows, #[session] draft: Draft) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Player" }, initial: open, idle_after: 3.0) {
+                Column(gap: 8) {
+                    Shortcut(key: "right", hold: draft.boosting, hold_after: 0.35, quiet: true) => app.toggle()
+                    Tooltip(content: tr! { "en" => "Play" }, keys: app.play_key, placement: above) {
+                        IconButton(id: play, icon: "icons/custom.svg", label: tr! { "en" => "Play" }) => app.toggle()
+                    }
+                    Menu(id: speed, label: tr! { "en" => "1.0x" }, style: icon, bold: true, placement: above) {
+                        MenuItem(id: fast, label: tr! { "en" => "2.0x" }, icon: "arrow.uturn.backward") => app.toggle()
+                    }
+                    PopoverButton(id: vol_pop, icon: "plus.circle", label: tr! { "en" => "Volume" }, placement: above) {
+                        Slider(
+                            id: vol,
+                            label: tr! { "en" => "Volume" },
+                            label_hidden: true,
+                            axis: vertical,
+                            current: app.volume,
+                            min: 0.0,
+                            max: 1.0
+                        ) => app.set_volume(app.volume)
+                    }
+                    Switch(id: sw, label: tr! { "en" => "Bright" }, checked: app.enabled, variant: bright) => app.set_enabled(app.enabled)
+                    Picker(id: seg, label: tr! { "en" => "Mode" }, value: draft.mode, style: segmented, shape: capsule)
+                    Picker(id: ch, label: tr! { "en" => "Chips" }, value: draft.mode, style: chips, shape: capsule)
+                    LanguagePicker(id: lang, label: tr! { "en" => "Language" })
+                    Stack(variant: framed, height: 120) {
+                        NativeView(id: canvas, label: tr! { "en" => "Canvas" }, gtk: "canvas.rs") {
+                            NativeValue(name: tags, value: app.tags)
+                            NativeAction(id: ping, label: tr! { "en" => "Ping" }) => app.toggle()
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+"#;
+    let native_rs = r#"
+pub fn build(_props: &Props, _actions: &Actions, _theme: &Theme) -> gtk::Widget {
+    gtk::Box::new(gtk::Orientation::Vertical, 0).into()
+}
+"#;
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M5 3l14 9-14 9V3z" fill="currentColor"/></svg>"#;
+    let root = workspace();
+    let dir = root.join("target/bern-test/gtk-player-controls-project");
+    let _ = std::fs::remove_dir_all(&dir);
+    for (package, source) in [
+        ("player-gtk", protocol),
+        ("player-ui", ui),
+        ("player-core", ""),
+    ] {
+        std::fs::create_dir_all(dir.join(package).join("src")).unwrap();
+        std::fs::write(
+            dir.join(package).join("Cargo.toml"),
+            format!("[package]\nname = \"{package}\"\n"),
+        )
+        .unwrap();
+        std::fs::write(dir.join(package).join("src/lib.rs"), source).unwrap();
+    }
+    std::fs::write(dir.join("player-ui/src/canvas.rs"), native_rs).unwrap();
+    std::fs::create_dir_all(dir.join("icons")).unwrap();
+    std::fs::write(dir.join("icons/custom.svg"), svg).unwrap();
+    std::fs::write(
+        dir.join("Bern.toml"),
+        "[app]\nid = \"player\"\nbundle_id = \"dev.bern.player\"\nversion = \"0.1.0\"\nname = { \"en\" = \"Player\" }\n[languages]\nsupported = [\"en\"]\ndefault = \"en\"\n[protocol]\npackage = \"player-gtk\"\nsource = \"player-gtk/src/lib.rs\"\n[engine]\npackage = \"player-core\"\ntype = \"player_core::Engine\"\n[ui]\npackage = \"player-ui\"\nsources = [\"player-ui/src/lib.rs\"]\nroot = \"app\"\n[resources]\npaths = [\"icons/custom.svg\"]\n[targets.linux]\nplatform = \"linux\"\n",
+    )
+    .unwrap();
+    let config = bern_compiler::config::load(&dir.join("Bern.toml")).unwrap();
+    let compiled = bern_compiler::compile(&config).unwrap();
+    let problems = GtkLinux.check(&compiled.app, &linux_target(&config));
+    assert!(problems.is_empty(), "{problems:?}");
+    let output = root.join("target/bern-test/gtk-player-controls");
+    let _ = std::fs::remove_dir_all(&output);
+    let context = stage_context(&config, &compiled, &output);
+    for file in GtkLinux.generate(&compiled.app, &context).unwrap() {
+        let path = output.join(&file.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, &file.contents).unwrap();
+    }
+    let generated = std::fs::read_to_string(output.join("app/src/ui.rs")).unwrap();
+    for expected in [
+        "pub(crate) static APP_ICONS: &[(&str, &str)]",
+        "\"icons/custom.svg\"",
+        "hold: Some(b::Field { session: 0, field: 0 }), hold_after: Some(0.35)",
+        "placement: Some(\"above\")",
+        "bound_keys: Some(b::str(",
+        "bold: true",
+        "vertical: true",
+        "look: Some(&STYLES[0])",
+        "widget.set_vexpand(true);",
+    ] {
+        assert!(
+            generated.contains(expected),
+            "missing `{expected}`:\n{generated}"
+        );
+    }
 }

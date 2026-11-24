@@ -62,6 +62,11 @@ pub const SUPPORT: &[StyleSupport] = &[
         states: &[],
     },
     StyleSupport {
+        component: "Switch",
+        base: &["foreground"],
+        states: &[],
+    },
+    StyleSupport {
         component: "Button",
         base: &[
             "background",

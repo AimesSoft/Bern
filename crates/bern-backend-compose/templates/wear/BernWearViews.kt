@@ -156,7 +156,7 @@ fun BernContentButton(label: String, enabled: Boolean, style: BernStyle?, modifi
 
 @Composable
 fun BernSwitch(label: String, value: Boolean, onChange: (Boolean) -> Unit, checkbox: Boolean,
-    labelHidden: Boolean = false, modifier: Modifier = Modifier) {
+    labelHidden: Boolean = false, modifier: Modifier = Modifier, style: BernStyle? = null) {
     val named = modifier.semantics { contentDescription = label }
     val text: @Composable RowScope.() -> Unit = { if (!labelHidden) Text(label) }
     if (checkbox) CheckboxButton(checked = value, onCheckedChange = onChange, modifier = named, label = text)
@@ -175,7 +175,7 @@ fun BernToggleButton(label: String, icon: ImageVector?, checked: Boolean, onChan
 @Composable
 fun BernSlider(label: String, value: Double, onChange: (Double) -> Unit, min: Double, max: Double,
     step: Double?, onCommit: (() -> Unit)?, minIcon: ImageVector?, maxIcon: ImageVector?,
-    labelHidden: Boolean = false, modifier: Modifier = Modifier) {
+    labelHidden: Boolean = false, modifier: Modifier = Modifier, vertical: Boolean = false) {
     val count = if (step != null && step > 0) kotlin.math.round((max - min) / step).toInt().coerceAtLeast(1) else 100
     Column(modifier.fillMaxWidth().semantics { contentDescription = label }) {
         if (!labelHidden) Text(label, style = MaterialTheme.typography.labelMedium)
@@ -192,8 +192,8 @@ fun BernSlider(label: String, value: Double, onChange: (Double) -> Unit, min: Do
 @Composable
 fun BernControlledSlider(label: String, value: Double, commit: (Double) -> Unit, min: Double, max: Double,
     step: Double?, minIcon: ImageVector?, maxIcon: ImageVector?, labelHidden: Boolean = false,
-    continuous: Boolean = false, modifier: Modifier = Modifier) =
-    BernSlider(label, value, commit, min, max, step, null, minIcon, maxIcon, labelHidden, modifier)
+    continuous: Boolean = false, modifier: Modifier = Modifier, vertical: Boolean = false) =
+    BernSlider(label, value, commit, min, max, step, null, minIcon, maxIcon, labelHidden, modifier, vertical)
 
 // The native state indexes one immutable option snapshot. When options are
 // reordered or resized, rebuild that indexed state and keep its draft by value.

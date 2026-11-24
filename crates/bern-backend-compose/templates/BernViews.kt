@@ -128,6 +128,7 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.foundation.shape.CircleShape
@@ -149,6 +150,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
+import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationDrawerItem
@@ -161,6 +163,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
@@ -218,7 +221,16 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
+import androidx.compose.ui.window.PopupProperties
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -240,6 +252,7 @@ import kotlinx.coroutines.delay
 object BernIcons {
     fun get(name: String): ImageVector = when (name) {
         /*bern:icon-branches*/
+        /*bern:app-icon-branches*/
         else -> dot
     }
 
@@ -594,10 +607,31 @@ object BernIcons {
             "M12.87 15.07l-2.54-2.51 .03-.03c1.74-1.94 2.98-4.17 3.71-6.53H17V4h-7V2H8v2H1v1.99h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11 .76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z",
         )
     }
+    private val undo by lazy {
+        icon(
+            "Undo",
+            "M12.5,8c-2.65,0 -5.05,0.99 -6.9,2.6L2,7v9h9l-3.62,-3.62c1.39,-1.16 3.16,-1.88 5.12,-1.88 3.54,0 6.55,2.31 7.6,5.5l2.37,-0.78C21.08,11.03 17.15,8 12.5,8z",
+        )
+    }
+    private val dragHandle by lazy {
+        icon(
+            "DragHandle",
+            "M20,9H4v2h16V9zM4,15h16v-2H4v2z",
+        )
+    }
     private val dot by lazy { icon("Dot", "M12,12m-4,0a4,4 0,1 0,8 0a4,4 0,1 0,-8 0") }
 
     private fun icon(name: String, vararg paths: String): ImageVector =
         ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f)
+            .apply {
+                for (path in paths) {
+                    addPath(PathParser().parsePathString(path).toNodes(), fill = SolidColor(Color.Black))
+                }
+            }
+            .build()
+
+    private fun appIcon(name: String, vararg paths: String): ImageVector =
+        ImageVector.Builder(name, 24.dp, 24.dp, 20f, 20f)
             .apply {
                 for (path in paths) {
                     addPath(PathParser().parsePathString(path).toNodes(), fill = SolidColor(Color.Black))
@@ -1076,12 +1110,19 @@ fun BernSwitch(
     checkbox: Boolean,
     labelHidden: Boolean = false,
     modifier: Modifier = Modifier,
+    style: BernStyle? = null,
 ) {
+    val thumbColor = style?.base?.foreground?.let { bernPalette().color(it) }
+    val switchColors = if (thumbColor != null) {
+        SwitchDefaults.colors(checkedThumbColor = thumbColor)
+    } else {
+        SwitchDefaults.colors()
+    }
     // Without its label shown, the control alone, named by it.
     if (labelHidden) {
         val named = modifier.semantics { contentDescription = label }
         if (checkbox) Checkbox(checked = value, onCheckedChange = onChange, modifier = named)
-        else Switch(checked = value, onCheckedChange = onChange, modifier = named)
+        else Switch(checked = value, onCheckedChange = onChange, modifier = named, colors = switchColors)
         return
     }
     Row(
@@ -1097,7 +1138,7 @@ fun BernSwitch(
             Text(label, Modifier.weight(1f))
         } else {
             Text(label, Modifier.weight(1f))
-            Switch(checked = value, onCheckedChange = null)
+            Switch(checked = value, onCheckedChange = null, colors = switchColors)
         }
     }
 }
@@ -1116,8 +1157,59 @@ fun BernSlider(
     labelHidden: Boolean = false,
     modifier: Modifier = Modifier,
     onHover: ((Double?) -> Unit)? = null,
+    vertical: Boolean = false,
 ) {
     val steps = if (step != null && step > 0) maxOf(0, Math.round((max - min) / step).toInt() - 1) else 0
+    if (vertical) {
+        Column(
+            modifier.semantics { if (labelHidden) contentDescription = label },
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            if (!labelHidden) Text(label, style = MaterialTheme.typography.bodyMedium)
+            if (maxIcon != null) Icon(maxIcon, contentDescription = null)
+            Box(
+                Modifier.weight(1f, fill = false),
+                contentAlignment = Alignment.Center,
+            ) {
+                androidx.compose.runtime.CompositionLocalProvider(
+                    androidx.compose.ui.platform.LocalLayoutDirection provides androidx.compose.ui.unit.LayoutDirection.Ltr
+                ) {
+                    Slider(
+                        value = value.toFloat(),
+                        onValueChange = { onChange(it.toDouble()) },
+                        valueRange = min.toFloat()..max.toFloat(),
+                        steps = steps,
+                        onValueChangeFinished = onCommit,
+                        modifier = Modifier
+                            .layout { measurable, constraints ->
+                                val fallback = 160.dp.roundToPx()
+                                val maxLen = if (constraints.hasBoundedHeight) constraints.maxHeight else fallback
+                                val minLen = if (constraints.hasBoundedHeight) constraints.minHeight.coerceAtMost(maxLen) else fallback
+                                val placeable = measurable.measure(
+                                    Constraints(
+                                        minWidth = minLen,
+                                        maxWidth = maxLen,
+                                        minHeight = constraints.minWidth,
+                                        maxHeight = constraints.maxWidth,
+                                    )
+                                )
+                                layout(placeable.height, placeable.width) {
+                                    placeable.place(0, placeable.width)
+                                }
+                            }
+                            .graphicsLayer {
+                                rotationZ = -90f
+                                transformOrigin = TransformOrigin(0f, 0f)
+                            }
+                            .bernSliderHover(onHover),
+                    )
+                }
+            }
+            if (minIcon != null) Icon(minIcon, contentDescription = null)
+        }
+        return
+    }
     Column(modifier.fillMaxWidth().semantics { if (labelHidden) contentDescription = label }) {
         if (!labelHidden) Text(label, style = MaterialTheme.typography.bodyMedium)
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1155,12 +1247,13 @@ fun BernControlledSlider(
     continuous: Boolean = false,
     modifier: Modifier = Modifier,
     onHover: ((Double?) -> Unit)? = null,
+    vertical: Boolean = false,
 ) {
     var preview by remember { mutableStateOf<Double?>(null) }
     BernSlider(
         label, preview ?: value, { preview = it; if (continuous) commit(it) }, min, max, step,
         { preview?.let(commit); preview = null },
-        minIcon, maxIcon, labelHidden, modifier, onHover,
+        minIcon, maxIcon, labelHidden, modifier, onHover, vertical,
     )
 }
 
@@ -1357,12 +1450,15 @@ fun <T> BernPicker(
     when (style) {
         "segmented" -> Column(modifier.semantics { if (labelHidden) contentDescription = label }) {
             if (!labelHidden) Text(label, style = MaterialTheme.typography.bodyMedium)
+            val baseShape = if (shape?.capsule == true) CircleShape else SegmentedButtonDefaults.baseShape
+            val segMod = shape?.height?.let { Modifier.height(it) } ?: Modifier
             SingleChoiceSegmentedButtonRow(if (inFlow || inRow) Modifier else Modifier.fillMaxWidth()) {
                 options.forEachIndexed { index, option ->
                     SegmentedButton(
                         selected = option == selected,
                         onClick = { onSelect(option) },
-                        shape = SegmentedButtonDefaults.itemShape(index, options.size),
+                        shape = SegmentedButtonDefaults.itemShape(index, options.size, baseShape = baseShape),
+                        modifier = segMod,
                         // The design's segments (`.c-seg`) mark the chosen one
                         // by its fill alone, without a check mark.
                         icon = {},
@@ -1379,12 +1475,14 @@ fun <T> BernPicker(
         // of the flow; elsewhere they wrap in a flow of their own.
         "chips" -> {
             val flat = inFlow && labelHidden
+            val chipShape = if (shape?.capsule == true) CircleShape else FilterChipDefaults.shape
             val chips = @Composable {
                 options.forEachIndexed { index, option ->
                     FilterChip(
                         selected = option == selected,
                         onClick = { onSelect(option) },
                         label = { Text(optionLabel(option), maxLines = 1) },
+                        shape = chipShape,
                         modifier = if (flat && index == 0) modifier else Modifier,
                     )
                 }
@@ -1503,10 +1601,11 @@ fun <T> BernPicker(
 fun BernLanguagePicker(label: String, target: String, labelHidden: Boolean = false, inRow: Boolean = false) {
     BernControl(
         target, "picker", label,
-        actions = BernControlActions(select = { BernLanguage.select(it) }, value = { BernLanguage.current }),
+        actions = BernControlActions(select = { BernLanguage.select(it) }, value = { BernLanguage.selection }),
     )
     BernPicker(
-        label, BernLanguage.supported, BernLanguage.current, { BernLanguage.autonym(it) },
+        label, listOf("system") + BernLanguage.supported, BernLanguage.selection,
+        { if (it == "system") BernText.string("bern.language.system") else BernLanguage.autonym(it) },
         { BernLanguage.select(it) }, "menu", labelHidden = labelHidden, inRow = inRow,
     )
 }
@@ -1703,6 +1802,37 @@ fun BernAdaptive(
 // MARK: - Menus
 
 // @bern:wear-skip-start
+internal class BernPopupPositionProvider(
+    private val placement: String?,
+    private val gapPx: Int,
+    private val centered: Boolean = false,
+) : PopupPositionProvider {
+    override fun calculatePosition(
+        anchorBounds: IntRect,
+        windowSize: IntSize,
+        layoutDirection: LayoutDirection,
+        popupContentSize: IntSize,
+    ): IntOffset {
+        val rawX = if (centered) {
+            anchorBounds.left + (anchorBounds.width - popupContentSize.width) / 2
+        } else if (layoutDirection == LayoutDirection.Rtl) {
+            anchorBounds.right - popupContentSize.width
+        } else {
+            anchorBounds.left
+        }
+        val x = rawX.coerceIn(0, (windowSize.width - popupContentSize.width).coerceAtLeast(0))
+        val aboveY = anchorBounds.top - popupContentSize.height - gapPx
+        val belowY = anchorBounds.bottom + gapPx
+        val rawY = when (placement) {
+            "above" -> if (aboveY >= 0) aboveY else belowY
+            "below" -> if (belowY + popupContentSize.height <= windowSize.height) belowY else aboveY
+            else -> if (belowY + popupContentSize.height <= windowSize.height) belowY else aboveY
+        }
+        val y = rawY.coerceIn(0, (windowSize.height - popupContentSize.height).coerceAtLeast(0))
+        return IntOffset(x, y)
+    }
+}
+
 /// A button opening a menu of commands. With an icon only the icon shows
 /// (`iconOnly`, or an icon in a top bar); with a `shape` height it is a
 /// round tonal button of that diameter, or a tonal capsule with its label.
@@ -1713,9 +1843,13 @@ fun BernMenu(
     modifier: Modifier = Modifier,
     iconOnly: Boolean = false,
     shape: BernShape? = null,
+    bold: Boolean = false,
+    placement: String? = null,
     items: @Composable (dismiss: () -> Unit) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val weight = if (bold) FontWeight.Bold else null
+    val density = LocalDensity.current
     Box(modifier) {
         val height = shape?.height
         if (icon != null && (iconOnly || shape == null)) {
@@ -1737,16 +1871,44 @@ fun BernMenu(
                     Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
                 }
-                Text(label, maxLines = 1)
+                Text(label, fontWeight = weight, maxLines = 1)
+            }
+        } else if (iconOnly) {
+            TextButton(onClick = { expanded = true }) {
+                Text(label, fontWeight = weight, maxLines = 1)
             }
         } else {
             TextButton(onClick = { expanded = true }) {
-                Text(label)
+                Text(label, fontWeight = weight)
                 Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
             }
         }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            BernPopupContent { Column { items { expanded = false } } }
+        if (placement != null) {
+            if (expanded) {
+                val gapPx = with(density) { 4.dp.roundToPx() }
+                Popup(
+                    popupPositionProvider = BernPopupPositionProvider(placement, gapPx),
+                    onDismissRequest = { expanded = false },
+                    properties = PopupProperties(focusable = true),
+                ) {
+                    Surface(
+                        shape = MenuDefaults.shape,
+                        color = MenuDefaults.containerColor,
+                        tonalElevation = MenuDefaults.TonalElevation,
+                        shadowElevation = MenuDefaults.ShadowElevation,
+                    ) {
+                        BernPopupContent {
+                            Column(Modifier.padding(vertical = 8.dp).width(IntrinsicSize.Max)) {
+                                items { expanded = false }
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                BernPopupContent { Column { items { expanded = false } } }
+            }
         }
     }
 }
@@ -2910,10 +3072,49 @@ data class BernAlertActionSpec(
 // @bern:wear-skip-start
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BernTooltip(content: String, child: @Composable () -> Unit) {
+fun BernTooltip(
+    content: String,
+    keys: String? = null,
+    placement: String? = null,
+    child: @Composable () -> Unit,
+) {
+    val density = LocalDensity.current
+    val provider = if (placement != null) {
+        val gapPx = with(density) { 4.dp.roundToPx() }
+        remember(placement, gapPx) { BernPopupPositionProvider(placement, gapPx, centered = true) }
+    } else {
+        TooltipDefaults.rememberPlainTooltipPositionProvider()
+    }
+    val keyText = keys?.let { BernShortcuts.display(it) }.orEmpty()
     TooltipBox(
-        positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
-        tooltip = { PlainTooltip { Text(content) } },
+        positionProvider = provider,
+        tooltip = {
+            PlainTooltip {
+                if (keyText.isEmpty()) {
+                    Text(content)
+                } else {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(content)
+                        for (cap in keyText.split("+")) {
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = LocalContentColor.current.copy(alpha = 0.14f),
+                                border = BorderStroke(1.dp, LocalContentColor.current.copy(alpha = 0.28f)),
+                            ) {
+                                Text(
+                                    cap,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
         state = rememberTooltipState(),
     ) {
         child()

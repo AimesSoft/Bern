@@ -112,6 +112,7 @@ pub(crate) fn state_prop(name: &str) -> String {
 
 pub struct Generator<'a> {
     app: &'a Application,
+    app_icons: Vec<(String, String)>,
     current_scope: std::cell::RefCell<String>,
     /// Whether the nodes being written are a sidebar's content, where
     /// `Section` groups sidebar items.
@@ -122,9 +123,15 @@ impl<'a> Generator<'a> {
     pub fn new(app: &'a Application) -> Self {
         Self {
             app,
+            app_icons: Vec::new(),
             current_scope: std::cell::RefCell::new(String::new()),
             in_sidebar: std::cell::Cell::new(false),
         }
+    }
+
+    pub fn with_app_icons(mut self, app_icons: Vec<(String, String)>) -> Self {
+        self.app_icons = app_icons;
+        self
     }
 
     fn types(&self) -> &TypeTable {
@@ -553,6 +560,14 @@ impl<'a> Generator<'a> {
                 "// Icons: Lucide (ISC; icons derived from Feather MIT), see THIRD_PARTY_NOTICES.txt.",
             );
             out.line(format!("icons: {{ {} }},", icons.join(", ")));
+            if !self.app_icons.is_empty() {
+                let entries: Vec<_> = self
+                    .app_icons
+                    .iter()
+                    .map(|(name, path)| format!("{}: {}", string(name), string(path)))
+                    .collect();
+                out.line(format!("appIcons: {{ {} }},", entries.join(", ")));
+            }
             out.line("engine,");
             out.line(format!("sessions: [{}],", sessions.join(", ")));
             out.open("windows: [");
@@ -813,6 +828,14 @@ impl<'a> Generator<'a> {
             "// Icons: Lucide (ISC; icons derived from Feather MIT), see THIRD_PARTY_NOTICES.txt.",
         );
         out.line(format!("icons: {{ {} }},", icons.join(", ")));
+        if !self.app_icons.is_empty() {
+            let entries: Vec<_> = self
+                .app_icons
+                .iter()
+                .map(|(name, path)| format!("{}: {}", string(name), string(path)))
+                .collect();
+            out.line(format!("appIcons: {{ {} }},", entries.join(", ")));
+        }
         out.line("engine,");
         out.line(format!("sessions: [{}],", sessions.join(", ")));
         out.open("windows: [");

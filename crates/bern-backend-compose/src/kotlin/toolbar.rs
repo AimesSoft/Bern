@@ -153,8 +153,17 @@ impl Generator<'_> {
         } else {
             ""
         };
+        let bold = if element.keyword("bold") == Some("true") {
+            ", bold = true"
+        } else {
+            ""
+        };
+        let placement = element
+            .keyword("placement")
+            .map(|place| format!(", placement = {}", crate::names::string(place)))
+            .unwrap_or_default();
         out.open(format!(
-            "BernMenu({label}, {}, Modifier.testTag({}){icon_only}{}) {{ dismiss ->",
+            "BernMenu({label}, {}, Modifier.testTag({}){icon_only}{}{bold}{placement}) {{ dismiss ->",
             Self::icon(element.icon("icon")),
             self.target(element, ctx),
             self.shape_arg(element)

@@ -47,14 +47,18 @@ fn shared(source: &str) -> String {
     )
 }
 
-pub(crate) fn files(engine_kinds: &str, package: &str) -> Vec<GeneratedFile> {
+pub(crate) fn files(
+    engine_kinds: &str,
+    package: &str,
+    app_icons: &[(String, String)],
+) -> Vec<GeneratedFile> {
     let runtime = Path::new("project/app/src/main/kotlin/dev/bern/runtime");
     let common = [
         (
             "BernRuntime.kt",
             super::RUNTIME.replace("__APP_PACKAGE__", package),
         ),
-        ("BernViews.kt", super::views_source()),
+        ("BernViews.kt", super::views_source(app_icons)),
         ("BernStyle.kt", super::STYLE.to_owned()),
         ("BernFeatures.kt", super::features_source(engine_kinds)),
         ("BernScene.kt", super::SCENE.to_owned()),
@@ -102,7 +106,7 @@ pub(crate) fn files(engine_kinds: &str, package: &str) -> Vec<GeneratedFile> {
 mod tests {
     #[test]
     fn shared_runtime_has_no_phone_material_or_rewritten_signatures() {
-        let files = super::files("audio", "dev.bern.probe");
+        let files = super::files("audio", "dev.bern.probe", &[]);
         assert!(files.len() >= 10);
         for file in files {
             let source = String::from_utf8(file.contents).unwrap();
@@ -111,6 +115,7 @@ mod tests {
             assert!(!source.contains("NavigationBar("));
             assert!(!source.contains("/*bern:engine-opens*/"));
             assert!(!source.contains("/*bern:icon-branches*/"));
+            assert!(!source.contains("/*bern:app-icon-branches*/"));
         }
     }
 }

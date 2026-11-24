@@ -169,9 +169,21 @@ pub(crate) struct Win {
     views: RefCell<Vec<glib::WeakRef<adw::ToolbarView>>>,
     shortcuts: RefCell<Vec<Shortcut>>,
     next_shortcut: StdCell<u64>,
+    active_hold: RefCell<Option<ActiveHold>>,
     /// The `ShortcutInput` waiting for a key: it takes every key meanwhile,
     /// and no shortcut runs.
     pub(crate) recorder: RefCell<Option<Recorder>>,
+}
+
+struct ActiveHold {
+    keycode: u32,
+    token: u64,
+    field: Field,
+    run: Rc<dyn Fn()>,
+    active: Option<Rc<dyn Fn() -> bool>>,
+    held: Rc<StdCell<bool>>,
+    timer: Rc<RefCell<Option<glib::SourceId>>>,
+    quiet: bool,
 }
 
 /// What takes the next key a `ShortcutInput` records: its keys, or `None`
@@ -213,6 +225,7 @@ struct Shortcut {
     run: Rc<dyn Fn()>,
     active: Option<Rc<dyn Fn() -> bool>>,
     quiet: bool,
+    hold: Option<(Field, f64)>,
 }
 
 /// The keys of a mounted shortcut: written out, or the text a shortcut
@@ -414,17 +427,37 @@ fn unshifted_key(
         .map(|(key, ..)| key)
 }
 
+struct ResolvedShortcut {
+    token: u64,
+    run: Rc<dyn Fn()>,
+    active: Option<Rc<dyn Fn() -> bool>>,
+    quiet: bool,
+    hold: Option<(Field, f64)>,
+}
+
 /// Resolve the latest active shortcut matching `pressed` and report whether it
 /// is `quiet`. Plain keys do not fire while text is being edited.
 fn resolve_shortcut(
     shortcuts: &[Shortcut],
     pressed: &[Keys],
     editing: bool,
-) -> Option<(Rc<dyn Fn()>, bool)> {
+) -> Option<ResolvedShortcut> {
     let found = shortcuts.iter().rev().find_map(|shortcut| {
         let keys = shortcut.keys.keys()?;
-        (pressed.contains(&keys) && shortcut.active.as_ref().is_none_or(|active| active()))
-            .then(|| (keys, Rc::clone(&shortcut.run), shortcut.quiet))
+        (pressed.contains(&keys) && shortcut.active.as_ref().is_none_or(|active| active())).then(
+            || {
+                (
+                    keys,
+                    ResolvedShortcut {
+                        token: shortcut.token,
+                        run: Rc::clone(&shortcut.run),
+                        active: shortcut.active.clone(),
+                        quiet: shortcut.quiet,
+                        hold: shortcut.hold,
+                    },
+                )
+            },
+        )
     })?;
     let plain = !found
         .0
@@ -433,7 +466,7 @@ fn resolve_shortcut(
     if plain && editing {
         return None;
     }
-    Some((found.1, found.2))
+    Some(found.1)
 }
 
 /// Whether any active `quiet` shortcut includes the modifier `mask`.
@@ -558,7 +591,18 @@ impl Win {
         active: Option<Rc<dyn Fn() -> bool>>,
         quiet: bool,
     ) {
-        self.mount_shortcut(KeySource::Fixed(parse_keys(keys)), run, active, quiet);
+        self.mount_shortcut(KeySource::Fixed(parse_keys(keys)), run, active, quiet, None);
+    }
+
+    pub(crate) fn add_shortcut_hold(
+        self: &Rc<Self>,
+        keys: &str,
+        run: Rc<dyn Fn()>,
+        active: Option<Rc<dyn Fn() -> bool>>,
+        quiet: bool,
+        hold: Option<(Field, f64)>,
+    ) {
+        self.mount_shortcut(KeySource::Fixed(parse_keys(keys)), run, active, quiet, hold);
     }
 
     /// Run `run` on the keys `text` names at each key press, while the
@@ -570,7 +614,37 @@ impl Win {
         active: Option<Rc<dyn Fn() -> bool>>,
         quiet: bool,
     ) {
-        self.mount_shortcut(KeySource::Bound(text), run, active, quiet);
+        self.mount_shortcut(KeySource::Bound(text), run, active, quiet, None);
+    }
+
+    pub(crate) fn add_bound_shortcut_hold(
+        self: &Rc<Self>,
+        text: Rc<dyn Fn() -> String>,
+        run: Rc<dyn Fn()>,
+        active: Option<Rc<dyn Fn() -> bool>>,
+        quiet: bool,
+        hold: Option<(Field, f64)>,
+    ) {
+        self.mount_shortcut(KeySource::Bound(text), run, active, quiet, hold);
+    }
+
+    fn cancel_hold(&self, only_token: Option<u64>) {
+        let should_clear = self
+            .active_hold
+            .borrow()
+            .as_ref()
+            .is_some_and(|h| only_token.is_none_or(|t| h.token == t));
+        if !should_clear {
+            return;
+        }
+        if let Some(active) = self.active_hold.borrow_mut().take() {
+            if let Some(source) = active.timer.borrow_mut().take() {
+                source.remove();
+            }
+            if active.held.replace(false) {
+                self.write(active.field, Value::Bool(false));
+            }
+        }
     }
 
     fn mount_shortcut(
@@ -579,6 +653,7 @@ impl Win {
         run: Rc<dyn Fn()>,
         active: Option<Rc<dyn Fn() -> bool>>,
         quiet: bool,
+        hold: Option<(Field, f64)>,
     ) {
         let token = self.next_shortcut.get();
         self.next_shortcut.set(token + 1);
@@ -588,10 +663,12 @@ impl Win {
             run,
             active,
             quiet,
+            hold,
         });
         let win = Rc::downgrade(self);
         crate::reactive::on_cleanup(move || {
             if let Some(win) = win.upgrade() {
+                win.cancel_hold(Some(token));
                 win.shortcuts
                     .borrow_mut()
                     .retain(|candidate| candidate.token != token);
@@ -601,7 +678,7 @@ impl Win {
 
     /// The shortcut for a key press, given as [`pressed_keys`]: of those
     /// that take the keys now, the one mounted last, and whether it is `quiet`.
-    fn shortcut_for(&self, pressed: &[Keys]) -> Option<(Rc<dyn Fn()>, bool)> {
+    fn shortcut_for(&self, pressed: &[Keys]) -> Option<ResolvedShortcut> {
         let editing = gtk::prelude::GtkWindowExt::focus(&self.window).is_some_and(|focus| {
             focus.is::<gtk::Text>() || focus.is::<gtk::TextView>() || focus.is::<gtk::Editable>()
         });
@@ -681,8 +758,7 @@ impl Win {
             return Some(seconds);
         }
         match self.mouse.get() {
-            Mouse::Unknown => Some(seconds),
-            Mouse::Outside => None,
+            Mouse::Unknown | Mouse::Outside => Some(seconds),
             Mouse::At(x, y) => {
                 // What takes the mouse there, as GTK picks it: a control
                 // standing over an area takes it off the area.
@@ -1205,6 +1281,7 @@ pub(crate) fn open(kind_id: &str) -> Result<String, Failure> {
         views: RefCell::new(Vec::new()),
         shortcuts: RefCell::new(Vec::new()),
         next_shortcut: StdCell::new(1),
+        active_hold: RefCell::new(None),
         recorder: RefCell::new(None),
     });
     watch_touch(&win);
@@ -1340,18 +1417,82 @@ pub(crate) fn open(kind_id: &str) -> Result<String, Failure> {
             }
             return glib::Propagation::Proceed;
         }
+        // Ignore key-repeat while a hold shortcut owns this physical key.
+        if let Some(active) = win.active_hold.borrow().as_ref()
+            && active.keycode == keycode
+        {
+            if !active.quiet {
+                win.wake_idle();
+            }
+            return glib::Propagation::Stop;
+        }
         let pressed = pressed_keys(keyval, unshifted, state);
         match win.shortcut_for(&pressed) {
-            Some((run, quiet)) => {
-                if !quiet {
+            Some(found) => {
+                if !found.quiet {
                     win.wake_idle();
                 }
-                run();
+                if let Some((field, after)) = found.hold {
+                    win.cancel_hold(None);
+                    let held = Rc::new(StdCell::new(false));
+                    let timer: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
+                    let held_fire = Rc::clone(&held);
+                    let timer_fire = Rc::clone(&timer);
+                    let win_fire = Rc::downgrade(&win);
+                    *timer.borrow_mut() = Some(glib::timeout_add_local_once(
+                        Duration::from_secs_f64(after.max(0.01)),
+                        move || {
+                            timer_fire.borrow_mut().take();
+                            if let Some(win) = win_fire.upgrade() {
+                                held_fire.set(true);
+                                win.write(field, Value::Bool(true));
+                            }
+                        },
+                    ));
+                    *win.active_hold.borrow_mut() = Some(ActiveHold {
+                        keycode,
+                        token: found.token,
+                        field,
+                        run: found.run,
+                        active: found.active,
+                        held,
+                        timer,
+                        quiet: found.quiet,
+                    });
+                } else {
+                    (found.run)();
+                }
                 glib::Propagation::Stop
             }
             None => {
                 win.wake_idle();
                 glib::Propagation::Proceed
+            }
+        }
+    });
+    let release_win = Rc::downgrade(&win);
+    keys.connect_key_released(move |_, _, keycode, _| {
+        let Some(win) = release_win.upgrade() else {
+            return;
+        };
+        let matched = win
+            .active_hold
+            .borrow()
+            .as_ref()
+            .is_some_and(|h| h.keycode == keycode);
+        if !matched {
+            return;
+        }
+        if let Some(active) = win.active_hold.borrow_mut().take() {
+            if let Some(source) = active.timer.borrow_mut().take() {
+                source.remove();
+            }
+            if active.held.replace(false) {
+                win.write(active.field, Value::Bool(false));
+            } else if win.recorder.borrow().is_none()
+                && active.active.as_ref().is_none_or(|f| f())
+            {
+                (active.run)();
             }
         }
     });
@@ -1397,6 +1538,9 @@ pub(crate) fn open(kind_id: &str) -> Result<String, Failure> {
         let watched = Rc::downgrade(&win);
         window.connect_notify_local(Some(property), move |_, _| {
             if let Some(win) = watched.upgrade() {
+                if !win.window.is_active() {
+                    win.cancel_hold(None);
+                }
                 win.fullscreen.set(win.window.is_fullscreen());
                 win.schedule_report();
             }
@@ -1523,10 +1667,15 @@ fn watch_input(win: &Rc<Win>, seconds: Option<f64>) -> Option<Rc<dyn Fn()>> {
     });
     let left = Rc::clone(&rest);
     let outside = place.clone();
+    let leave_win = Rc::downgrade(win);
     pointer.connect_leave(move |pointer| {
         if from_mouse(pointer) {
             outside(Mouse::Outside);
-            left();
+            // Leaving an already idle window must not wake it; while awake,
+            // moving outside the window starts the `idle_after` countdown.
+            if leave_win.upgrade().is_some_and(|w| !w.idle.peek()) {
+                left();
+            }
         }
     });
     win.window.add_controller(pointer);
@@ -2175,6 +2324,7 @@ mod tests {
                 run: Rc::clone(&noop),
                 active: Some(Rc::new(move || is_on.get())),
                 quiet: true,
+                hold: None,
             },
             Shortcut {
                 token: 2,
@@ -2182,6 +2332,7 @@ mod tests {
                 run: Rc::clone(&noop),
                 active: None,
                 quiet: true,
+                hold: None,
             },
             Shortcut {
                 token: 3,
@@ -2189,12 +2340,13 @@ mod tests {
                 run: Rc::clone(&noop),
                 active: None,
                 quiet: false,
+                hold: None,
             },
         ];
         // Bare quiet shortcut matches outside text editing, not inside it.
         let right = pressed_keys(Key::Right, None, ModifierType::empty());
         assert_eq!(
-            resolve_shortcut(&shortcuts, &right, false).map(|(_, q)| q),
+            resolve_shortcut(&shortcuts, &right, false).map(|s| s.quiet),
             Some(true)
         );
         assert!(resolve_shortcut(&shortcuts, &right, true).is_none());
@@ -2205,7 +2357,7 @@ mod tests {
         // modifier (Ctrl on Linux for `cmd`) stays quiet while Shift does not.
         let ctrl_left = pressed_keys(Key::Left, None, ModifierType::CONTROL_MASK);
         assert_eq!(
-            resolve_shortcut(&shortcuts, &ctrl_left, true).map(|(_, q)| q),
+            resolve_shortcut(&shortcuts, &ctrl_left, true).map(|s| s.quiet),
             Some(true)
         );
         assert!(has_quiet_modifier_in(
@@ -2216,7 +2368,7 @@ mod tests {
         // Ordinary shortcut returns quiet = false.
         let space = pressed_keys(Key::space, None, ModifierType::empty());
         assert_eq!(
-            resolve_shortcut(&shortcuts, &space, false).map(|(_, q)| q),
+            resolve_shortcut(&shortcuts, &space, false).map(|s| s.quiet),
             Some(false)
         );
     }

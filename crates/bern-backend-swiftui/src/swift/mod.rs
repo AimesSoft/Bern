@@ -95,6 +95,8 @@ struct Ctx {
     /// The layers of a stack some of whose conditions bring in a moving
     /// layer: each is drawn at its place in the stack by its `zIndex`.
     layers: bool,
+    /// Directly inside a `Stack`: an unsized `NativeView` fills both axes.
+    in_stack: bool,
 }
 
 /// The system the Swift is generated for. SwiftUI is shared; windows,
@@ -128,11 +130,30 @@ impl Platform {
 pub struct Generator<'a> {
     app: &'a Application,
     platform: Platform,
+    app_icons: Vec<(String, Vec<bern_target_api::app_icon::Contour>)>,
 }
 
 impl<'a> Generator<'a> {
     pub fn new(app: &'a Application, platform: Platform) -> Self {
-        Self { app, platform }
+        Self {
+            app,
+            platform,
+            app_icons: Vec::new(),
+        }
+    }
+
+    /// Outlined `.svg` application icons, emitted into `BernAppIconCatalog`.
+    pub fn with_app_icons(
+        mut self,
+        icons: Vec<(String, Vec<bern_target_api::app_icon::Contour>)>,
+    ) -> Self {
+        self.app_icons = icons;
+        self
+    }
+
+    /// Whether `icon` needs `BernIcon` (application `.svg` or non-SF alias).
+    pub(super) fn uses_custom_icon(icon: &str) -> bool {
+        bern_target_api::app_icon::is_app_icon(icon) || icon == "line.2.horizontal"
     }
 
     fn types(&self) -> &TypeTable {

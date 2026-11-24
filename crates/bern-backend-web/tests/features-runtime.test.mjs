@@ -1533,11 +1533,14 @@ test("a toolbar appearing under a stationary mouse keeps the window awake", () =
   move();
   timers.at(-1).callback();
   assert.equal(win.idle.peek(), true);
-  // Leaving the window while a hide is pending also cancels that hide.
+  // Leaving the window while a hide is pending replaces the area's 1s timer
+  // with the window's own 3s `idle_after` fallback.
   move();
   root.dispatch("pointerleave", { pointerType: "mouse" });
   assert.equal(win.idle.peek(), false);
-  assert.equal(timers.at(-1).cancelled, true);
+  assert.equal(timers.at(-1).delay, 3000);
+  timers.at(-1).callback();
+  assert.equal(win.idle.peek(), true);
   scope.dispose();
 });
 
@@ -3303,6 +3306,111 @@ test("SplitView collapsed, MenuItem checked, PopoverButton shape/height, Label/I
   assert.equal(img.style.filter, "saturate(0)");
   sat.set(1);
   assert.equal(img.style.filter, "");
+
+  scope.dispose();
+});
+
+test("player controls: hold shortcuts, placement, tooltip keys, switch knob, bold/iconless menu, vertical slider", () => {
+  const { B, F, Element, document, timers } = runtime();
+  const root = new Element("div");
+  const ctx = { window: { id: "demo" }, scope: () => "demo" };
+  const scope = new B.Scope();
+  const hold = B.cell(false);
+  const volume = B.cell(0.5);
+  const hover = B.cell(null);
+  const playKey = B.cell("space");
+  const checked = B.cell(true);
+  let taps = 0;
+
+  B.within(scope, () => {
+    F.KeyShortcut(root, ctx, { key: "right", quiet: true, hold, holdAfter: 0.35 }, () => { taps += 1; });
+    B.Tooltip(root, ctx, { content: () => "Play", keys: () => playKey.get(), placement: "above" }, (p) => {
+      p.append(new Element("button"));
+    });
+    B.Menu(root, ctx, { id: "speed", label: () => "1.0x", style: "icon", bold: true, placement: "above" }, [
+      { id: "x2", label: () => "2.0x", action: () => {} },
+    ]);
+    F.Switch(root, ctx, {
+      id: "sw",
+      label: () => "Bright",
+      field: checked,
+      look: { base: { foreground: { role: "accent" } } },
+    });
+    B.Slider(root, ctx, {
+      id: "vol",
+      label: () => "Volume",
+      labelHidden: true,
+      field: volume,
+      hover,
+      min: 0,
+      max: 1,
+      axis: "vertical",
+      minIcon: "speaker.fill",
+      maxIcon: "speaker.wave.3.fill",
+    });
+  });
+
+  // Short press runs tap action without setting hold.
+  const dispatchDoc = (name, event) => {
+    for (const fn of [...(document.listeners[name] ?? [])]) fn(event);
+  };
+  const down = { target: root, key: "ArrowRight", code: "ArrowRight", repeat: false, preventDefault() {} };
+  const up = { target: root, key: "ArrowRight", code: "ArrowRight", preventDefault() {} };
+  dispatchDoc("keydown", down);
+  assert.equal(hold.peek(), false);
+  assert.equal(timers.at(-1).delay, 350);
+  dispatchDoc("keyup", up);
+  assert.equal(taps, 1);
+  assert.equal(hold.peek(), false);
+
+  // Holding past holdAfter sets hold true, ignores repeats, and clears on keyup without tapping.
+  dispatchDoc("keydown", down);
+  timers.at(-1).callback();
+  assert.equal(hold.peek(), true);
+  dispatchDoc("keydown", { ...down, repeat: true });
+  dispatchDoc("keyup", up);
+  assert.equal(hold.peek(), false);
+  assert.equal(taps, 1);
+
+  // Tooltip tracks reactive keys and placement.
+  const tipTarget = root.children[0];
+  assert.equal(tipTarget.dataset.bernTooltip, "Play");
+  assert.equal(tipTarget.dataset.bernTooltipPlacement, "above");
+  assert.ok(tipTarget.dataset.bernTooltipKeys.length > 0);
+  playKey.set("cmd+k");
+  assert.ok(tipTarget.dataset.bernTooltipKeys.includes("K"));
+
+  // Icon-less Menu(style: icon, bold: true) has bold class and no chevron icon.
+  const menuWrap = root.children[1];
+  const trigger = menuWrap.children[0];
+  assert.equal(trigger.classes.has("bern-menu-bold"), true);
+  assert.equal(trigger.classes.has("bern-menu-text-only"), true);
+  assert.equal(trigger.children.length, 1);
+
+  // Switch knob CSS variable set from style foreground.
+  const swNode = root.children[2].children[1];
+  assert.equal(swNode.style["--bern-switch-knob-on"], "var(--bern-accent)");
+
+  // Vertical slider places maxIcon before input and minIcon after, and maps vertical hover.
+  const sliderTrack = root.children[3];
+  assert.equal(sliderTrack.classes.has("bern-slider-track-vertical"), true);
+  const input = sliderTrack.children[1];
+  assert.equal(input.classes.has("bern-slider-vertical"), true);
+  input.getBoundingClientRect = () => ({ left: 0, top: 100, width: 28, height: 116 });
+  input.dispatch("pointermove", { pointerType: "mouse", clientX: 14, clientY: 108 });
+  assert.equal(hover.peek(), 1);
+  input.dispatch("pointermove", { pointerType: "mouse", clientX: 14, clientY: 208 });
+  assert.equal(hover.peek(), 0);
+  input.dispatch("pointerleave", { pointerType: "mouse" });
+  assert.equal(hover.peek(), null);
+
+  // placePopover honors explicit placement: "above" even when room below is ample.
+  const pop = new Element("div");
+  pop.classes.add("bern-menu");
+  const anchor = { getBoundingClientRect: () => ({ left: 40, right: 120, top: 240, bottom: 270, width: 80, height: 30 }) };
+  B.placePopover(pop, anchor, "above");
+  assert.equal(pop.style.top, "auto");
+  assert.notEqual(pop.style.bottom, "auto");
 
   scope.dispose();
 });

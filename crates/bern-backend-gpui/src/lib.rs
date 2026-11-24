@@ -111,6 +111,14 @@ const FEATURES: &[&str] = &[
     feature::SCROLL_BROWSING,
     feature::BOUND_BLUR,
     feature::NATIVE_VIEW,
+    feature::APP_ICONS,
+    feature::POPUP_PLACEMENT,
+    feature::SWITCH_KNOB,
+    feature::BOLD_MENUS,
+    feature::TOOLTIP_KEYS,
+    feature::VERTICAL_SLIDERS,
+    feature::HOLD_SHORTCUTS,
+    feature::NATIVE_LISTS,
 ];
 
 const CONTROL_STATES: &[&str] = &[
@@ -139,7 +147,12 @@ const ROW_STATES: &[&str] = &[
 const STYLES: &[StyleSupport] = &[
     StyleSupport {
         component: "Stack",
-        base: &["background", "foreground", "corner", "shadow"],
+        base: &["background", "foreground", "border", "corner", "shadow"],
+        states: &[],
+    },
+    StyleSupport {
+        component: "Switch",
+        base: &["foreground"],
         states: &[],
     },
     StyleSupport {
@@ -734,6 +747,7 @@ impl Target for Gpui {
                 "spin_period",
                 "blur",
                 "glow",
+                "idle_area",
             ],
             window_chrome: true,
             text_marks: true,
