@@ -8,9 +8,9 @@ Bern includes an optional **GPUI** backend (`ui = "gpui"`) that renders a unifie
 
 - **Rust 1.99+** (`rustup update`).
 - Platform GPU/windowing build dependencies on the host you build for:
-  - **macOS**: Standard Xcode Command Line Tools (no separate Metal compiler toolchain required; shaders compile at runtime via `runtime_shaders`).
-  - **Windows**: Visual Studio C++ build tools + Windows 11 SDK (`rc.exe` / `fxc.exe`) and Rust `stable-msvc`.
-  - **Linux**: X11/Wayland, font, and GPU development headers plus a Vulkan or OpenGL ES driver (or Mesa software rendering):
+  - **macOS**: Standard Xcode Command Line Tools (no separate Metal compiler toolchain required; shaders compile at runtime via `runtime_shaders`). `WebKit`, `AVFoundation`, `CoreMedia`, and `ServiceManagement` are built into macOS.
+  - **Windows**: Visual Studio C++ build tools + Windows 11 SDK (`rc.exe` / `fxc.exe`) and Rust `stable-msvc`. `WebPage` uses the installed Microsoft Edge WebView2 Runtime; built-in media playback uses Windows Media Foundation (`IMFMediaEngine`).
+  - **Linux**: X11/Wayland, font, and GPU development headers plus a Vulkan or OpenGL ES driver (or Mesa software rendering). At runtime, `WebPage` dynamically loads WebKitGTK (`libwebkit2gtk-4.1.so.0` + `libgtk-3.so.0`) and built-in media playback dynamically loads GStreamer (`libgstreamer-1.0.so.0` + `libgstapp-1.0.so.0`) with zero link-time requirement when unused:
 
 ```bash
 # Debian / Ubuntu
@@ -51,7 +51,7 @@ bern build --target gpui_macos
 bern run --target gpui_macos
 ```
 
-Because `bern-gpui` links the same Rust engine in-process and exposes the same IPC channel as the native desktop targets, the generated app CLI and Skill work identically:
+Because `bern-gpui` links the same Rust engine in-process and exposes the same IPC channel as the native desktop targets, the generated app CLI, UI session commands (`back`, `focus`, `set_file`, `window.*`, close confirmation protocol), `BERN_TRACE` UI spans, and Skill work identically:
 
 ```bash
 target/bern/gpui_macos/bin/tasks --help
@@ -71,18 +71,29 @@ Useful debugging environment variables:
 
 ## Platform behavior and adaptations
 
-- **Unified visual system**: Uses `BernTheme` (high-contrast neutral palette, consistent spacing, rounded corners, and spring physics) across macOS, Windows, and Linux.
-- **macOS menu bar**: When built with `platform = "macos"`, the GPUI target also declares and renders the native macOS `MenuBar`.
-- **Standard controls & animations**: Supports split/tab navigation, forms, tables, sheets/modals, search palettes, automatic skeleton screens, pure-Rust animated `Svg` (`BSVG`), and opt-in in-process `javascript = true`.
+- **Full desktop IR parity**: Supports all desktop Bern components, features, styles, and motion tokens—including `Table`/`TableColumn`/`TableMenu`, `List`, `Inspector`, `Marquee`, `WindowButtons`, `Slot`, `Sidebar(fallback:)`, `Drop(opens:)`, `WindowRole::Settings` and `WindowRole::Dialog` (modal blocking), `Window(confirm_close:)`, `WindowSet(palette:)`, `Text(lit*)`, `TextInput(current:)`, `paste:`, `Rail(overhang:)`, `idle_area`, `glow_opacity`, `Stack` border/hover styles, pure-Rust animated `Svg` (`BSVG`), and opt-in in-process `javascript = true`.
+- **Unified visual system**: Uses `BernTheme` (high-contrast neutral palette, runtime semantic palette overrides, consistent spacing, rounded corners, and spring physics) across macOS, Windows, and Linux.
+- **Native system integration**:
+  - **Menu bar**: Native macOS `MenuBar` (`platform = "macos"`).
+  - **Status item (`StatusItem`)**: Native tray icon and dynamic menu on all three platforms (macOS `NSStatusBar`, Windows `Shell_NotifyIconW`, Linux D-Bus `StatusNotifierItem` + `com.canonical.dbusmenu`), keeping the app alive after the last window closes and launching silently with `--at-login`.
+  - **Open at Login (`Switch(login_item: true)`)**: macOS `SMAppService` (with LaunchAgent fallback when unbundled), Windows `HKCU\...\Run` registry, and Linux XDG Autostart `.desktop`.
+- **Native embedded `WebPage`**: Uses native platform WebViews (`WKWebView` on macOS, `WebView2` on Windows, `WebKitGTK` on Linux) supporting `cookies_file`, `cookie_domain`, `user_agent`, and `close_on`, plus native WebKit `content_mode` on macOS (Windows and Linux emit the standard build warning and keep the engine default mode, matching WinUI 3 and GTK).
+- **Media playback (`Video`)**: Ships built-in native media executors on all three platforms (macOS `AVFoundation`, Windows `IMFMediaEngine`, Linux `GStreamer`) along with GPUI's standard `Video(controls:)` playback control bar. When an application supplies its own `MediaKernel`, the application kernel continues to take priority automatically.
 - **Native views**: Co-located GPUI views can be mounted directly via `NativeView(gpui: "...")` (keeping `Fallback` for non-GPUI targets). See [Native views](../Topics/Native-Views.md).
-- **Capability checking**: Any IR feature not yet declared by `bern-backend-gpui` is caught at compile time by `bern check --target <gpui_target>` with a clear diagnostic pointing to the declaration.
 
 ## Packaging and signing
 
-`bern package` does not generate standalone installers for GPUI targets yet. For release binaries, run:
+`bern package` produces distributable artifacts for all three GPUI desktop targets into `target/bern/dist/`:
 
 ```bash
-bern build --target gpui_macos --release
+# macOS: signed (and optionally notarized) .dmg disk image
+bern package --target gpui_macos
+
+# Windows: portable .zip (with optional signtool signing via BERN_WINDOWS_CERTIFICATE)
+bern package --target gpui_windows
+
+# Linux: portable .tar.gz plus .deb package (when dpkg-deb is available)
+bern package --target gpui_linux
 ```
 
-and distribute the compiled binary alongside its generated `resources/`, `bin/`, and `skills/` artifacts from `target/bern/<target>/`.
+Signing environment variables (`BERN_MACOS_SIGNING_IDENTITY`, `BERN_MACOS_NOTARY_PROFILE`, `BERN_WINDOWS_CERTIFICATE`, `BERN_WINDOWS_PASSWORD`, `BERN_WINDOWS_TIMESTAMP`) match the native desktop targets.

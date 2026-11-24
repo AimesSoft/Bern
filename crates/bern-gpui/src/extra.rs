@@ -1157,6 +1157,7 @@ pub fn tree_view(
         has_children: bool,
         open: bool,
     }
+    #[allow(clippy::too_many_arguments)]
     fn walk(
         idx: usize,
         depth: usize,
@@ -1618,7 +1619,7 @@ pub fn reorderable(
         Rc::new(move |text: String| {
             let trimmed = text.trim();
             let parts: Vec<&str> = trimmed
-                .split(|ch: char| ch == ':' || ch == ',' || ch == '-' || ch == '>')
+                .split([':', ',', '-', '>'])
                 .filter(|s| !s.is_empty())
                 .collect();
             if parts.len() == 2

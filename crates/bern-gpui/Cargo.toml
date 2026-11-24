@@ -53,21 +53,24 @@ windows = ["dep:gpui_windows"]
 # toolchain. Without `font-kit`, macOS draws no text at all.
 gpui_macos = { package = "gpui-pre-macos", version = "=0.3.10", default-features = false, features = ["runtime_shaders", "font-kit"], optional = true }
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSAccessibility", "NSApplication", "NSButton", "NSControl", "NSCursor", "NSGraphics", "NSImage", "NSMenu", "NSMenuItem", "NSResponder", "NSScreen", "NSView", "NSWindow", "NSWorkspace", "objc2-core-foundation", "objc2-quartz-core"] }
-objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGColor"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSDictionary", "NSGeometry", "NSString", "NSValue"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSAccessibility", "NSApplication", "NSBitmapImageRep", "NSButton", "NSColor", "NSControl", "NSCursor", "NSEvent", "NSGraphics", "NSImage", "NSImageRep", "NSMenu", "NSMenuItem", "NSPasteboard", "NSResponder", "NSScreen", "NSStatusBar", "NSStatusBarButton", "NSStatusItem", "NSView", "NSWindow", "NSWorkspace", "objc2-core-foundation", "objc2-quartz-core"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGColor", "CGImage", "CGWindow"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSData", "NSDictionary", "NSGeometry", "NSString", "NSURL", "NSURLRequest", "NSValue"] }
 objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "CABase", "CALayer", "CAMetalLayer", "objc2-core-foundation", "objc2-core-graphics"] }
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
 gpui_linux = { package = "gpui-pre-linux", version = "=0.3.10", default-features = false, features = ["wayland", "x11"], optional = true }
-# The monotonic clock video frames are timed by.
+# The monotonic clock video frames are timed by, plus dlopen for platform
+# libraries (X11, WebKitGTK, GStreamer) without hard link-time dependencies.
 libc = "0.2"
+# Session D-Bus connection for `StatusItem` (StatusNotifierItem + dbusmenu).
+zbus = { version = "5", default-features = false, features = ["async-io"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 gpui_windows = { package = "gpui-pre-windows", version = "=0.3.10", optional = true }
 # The release GPUI builds on: videos composed under a window, its place,
-# the pointer and the animation setting.
-win32 = { package = "windows", version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_DirectComposition", "Win32_Graphics_Dxgi", "Win32_System_Performance", "Win32_UI_WindowsAndMessaging"] }
+# the pointer, tray icon, Media Foundation, WebView2 and the animation setting.
+win32 = { package = "windows", version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_DirectComposition", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_Graphics_Gdi", "Win32_Media_MediaFoundation", "Win32_Storage_Xps", "Win32_System_Com", "Win32_System_LibraryLoader", "Win32_System_Performance", "Win32_System_Registry", "Win32_UI_HiDpi", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 # Bern's raw-touch dispatch and desktop contact delivery. The application
 # workspace must carry these overrides too; the GPUI generator emits them.

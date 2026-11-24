@@ -62,6 +62,8 @@ pub struct ButtonProps {
     pub style: Option<&'static ControlStyle>,
     /// A draft field the open or save panel fills before the action runs.
     pub pick: Option<FilePrompt>,
+    /// A draft field clipboard text is pasted into before the action runs.
+    pub paste: Option<Field>,
     /// A key combination that presses the button, as `cmd+o`.
     pub shortcut: Option<String>,
     /// Pointer cursor on desktop platforms (`"default"` or `"pointer"`).
@@ -161,18 +163,66 @@ fn pick(c: &Ctx, prompt: FilePrompt, then: Option<Act>, cx: &mut App) {
     .detach();
 }
 
-/// The action of a pressed button: the open/save panel first when it picks.
+pub(crate) type FileHandler = Rc<dyn Fn(String)>;
+
+/// Build `set_file` + `file_kinds` actions for a control with a `FilePrompt`.
+pub(crate) fn file_actions(
+    c: &Ctx,
+    pick: Option<&FilePrompt>,
+    action: Option<&Act>,
+) -> (Option<FileHandler>, Option<&'static str>) {
+    let Some(prompt) = pick else {
+        return (None, None);
+    };
+    let field = prompt.field;
+    let kinds = prompt.kinds;
+    let c = c.clone();
+    let action = action.cloned();
+    let set_file: Rc<dyn Fn(String)> = Rc::new(move |url: String| {
+        let ty = field_type(field);
+        let value = crate::files::url_value(ty.as_ref(), &url);
+        if c.write(field, value)
+            && let Some(action) = &action
+        {
+            action(&c);
+        }
+    });
+    (Some(set_file), Some(kinds))
+}
+
+/// The action of a pressed button: the open/save panel or clipboard paste
+/// first, then the declared action.
 pub(crate) fn press(
     c: &Ctx,
     pick_into: Option<FilePrompt>,
     action: Option<Act>,
 ) -> crate::ctx::Press {
+    press_with_paste(c, pick_into, None, action)
+}
+
+pub(crate) fn press_with_paste(
+    c: &Ctx,
+    pick_into: Option<FilePrompt>,
+    paste_into: Option<Field>,
+    action: Option<Act>,
+) -> crate::ctx::Press {
     let c = c.clone();
-    Rc::new(move |cx: &mut App| match pick_into.clone() {
-        Some(prompt) => pick(&c, prompt, action.clone(), cx),
-        None => {
-            if let Some(action) = &action {
+    Rc::new(move |cx: &mut App| {
+        if let Some(field) = paste_into {
+            if let Some(text) = crate::native::clipboard_text(cx)
+                && c.write(field, Value::Text(text))
+                && let Some(action) = &action
+            {
                 action(&c);
+            }
+            return;
+        }
+        match pick_into.clone() {
+            Some(prompt) => pick(&c, prompt, action.clone(), cx),
+            None => {
+                if let Some(action) = &action {
+                    action(&c);
+                }
             }
         }
     })
@@ -481,7 +531,7 @@ fn painted_face(
             }
         }
     };
-    let element = if hover_scale.is_some() || pressed_scale.is_some() {
+    if hover_scale.is_some() || pressed_scale.is_some() {
         let (hover_key, down_key, up_key, out_key) = (key.clone(), key.clone(), key.clone(), key);
         element
             .on_hover(move |hovered, window, _| track(&hover_key, Some(*hovered), None, window))
@@ -496,8 +546,7 @@ fn painted_face(
             })
     } else {
         element
-    };
-    element
+    }
 }
 
 /// `Button` with a text label and an optional icon: 36 points high, 14
@@ -534,7 +583,8 @@ fn button_of(
         (_, Prominence::Plain) => "button.plain",
         _ => "button.standard",
     };
-    let press = press(c, props.pick, action);
+    let (set_file, file_kinds) = file_actions(c, props.pick.as_ref(), action.as_ref());
+    let press = press_with_paste(c, props.pick, props.paste, action);
     c.list(Control {
         target: c.target(id),
         window: c.win().id.clone(),
@@ -544,6 +594,8 @@ fn button_of(
         enabled,
         actions: Actions {
             activate: Some(Rc::clone(&press)),
+            set_file,
+            file_kinds,
             ..Actions::default()
         },
     });
@@ -706,6 +758,7 @@ pub struct IconButtonProps {
     pub size: Option<f32>,
     pub style: Option<&'static ControlStyle>,
     pub pick: Option<FilePrompt>,
+    pub paste: Option<Field>,
     pub shortcut: Option<String>,
     pub icon_progress: Option<f32>,
     pub badge_icon: Option<&'static str>,
@@ -723,7 +776,8 @@ pub fn icon_button(
     action: Option<Act>,
 ) -> El {
     let enabled = props.enabled && c.enabled();
-    let press = press(c, props.pick, action);
+    let (set_file, file_kinds) = file_actions(c, props.pick.as_ref(), action.as_ref());
+    let press = press_with_paste(c, props.pick, props.paste, action);
     c.list(Control {
         target: c.target(id),
         window: c.win().id.clone(),
@@ -733,6 +787,8 @@ pub fn icon_button(
         enabled,
         actions: Actions {
             activate: Some(Rc::clone(&press)),
+            set_file,
+            file_kinds,
             ..Actions::default()
         },
     });
@@ -805,7 +861,7 @@ pub enum SwitchStyle {
 }
 
 /// How a `Switch` shows.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct SwitchProps {
     pub style: SwitchStyle,
     /// The switch alone, its label the accessible name.
@@ -813,6 +869,7 @@ pub struct SwitchProps {
     pub icon: Option<&'static str>,
     pub shape: Shape,
     pub height: Option<f32>,
+    pub shortcut: Option<String>,
 }
 
 /// `Switch`: its label at the leading edge and the switch at the trailing
@@ -827,6 +884,7 @@ pub fn switch(c: &Ctx, id: &'static str, label: String, model: Model, props: Swi
         Rc::new(move |value| model.set(&c, Value::Bool(value)))
     };
     let flip = Rc::clone(&toggle);
+    let activate: crate::ctx::Press = Rc::new(move |_| flip(!on));
     c.list(Control {
         target: c.target(id),
         window: c.win().id.clone(),
@@ -839,11 +897,14 @@ pub fn switch(c: &Ctx, id: &'static str, label: String, model: Model, props: Swi
         value: Some(on.to_string()),
         enabled,
         actions: Actions {
-            activate: Some(Rc::new(move |_| flip(!on))),
+            activate: Some(Rc::clone(&activate)),
             set_bool: Some(toggle.clone()),
             ..Actions::default()
         },
     });
+    if enabled {
+        register_shortcut(c, props.shortcut.as_deref(), &activate);
+    }
     if style == SwitchStyle::Button {
         let (height, padding, text) = look::metrics(None, props.shape);
         let height = props.height.unwrap_or(height);
@@ -1281,6 +1342,7 @@ struct TextField {
     key: SharedString,
     props: InputProps,
     value: String,
+    controlled: bool,
     enabled: bool,
     hooks: Hooks,
     colors: [gpui::Rgba; 3],
@@ -1380,16 +1442,17 @@ impl RenderOnce for TextField {
             }
             mine
         });
-        // The draft changed elsewhere (cleared after sending, an external
-        // entry's edit): the field shows it. Its own edits reach the draft
-        // as they happen, so a draft unlike the field changed elsewhere,
-        // even while the field has the keyboard.
+        // For draft-bound fields, any difference came from elsewhere (clear /
+        // external edit). For engine-controlled `TextInput(current:)`, keep the
+        // user's in-progress text while focused so async command replies never
+        // snap the caret back.
         let value = self.value;
+        let sync_value = !self.controlled || !focused(&self.key);
         let editor = match &state.read(cx).editor {
             Editor::Line(editor) => {
                 let editor = editor.clone();
                 let shown = editor.read(cx).value().to_string();
-                if shown != value {
+                if sync_value && shown != value {
                     editor.update(cx, |input, cx| input.set_value(value, window, cx));
                 }
                 if requested {
@@ -1400,7 +1463,7 @@ impl RenderOnce for TextField {
             Editor::Lines(editor) => {
                 let editor = editor.clone();
                 let shown = editor.read(cx).value().to_string();
-                if shown != value {
+                if sync_value && shown != value {
                     editor.update(cx, |input, cx| input.set_value(value, window, cx));
                 }
                 if requested {
@@ -1523,6 +1586,8 @@ pub fn text_input(c: &Ctx, id: &str, props: InputProps, field: Field, submit: Op
             c.write(field, Value::Text(String::new()));
         }
     }
+    let focus_key = c.key(id);
+    let focus: crate::ctx::Press = Rc::new(move |_| request_focus(&focus_key));
     c.list(Control {
         target: c.target(id),
         window: c.win().id.clone(),
@@ -1541,6 +1606,7 @@ pub fn text_input(c: &Ctx, id: &str, props: InputProps, field: Field, submit: Op
         actions: Actions {
             edit: Some(Rc::clone(&change)),
             submit: submit.clone(),
+            focus: Some(focus),
             ..Actions::default()
         },
     });
@@ -1554,6 +1620,7 @@ pub fn text_input(c: &Ctx, id: &str, props: InputProps, field: Field, submit: Op
         key: c.key(id).into(),
         props,
         value,
+        controlled: false,
         enabled,
         hooks: Hooks {
             change: enabled.then_some(change),
@@ -1566,16 +1633,107 @@ pub fn text_input(c: &Ctx, id: &str, props: InputProps, field: Field, submit: Op
         .into_any_element()
 }
 
+/// `TextInput(current:)`: controlled text field showing engine state; each
+/// edit commits via `model` while preserving in-progress edits during focus.
+pub fn text_input_controlled(c: &Ctx, id: &str, props: InputProps, model: Model) -> El {
+    let enabled = c.enabled();
+    let value = crate::value::as_text(&model.value(c));
+    let change: Rc<dyn Fn(String)> = {
+        let c = c.clone();
+        let model = model.clone();
+        Rc::new(move |text| {
+            model.set(&c, Value::Text(text));
+        })
+    };
+    let focus_key = c.key(id);
+    let focus: crate::ctx::Press = Rc::new(move |_| request_focus(&focus_key));
+    c.list(Control {
+        target: c.target(id),
+        window: c.win().id.clone(),
+        role: if props.kind == InputKind::Search {
+            "search"
+        } else {
+            "text_input"
+        },
+        label: props.label.clone(),
+        value: Some(if props.kind == InputKind::Secure {
+            "•".repeat(value.chars().count())
+        } else {
+            value.clone()
+        }),
+        enabled,
+        actions: Actions {
+            edit: Some(Rc::clone(&change)),
+            focus: Some(focus),
+            ..Actions::default()
+        },
+    });
+    let state = if enabled { "rest" } else { "disabled" };
+    let colors = [
+        c.slot("field", state, "background"),
+        c.slot("field", state, "foreground"),
+        c.slot("field", state, "border"),
+    ];
+    let element = TextField {
+        key: c.key(id).into(),
+        props,
+        value,
+        controlled: true,
+        enabled,
+        hooks: Hooks {
+            change: enabled.then_some(change),
+            submit: None,
+        },
+        colors,
+    };
+    c.grow()
+        .apply(div().flex_col().flex().child(element))
+        .into_any_element()
+}
+
 /// `Drop`: content that takes a file dropped on it into `field`, then runs
-/// its action; it lights up while a file is over it.
+/// its action; it lights up while a file is over it. Also accepts external
+/// `ui.set_file` calls validated against `files`, and system file-open events
+/// when `opens` is true.
+#[allow(clippy::too_many_arguments)]
 pub fn drop_area(
     c: &Ctx,
     id: &'static str,
+    label: String,
+    files: &'static str,
+    opens: bool,
     field: Field,
     over: Option<Field>,
     action: Option<Act>,
     children: Vec<El>,
 ) -> El {
+    let enabled = c.enabled();
+    let prompt = FilePrompt {
+        field,
+        kinds: files,
+        save: false,
+        suggested_name: None,
+    };
+    let (set_file, file_kinds) = file_actions(c, Some(&prompt), action.as_ref());
+    if opens
+        && enabled
+        && let Some(deliver) = set_file.as_ref()
+    {
+        crate::host::register_opener(&c.win().id, files, Rc::clone(deliver));
+    }
+    c.list(Control {
+        target: c.target(id),
+        window: c.win().id.clone(),
+        role: "drop",
+        label,
+        value: None,
+        enabled,
+        actions: Actions {
+            set_file,
+            file_kinds,
+            ..Actions::default()
+        },
+    });
     let hover = c.color("hover.overlay");
     let ctx = c.clone();
     let moved = c.clone();
@@ -1598,8 +1756,11 @@ pub fn drop_area(
             if let Some(over) = over {
                 ctx.write(over, Value::Bool(false));
             }
+            if !enabled {
+                return;
+            }
             if let Some(path) = paths.paths().first()
-                && ctx.write(field, media_source(path))
+                && write_picked_paths(&ctx, field, std::slice::from_ref(path), false)
                 && let Some(action) = &action
             {
                 action(&ctx);

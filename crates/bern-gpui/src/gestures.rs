@@ -26,7 +26,7 @@ fn double_click_interval() -> Duration {
     {
         // GPUI reports AppKit's click count; use the same system interval.
         let seconds: f64 = unsafe { objc2::msg_send![objc2::class!(NSEvent), doubleClickInterval] };
-        return Duration::from_secs_f64(seconds.max(0.001));
+        Duration::from_secs_f64(seconds.max(0.001))
     }
     #[cfg(target_os = "windows")]
     {
@@ -34,7 +34,7 @@ fn double_click_interval() -> Duration {
         unsafe extern "system" {
             fn GetDoubleClickTime() -> u32;
         }
-        return Duration::from_millis(u64::from(unsafe { GetDoubleClickTime() }));
+        Duration::from_millis(u64::from(unsafe { GetDoubleClickTime() }))
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     // Matches gpui-pre-linux 0.3.10 (Wayland and X11).
@@ -572,11 +572,12 @@ impl RenderOnce for Swipe {
                     }
                 });
                 window.on_key_event(move |event: &KeyDownEvent, phase, _, cx| {
-                    if phase == DispatchPhase::Capture && event.keystroke.key == "escape" {
-                        if escape.borrow_mut().cancel() {
-                            on_escape.active(false);
-                            cx.stop_propagation();
-                        }
+                    if phase == DispatchPhase::Capture
+                        && event.keystroke.key == "escape"
+                        && escape.borrow_mut().cancel()
+                    {
+                        on_escape.active(false);
+                        cx.stop_propagation();
                     }
                 });
             },

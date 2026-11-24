@@ -105,13 +105,9 @@ fn hello_generates_a_gpui_application() {
     for name in ["gpui-pre", "gpui-pre-linux", "gpui-pre-windows"] {
         let expected = format!(
             "{name} = {{ path = {} }}",
-            bern_target_api::toml_string(
-                &root
-                    .join("crates/bern-gpui/vendor")
-                    .join(name)
-                    .display()
-                    .to_string()
-            )
+            bern_target_api::toml_string(&bern_target_api::glue::path(
+                &root.join("crates/bern-gpui/vendor").join(name)
+            ))
         );
         assert!(cargo.contains(&expected), "{cargo}");
     }
@@ -150,7 +146,7 @@ fn hello_generates_a_gpui_application() {
     assert!(ui.contains("Hello, World!"), "{ui}");
     assert!(
         ui.contains(
-            "open: true, utility: false, overlay: None, width: Some(480.0), height: Some(320.0)"
+            "open: true, settings: false, utility: false, dialog: false, overlay: None, width: Some(480.0), height: Some(320.0)"
         ),
         "{ui}"
     );
@@ -230,29 +226,26 @@ fn hello_generates_a_gpui_application() {
 }
 
 #[test]
-fn what_the_target_does_not_show_fails_where_it_is_declared() {
+fn showcase_passes_gpui_check_on_all_three_desktops() {
     let (_, compiled) = compile("showcase");
-    let problems = Gpui::MACOS.check(&compiled.app, &gpui_macos());
-    // What a component it lists cannot show yet, where it is declared, and
-    // window properties beyond the size and the title.
-    for expected in [
-        "does not show a `Video` with the standard control bar",
-        "does not show `Window(id: settings, role:)`",
+    for (target, platform) in [
+        (&Gpui::MACOS, "macos"),
+        (&Gpui::WINDOWS, "windows"),
+        (&Gpui::LINUX, "linux"),
     ] {
+        let cfg = TargetConfig {
+            name: format!("gpui_{platform}"),
+            platform: platform.into(),
+            ui: Some("gpui".into()),
+            channels: vec!["ipc".into()],
+            ..TargetConfig::default()
+        };
+        let problems = target.check(&compiled.app, &cfg);
         assert!(
-            problems
-                .iter()
-                .any(|problem| problem.message.contains(expected)),
-            "{expected}: {problems:?}"
+            problems.is_empty(),
+            "gpui-{platform} showcase check failed: {problems:?}"
         );
     }
-    assert!(
-        problems
-            .iter()
-            .filter(|problem| problem.message.contains("`Video`"))
-            .all(|problem| problem.location.is_some()),
-        "{problems:?}"
-    );
 }
 
 /// A macOS icon declared as an Icon Composer document goes beside the
@@ -1339,5 +1332,297 @@ pub fn app(app: controls::Client, windows: AppWindows) -> impl View {
             "missing `{expected}`:\n{generated}"
         );
     }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn gallery_passes_gpui_check_and_generates_parity_widgets() {
+    let root = workspace();
+    let (config, compiled) = compile("gallery");
+    let target = gpui_macos();
+    let problems = Gpui::MACOS.check(&compiled.app, &target);
+    assert!(problems.is_empty(), "gallery check failed: {problems:?}");
+    let output = root.join("target/bern-test/gpui-gallery");
+    let _ = std::fs::remove_dir_all(&output);
+    let context = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: output.clone(),
+        target,
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    let files = Gpui::MACOS.generate(&compiled.app, &context).unwrap();
+    let ui = files
+        .iter()
+        .find(|f| f.path == Path::new("app/src/ui.rs"))
+        .map(|f| String::from_utf8_lossy(&f.contents).into_owned())
+        .unwrap();
+    for expected in [
+        "b::table(c,",
+        "b::text_input_controlled(c,",
+        "b::sidebar_selection(c,",
+        "b::drop_area(c,",
+    ] {
+        assert!(
+            ui.contains(expected),
+            "missing `{expected}` in gallery ui.rs"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&output);
+}
+
+#[test]
+fn status_item_login_switch_webpage_palette_and_package_generate() {
+    let root = workspace();
+    let dir = root.join("target/bern-test/gpui-parity-features");
+    let _ = std::fs::remove_dir_all(&dir);
+    let protocol = r#"
+#[bern::protocol(namespace = "parity", version = 1)]
+pub mod parity {
+    use bern::prelude::*;
+
+    #[state]
+    pub struct State {
+        #[content]
+        pub palette: String,
+        #[content]
+        pub page_url: String,
+        #[content]
+        pub close_sel: String,
+        #[content]
+        pub note: String,
+        pub show_tray: bool,
+    }
+
+    #[commands]
+    pub trait Commands {
+        fn set_note(&mut self, text: String) -> Result<(), CommandError>;
+        fn close_web(&mut self) -> Result<(), CommandError>;
+    }
+}
+"#;
+    let ui = r#"
+use bern::prelude::*;
+use parity_protocol::parity;
+
+#[bern::session]
+pub struct Draft {
+    pub show_inspector: bool,
+    pub clipboard: String,
+    pub dirty: bool,
+}
+
+#[component]
+pub fn main_view(app: parity::Client, #[session] draft: Draft) -> impl View {
+    ui! {
+        Column(idle_area: 5) {
+            WindowButtons(edge: leading)
+            Switch(id: login, label: tr! { "en" => "Open at Login" }, login_item: true)
+            Button(id: paste_btn, label: tr! { "en" => "Paste" }, paste: draft.clipboard) => app.set_note(draft.clipboard)
+            TextInput(id: ctrl_in, label: tr! { "en" => "Note" }, current: app.note) => app.set_note(app.note)
+            Marquee(duration: 8) {
+                Text(content: tr! { "en" => "Scrolling" })
+            }
+            List {
+                Text(content: tr! { "en" => "Row 1" })
+            }
+            WebPage(url: app.page_url, content_mode: mobile, close_on: app.close_sel, label: tr! { "en" => "Browser" }) => app.close_web()
+            Inspector(presented: draft.show_inspector, width: 260) {
+                Text(content: tr! { "en" => "Details" })
+            }
+        }
+    }
+}
+
+#[component]
+pub fn windows(app: parity::Client, windows: AppWindows, #[session] draft: Draft) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main, palette: app.palette) {
+            StatusItem(icon: "star", label: tr! { "en" => "Parity" }, login_item: true, shown: app.show_tray) {
+                CommandItem(id: close_w, label: tr! { "en" => "Close Web" }) => app.close_web()
+            }
+            Window(id: main, title: tr! { "en" => "Main" }, initial: open, confirm_close: draft.dirty, close_message: tr! { "en" => "Unsaved" }) {
+                main_view(app: app)
+            }
+            Window(id: settings, title: tr! { "en" => "Settings" }, role: settings, initial: closed) {
+                Text(content: tr! { "en" => "Settings" })
+            }
+            Window(id: confirm, title: tr! { "en" => "Confirm" }, role: dialog, initial: closed) {
+                Text(content: tr! { "en" => "Modal" })
+            }
+        }
+    }
+}
+"#;
+    for (package, source) in [
+        ("parity-protocol", protocol),
+        ("parity-ui", ui),
+        ("parity-core", "pub struct Engine;\n"),
+    ] {
+        std::fs::create_dir_all(dir.join(package).join("src")).unwrap();
+        std::fs::write(
+            dir.join(package).join("Cargo.toml"),
+            format!("[package]\nname = \"{package}\"\n"),
+        )
+        .unwrap();
+        std::fs::write(dir.join(package).join("src/lib.rs"), source).unwrap();
+    }
+    std::fs::write(
+        dir.join("Bern.toml"),
+        r#"[app]
+id = "parity"
+bundle_id = "dev.bern.parity"
+version = "1.2.3"
+name = { "en" = "Parity" }
+
+[languages]
+default = "en"
+supported = ["en"]
+
+[protocol]
+package = "parity-protocol"
+source = "parity-protocol/src/lib.rs"
+
+[engine]
+package = "parity-core"
+type = "parity_core::Engine"
+
+[ui]
+package = "parity-ui"
+sources = ["parity-ui/src/lib.rs"]
+root = "windows"
+
+[targets.gpui_macos]
+platform = "macos"
+ui = "gpui"
+channels = ["ipc"]
+
+[targets.gpui_windows]
+platform = "windows"
+ui = "gpui"
+channels = ["ipc"]
+
+[targets.gpui_linux]
+platform = "linux"
+ui = "gpui"
+channels = ["ipc"]
+"#,
+    )
+    .unwrap();
+    let config = bern_compiler::config::load(&dir.join("Bern.toml")).unwrap();
+    let compiled = bern_compiler::compile(&config).unwrap_or_else(|e| panic!("{e:?}"));
+    for (gpui, name) in [
+        (&Gpui::MACOS, "gpui_macos"),
+        (&Gpui::WINDOWS, "gpui_windows"),
+        (&Gpui::LINUX, "gpui_linux"),
+    ] {
+        let target = config
+            .targets
+            .iter()
+            .find(|t| t.name == name)
+            .unwrap()
+            .clone();
+        let problems = gpui.check(&compiled.app, &target);
+        let errors: Vec<_> = problems.iter().filter(|d| d.is_error()).collect();
+        assert!(errors.is_empty(), "{name} check errors: {errors:?}");
+        if name == "gpui_macos" {
+            assert!(problems.is_empty(), "{name} check warnings: {problems:?}");
+        } else {
+            assert_eq!(
+                problems.len(),
+                1,
+                "{name} expected web_content_mode warning: {problems:?}"
+            );
+        }
+        let output = dir.join(format!("out-{name}"));
+        let ctx = BuildContext {
+            project_dir: config.dir.clone(),
+            workspace_dir: root.clone(),
+            output_dir: output.clone(),
+            target,
+            protocol_package: config.protocol_package.name.clone(),
+            protocol_path: config.protocol_package.dir.clone(),
+            protocol_module: compiled.protocol_module.clone(),
+            engine_package: config.engine_package.name.clone(),
+            engine_path: config.engine_package.dir.clone(),
+            engine_type: config.engine_type.clone(),
+            modules: Vec::new(),
+            framework: Framework::Path(root.join("crates")),
+            release: true,
+        };
+        let files = gpui.generate(&compiled.app, &ctx).unwrap();
+        let ui = files
+            .iter()
+            .find(|f| f.path == Path::new("app/src/ui.rs"))
+            .map(|f| String::from_utf8_lossy(&f.contents).into_owned())
+            .unwrap();
+        for expected in [
+            "fn window_palette(c: &b::Ctx) -> String",
+            "fn status_menu(c: &b::Ctx, m: &mut b::StatusMenu)",
+            "status_item: Some(b::StatusItemDef {",
+            "b::login_model()",
+            "b::web_page(c,",
+            "b::WebPageProps {",
+            "content_mode: \"mobile\"",
+            "b::inspector(c,",
+            "b::marquee(c,",
+            "b::list(c,",
+            "b::window_buttons(c, false)",
+            "b::idle_area(c, 5.0,",
+            "settings: true",
+            "dialog: true",
+            "window_main_close",
+        ] {
+            assert!(ui.contains(expected), "{name}: missing `{expected}`:\n{ui}");
+        }
+        // Verify Target::package() builds a valid packaging plan for each platform.
+        std::fs::create_dir_all(output.join("Parity/resources")).unwrap();
+        std::fs::write(output.join("Parity/parity"), b"").unwrap();
+        std::fs::create_dir_all(output.join("bin")).unwrap();
+        let pkg = gpui
+            .package(&compiled.app, &ctx, &bern_target_api::Signing::default())
+            .unwrap();
+        assert!(!pkg.products.is_empty(), "{name}: no package products");
+        assert!(!pkg.steps.is_empty(), "{name}: no package steps");
+    }
+    // macOS notarization without signing identity must fail cleanly.
+    let mac_target = config
+        .targets
+        .iter()
+        .find(|t| t.name == "gpui_macos")
+        .unwrap()
+        .clone();
+    let mac_ctx = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: dir.join("out-gpui_macos"),
+        target: mac_target,
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: true,
+    };
+    let bad_signing = bern_target_api::Signing {
+        macos_notary_profile: Some("profile".into()),
+        ..Default::default()
+    };
+    assert!(
+        Gpui::MACOS
+            .package(&compiled.app, &mac_ctx, &bad_signing)
+            .is_err()
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
