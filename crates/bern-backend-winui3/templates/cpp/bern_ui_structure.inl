@@ -1425,6 +1425,7 @@ inline void Adaptive(Parent const& p, Ctx const& ctx, char const* id, std::array
         return -1;
     };
     auto region = p.isList ? Parent::OfList(holder) : Parent::Of(holder);
+    region.fillRows = p.fillRows;
     auto slot = Slot::In(region);
     auto shown = std::make_shared<int>(-2);
     Reactive::Run([size, shared, layoutFor, slot, ctx, shown] {
@@ -1566,6 +1567,7 @@ inline Build OwnQuery(Ctx const& ctx, QueryProps props, Build const& templ) {
         // receive bounded vertical space instead of infinite measure height.
         auto group = MakeFlex(false, 0);
         auto inside = p.isList ? Parent::OfList(group) : Parent::Of(group);
+        inside.fillRows = p.fillRows;
         PresentQuery(inside, c, props, templ, result, state, retry);
         p.Add(group);
     };

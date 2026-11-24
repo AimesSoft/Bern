@@ -1084,6 +1084,9 @@ struct Parent {
     /// The window's content, directly or through a condition or a
     /// component: a stack there fills the window.
     bool window = false;
+    /// Whether rows stretch across the full container width, including controls
+    /// that normally keep their own width (such as search result rows).
+    bool fillRows = false;
 
     static Parent Of(controls::Panel const& panel) { return Parent{panel, RootRegion(panel)}; }
     static Parent Window(controls::Panel const& panel) {

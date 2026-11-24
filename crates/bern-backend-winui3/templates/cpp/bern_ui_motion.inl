@@ -1892,6 +1892,7 @@ inline void Decorate(Parent const& p, Ctx const& ctx, DecorateProps props, Build
     controls::Grid holder;
     Parent target = Parent::Of(holder);
     target.isList = p.isList;
+    target.fillRows = p.fillRows;
     {
         Structure::Scope quiet(false);
         build(target, inner);
