@@ -2097,7 +2097,7 @@ struct BernFocusSlider: View {
                 Text(label)
             }
             if let minimumIcon {
-                Image(systemName: minimumIcon).foregroundStyle(.secondary)
+                BernIcon(name: minimumIcon).foregroundStyle(.secondary)
             }
             GeometryReader { geometry in
                 let thumb = CGSize(width: 40 * k, height: 24 * k)
@@ -2116,7 +2116,7 @@ struct BernFocusSlider: View {
             .frame(height: 31 * k)
             .contentShape(Rectangle())
             if let maximumIcon {
-                Image(systemName: maximumIcon).foregroundStyle(.secondary)
+                BernIcon(name: maximumIcon).foregroundStyle(.secondary)
             }
         }
         .overlay {

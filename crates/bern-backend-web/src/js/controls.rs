@@ -174,6 +174,10 @@ impl Generator<'_> {
                 ("label", self.text_prop(element, "label")),
                 ("field", field.clone()),
                 ("style", Self::keyword(element, "style")),
+                (
+                    "look",
+                    crate::style::reference(self.app, "Switch", element.keyword("variant")),
+                ),
                 ("shape", Self::keyword(element, "shape")),
                 ("height", self.length(element, "height")),
                 ("icon", element.icon("icon").map(string)),
@@ -220,6 +224,7 @@ impl Generator<'_> {
                 ("step", element.number("step").map(number)),
                 ("minIcon", element.icon("min_icon").map(string)),
                 ("maxIcon", element.icon("max_icon").map(string)),
+                ("axis", Self::keyword(element, "axis")),
                 (
                     "labelHidden",
                     Some((element.keyword("label_hidden") == Some("true")).to_string())
@@ -269,7 +274,11 @@ impl Generator<'_> {
             out,
             &format!(
                 "B.Tooltip(p, ctx, {}, ",
-                Self::props(vec![("content", self.text_prop(element, "content"))]),
+                Self::props(vec![
+                    ("content", self.text_prop(element, "content")),
+                    ("keys", self.shortcut_keys(element, "keys")),
+                    ("placement", Self::keyword(element, "placement")),
+                ]),
             ),
             &element.children,
             ");",
@@ -777,6 +786,7 @@ impl Generator<'_> {
             ("fontSize", element.number("font_size").map(number)),
             ("shape", Self::keyword(element, "shape")),
             ("height", self.length(element, "height")),
+            ("placement", Self::keyword(element, "placement")),
             ("presented", presented),
             (
                 "windowTheme",
@@ -923,6 +933,8 @@ impl Generator<'_> {
                     "quiet",
                     (element.keyword("quiet") == Some("true")).then(|| "true".into()),
                 ),
+                ("hold", self.field(element, "hold")),
+                ("holdAfter", element.number("hold_after").map(number)),
             ]),
             self.action_fn(element)
         ));

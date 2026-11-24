@@ -354,6 +354,8 @@ impl Generator<'_> {
                     (element.keyword("quiet") == Some("true")).then(|| "true".to_string()),
                 ),
                 ("action", self.action(element)),
+                ("hold", self.field(element, "hold")),
+                ("holdAfter", Self::number(element, "hold_after")),
             ])
         ));
     }

@@ -21,6 +21,8 @@ pub const PLATFORMS: [&str; 9] = [
 /// Controls that take style overrides, with the states that apply to them.
 const STYLEABLE: &[(&str, &[StyleState])] = &[
     ("Stack", &[StyleState::Hover]),
+    // A switch's `foreground` is its knob's color while it is on.
+    ("Switch", &[]),
     // Popover colors style the presented surface, not its trigger.
     ("PopoverButton", &[]),
     ("Sidebar", &[]),

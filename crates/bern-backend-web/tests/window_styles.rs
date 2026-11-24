@@ -389,3 +389,164 @@ fn an_idle_area_and_landscape_reach_the_page() {
         assert!(script.contains(expected), "missing `{expected}`:\n{script}");
     }
 }
+
+#[test]
+fn player_controls_and_app_icons_generate_for_web() {
+    let root = workspace();
+    let dir = root.join("target/bern-test/web-player-controls-project");
+    let _ = std::fs::remove_dir_all(&dir);
+    let protocol = r#"
+#[bern::protocol(namespace = "player_web", version = 1)]
+pub mod player_web {
+    #[value]
+    pub enum Mode {
+        #[label(tr! { "en" => "One" })]
+        One,
+        #[label(tr! { "en" => "Two" })]
+        Two,
+    }
+
+    #[state]
+    pub struct State {
+        pub play_key: String,
+        pub volume: f64,
+        pub enabled: bool,
+        pub tags: Vec<String>,
+        pub counts: Vec<i64>,
+    }
+
+    #[commands]
+    pub trait Commands {
+        fn toggle(&mut self) -> Result<(), CommandError>;
+        fn set_volume(&mut self, value: f64) -> Result<(), CommandError>;
+        fn set_enabled(&mut self, value: bool) -> Result<(), CommandError>;
+    }
+}
+"#;
+    let ui = r#"
+use bern::prelude::*;
+use player_web_proto::player_web::{self, Mode};
+
+style! {
+    Stack.framed {
+        border: border(control.border, width: 1),
+        corner: 8,
+    }
+    Switch.bright {
+        foreground: accent,
+    }
+}
+
+#[bern::session]
+pub struct Draft {
+    pub boosting: bool,
+    pub mode: Mode,
+}
+
+#[component]
+pub fn app(app: player_web::Client, windows: AppWindows, #[session] draft: Draft) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Player" }, initial: open, idle_after: 3.0) {
+                Column(gap: 8) {
+                    Shortcut(key: "right", hold: draft.boosting, hold_after: 0.35, quiet: true) => app.toggle()
+                    Tooltip(content: tr! { "en" => "Play" }, keys: app.play_key, placement: above) {
+                        IconButton(id: play, icon: "icons/custom.svg", label: tr! { "en" => "Play" }) => app.toggle()
+                    }
+                    Menu(id: speed, label: tr! { "en" => "1.0x" }, style: icon, bold: true, placement: above) {
+                        MenuItem(id: fast, label: tr! { "en" => "2.0x" }, icon: "arrow.uturn.backward") => app.toggle()
+                    }
+                    PopoverButton(id: vol_pop, icon: "plus.circle", label: tr! { "en" => "Volume" }, placement: above) {
+                        Slider(
+                            id: vol,
+                            label: tr! { "en" => "Volume" },
+                            label_hidden: true,
+                            axis: vertical,
+                            current: app.volume,
+                            min: 0.0,
+                            max: 1.0
+                        ) => app.set_volume(app.volume)
+                    }
+                    Switch(id: sw, label: tr! { "en" => "Bright" }, checked: app.enabled, variant: bright) => app.set_enabled(app.enabled)
+                    Picker(id: seg, label: tr! { "en" => "Mode" }, value: draft.mode, style: segmented, shape: capsule, height: 32)
+                    Picker(id: ch, label: tr! { "en" => "Chips" }, value: draft.mode, style: chips, shape: capsule)
+                    LanguagePicker(id: lang, label: tr! { "en" => "Language" })
+                    Stack(variant: framed, height: 120) {
+                        NativeView(id: canvas, label: tr! { "en" => "Canvas" }, web: "canvas.js") {
+                            NativeValue(name: tags, value: app.tags)
+                            NativeValue(name: counts, value: app.counts)
+                            NativeAction(id: ping, label: tr! { "en" => "Ping" }) => app.toggle()
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+"#;
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M5 3l14 9-14 9V3z" fill="currentColor"/></svg>"#;
+    for (package, source) in [
+        ("player-web-proto", protocol),
+        ("player-ui", ui),
+        ("player-core", ""),
+    ] {
+        std::fs::create_dir_all(dir.join(package).join("src")).unwrap();
+        std::fs::write(
+            dir.join(package).join("Cargo.toml"),
+            format!("[package]\nname = \"{package}\"\n"),
+        )
+        .unwrap();
+        std::fs::write(dir.join(package).join("src/lib.rs"), source).unwrap();
+    }
+    std::fs::write(
+        dir.join("player-ui/src/canvas.js"),
+        "export function mount() { return document.createElement('div'); }\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.join("icons")).unwrap();
+    std::fs::write(dir.join("icons/custom.svg"), svg).unwrap();
+    std::fs::write(
+        dir.join("Bern.toml"),
+        "[app]\nid = \"player\"\nbundle_id = \"dev.bern.player\"\nversion = \"0.1.0\"\nname = { \"en\" = \"Player\" }\n[languages]\nsupported = [\"en\"]\ndefault = \"en\"\n[protocol]\npackage = \"player-web-proto\"\nsource = \"player-web-proto/src/lib.rs\"\n[engine]\npackage = \"player-core\"\ntype = \"player_core::Engine\"\n[ui]\npackage = \"player-ui\"\nsources = [\"player-ui/src/lib.rs\"]\nroot = \"app\"\n[resources]\npaths = [\"icons/custom.svg\"]\n[targets.web]\nplatform = \"browser\"\nweb_mode = \"app\"\n",
+    )
+    .unwrap();
+    let config = bern_compiler::config::load(&dir.join("Bern.toml")).unwrap();
+    let compiled = bern_compiler::compile(&config).unwrap();
+    let target = config.targets[0].clone();
+    let problems = WebBrowser.check(&compiled.app, &target);
+    assert!(problems.is_empty(), "{problems:?}");
+    let context = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: root.join("target/bern-test/web-player-controls"),
+        target,
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    let script = WebBrowser
+        .generate(&compiled.app, &context)
+        .unwrap()
+        .into_iter()
+        .find(|file| file.path.as_os_str() == "app.js")
+        .map(|file| String::from_utf8_lossy(&file.contents).into_owned())
+        .expect("the page's `app.js`");
+    for expected in [
+        "appIcons: { \"icons/custom.svg\":",
+        "holdAfter: 0.35",
+        "placement: \"above\"",
+        "bold: true",
+        "axis: \"vertical\"",
+        "look: S.switchBright",
+        "(E.counts.get()).map(Number)",
+    ] {
+        assert!(script.contains(expected), "missing `{expected}`:\n{script}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

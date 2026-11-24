@@ -54,7 +54,8 @@ list.bern-plain-list > row > box.header { padding: 0; min-height: 0; }\n\
 .bern-badge-success { color: @success_color; border-color: alpha(@success_bg_color, 0.32); background-color: alpha(@success_bg_color, 0.14); }\n\
 .bern-badge-warning { color: @warning_color; border-color: alpha(@warning_bg_color, 0.35); background-color: alpha(@warning_bg_color, 0.14); }\n\
 .bern-badge-error { color: @error_color; border-color: alpha(@error_bg_color, 0.35); background-color: alpha(@error_bg_color, 0.14); }\n\
-.bern-avatar-rounded { border-radius: 22%; }\n";
+.bern-avatar-rounded { border-radius: 22%; }\n\
+.bern-keycap { padding: 1px 6px; border-radius: 4px; border: 1px solid alpha(currentColor, 0.25); background-color: alpha(currentColor, 0.08); font-size: 11px; font-weight: 600; }\n";
 
 fn children(widget: &gtk::Widget) -> Vec<gtk::Widget> {
     let mut children = Vec::new();

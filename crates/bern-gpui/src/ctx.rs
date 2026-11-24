@@ -100,9 +100,10 @@ pub(crate) struct Win {
     pub(crate) lights_at: Cell<Option<(f32, f32)>>,
     /// Seconds without input after which the window is idle.
     pub(crate) idle_after: Option<f64>,
-    /// Override for `idle_after` while the pointer rests inside an `idle_area`.
-    pub(crate) idle_override: Cell<Option<f64>>,
     pub(crate) last_input: Cell<std::time::Instant>,
+    pub(crate) pointer_inside: Cell<bool>,
+    pub(crate) has_idle_areas: Cell<bool>,
+    pub(crate) hovered_idle_area: Cell<Option<f64>>,
     pub(crate) fullscreen: Cell<bool>,
     /// `idle_enabled` is false: the window does not go idle.
     pub(crate) paused: Cell<bool>,
@@ -142,8 +143,10 @@ impl Win {
             #[cfg(target_os = "macos")]
             lights_at: Cell::new(None),
             idle_after,
-            idle_override: Cell::new(None),
             last_input: Cell::new(std::time::Instant::now()),
+            pointer_inside: Cell::new(false),
+            has_idle_areas: Cell::new(false),
+            hovered_idle_area: Cell::new(None),
             fullscreen: Cell::new(false),
             paused: Cell::new(false),
             immersive: Cell::new(false),
@@ -153,13 +156,17 @@ impl Win {
         })
     }
 
-    /// Whether the window has gone without input for its `idle_after`
-    /// (or active `idle_area` timeout).
+    /// Whether the window has gone without input for its `idle_after` (or the
+    /// hovered `idle_area`'s timeout while the pointer is inside the window).
     pub(crate) fn idle(&self) -> bool {
         if self.paused.get() {
             return false;
         }
-        let after = self.idle_override.get().or(self.idle_after);
+        let after = if self.has_idle_areas.get() && self.pointer_inside.get() {
+            self.hovered_idle_area.get()
+        } else {
+            self.idle_after
+        };
         after.is_some_and(|after| self.last_input.get().elapsed().as_secs_f64() >= after)
     }
 

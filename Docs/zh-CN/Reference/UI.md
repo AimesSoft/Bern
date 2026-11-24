@@ -206,7 +206,7 @@ bern run --target web_app --port 4173
 
 - `Layout(size: tv)` 是电视上的布局，`Adaptive` 里最多一个，不影响其他尺寸的必需与回退规则；表达式可读 `window.tv`。tvOS 在构建时只保留电视显示的部分，所以手机与桌面布局里电视没有的能力（如 `pick:`）不会让 tvOS 构建失败。
 - `Layout(size: watch)` 是 Apple Watch（`watchos`）与 Wear OS（`wearos`）手表上的布局，`Adaptive` 里最多一个；表达式可读 `window.watch`。应用声明 `watchos` 或 `wearos` 目标时，所有可达的 `Adaptive` 都必须显式提供 `Layout(size: watch)`（不回落到手机 `compact`），`#[bern::features]` 也会单独校验 `watch` 覆盖；其他后端在检查前就会裁剪掉 `watch` 分支与仅被它引用的组件。`platform = "watchos"` 构建独立的 watchOS SwiftUI 应用（`MinimumOSVersion = 11.0`、`WKWatchOnly`，打包为 Watch-Only `-watchos.ipa`）；`platform = "wearos"` 使用 Wear Material 3 打出独立的手表 APK（默认 `minSdk = 26`，可通过 `android.min_sdk` 自定义，例如上架 Google Play 设为 `30`；声明 `android.hardware.type.watch`、默认 `android.standalone = true`，且发布打包默认同时产出 `arm64-v8a` 与 `armeabi-v7a`）。
-- `Shortcut(key:, enabled:, quiet:) => 动作` 是没有控件的快捷键，键的写法与控件的 `shortcut` 相同。电视上 `escape`、`space` 与方向键分别是遥控器的返回、播放/暂停与触控板方向（方向只在焦点无处可移时到达）。Android 手机与平板上，系统的返回（按钮或手势）先运行最后生效的 `escape` 快捷键，没有时才离开应用：按 Esc 关闭的页面或图层，按返回也会关闭。写 `quiet: true` 时，这个键不算 `window.idle` 的输入：既不唤醒静置的窗口，也不重新计时，例如播放器里不让操作栏出来的快进快退键。
+- `Shortcut(key:, enabled:, quiet:, hold:, hold_after:) => 动作` 是没有控件的快捷键，键的写法与控件的 `shortcut` 相同。电视上 `escape`、`space` 与方向键分别是遥控器的返回、播放/暂停与触控板方向（方向只在焦点无处可移时到达）。Android 手机与平板上，系统的返回（按钮或手势）先运行最后生效的 `escape` 快捷键，没有时才离开应用：按 Esc 关闭的页面或图层，按返回也会关闭。写 `quiet: true` 时，这个键不算 `window.idle` 的输入：既不唤醒静置的窗口，也不重新计时，例如播放器里不让操作栏出来的快进快退键。写了 `hold: draft.fast` 时，按下不到 `hold_after` 秒（不写为 0.3）就松开的，松开时执行动作；按得更久的，会话字段一直为真，直到松开，不执行动作：例如播放器里点一下快进、按住加速的键。macOS、iOS、Web、Android、Linux、Windows 与 GPUI 均支持（未声明 `hold_shortcuts` 的目标如 tvOS 发出警告并在按下时执行动作）。
 - `Button` / `IconButton` 的 `default_focus: true` 让界面出现时焦点从它开始；电视上每个页面都应给出一个。
 - `window.keyboard` 是否连着实体键盘：电脑上总是成立，手机与平板跟随键盘的连接与断开。只对键盘有用的内容（如快捷键设置）写在 `if window.keyboard { … }` 里，没接键盘的手机上就不出现。
 - `window.app_version` 是 `Bern.toml` 里 `[app]` 的 `version`，也就是各平台安装包上的版本号：`Text(content: tr! { "zh-Hans" => "版本 {version}"; version: window.app_version })`。它在构建时确定，所有目标都一样。组件库不属于任何应用，要用时通过参数传入。
@@ -423,7 +423,7 @@ NativeView(
 ```
 
 - **紧邻文件放置**：各后端文件属性（`swiftui`、`winui3`、`compose`、`gtk`、`gpui`、`web`）相对声明所在的 `.rs` 文件解析。配置目录扫描（`sources = "my-ui/src"`）时，编译器会自动跳过 `*.gtk.rs`、`*.gpui.rs` 与 `*.native.rs`。
-- **默认宽度**：未显式指定 `width:` 时，`NativeView` 在全部六个后端默认左右铺满容器可用宽度，避免在 `Column` 布局中缩成左侧小块；需要固定宽度时显式传入 `width:` 即可。
+- **默认尺寸**：未显式指定 `width:` 时，`NativeView` 在全部六个后端默认左右铺满容器可用宽度，避免在 `Column` 布局中缩成左侧小块；放在 `Stack` 内且未显式指定尺寸时同时铺满宽高；需要固定尺寸时显式传入 `width:` 或 `height:` 即可。
 - **强制规范化 CLI 入口**：每个 `NativeView` 必须至少声明一个 `NativeAction`、`NativeNumber`、`NativeBool` 或 `NativeInput`。各后端会自动以 `<component>.<view>.<entry>` 注册到控件表，`ui inspect`、`ui activate`、`ui set-number`、`ui set-bool`、`ui edit` 与 `ui submit` 无需穿透原生视图树即可直接发现和驱动。
 - **多语言与静态检查**：所有展示文本通过 `NativeText(name:, content: tr! { ... })` 或入口的 `label:` 传入。编译器还会扫描原生文件中明显的硬编码展示字面量并发出警告（需要豁免的纯技术行可用 `// bern-ignore-l10n`）。
 - **各后端入口签名**：
@@ -489,7 +489,9 @@ Grid(min_width: 160, gap: 16, skeleton: app.loading, skeleton_count: 6) {
 
 ## 反馈提示、折叠面板、数字输入与动态选择器
 
-- **`Tooltip(content:)`**：为单个子控件附加悬停/聚焦提示，不改变布局。
+- **`Tooltip(content:)`**：为单个子控件附加悬停/聚焦提示，不改变布局。`keys: app.keys.play` 在文字后面用按键框写出这个快捷键（不注册快捷键），`placement: above` / `below` 让提示出现在子控件上方或下方；`Menu(placement:)`、`PopoverButton(placement:)` 也这样决定菜单和弹出层往哪边开，例如播放器底栏要往上弹。全部六个后端均支持（SwiftUI 保持系统原生 `.help(...)` 并在提示文字后附上格式化按键文本，`PopoverButton` 通过 `arrowEdge` 控制弹出方向，`Menu` 由系统管理位置）。
+- **应用自己的图标**：`icon:` 写一个声明了的 `.svg` 资源，例如 `icon: "icons/play.svg"`，代替 Bern 图标集里的名字。构建时把它的填充、描线和文字转成一个填充轮廓，像系统图标一样按控件的前景色画。全部六个后端均支持（功能 `app_icons`）。
+- **`Slider(axis: vertical)`** 让滑块竖着放，`min` 在下面，高度跟着容器，例如弹出层里的音量滑块。全部六个后端均支持（功能 `vertical_sliders`）。
 - **`Banner(severity:, title:, content:, icon:, dismiss_label:) { … } => dismiss`**：行内状态横幅（`info`、`success`、`warning`、`error`），使用各平台原生容器（WinUI 3 的 `InfoBar`，SwiftUI/GTK/Compose/Web/GPUI 的语义横幅），支持尾部操作按钮，绑定动作后自动显示关闭按钮。
 - **`Disclosure(id:, label:, icon:, expanded:, open:) { … }`**：可折叠展开区域，使用原生 `DisclosureGroup`（SwiftUI）、`Expander`（WinUI 3 / GTK）、Material 折叠区（Compose）与 `<details>`（Web）。支持草稿绑定（`expanded:`）、受控绑定（`open:` + `=> action`）以及省略绑定时的本地展开状态。
 - **`NumberInput(id:, label:, value:/current:, min:, max:, step:, precision:, enabled:)`**：带步进器与范围约束的数字输入控件（WinUI 3 `NumberBox`、GTK `SpinButton`、SwiftUI `TextField` + `Stepper`、Web `<input type="number">`）。

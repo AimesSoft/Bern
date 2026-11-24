@@ -248,6 +248,8 @@ pub struct AppDef {
     pub brand_seed: Option<(u8, u8, u8)>,
     /// Style overrides of `style!`.
     pub styles: &'static [StyleDef],
+    /// Outlined application `.svg` icons: `(bern_name, svg_document)`.
+    pub app_icons: &'static [(&'static str, &'static str)],
     /// The weights and sizes of text styles from `text { … }`.
     pub text_styles: &'static [style::TextStyle],
     pub theme: Option<ThemeDef>,

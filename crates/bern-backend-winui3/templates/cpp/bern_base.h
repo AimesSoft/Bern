@@ -553,6 +553,11 @@ std::string const& PeekLanguage();
 std::vector<std::string> const& Supported();
 /// Switch the interface language. False for unsupported tags.
 bool SetLanguage(std::string const& tag);
+/// Whether the interface follows the system's language, as it does until
+/// a language is chosen in the app; records a dependency.
+bool FollowsSystem();
+/// Follow the system's language again, forgetting the one chosen.
+void FollowSystem();
 /// The translation of `key` in the current language.
 winrt::hstring Tr(std::string_view key);
 /// A value a translated text shows: text, a number and the way Bern

@@ -371,25 +371,40 @@ pub struct KeyShortcutProps {
     pub enabled: Option<Get>,
     /// The keys do not wake `window.idle` or restart its countdown.
     pub quiet: bool,
+    /// Draft boolean held true while the key is held past `hold_after`.
+    pub hold: Option<crate::ctx::Field>,
+    /// Seconds the key must stay down before `hold` turns true.
+    pub hold_after: Option<f64>,
 }
 
 /// `Shortcut`: `keys` runs the action while it is mounted and enabled,
 /// without a control on screen.
 #[allow(non_snake_case)]
 pub fn KeyShortcut(_p: &Parent, ctx: &Ctx, props: KeyShortcutProps, action: Option<Act>) {
-    let Some(action) = action else { return };
+    if action.is_none() && props.hold.is_none() {
+        return;
+    }
     // A disabled shortcut leaves its keys to the one mounted before it.
     let active = props.enabled.map(|enabled| {
         let at = ctx.clone();
         Rc::new(move || crate::value::truthy(&untrack(|| enabled(&at)))) as Rc<dyn Fn() -> bool>
     });
     let at = ctx.clone();
-    let run = Rc::new(move || action(&at));
+    let run: Rc<dyn Fn()> = match action {
+        Some(action) => Rc::new(move || action(&at)),
+        None => Rc::new(|| {}),
+    };
+    let hold = props
+        .hold
+        .map(|field| (field, props.hold_after.unwrap_or(0.3).max(0.01)));
     match &props.bound {
-        Some(keys) => ctx
+        Some(keys) => {
+            ctx.win()
+                .add_bound_shortcut_hold(bound_text(ctx, keys), run, active, props.quiet, hold)
+        }
+        None => ctx
             .win()
-            .add_bound_shortcut(bound_text(ctx, keys), run, active, props.quiet),
-        None => ctx.win().add_shortcut(props.keys, run, active, props.quiet),
+            .add_shortcut_hold(props.keys, run, active, props.quiet, hold),
     }
 }
 
@@ -874,6 +889,8 @@ pub struct PopoverButtonProps {
     /// The size of the icon in points.
     pub font_size: Option<f64>,
     pub shape: crate::widgets::Shape,
+    /// Preferred side (`above` / `below`) for the popover.
+    pub placement: Option<&'static str>,
 }
 
 fn popover_look(popover: &gtk::Popover, window_theme: bool, style: Option<&'static StyleDef>) {
@@ -990,6 +1007,11 @@ pub fn PopoverButton(p: &Parent, ctx: &Ctx, props: PopoverButtonProps, content: 
         });
     }
     let (popover, column) = popover_content();
+    match props.placement {
+        Some("above") => popover.set_position(gtk::PositionType::Top),
+        Some("below") => popover.set_position(gtk::PositionType::Bottom),
+        _ => {}
+    }
     button.set_popover(Some(&popover));
     popover_look(&popover, props.window_theme, props.style);
     let open = crate::reactive::Cell::new(false);

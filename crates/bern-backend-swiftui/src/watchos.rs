@@ -115,6 +115,11 @@ pub(crate) const FEATURES: &[&str] = &[
     feature::UNTITLED_DETAIL,
     feature::IDLE_CONTROL,
     feature::QUIET_SHORTCUTS,
+    feature::APP_ICONS,
+    feature::POPUP_PLACEMENT,
+    feature::BOLD_MENUS,
+    feature::VERTICAL_SLIDERS,
+    feature::NATIVE_LISTS,
     feature::FILL_BUTTONS,
     feature::GRID_CELLS,
     feature::TAB_ACCESSORY,
@@ -231,6 +236,7 @@ impl Target for SwiftUiWatchos {
         bern_target_api::svg::validate(app, context)?;
         let product = product_name(app);
         let bundle = PathBuf::from(format!("{product}.app"));
+        let app_icons = crate::app_icon_contours(app, context)?;
         let mut files = vec![
             GeneratedFile::text(
                 "Sources/BernRuntime.swift",
@@ -242,7 +248,9 @@ impl Target for SwiftUiWatchos {
             GeneratedFile::text("Sources/bern.h", HEADER),
             GeneratedFile::text(
                 "Sources/BernGenerated.swift",
-                Generator::new(app, Platform::Watchos).generate(app.protocol.fingerprint()),
+                Generator::new(app, Platform::Watchos)
+                    .with_app_icons(app_icons)
+                    .generate(app.protocol.fingerprint()),
             ),
             GeneratedFile::text("glue/Cargo.toml", glue::cargo_toml(context, app)),
             GeneratedFile::text(

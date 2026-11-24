@@ -127,7 +127,7 @@ impl Generator<'_> {
             self.model(element, "checked", true)
         };
         out.line(format!(
-            "b::Switch(p, c, b::SwitchProps {{ id: {}, label: {}, model: {}, style: {}, icon: {}, label_hidden: {}, shape: {} }});",
+            "b::Switch(p, c, b::SwitchProps {{ id: {}, label: {}, model: {}, style: {}, icon: {}, label_hidden: {}, shape: {}, look: {} }});",
             self.id(element),
             some(self.text_prop(element, "label")),
             some(model.clone()),
@@ -135,6 +135,7 @@ impl Generator<'_> {
             Self::icon(element, "icon"),
             element.keyword("label_hidden") == Some("true"),
             self.shape(element),
+            self.style("Switch", element),
         ));
         if let Some(model) = model {
             self.shortcut(out, element, &format!("b::toggle(c, &{model})"));
@@ -143,7 +144,7 @@ impl Generator<'_> {
 
     pub(super) fn slider(&self, out: &mut Out, element: &Element) {
         out.line(format!(
-            "b::Slider(p, c, b::SliderProps {{ id: {}, label: {}, model: {}, min: {}, max: {}, step: {}, min_icon: {}, max_icon: {}, label_hidden: {}, continuous: {}, hover: {} }}, {});",
+            "b::Slider(p, c, b::SliderProps {{ id: {}, label: {}, model: {}, min: {}, max: {}, step: {}, min_icon: {}, max_icon: {}, label_hidden: {}, continuous: {}, vertical: {}, hover: {} }}, {});",
             self.id(element),
             some(self.text_prop(element, "label")),
             some(self.model(element, "current", false)),
@@ -154,6 +155,7 @@ impl Generator<'_> {
             Self::icon(element, "max_icon"),
             element.keyword("label_hidden") == Some("true"),
             element.keyword("continuous") == Some("true"),
+            element.keyword("axis") == Some("vertical"),
             some(self.field(element, "hover")),
             // A controlled slider's action is its change.
             if element.expr("current").is_some() {
@@ -183,8 +185,11 @@ impl Generator<'_> {
         self.children(
             out,
             &format!(
-                "b::Tooltip(p, c, {}, ",
+                "b::Tooltip(p, c, b::TooltipProps {{ content: {}, keys: {}, bound_keys: {}, placement: {} }}, ",
                 some(self.text_prop(element, "content")),
+                Self::keyword(element, "keys"),
+                some(self.bound_keys(element, "keys")),
+                Self::keyword(element, "placement"),
             ),
             &element.children,
             ");",
@@ -458,7 +463,7 @@ impl Generator<'_> {
         self.children(
             out,
             &format!(
-                "b::PopoverButton(p, c, b::PopoverButtonProps {{ id: {}, label: {}, icon: {}, presented: {}, window_theme: {}, style: {}, plain: {}, font_size: {}, shape: {} }}, ",
+                "b::PopoverButton(p, c, b::PopoverButtonProps {{ id: {}, label: {}, icon: {}, presented: {}, window_theme: {}, style: {}, plain: {}, font_size: {}, shape: {}, placement: {} }}, ",
                 self.id(element),
                 some(self.text_prop(element, "label")),
                 Self::icon(element, "icon"),
@@ -468,6 +473,7 @@ impl Generator<'_> {
                 element.keyword("prominence") == Some("plain"),
                 Self::number(element, "font_size"),
                 self.shape(element),
+                Self::keyword(element, "placement"),
             ),
             &element.children,
             ");",

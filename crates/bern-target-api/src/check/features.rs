@@ -48,6 +48,14 @@ const CHECKS: &[(&str, Check)] = &[
     (feature::WINDOW_LANDSCAPE, window_landscape),
     (feature::IDLE_CONTROL, idle_control),
     (feature::QUIET_SHORTCUTS, quiet_shortcuts),
+    (feature::APP_ICONS, app_icons),
+    (feature::POPUP_PLACEMENT, popup_placement),
+    (feature::SWITCH_KNOB, switch_knob),
+    (feature::BOLD_MENUS, bold_menus),
+    (feature::TOOLTIP_KEYS, tooltip_keys),
+    (feature::VERTICAL_SLIDERS, vertical_sliders),
+    (feature::HOLD_SHORTCUTS, hold_shortcuts),
+    (feature::NATIVE_LISTS, native_lists),
     (feature::UNTITLED_DETAIL, untitled_detail),
     (feature::POPOVER_BUTTON, popover_button),
     (feature::SIZE_CLASSES, size_classes),
@@ -837,6 +845,152 @@ fn quiet_shortcuts(
     }
 }
 
+fn switch_knob(
+    descriptor: &TargetDescriptor,
+    app: &Application,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some(element) = first_element(app, |element| {
+        element.kind == "Switch" && element.keyword("variant").is_some()
+    }) {
+        diagnostics.push(
+            Diagnostic::warning(format!(
+                "target `{}` ignores the style of `Switch`: its knob keeps the platform's color",
+                descriptor.id
+            ))
+            .at(element.source.clone()),
+        );
+    }
+}
+
+fn bold_menus(descriptor: &TargetDescriptor, app: &Application, diagnostics: &mut Vec<Diagnostic>) {
+    if let Some(element) = first_element(app, |element| {
+        element.kind == "Menu" && element.keyword("bold") == Some("true")
+    }) {
+        diagnostics.push(
+            Diagnostic::warning(format!(
+                "target `{}` ignores `bold` of `Menu`: its label has the button's own weight",
+                descriptor.id
+            ))
+            .at(element.source.clone()),
+        );
+    }
+}
+
+fn popup_placement(
+    descriptor: &TargetDescriptor,
+    app: &Application,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some(element) = first_element(app, |element| {
+        matches!(element.kind.as_str(), "Menu" | "PopoverButton" | "Tooltip")
+            && element.keyword("placement").is_some()
+    }) {
+        diagnostics.push(
+            Diagnostic::warning(format!(
+                "target `{}` ignores `placement` of `{}`: the platform chooses where it opens",
+                descriptor.id, element.kind
+            ))
+            .at(element.source.clone()),
+        );
+    }
+}
+
+fn tooltip_keys(
+    descriptor: &TargetDescriptor,
+    app: &Application,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some(element) = first_element(app, |element| {
+        element.kind == "Tooltip" && element.prop("keys").is_some()
+    }) {
+        diagnostics.push(
+            Diagnostic::warning(format!(
+                "target `{}` ignores `keys` of `Tooltip`: the tip shows its text alone",
+                descriptor.id
+            ))
+            .at(element.source.clone()),
+        );
+    }
+}
+
+fn vertical_sliders(
+    descriptor: &TargetDescriptor,
+    app: &Application,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some(element) = first_element(app, |element| {
+        element.kind == "Slider" && element.keyword("axis") == Some("vertical")
+    }) {
+        diagnostics.push(
+            Diagnostic::warning(format!(
+                "target `{}` ignores `axis: vertical` of `Slider`: it lies along its row",
+                descriptor.id
+            ))
+            .at(element.source.clone()),
+        );
+    }
+}
+
+fn hold_shortcuts(
+    descriptor: &TargetDescriptor,
+    app: &Application,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some(element) = first_element(app, |element| {
+        element.kind == "Shortcut" && element.prop("hold").is_some()
+    }) {
+        diagnostics.push(
+            Diagnostic::warning(format!(
+                "target `{}` ignores `hold` of `Shortcut`: the key runs the action as it is pressed",
+                descriptor.id
+            ))
+            .at(element.source.clone()),
+        );
+    }
+}
+
+/// A list reaches only the native views the target draws with its own file;
+/// elsewhere the view shows its `Fallback` and the value goes nowhere.
+fn native_lists(
+    descriptor: &TargetDescriptor,
+    app: &Application,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for view in bern_ir::native::collect_native_views(app) {
+        if view.info.file_for(descriptor.ui).is_none() {
+            continue;
+        }
+        for value in &view.info.values {
+            if bern_ir::native::is_native_list_type(&value.expr.ty) {
+                diagnostics.push(
+                    Diagnostic::error(format!(
+                        "target `{}` cannot pass the list `{}` to the native view `{}`",
+                        descriptor.id, value.name, view.info.id
+                    ))
+                    .at(view.info.element.source.clone()),
+                );
+            }
+        }
+    }
+}
+
+fn app_icons(descriptor: &TargetDescriptor, app: &Application, diagnostics: &mut Vec<Diagnostic>) {
+    if let Some(element) = first_element(app, |element| {
+        element.props.values().any(|prop| {
+            matches!(prop, bern_ir::Prop::Icon { name } if crate::app_icon::is_app_icon(name))
+        })
+    }) {
+        diagnostics.push(
+            Diagnostic::warning(format!(
+                "target `{}` cannot draw the application's own .svg icons yet: `{}` shows no icon",
+                descriptor.id, element.kind
+            ))
+            .at(element.source.clone()),
+        );
+    }
+}
+
 fn untitled_detail(
     descriptor: &TargetDescriptor,
     app: &Application,
@@ -1205,9 +1359,11 @@ fn bound_shortcuts(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let bound = |element: &bern_ir::Element| {
-        ["shortcut", "key"].iter().any(|name| {
+        ["shortcut", "key", "keys"].iter().any(|name| {
             matches!(element.prop(name), Some(bern_ir::Prop::Expr { .. }))
-                && (*name == "shortcut" || element.kind == "Shortcut")
+                && (*name == "shortcut"
+                    || (*name == "key" && element.kind == "Shortcut")
+                    || (*name == "keys" && element.kind == "Tooltip"))
         })
     };
     let in_menu_bar = app.windows.menu_bar.as_ref().and_then(|bar| {

@@ -105,7 +105,8 @@ pub enum Align {
 pub struct Style {
     pub background: Option<Color>,
     pub foreground: Option<Color>,
-    pub border: Option<Color>,
+    /// Color and width of the border.
+    pub border: Option<(Color, f32)>,
     pub hover_background: Option<Color>,
     pub corner: Option<f32>,
     /// Blur radius, offset down and opacity of the shadow.
@@ -156,8 +157,10 @@ pub(crate) fn styled(c: &Ctx, element: Div, style: Option<&Style>) -> Div {
     if let Some(foreground) = style.foreground {
         element = element.text_color(color(c, foreground));
     }
-    if let Some(border) = style.border {
-        element = element.border_1().border_color(color(c, border));
+    if let Some((border_color, width)) = style.border {
+        element = element
+            .border(px(width))
+            .border_color(color(c, border_color));
     }
     if let Some(hover_bg) = style.hover_background {
         let hover_bg = color(c, hover_bg);
@@ -226,6 +229,40 @@ pub fn reveal(c: &Ctx, content: El) -> El {
                 .group_hover(REVEAL, |style| style.opacity(1.0))
                 .child(content),
         )
+        .into_any_element()
+}
+
+/// Wrapper for an unsized `NativeView`: fills width in columns and both axes
+/// when layered inside a `Stack`.
+pub fn native_host(c: &Ctx, child: El) -> El {
+    c.grow()
+        .apply(div().flex().flex_col().min_w(px(0.0)).min_h(px(0.0)))
+        .child(child)
+        .into_any_element()
+}
+
+/// Marks a region whose hover counts down to `window.idle` after `seconds`;
+/// resting over other controls keeps the window awake until the pointer leaves.
+pub fn idle_area(c: &Ctx, key: &'static str, seconds: f64, child: El) -> El {
+    let win = std::rc::Rc::clone(c.win());
+    win.has_idle_areas.set(true);
+    c.grow()
+        .apply(
+            div()
+                .id(c.element_id(key))
+                .flex()
+                .flex_col()
+                .min_w(px(0.0))
+                .min_h(px(0.0)),
+        )
+        .on_hover(move |hovered, _, _| {
+            if *hovered {
+                win.hovered_idle_area.set(Some(seconds));
+            } else if win.hovered_idle_area.get() == Some(seconds) {
+                win.hovered_idle_area.set(None);
+            }
+        })
+        .child(child)
         .into_any_element()
 }
 
@@ -360,29 +397,6 @@ pub fn window_buttons(c: &Ctx, trailing: bool) -> El {
         return div().flex_none().w(px(0.0)).h(px(0.0)).into_any_element();
     }
     div().flex_none().w(px(width)).h(px(1.0)).into_any_element()
-}
-
-/// `idle_area`: while the pointer rests over this area, the window waits
-/// `seconds` of inactivity before going idle (overriding the window default).
-pub fn idle_area(c: &Ctx, seconds: f64, child: El) -> El {
-    let win_enter = std::rc::Rc::clone(c.win());
-    let win_move = std::rc::Rc::clone(c.win());
-    div()
-        .id(c.element_id("idle-area"))
-        .flex()
-        .flex_col()
-        .on_hover(move |hovered, _, _| {
-            if *hovered {
-                win_enter.idle_override.set(Some(seconds));
-            } else if win_enter.idle_override.get() == Some(seconds) {
-                win_enter.idle_override.set(None);
-            }
-        })
-        .on_mouse_move(move |_, _, _| {
-            win_move.idle_override.set(Some(seconds));
-        })
-        .child(child)
-        .into_any_element()
 }
 
 /// A layer of a stack that covers it whole with an opaque surface

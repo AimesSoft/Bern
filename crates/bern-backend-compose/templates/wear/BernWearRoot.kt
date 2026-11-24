@@ -152,6 +152,11 @@ fun BernWindowRoot(
                     val event = awaitPointerEvent(PointerEventPass.Initial)
                     val change = event.changes.firstOrNull() ?: continue
                     context.mouse = change.type == PointerType.Mouse
+                    if (event.type == PointerEventType.Exit) {
+                        context.pointerInsideWindow = false
+                        continue
+                    }
+                    context.pointerInsideWindow = true
                     if (event.type != PointerEventType.Move || change.position != last) input++
                     last = change.position
                 }

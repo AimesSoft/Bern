@@ -32,6 +32,7 @@ enum BernText { static func string(_ key: String) -> String { key } }
     var popoverOwner: UUID?
     var idleAreas: Set<UUID> = []
     var idleAreasHovered: [UUID: Double] = [:]
+    var pointerInsideWindow = false
     var idleAreasChanged: (() -> Void)?
     var quietShortcuts: [QuietShortcut] = []
 }
@@ -114,11 +115,17 @@ enum BernText { static func string(_ key: String) -> String { key } }
         context.idleAreasChanged?()
         RunLoop.current.run(until: Date().addingTimeInterval(0.10))
         precondition(context.idle, "dismissing a popover restores idle")
+        context.pointerInsideWindow = true
         context.idleAreasHovered = [:]
         context.idleAreasChanged?()
         monitor.activity(after: 0.02)
         RunLoop.current.run(until: Date().addingTimeInterval(0.06))
         precondition(!context.idle, "real input over controls keeps them awake")
+        // Leaving the window lets it go idle after idle_after even with idle_areas present.
+        context.pointerInsideWindow = false
+        context.idleAreasChanged?()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.06))
+        precondition(context.idle, "pointer leaving the window lets it go idle")
         monitor.stop()
         helper.orderOut(nil)
         window.orderOut(nil)

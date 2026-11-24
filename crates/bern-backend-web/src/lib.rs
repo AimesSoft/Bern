@@ -118,6 +118,14 @@ const FEATURES: &[&str] = &[
     bern_target_api::feature::ICON_TABS,
     bern_target_api::feature::ROW_BASELINE,
     bern_target_api::feature::NATIVE_VIEW,
+    bern_target_api::feature::APP_ICONS,
+    bern_target_api::feature::POPUP_PLACEMENT,
+    bern_target_api::feature::SWITCH_KNOB,
+    bern_target_api::feature::BOLD_MENUS,
+    bern_target_api::feature::TOOLTIP_KEYS,
+    bern_target_api::feature::VERTICAL_SLIDERS,
+    bern_target_api::feature::HOLD_SHORTCUTS,
+    bern_target_api::feature::NATIVE_LISTS,
 ];
 
 fn component_names() -> &'static [&'static str] {
@@ -322,6 +330,24 @@ fn alternate_page_icons(
     Ok((files, templates))
 }
 
+fn app_icons(
+    app: &Application,
+    project_dir: &Path,
+) -> Result<Vec<(String, String)>, Vec<Diagnostic>> {
+    let mut out = Vec::new();
+    for name in bern_target_api::app_icon::used(app) {
+        let path = project_dir.join(&name);
+        let outlined = bern_target_api::app_icon::outline(&path).map_err(|error| {
+            vec![Diagnostic::error(format!(
+                "cannot outline icon `{name}` ({}): {error}",
+                path.display()
+            ))]
+        })?;
+        out.push((name, outlined));
+    }
+    Ok(out)
+}
+
 fn index_html(app: &Application, version: &str, icons: &str) -> String {
     let title = app
         .app
@@ -512,6 +538,7 @@ impl Target for WebBrowser {
         let (alternate_files, alternate_links) = alternate_page_icons(app, context, &version)?;
         icon_files.extend(alternate_files);
         icon_links.push_str(&alternate_links);
+        let custom_icons = app_icons(app, &context.project_dir)?;
         let mut files = vec![
             GeneratedFile::text("index.html", index_html(app, &version, &icon_links)),
             GeneratedFile::text("bern.js", RUNTIME),
@@ -534,7 +561,7 @@ impl Target for WebBrowser {
             GeneratedFile::text("THIRD_PARTY_NOTICES.txt", icons::NOTICES),
             GeneratedFile::text(
                 "app.js",
-                Generator::new(app).generate(
+                Generator::new(app).with_app_icons(custom_icons).generate(
                     app.protocol.fingerprint(),
                     &strings,
                     &format!("{WASM}?v={version}"),
@@ -1022,9 +1049,11 @@ impl Target for WebBrowser {
             GeneratedFile::text("THIRD_PARTY_NOTICES.txt", icons::NOTICES),
         ];
 
+        let custom_icons = app_icons(app, &context.project_dir)?;
         // Split ES modules (`fingerprint = 0` relaxes catalog check).
-        for (rel, content) in
-            Generator::new(app).generate_split(0, &strings, WASM, if remote { "ui" } else { "app" })
+        for (rel, content) in Generator::new(app)
+            .with_app_icons(custom_icons)
+            .generate_split(0, &strings, WASM, if remote { "ui" } else { "app" })
         {
             files.push(GeneratedFile::text(rel, content));
         }

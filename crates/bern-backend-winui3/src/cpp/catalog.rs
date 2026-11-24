@@ -193,7 +193,7 @@ impl Generator<'_> {
         out.line("");
         Self::icon_glyphs(&mut out);
         out.line("");
-        Self::icon_paths(&mut out);
+        Self::icon_paths(&mut out, &self.app_icons);
         out.line("");
         out.close("}");
         out.finish()
@@ -338,9 +338,15 @@ impl Generator<'_> {
     }
 
     /// XAML path markup for the Fluent designs absent from the system fonts.
-    fn icon_paths(out: &mut Out) {
+    fn icon_paths(out: &mut Out, app_icons: &[(String, String)]) {
         out.open("wchar_t const* IconPath(std::string_view name) {");
-        for &(name, data) in crate::icons::FLUENT_PAIRS.iter().flatten() {
+        // The application's own icons, outlined at build time in the same
+        // 20-unit square as the Fluent artwork.
+        let own = app_icons
+            .iter()
+            .map(|(name, data)| (name.as_str(), data.as_str()));
+        let fluent = crate::icons::FLUENT_PAIRS.iter().flatten().copied();
+        for (name, data) in own.chain(fluent) {
             // SVG uses nonzero winding. The zero-area contour keeps its 20×20
             // viewBox when PathIcon fits the geometry to the requested size.
             let path = format!("F1 M0,0 L20,20 Z {}", data.trim());

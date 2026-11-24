@@ -8,8 +8,9 @@ use crate::session::{Actions, Control};
 use crate::{El, Prominence, Role, protocol::Value};
 use gpui::prelude::*;
 use gpui::{
-    App, Bounds, Context, FontWeight, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    Pixels, Render, Window, anchored, canvas, deferred, div, point, px, relative,
+    Anchor, AnchoredPositionMode, App, Bounds, Context, FontWeight, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, Pixels, Render, Window, anchored, canvas, deferred, div, point,
+    px, relative,
 };
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -20,6 +21,9 @@ thread_local! {
     static TREE_SELECTION: RefCell<HashMap<String, Value>> = RefCell::new(HashMap::new());
     static TREE_EXPANDED: RefCell<HashMap<String, Vec<Value>>> = RefCell::new(HashMap::new());
     static SPLIT_RATIO: RefCell<HashMap<String, f64>> = RefCell::new(HashMap::new());
+    static TOOLTIP_HOVERED: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
+    static TOOLTIP_BOUNDS: RefCell<HashMap<String, Bounds<Pixels>>> = RefCell::new(HashMap::new());
+    static REORDER_DRAG: RefCell<Option<(String, usize, usize)>> = const { RefCell::new(None) };
 }
 
 fn disclosure_open(key: &str) -> bool {
@@ -32,16 +36,84 @@ fn set_disclosure_open(key: &str, open: bool) {
     });
 }
 
+/// Properties of a `Tooltip`.
+#[derive(Clone, Debug, Default)]
+pub struct TooltipProps {
+    pub content: String,
+    pub keys: Option<String>,
+    pub placement: Option<&'static str>,
+}
+
+fn format_shortcut_keys(spec: &str) -> String {
+    let mut parts: Vec<&str> = spec
+        .split('+')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect();
+    let Some(raw_key) = parts.pop() else {
+        return String::new();
+    };
+    let key_lower = raw_key.to_ascii_lowercase();
+    let apple = cfg!(target_os = "macos");
+    let key_label = match key_lower.as_str() {
+        "space" => crate::text::tr("bern.shortcut.space"),
+        "escape" => if apple { "⎋" } else { "Esc" }.to_string(),
+        "return" | "enter" => if apple { "↩" } else { "Enter" }.to_string(),
+        "tab" => if apple { "⇥" } else { "Tab" }.to_string(),
+        "delete" | "backspace" => if apple { "⌫" } else { "Backspace" }.to_string(),
+        "up" => "↑".to_string(),
+        "down" => "↓".to_string(),
+        "left" => "←".to_string(),
+        "right" => "→".to_string(),
+        "home" => if apple { "↖" } else { "Home" }.to_string(),
+        "end" => if apple { "↘" } else { "End" }.to_string(),
+        "pageup" => if apple { "⇞" } else { "PgUp" }.to_string(),
+        "pagedown" => if apple { "⇟" } else { "PgDn" }.to_string(),
+        _ => raw_key.to_uppercase(),
+    };
+    let lower_mods: Vec<String> = parts.iter().map(|m| m.to_ascii_lowercase()).collect();
+    if apple {
+        let mut out = String::new();
+        for (name, glyph) in [("ctrl", "⌃"), ("alt", "⌥"), ("shift", "⇧"), ("cmd", "⌘")] {
+            if lower_mods.iter().any(|m| m == name) {
+                out.push_str(glyph);
+            }
+        }
+        out.push_str(&key_label);
+        out
+    } else {
+        let mut out = Vec::new();
+        if lower_mods.iter().any(|m| m == "cmd" || m == "ctrl") {
+            out.push("Ctrl".to_string());
+        }
+        if lower_mods.iter().any(|m| m == "alt") {
+            out.push("Alt".to_string());
+        }
+        if lower_mods.iter().any(|m| m == "shift") {
+            out.push("Shift".to_string());
+        }
+        out.push(key_label);
+        out.join("+")
+    }
+}
+
 struct TooltipBubble {
     text: String,
+    keys: Option<String>,
     bg: gpui::Rgba,
     border: gpui::Rgba,
     fg: gpui::Rgba,
+    key_bg: gpui::Rgba,
+    key_fg: gpui::Rgba,
 }
 
-impl Render for TooltipBubble {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+impl TooltipBubble {
+    fn view(&self) -> gpui::Div {
         div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(6.0))
             .px(px(8.0))
             .py(px(4.0))
             .rounded(px(6.0))
@@ -52,27 +124,145 @@ impl Render for TooltipBubble {
             .text_size(px(12.0))
             .shadow_md()
             .child(self.text.clone())
+            .when_some(self.keys.as_ref().filter(|k| !k.is_empty()), |el, keys| {
+                el.child(
+                    div()
+                        .px(px(5.0))
+                        .py(px(1.0))
+                        .rounded(px(4.0))
+                        .bg(self.key_bg)
+                        .border_1()
+                        .border_color(self.border)
+                        .text_color(self.key_fg)
+                        .text_size(px(11.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(keys.clone()),
+                )
+            })
     }
 }
 
-/// `Tooltip`: attaches native GPUI hover tooltip text to its single child.
-pub fn tooltip(c: &Ctx, key: &'static str, text: String, child: El) -> El {
+impl Render for TooltipBubble {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        self.view()
+    }
+}
+
+/// `Tooltip`: attaches a hover tooltip (with optional formatted shortcut keys
+/// and `above` / `below` placement) to its single child.
+pub fn tooltip(c: &Ctx, key: &'static str, props: TooltipProps, child: El) -> El {
     let bg = c.color("surface.raised");
     let border = c.color("control.border");
     let fg = c.color("text.primary");
+    let key_bg = c.color("surface.panel");
+    let key_fg = c.color("text.secondary");
+    let formatted_keys = props
+        .keys
+        .as_deref()
+        .map(format_shortcut_keys)
+        .filter(|s| !s.is_empty());
+    let bubble = TooltipBubble {
+        text: props.content,
+        keys: formatted_keys,
+        bg,
+        border,
+        fg,
+        key_bg,
+        key_fg,
+    };
+    let Some(placement) = props.placement else {
+        let text = bubble.text;
+        let keys = bubble.keys;
+        return div()
+            .id(c.element_id(key))
+            .tooltip(move |_window, cx: &mut App| {
+                let text = text.clone();
+                let keys = keys.clone();
+                cx.new(move |_| TooltipBubble {
+                    text,
+                    keys,
+                    bg,
+                    border,
+                    fg,
+                    key_bg,
+                    key_fg,
+                })
+                .into()
+            })
+            .child(child)
+            .into_any_element();
+    };
+    let target = c.key(key);
+    let hovered = TOOLTIP_HOVERED.with(|set| set.borrow().contains(&target));
+    let target_hover = target.clone();
+    let target_bounds = target.clone();
+    let above = placement != "below";
+    let bounds = TOOLTIP_BOUNDS.with(|map| map.borrow().get(&target).copied());
     div()
         .id(c.element_id(key))
-        .tooltip(move |_window, cx: &mut App| {
-            let text = text.clone();
-            cx.new(move |_| TooltipBubble {
-                text,
-                bg,
-                border,
-                fg,
-            })
-            .into()
+        .relative()
+        .on_hover(move |inside, _, _| {
+            let changed = TOOLTIP_HOVERED.with(|set| {
+                let mut set = set.borrow_mut();
+                if *inside {
+                    set.insert(target_hover.clone())
+                } else {
+                    set.remove(&target_hover)
+                }
+            });
+            if changed {
+                crate::host::redraw();
+            }
         })
+        .child(
+            canvas(
+                move |b, _, _| {
+                    TOOLTIP_BOUNDS.with(|map| {
+                        map.borrow_mut().insert(target_bounds.clone(), b);
+                    });
+                },
+                |_, _, _, _| {},
+            )
+            .absolute()
+            .size_full(),
+        )
         .child(child)
+        .when(hovered, |el| {
+            let placed = match bounds {
+                Some(rect) => {
+                    let gap = px(6.0);
+                    let anchor = if above {
+                        Anchor::BottomLeft
+                    } else {
+                        Anchor::TopLeft
+                    };
+                    let y = if above {
+                        rect.top() - gap
+                    } else {
+                        rect.bottom() + gap
+                    };
+                    anchored()
+                        .position_mode(AnchoredPositionMode::Window)
+                        .anchor(anchor)
+                        .position(point(rect.left(), y))
+                }
+                None => anchored()
+                    .anchor(if above {
+                        Anchor::BottomLeft
+                    } else {
+                        Anchor::TopLeft
+                    })
+                    .offset(point(px(0.0), px(if above { -6.0 } else { 6.0 }))),
+            };
+            el.child(
+                deferred(
+                    placed
+                        .snap_to_window_with_margin(px(8.0))
+                        .child(bubble.view()),
+                )
+                .with_priority(2),
+            )
+        })
         .into_any_element()
 }
 
@@ -1588,15 +1778,17 @@ pub struct ReorderableProps {
     pub to: Field,
 }
 
-/// `Reorderable`: reorderable vertical list with move up/down buttons and CLI `edit("from:to")`.
+/// `Reorderable`: reorderable vertical list with pointer drag-to-reorder,
+/// move up/down buttons, horizontal row content (`Spacer`-aware), and CLI `edit("from:to")`.
 pub fn reorderable(
     c: &Ctx,
     id: &'static str,
     props: ReorderableProps,
     items: Vec<Value>,
-    row: &dyn Fn(&Ctx, Value) -> El,
+    row: &dyn Fn(&Ctx, Value) -> Vec<El>,
     on_move: Option<Act>,
 ) -> El {
+    let list_key = c.key(id);
     let count = items.len();
     let commit_move: Rc<dyn Fn(usize, usize)> = {
         let c = c.clone();
@@ -1642,7 +1834,14 @@ pub fn reorderable(
         },
     });
 
+    let active_drag = REORDER_DRAG.with(|drag| {
+        drag.borrow()
+            .as_ref()
+            .filter(|(k, _, _)| *k == list_key)
+            .map(|(_, from, over)| (*from, *over))
+    });
     let hover = c.color("hover.overlay");
+    let accent = c.color("accent");
     let mut rows_els: Vec<El> = Vec::with_capacity(count);
     for (idx, item) in items.into_iter().enumerate() {
         let kt = crate::value::key_text(&crate::value::at(item.clone(), &[props.key_field]));
@@ -1684,8 +1883,15 @@ pub fn reorderable(
                 })
             })
             .when(!can_down, |el| el.opacity(0.35));
+        let is_source = active_drag.is_some_and(|(from, _)| from == idx);
+        let is_target = active_drag.is_some_and(|(from, over)| from != over && over == idx);
+        let drag_down_key = list_key.clone();
+        let drag_move_key = list_key.clone();
+        let drag_up_key = list_key.clone();
+        let commit_drop = Rc::clone(&commit_move);
         rows_els.push(
             div()
+                .id(c.element_id(&format!("{id}.row.{kt}")))
                 .flex()
                 .flex_row()
                 .items_center()
@@ -1695,14 +1901,70 @@ pub fn reorderable(
                 .gap(px(8.0))
                 .rounded(px(8.0))
                 .border_1()
-                .border_color(c.color("control.border"))
+                .border_color(if is_target {
+                    accent
+                } else {
+                    c.color("control.border")
+                })
                 .bg(c.color("surface.panel"))
+                .when(is_source, |el| el.opacity(0.6))
+                .on_mouse_down(MouseButton::Left, move |_, _, _| {
+                    REORDER_DRAG.with(|drag| {
+                        *drag.borrow_mut() = Some((drag_down_key.clone(), idx, idx));
+                    });
+                    crate::host::redraw();
+                })
+                .on_mouse_move(move |event: &MouseMoveEvent, _, _| {
+                    if event.pressed_button != Some(MouseButton::Left) {
+                        return;
+                    }
+                    let changed = REORDER_DRAG.with(|drag| {
+                        let mut drag = drag.borrow_mut();
+                        if let Some((key, _, over)) = drag.as_mut()
+                            && *key == drag_move_key
+                            && *over != idx
+                        {
+                            *over = idx;
+                            return true;
+                        }
+                        false
+                    });
+                    if changed {
+                        crate::host::redraw();
+                    }
+                })
+                .on_mouse_up(MouseButton::Left, move |_, _, _| {
+                    let finished = REORDER_DRAG.with(|drag| {
+                        let mut drag = drag.borrow_mut();
+                        if drag.as_ref().is_some_and(|(key, _, _)| *key == drag_up_key) {
+                            drag.take()
+                        } else {
+                            None
+                        }
+                    });
+                    if let Some((_, from, to)) = finished {
+                        if from != to {
+                            commit_drop(from, to);
+                        } else {
+                            crate::host::redraw();
+                        }
+                    }
+                })
                 .child(icons::icon(
                     "chevron.up.chevron.down",
                     13.0,
                     c.color("icon.secondary"),
                 ))
-                .child(div().flex_1().min_w(px(0.0)).child(content))
+                .child(
+                    div()
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap(px(8.0))
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .children(content),
+                )
                 .child(
                     div()
                         .flex()
@@ -1714,11 +1976,25 @@ pub fn reorderable(
                 .into_any_element(),
         );
     }
+    let cancel_key = list_key.clone();
     div()
         .flex()
         .flex_col()
         .w_full()
         .gap(px(4.0))
+        .on_mouse_up_out(MouseButton::Left, move |_, _, _| {
+            let cleared = REORDER_DRAG.with(|drag| {
+                let mut drag = drag.borrow_mut();
+                if drag.as_ref().is_some_and(|(key, _, _)| *key == cancel_key) {
+                    drag.take().is_some()
+                } else {
+                    false
+                }
+            });
+            if cleared {
+                crate::host::redraw();
+            }
+        })
         .children(rows_els)
         .into_any_element()
 }

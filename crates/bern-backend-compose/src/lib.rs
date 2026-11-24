@@ -194,6 +194,14 @@ const FEATURES_BUILT: &[&str] = &[
     bern_target_api::feature::SIDEBAR_HEADER,
     bern_target_api::feature::UNTITLED_DETAIL,
     bern_target_api::feature::NATIVE_VIEW,
+    bern_target_api::feature::APP_ICONS,
+    bern_target_api::feature::POPUP_PLACEMENT,
+    bern_target_api::feature::SWITCH_KNOB,
+    bern_target_api::feature::BOLD_MENUS,
+    bern_target_api::feature::TOOLTIP_KEYS,
+    bern_target_api::feature::VERTICAL_SLIDERS,
+    bern_target_api::feature::HOLD_SHORTCUTS,
+    bern_target_api::feature::NATIVE_LISTS,
 ];
 
 /// The features template with the extensions of each file kind from the
@@ -211,9 +219,37 @@ fn features_source(engine_kinds: &str) -> String {
         .replace("/*bern:engine-opens*/", engine_kinds)
 }
 
-/// The views template with the icon branches from the icon table.
-fn views_source() -> String {
-    VIEWS.replace("/*bern:icon-branches*/", &icons::branches())
+/// Outline every declared application `.svg` icon referenced by the UI.
+fn app_icons(
+    app: &Application,
+    project_dir: &std::path::Path,
+) -> Result<Vec<(String, String)>, Vec<Diagnostic>> {
+    let mut out = Vec::new();
+    for name in bern_target_api::app_icon::used(app) {
+        let path = project_dir.join(&name);
+        let data = bern_target_api::app_icon::outline(&path)
+            .map_err(|message| vec![Diagnostic::error(format!("app icon `{name}`: {message}"))])?;
+        out.push((name, data));
+    }
+    Ok(out)
+}
+
+/// The views template with the icon branches from the icon table and outlined app icons.
+fn views_source(app_icons: &[(String, String)]) -> String {
+    let custom: Vec<String> = app_icons
+        .iter()
+        .map(|(name, data)| {
+            format!(
+                "{} -> appIcon({}, {})",
+                names::string(name),
+                names::string(name),
+                names::string(data)
+            )
+        })
+        .collect();
+    VIEWS
+        .replace("/*bern:icon-branches*/", &icons::branches())
+        .replace("/*bern:app-icon-branches*/", &custom.join("\n        "))
 }
 
 pub struct ComposeAndroid;
@@ -427,6 +463,7 @@ impl Target for ComposeAndroid {
             });
         }
         let min_sdk = minimum_sdk(context);
+        let custom_icons = app_icons(app, &context.project_dir)?;
         let mut files = vec![
             GeneratedFile::text("project/settings.gradle.kts", project::settings(&product)),
             GeneratedFile::text("project/build.gradle.kts", project::root_build()),
@@ -491,7 +528,7 @@ impl Target for ComposeAndroid {
             ),
             GeneratedFile::text(
                 sources.join("dev/bern/runtime/BernViews.kt"),
-                views_source(),
+                views_source(&custom_icons),
             ),
             GeneratedFile::text(sources.join("dev/bern/runtime/BernStyle.kt"), STYLE),
             GeneratedFile::text(
@@ -535,7 +572,11 @@ impl Target for ComposeAndroid {
         }
         if watch {
             files.retain(|file| !file.path.starts_with(sources.join("dev/bern/runtime")));
-            files.extend(wear_runtime::files(&app.engine_kinds(), &package));
+            files.extend(wear_runtime::files(
+                &app.engine_kinds(),
+                &package,
+                &custom_icons,
+            ));
         }
         if glue::ipc(context) {
             files.extend([
@@ -704,7 +745,7 @@ impl Target for ComposeAndroid {
             dir: gradle_project.join("app/src/main/kotlin"),
             files: Vec::new(),
             keep: if watch {
-                wear_runtime::files(&app.engine_kinds(), &package)
+                wear_runtime::files(&app.engine_kinds(), &package, &[])
                     .into_iter()
                     .map(|file| {
                         file.path

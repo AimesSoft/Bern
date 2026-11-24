@@ -325,6 +325,10 @@ impl Generator<'_> {
                         self.expr(checked)
                     ));
                     match item.icon("icon") {
+                        Some(icon) if Self::uses_custom_icon(icon) => out.line(format!(
+                            "BernIconLabel(title: {item_label}, icon: {})",
+                            string(icon)
+                        )),
                         Some(icon) => out.line(format!(
                             "SwiftUI.Label({item_label}, systemImage: {})",
                             string(icon)
@@ -344,6 +348,10 @@ impl Generator<'_> {
                     out.close("}) {");
                     out.indent += 1;
                     match item.icon("icon") {
+                        Some(icon) if Self::uses_custom_icon(icon) => out.line(format!(
+                            "BernIconLabel(title: {item_label}, icon: {})",
+                            string(icon)
+                        )),
                         Some(icon) => out.line(format!(
                             "SwiftUI.Label({item_label}, systemImage: {})",
                             string(icon)
@@ -366,6 +374,8 @@ impl Generator<'_> {
         out.close("} label: {");
         out.indent += 1;
         let icon_only = element.keyword("style") == Some("icon");
+        let bold = element.keyword("bold") == Some("true");
+        let has_icon = element.icon("icon").is_some();
         let diameter = self
             .length(element, "height")
             .filter(|_| icon_only && !ctx.toolbar);
@@ -379,17 +389,42 @@ impl Generator<'_> {
             // 11 points from the edge instead of 14.
             out.open("SwiftUI.HStack(spacing: 6) {");
         }
+        let weight = if bold { ".fontWeight(.bold)" } else { "" };
         match element.icon("icon") {
             Some(icon) if arrow => {
-                out.line(format!(
-                    "SwiftUI.Image(systemName: {}).frame(width: 16, height: 16).accessibilityHidden(true)",
-                    string(icon)
-                ));
-                out.line(format!("SwiftUI.Text(verbatim: {label})"));
+                if Self::uses_custom_icon(icon) {
+                    out.line(format!(
+                        "BernIcon(name: {}, size: 16).frame(width: 16, height: 16).accessibilityHidden(true)",
+                        string(icon)
+                    ));
+                } else {
+                    out.line(format!(
+                        "SwiftUI.Image(systemName: {}).frame(width: 16, height: 16).accessibilityHidden(true)",
+                        string(icon)
+                    ));
+                }
+                out.line(format!("SwiftUI.Text(verbatim: {label}){weight}"));
+            }
+            Some(icon) if Self::uses_custom_icon(icon) => {
+                if icon_only {
+                    let size = if diameter.is_some() { 18.0 } else { 16.0 };
+                    out.line(format!(
+                        "BernIcon(name: {}, size: {}).frame(width: {}, height: {}).accessibilityLabel(SwiftUI.Text(verbatim: {label}))",
+                        string(icon),
+                        double(size),
+                        double(size),
+                        double(size)
+                    ));
+                } else {
+                    out.line(format!(
+                        "BernIconLabel(title: {label}, icon: {}, bold: {bold})",
+                        string(icon)
+                    ));
+                }
             }
             Some(icon) => {
                 out.line(format!(
-                    "SwiftUI.Label({label}, systemImage: {})",
+                    "SwiftUI.Label({label}, systemImage: {}){weight}",
                     string(icon)
                 ));
                 if icon_only {
@@ -404,7 +439,7 @@ impl Generator<'_> {
                     }
                 }
             }
-            None => out.line(format!("SwiftUI.Text(verbatim: {label})")),
+            None => out.line(format!("SwiftUI.Text(verbatim: {label}){weight}")),
         }
         if arrow {
             out.line("SwiftUI.Image(systemName: \"chevron.down\").font(.system(size: 10, weight: .semibold)).frame(width: 12, height: 12).opacity(0.6)");
@@ -416,7 +451,8 @@ impl Generator<'_> {
             out.line(".menuIndicator(.hidden)");
         }
         // Outside a toolbar a menu is a pull-down button of the platform;
-        // an icon-only one is a round icon button without the arrow.
+        // an icon-only one is a round icon button without the arrow (or a
+        // plain text trigger without an arrow when no icon is given).
         if !ctx.toolbar {
             if element.keyword("shape") == Some("capsule") {
                 // A macOS pull-down's AppKit bezel ignores .buttonStyle(.glass).
@@ -433,15 +469,26 @@ impl Generator<'_> {
             } else if let Some(diameter) = &diameter {
                 out.line(".menuStyle(.button)");
                 out.line(".menuIndicator(.hidden)");
-                out.line(format!(
-                    ".bernCircleControl(diameter: {diameter}, prominent: false)"
-                ));
-                out.line(format!(".help({label})"));
+                if has_icon {
+                    out.line(format!(
+                        ".bernCircleControl(diameter: {diameter}, prominent: false)"
+                    ));
+                    out.line(format!(".help({label})"));
+                } else {
+                    out.line(".bernButtonLook(.flat)");
+                    out.line(format!(".frame(height: {diameter})"));
+                }
             } else if icon_only {
                 out.line(".menuStyle(.button)");
                 out.line(".menuIndicator(.hidden)");
-                out.line(".bernButtonLook(.icon)");
-                out.line(format!(".help({label})"));
+                out.line(if has_icon {
+                    ".bernButtonLook(.icon)"
+                } else {
+                    ".bernButtonLook(.flat)"
+                });
+                if has_icon {
+                    out.line(format!(".help({label})"));
+                }
             } else {
                 out.line(".menuStyle(.button)");
                 out.line(".bernButtonLook(.secondary)");
@@ -486,21 +533,36 @@ impl Generator<'_> {
         ctx: &Ctx,
     ) {
         let icon_only = element.keyword("style") == Some("icon");
+        let bold = element.keyword("bold") == Some("true");
+        let weight = if bold { ".fontWeight(.bold)" } else { "" };
         let diameter = self
             .length(element, "height")
             .filter(|_| icon_only && !ctx.toolbar);
         out.open(format!("BernWatchMenu(labelText: {label}) {{"));
         match element.icon("icon") {
+            Some(icon) if Self::uses_custom_icon(icon) => {
+                if icon_only {
+                    out.line(format!(
+                        "BernIcon(name: {}).accessibilityLabel(SwiftUI.Text(verbatim: {label}))",
+                        string(icon)
+                    ));
+                } else {
+                    out.line(format!(
+                        "BernIconLabel(title: {label}, icon: {}, bold: {bold})",
+                        string(icon)
+                    ));
+                }
+            }
             Some(icon) => {
                 out.line(format!(
-                    "SwiftUI.Label({label}, systemImage: {})",
+                    "SwiftUI.Label({label}, systemImage: {}){weight}",
                     string(icon)
                 ));
                 if icon_only {
                     out.line(".labelStyle(.iconOnly)");
                 }
             }
-            None => out.line(format!("SwiftUI.Text(verbatim: {label})")),
+            None => out.line(format!("SwiftUI.Text(verbatim: {label}){weight}")),
         }
         out.close("} items: { bernDismissMenu in");
         out.indent += 1;
@@ -528,6 +590,10 @@ impl Generator<'_> {
             if let Some(checked) = item.expr("checked") {
                 out.open("SwiftUI.HStack {");
                 match item.icon("icon") {
+                    Some(icon) if Self::uses_custom_icon(icon) => out.line(format!(
+                        "BernIconLabel(title: {item_label}, icon: {})",
+                        string(icon)
+                    )),
                     Some(icon) => out.line(format!(
                         "SwiftUI.Label({item_label}, systemImage: {})",
                         string(icon)
@@ -541,6 +607,10 @@ impl Generator<'_> {
                 out.close("}");
             } else {
                 match item.icon("icon") {
+                    Some(icon) if Self::uses_custom_icon(icon) => out.line(format!(
+                        "BernIconLabel(title: {item_label}, icon: {})",
+                        string(icon)
+                    )),
                     Some(icon) => out.line(format!(
                         "SwiftUI.Label({item_label}, systemImage: {})",
                         string(icon)

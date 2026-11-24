@@ -20,6 +20,7 @@ pub const NAMES: &[&str] = &[
     "arrow.up.arrow.down",
     "arrow.up.left.and.arrow.down.right",
     "arrow.up.right.square",
+    "arrow.uturn.backward",
     "backward.end.fill",
     "bubble.left.and.bubble.right",
     "calendar",
@@ -59,6 +60,8 @@ pub const NAMES: &[&str] = &[
     "house",
     "info.circle",
     "keyboard",
+    "line.2.horizontal",
+    "line.3.horizontal",
     "line.3.horizontal.decrease",
     "link",
     "list.bullet",
@@ -81,6 +84,7 @@ pub const NAMES: &[&str] = &[
     "play.fill",
     "play.rectangle",
     "plus",
+    "plus.circle",
     "power",
     "puzzlepiece.extension",
     "scissors",
@@ -130,7 +134,9 @@ pub fn check(app: &Application, set: &str, has: impl Fn(&str) -> bool) -> Vec<Di
     app.walk(&mut |node: &Node, _| {
         if let Node::Element(element) = node {
             for (name, prop) in &element.props {
+                // The application's own icons are checked by `app_icons`.
                 if let Prop::Icon { name: icon } = prop
+                    && !crate::app_icon::is_app_icon(icon)
                     && !has(icon)
                 {
                     diagnostics.push(

@@ -46,7 +46,7 @@ pub const SUPPORT: &[StyleSupport] = &[
     },
     StyleSupport {
         component: "Stack",
-        base: &["background", "foreground", "corner", "shadow"],
+        base: &["background", "foreground", "border", "corner", "shadow"],
         states: &[(
             StyleState::Hover,
             &[

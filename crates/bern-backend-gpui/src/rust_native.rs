@@ -28,6 +28,13 @@ fn rust_type(ty: &Type) -> &'static str {
             Type::Text => "Option<String>",
             _ => "Option<f64>",
         },
+        Type::List { inner } => match inner.as_ref() {
+            Type::Bool => "Vec<bool>",
+            Type::Int => "Vec<i64>",
+            Type::Float => "Vec<f64>",
+            Type::Text => "Vec<String>",
+            _ => "Vec<f64>",
+        },
         _ => "f64",
     }
 }
@@ -47,6 +54,16 @@ fn unpack_rust(expr_val: &str, ty: &Type) -> String {
             };
             format!("rt::some({expr_val}).map({map})")
         }
+        Type::List { inner } => {
+            let map = match inner.as_ref() {
+                Type::Bool => "|v| rt::truthy(&v)",
+                Type::Int => "|v| rt::as_f64(&v).round() as i64",
+                Type::Float => "|v| rt::as_f64(&v)",
+                Type::Text => "|v| rt::plain(&v)",
+                _ => "|v| rt::as_f64(&v)",
+            };
+            format!("rt::as_list({expr_val}).into_iter().map({map}).collect()")
+        }
         _ => format!("rt::as_f64(&({expr_val}))"),
     }
 }
@@ -63,6 +80,16 @@ fn pack_rust(var: &str, ty: &Type) -> String {
             Type::Text => format!("{var}.map(|s| V::some(V::Text(s))).unwrap_or_else(V::none)"),
             _ => "V::none()".into(),
         },
+        Type::List { inner } => {
+            let map = match inner.as_ref() {
+                Type::Bool => "V::Bool",
+                Type::Int => "V::Int",
+                Type::Float => "V::Float",
+                Type::Text => "V::Text",
+                _ => "V::Float",
+            };
+            format!("V::List({var}.into_iter().map({map}).collect())")
+        }
         _ => format!("V::Float({var})"),
     }
 }
@@ -357,9 +384,9 @@ impl Generator<'_> {
         code.push_str(&format!(
             "let _theme = {ns}::Theme {{ dark: c.theme_is_dark(), accent: c.theme_color(\"accent\"), surface: c.theme_color(\"surface.canvas\"), text_primary: c.theme_color(\"text.primary\"), text_secondary: c.theme_color(\"text.secondary\"), border: c.theme_color(\"control.border\") }}; "
         ));
-        if element.prop("width").is_none() {
+        if element.prop("width").is_none() || element.prop("height").is_none() {
             code.push_str(&format!(
-                "bern_gpui::gpui::IntoElement::into_any_element(bern_gpui::gpui::Styled::w_full(bern_gpui::gpui::ParentElement::child(bern_gpui::gpui::div(), {ns}::render(_props, _actions, _theme)))) }}"
+                "b::native_host(c, bern_gpui::gpui::IntoElement::into_any_element({ns}::render(_props, _actions, _theme))) }}"
             ));
         } else {
             code.push_str(&format!(

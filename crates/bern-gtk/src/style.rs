@@ -261,7 +261,7 @@ fn sheet(styles: &[StyleDef], text: &[TextStyle]) -> String {
         ".navigation-sidebar > row.bern-styled-row { padding: 0; background: none; box-shadow: none; }\n\
          .navigation-sidebar > row.bern-styled-row:focus-visible { outline-offset: -2px; }\n\
          .navigation-sidebar > row:selected .bern-sidebar-label { font-weight: 700; }\n\
-         label.bern-bold { font-weight: 700; }\n\
+         label.bern-bold, .bern-bold, .bern-bold label { font-weight: 700; }\n\
          .bern-sidebar-content { padding: 8px 10px; border-radius: 6px; min-height: 20px; }\n\
          .bern-sidebar-content.bern-hover { background-color: alpha(currentColor, 0.07); }\n\
          .bern-sidebar-content.bern-selected { background-color: alpha(currentColor, 0.1); }\n\
@@ -313,6 +313,14 @@ fn sheet(styles: &[StyleDef], text: &[TextStyle]) -> String {
             if !base.is_empty() {
                 css.push_str(&format!("{class} {{ {base}}}\n"));
             }
+            if let Some(fg) = style.base.foreground {
+                let knob = theme::css(&fg, part);
+                let sw_class = format!("{scope}switch.bern-switch-{}", style.name);
+                let row_class = format!("{scope}.bern-switch-{} switch", style.name);
+                css.push_str(&format!(
+                    "{sw_class}:checked > slider, {row_class}:checked > slider {{ background-color: {knob}; }}\n"
+                ));
+            }
             for state in STATES {
                 if let Some(look) = style.state(state) {
                     let body = declarations(look, &style.base, part, bare);
@@ -337,6 +345,13 @@ pub(crate) fn scoped_colors(scope: &str, dark: bool) -> String {
             "{class} {{ {} }}\n",
             declarations(&style.base, &Look::NONE, Some(dark), bare)
         ));
+        if let Some(fg) = style.base.foreground {
+            let knob = theme::css(&fg, Some(dark));
+            css.push_str(&format!(
+                "{scope} switch.bern-switch-{}:checked > slider, {scope} .bern-switch-{} switch:checked > slider {{ background-color: {knob}; }}\n",
+                style.name, style.name
+            ));
+        }
         for state in STATES {
             if let Some(look) = style.state(state) {
                 css.push_str(&format!(

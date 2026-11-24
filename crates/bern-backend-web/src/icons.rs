@@ -283,6 +283,10 @@ const ICONS: &[(&str, &str, Fill)] = &[
         lucide!("triangle-alert"),
         Fill::None,
     ),
+    ("arrow.uturn.backward", lucide!("undo-2"), Fill::None),
+    ("line.2.horizontal", lucide!("equal"), Fill::None),
+    ("line.3.horizontal", lucide!("menu"), Fill::None),
+    ("plus.circle", lucide!("circle-plus"), Fill::None),
 ];
 
 /// The license notices that must ship with the icons, written next to the

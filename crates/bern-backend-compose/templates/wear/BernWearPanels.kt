@@ -99,7 +99,8 @@ fun BernControlGroup(label: String?, height: Dp?, content: @Composable RowScope.
 
 @Composable
 fun BernMenu(label: String, icon: ImageVector?, modifier: Modifier = Modifier, iconOnly: Boolean = false,
-    shape: BernShape? = null, items: @Composable (dismiss: () -> Unit) -> Unit) {
+    shape: BernShape? = null, bold: Boolean = false, placement: String? = null,
+    items: @Composable (dismiss: () -> Unit) -> Unit) {
     var open by remember { mutableStateOf(false) }
     if (icon != null && iconOnly) BernIconButton(label, icon, true, modifier, diameter = shape?.height) { open = true }
     else BernButton(label, icon, BernProminence.Standard, modifier = modifier, shape = shape) { open = true }
@@ -184,7 +185,8 @@ fun BernSplitButton(target: String, label: String, icon: ImageVector?, more: Str
 @Composable
 fun BernPopoverButton(target: String, label: String, icon: ImageVector?, presented: Boolean?,
     onPresented: ((Boolean) -> Unit)?, shortcut: String?, plain: Boolean, windowTheme: Boolean = false,
-    style: BernStyle? = null, iconSize: Float? = null, shape: BernShape? = null, content: @Composable ColumnScope.() -> Unit) {
+    style: BernStyle? = null, iconSize: Float? = null, shape: BernShape? = null, placement: String? = null,
+    content: @Composable ColumnScope.() -> Unit) {
     var own by remember { mutableStateOf(false) }
     val showing = presented ?: own
     val show: (Boolean) -> Unit = { if (onPresented != null) onPresented(it) else own = it }
@@ -329,7 +331,7 @@ fun BernSearchItem(target: String, label: String, icon: ImageVector?, detail: St
 }
 
 @Composable
-fun BernTooltip(content: String, child: @Composable () -> Unit) {
+fun BernTooltip(content: String, keys: String? = null, placement: String? = null, child: @Composable () -> Unit) {
     child()
 }
 

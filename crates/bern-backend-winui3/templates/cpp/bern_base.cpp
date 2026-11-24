@@ -483,6 +483,10 @@ using Table = std::unordered_map<std::string, winrt::hstring>;
 static Strings const* all = nullptr;
 static std::vector<std::string> supported;
 static Cell<std::string> language{std::string("en")};
+/// The catalog's own language, for a system language it has no texts for.
+static std::string defaultLanguage;
+/// No language is chosen in the app: the system's is shown.
+static Cell<bool> followsSystem{true};
 static Cell<Table const*> strings{nullptr};
 
 static Table const* TableFor(std::string const& tag) {
@@ -549,12 +553,21 @@ static void KeepLanguage(std::string const& tag) {
                     static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t)));
 }
 
+static void ForgetLanguage() {
+    HKEY key = nullptr;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, kKeptLanguages, 0, KEY_SET_VALUE, &key) != ERROR_SUCCESS) return;
+    RegDeleteValueW(key, ProgramName().c_str());
+    RegCloseKey(key);
+}
+
 void Install(Catalog const& catalog) {
     all = &catalog.strings;
     supported = catalog.languages;
+    defaultLanguage = catalog.defaultLanguage;
     auto kept = KeptLanguage();
     bool known = std::find(supported.begin(), supported.end(), kept) != supported.end();
     auto chosen = known ? kept : Choose(catalog.defaultLanguage);
+    followsSystem.Set(!known);
     language.Set(chosen);
     bern_platform_language(reinterpret_cast<uint8_t const*>(chosen.data()), chosen.size());
     strings.Set(TableFor(chosen));
@@ -566,13 +579,27 @@ std::vector<std::string> const& Supported() { return supported; }
 
 bool SetLanguage(std::string const& tag) {
     if (std::find(supported.begin(), supported.end(), tag) == supported.end()) return false;
+    KeepLanguage(tag);
     Reactive::Batch([&] {
+        followsSystem.Set(false);
         language.Set(tag);
         strings.Set(TableFor(tag));
     });
     bern_platform_language(reinterpret_cast<uint8_t const*>(tag.data()), tag.size());
-    KeepLanguage(tag);
     return true;
+}
+
+bool FollowsSystem() { return followsSystem.Get(); }
+
+void FollowSystem() {
+    ForgetLanguage();
+    auto chosen = Choose(defaultLanguage);
+    Reactive::Batch([&] {
+        followsSystem.Set(true);
+        language.Set(chosen);
+        strings.Set(TableFor(chosen));
+    });
+    bern_platform_language(reinterpret_cast<uint8_t const*>(chosen.data()), chosen.size());
 }
 
 winrt::hstring Tr(std::string_view key) {

@@ -311,7 +311,13 @@ impl Generator<'_> {
         }
         out.close(")");
 
-        if element.prop("width").is_none() && ctx.scope != super::Scope::Row {
+        if ctx.layer && element.prop("width").is_none() && element.prop("height").is_none() {
+            out.open("Box(Modifier.fillMaxSize()) {");
+            out.line(format!(
+                "{fq}.NativeContent(props = _bernNativeProps, actions = _bernNativeActions, theme = _bernNativeTheme)"
+            ));
+            out.close("}");
+        } else if element.prop("width").is_none() && ctx.scope != super::Scope::Row {
             out.open("Box(Modifier.fillMaxWidth()) {");
             out.line(format!(
                 "{fq}.NativeContent(props = _bernNativeProps, actions = _bernNativeActions, theme = _bernNativeTheme)"

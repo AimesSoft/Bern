@@ -212,8 +212,12 @@ impl Generator<'_> {
             .number("font_size")
             .map(|size| format!(", iconSize = {}", float(size)))
             .unwrap_or_default();
+        let placement = element
+            .keyword("placement")
+            .map(|place| format!(", placement = {}", string(place)))
+            .unwrap_or_default();
         out.open(format!(
-            "BernPopoverButton({}, {label}, {}, {presented}, {on_presented}, {shortcut}, {plain}, windowTheme = {}{}{icon_size}{}) {{",
+            "BernPopoverButton({}, {label}, {}, {presented}, {on_presented}, {shortcut}, {plain}, windowTheme = {}{}{icon_size}{}{placement}) {{",
             self.target(element, ctx),
             Self::icon(element.icon("icon")),
             bern_target_api::style::popover_window_theme(self.app, "android", element),
@@ -344,17 +348,26 @@ impl Generator<'_> {
             ));
         } else {
             out.line(format!(
-                "BernSwitch({label}, {value}, {{ it: Boolean -> {change} }}, checkbox = {}, labelHidden = {}, modifier = Modifier.testTag({target}))",
+                "BernSwitch({label}, {value}, {{ it: Boolean -> {change} }}, checkbox = {}, labelHidden = {}, modifier = Modifier.testTag({target}){})",
                 element.keyword("style") == Some("checkbox"),
-                element.keyword("label_hidden") == Some("true")
+                element.keyword("label_hidden") == Some("true"),
+                self.style_arg(element)
             ));
         }
     }
 
-    /// In a row a slider takes what the others leave, as on the other
-    /// targets: measured first, it would leave them nothing.
-    pub(super) fn slider_flex(ctx: &Ctx) -> &'static str {
-        if ctx.scope == Scope::Row {
+    /// In a row a horizontal slider takes what the others leave; in a column a
+    /// vertical slider without a declared height takes the vertical share.
+    pub(super) fn slider_flex(element: &Element, ctx: &Ctx) -> &'static str {
+        let vertical = element.keyword("axis") == Some("vertical");
+        if vertical {
+            if ctx.scope == Scope::Column && !ctx.scroll_content && element.prop("height").is_none()
+            {
+                ".weight(1f)"
+            } else {
+                ""
+            }
+        } else if ctx.scope == Scope::Row {
             ".weight(1f)"
         } else {
             ""
@@ -371,7 +384,9 @@ impl Generator<'_> {
             .unwrap_or_else(|| "null".into());
         let target = self.target(element, ctx);
         let label_hidden = element.keyword("label_hidden") == Some("true");
-        let weight = Self::slider_flex(ctx);
+        let vertical = element.keyword("axis") == Some("vertical");
+        let vertical_arg = if vertical { ", vertical = true" } else { "" };
+        let weight = Self::slider_flex(element, ctx);
         // Where a mouse or stylus is along the track, into its draft.
         let hover = self
             .field(element, "hover")
@@ -398,7 +413,7 @@ impl Generator<'_> {
                 "BernControl({target}, \"slider\", {label}, actions = BernControlActions(setNumber = {{ it: Double -> {change} }}, value = {{ BernText.text({value}) }}))"
             ));
             out.line(format!(
-                "BernControlledSlider({label}, ({value}).toDouble(), {{ it: Double -> {change} }}, {min}, {max}, {step}, {icons}, labelHidden = {label_hidden}, continuous = {}, modifier = Modifier{weight}.testTag({target}){hover})",
+                "BernControlledSlider({label}, ({value}).toDouble(), {{ it: Double -> {change} }}, {min}, {max}, {step}, {icons}, labelHidden = {label_hidden}, continuous = {}, modifier = Modifier{weight}.testTag({target}){hover}{vertical_arg})",
                 element.keyword("continuous") == Some("true")
             ));
             return;
@@ -427,7 +442,7 @@ impl Generator<'_> {
             "BernControl({target}, \"slider\", {label}, actions = BernControlActions(setNumber = {{ {write}{commit} }}, value = {{ BernText.text({field}) }}))"
         ));
         out.line(format!(
-            "BernSlider({label}, {read}, {{ {write} }}, {min}, {max}, {step}, {}, {icons}, labelHidden = {label_hidden}, modifier = Modifier{weight}.testTag({target}){hover})",
+            "BernSlider({label}, {read}, {{ {write} }}, {min}, {max}, {step}, {}, {icons}, labelHidden = {label_hidden}, modifier = Modifier{weight}.testTag({target}){hover}{vertical_arg})",
             action
                 .map(|action| format!("{{ {action} }}"))
                 .unwrap_or_else(|| "null".into()),
@@ -533,7 +548,15 @@ impl Generator<'_> {
 
     pub(super) fn tooltip(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         let content = self.text_prop(element, "content").unwrap_or_default();
-        out.open(format!("BernTooltip({content}) {{"));
+        let keys = self
+            .shortcut_keys(element, "keys")
+            .map(|keys| format!(", keys = {keys}"))
+            .unwrap_or_default();
+        let placement = element
+            .keyword("placement")
+            .map(|place| format!(", placement = {}", string(place)))
+            .unwrap_or_default();
+        out.open(format!("BernTooltip({content}{keys}{placement}) {{"));
         self.nodes(out, &element.children, ctx);
         out.close("}");
     }

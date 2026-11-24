@@ -12,6 +12,8 @@ pub type StringTable = &'static [(&'static str, &'static [(&'static str, &'stati
 
 struct Language {
     current: String,
+    fallback: String,
+    follows_system: bool,
     strings: HashMap<&'static str, &'static str>,
     supported: Vec<&'static str>,
     table: StringTable,
@@ -80,6 +82,8 @@ pub(crate) fn install(table: StringTable, supported: &'static [&'static str], fa
         *cell.borrow_mut() = Some(Language {
             strings: strings_of(table, &current),
             current,
+            fallback: fallback.to_string(),
+            follows_system: true,
             supported: supported.to_vec(),
             table,
         });
@@ -95,22 +99,37 @@ pub fn language() -> String {
     with(|language| language.current.clone())
 }
 
+/// Whether the interface language currently follows the system locale.
+pub fn follows_system() -> bool {
+    with(|language| language.follows_system)
+}
+
 /// The supported languages, in the application's order.
 pub fn supported() -> Vec<&'static str> {
     with(|language| language.supported.clone())
 }
 
 /// Switch the interface language; every window shows it at once, while
-/// drafts, navigation and windows stay. False for unsupported tags.
+/// drafts, navigation and windows stay. `"system"` follows the system's
+/// preferred locales. False for unsupported tags.
 pub fn set_language(tag: &str) -> bool {
     let switched = LANGUAGE.with(|cell| {
         let mut cell = cell.borrow_mut();
         let Some(language) = cell.as_mut() else {
             return false;
         };
+        if tag == "system" {
+            let wanted: Vec<String> = sys_locale::get_locales().collect();
+            let resolved = best(&language.supported, &wanted, &language.fallback);
+            language.follows_system = true;
+            language.current = resolved.clone();
+            language.strings = strings_of(language.table, &resolved);
+            return true;
+        }
         if !language.supported.contains(&tag) {
             return false;
         }
+        language.follows_system = false;
         language.current = tag.to_string();
         language.strings = strings_of(language.table, tag);
         true

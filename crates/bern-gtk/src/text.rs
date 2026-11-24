@@ -15,8 +15,10 @@ pub type StringTable = &'static [(&'static str, &'static [(&'static str, &'stati
 
 pub(crate) struct Language {
     pub(crate) current: Cell<String>,
+    pub(crate) follows_system: Cell<bool>,
     strings: Cell<Rc<HashMap<&'static str, &'static str>>>,
     pub(crate) supported: Vec<String>,
+    fallback: String,
     table: StringTable,
 }
 
@@ -124,13 +126,16 @@ pub(crate) fn install(table: StringTable, supported: &[&str], fallback: &str) {
     let kept = kept_language()
         .and_then(|path| std::fs::read_to_string(path).ok())
         .filter(|tag| supported.contains(tag));
+    let follows_system = kept.is_none();
     let language = kept.unwrap_or_else(|| choose(&supported, fallback));
     bern_ffi::platform::set_ui_language(&language);
     LANGUAGE.with(|cell| {
         let _ = cell.set(Language {
             strings: Cell::new(strings_of(table, &language)),
             current: Cell::new(language),
+            follows_system: Cell::new(follows_system),
             supported,
+            fallback: fallback.to_string(),
             table,
         });
     });
@@ -145,14 +150,36 @@ pub fn language() -> String {
     with(|language| language.current.get())
 }
 
-/// Switch the interface language. Returns false for unsupported tags.
+/// Whether the language follows the operating system locale, recording a dependency.
+pub(crate) fn follows_system() -> bool {
+    with(|language| language.follows_system.get())
+}
+
+/// Switch the interface language, or `"system"` to follow the OS locale.
+/// Returns false for unsupported tags.
 pub(crate) fn set_language(tag: &str) -> bool {
     with(|language| {
+        if tag == "system" {
+            let resolved = choose(&language.supported, &language.fallback);
+            bern_ffi::platform::set_ui_language(&resolved);
+            batch(|| {
+                language.follows_system.set(true);
+                language.current.set(resolved.clone());
+                language.strings.set(strings_of(language.table, &resolved));
+            });
+            if !cfg!(test)
+                && let Some(path) = kept_language()
+            {
+                let _ = std::fs::remove_file(path);
+            }
+            return true;
+        }
         if !language.supported.iter().any(|supported| supported == tag) {
             return false;
         }
         bern_ffi::platform::set_ui_language(tag);
         batch(|| {
+            language.follows_system.set(false);
             language.current.set(tag.to_string());
             language.strings.set(strings_of(language.table, tag));
         });

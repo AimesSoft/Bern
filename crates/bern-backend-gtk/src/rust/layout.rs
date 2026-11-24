@@ -105,6 +105,7 @@ impl Generator<'_> {
     }
 
     pub(super) fn stack(&self, out: &mut Out, element: &Element) {
+        let was_stack = self.in_stack.replace(true);
         self.container_children(
             out,
             &format!(
@@ -121,6 +122,7 @@ impl Generator<'_> {
             element,
             ");",
         );
+        self.in_stack.set(was_stack);
     }
 
     pub(super) fn scale_box(&self, out: &mut Out, element: &Element) {
@@ -223,11 +225,13 @@ impl Generator<'_> {
     /// enabled.
     pub(super) fn key_shortcut(&self, out: &mut Out, element: &Element) {
         out.line(format!(
-            "b::KeyShortcut(p, c, b::KeyShortcutProps {{ keys: {}, bound: {}, enabled: {}, quiet: {} }}, {});",
+            "b::KeyShortcut(p, c, b::KeyShortcutProps {{ keys: {}, bound: {}, enabled: {}, quiet: {}, hold: {}, hold_after: {} }}, {});",
             string(element.keyword("key").unwrap_or_default()),
             some(self.bound_keys(element, "key")),
             self.enabled(element),
             element.keyword("quiet") == Some("true"),
+            some(self.field(element, "hold")),
+            Self::number(element, "hold_after"),
             self.action(element),
         ));
     }

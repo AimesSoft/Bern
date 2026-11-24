@@ -100,10 +100,16 @@ fn check_styles(descriptor: &TargetDescriptor, app: &Application) -> Vec<Diagnos
                     }));
             for (state, effect) in effects {
                 // Lengths in place of written ones are laid out by every
-                // target alike.
+                // target alike. `Switch(foreground:)` degrades to a feature
+                // warning on targets without `switch_knob` (such as SwiftUI,
+                // whose system switch keeps its platform knob).
                 if matches!(effect, bern_ir::style::StyleEffect::Metric { .. })
                     || (matches!(effect, bern_ir::style::StyleEffect::Padding { .. })
                         && matches!(rule.component.as_str(), "Row" | "Column"))
+                    || (rule.component == "Switch"
+                        && state.is_none()
+                        && effect.name() == "foreground"
+                        && !descriptor.features.contains(&crate::feature::SWITCH_KNOB))
                     || support.is_some_and(|support| support.shows(state, effect.name()))
                 {
                     continue;

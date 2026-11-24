@@ -116,7 +116,29 @@ const FEATURES: &[&str] = &[
     feature::SIDEBAR_HEADER,
     feature::UNTITLED_DETAIL,
     feature::NATIVE_VIEW,
+    feature::APP_ICONS,
+    feature::POPUP_PLACEMENT,
+    feature::SWITCH_KNOB,
+    feature::BOLD_MENUS,
+    feature::TOOLTIP_KEYS,
+    feature::VERTICAL_SLIDERS,
+    feature::HOLD_SHORTCUTS,
+    feature::NATIVE_LISTS,
 ];
+
+fn app_icon_svgs(
+    app: &Application,
+    context: &BuildContext,
+) -> Result<Vec<(String, String)>, Vec<Diagnostic>> {
+    let mut out = Vec::new();
+    for name in bern_target_api::app_icon::used(app) {
+        let path = context.project_dir.join(&name);
+        let data = bern_target_api::app_icon::outline(&path)
+            .map_err(|message| vec![Diagnostic::error(format!("icon `{name}`: {message}"))])?;
+        out.push((name, bern_target_api::app_icon::svg_document(&data)));
+    }
+    Ok(out)
+}
 
 /// `reflow` GTK cannot show, in components and in the content written
 /// directly in a window: the children of a column, row or stack and the
@@ -373,15 +395,18 @@ impl Target for GtkLinux {
         bern_target_api::svg::validate(app, context)?;
         let product = product_name(app);
         let executable = executable(app);
+        let app_icons = app_icon_svgs(app, context)?;
         let mut files = vec![
             GeneratedFile::text("app/Cargo.toml", glue::cargo_toml(context, app)),
             GeneratedFile::text("app/src/main.rs", glue::main_rs(context, app)),
             GeneratedFile::text(
                 "app/src/ui.rs",
-                Generator::with_project_dir(app, &context.project_dir).generate(
-                    app.protocol.fingerprint(),
-                    &bern_target_api::glue::descriptor_expr(context),
-                ),
+                Generator::with_project_dir(app, &context.project_dir)
+                    .with_app_icons(app_icons)
+                    .generate(
+                        app.protocol.fingerprint(),
+                        &bern_target_api::glue::descriptor_expr(context),
+                    ),
             ),
             GeneratedFile::text("app/src/cli.rs", glue::cli_rs(context, app)),
             GeneratedFile::text(
@@ -910,7 +935,9 @@ impl Target for GtkLinux {
             ));
         }
 
+        let app_icons = app_icon_svgs(app, context)?;
         let split = Generator::with_project_dir(app, &context.project_dir)
+            .with_app_icons(app_icons)
             .generate_split(0, &bern_target_api::glue::descriptor_expr(context));
         for (rel, content) in split {
             files.push(GeneratedFile::text(

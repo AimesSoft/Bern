@@ -748,14 +748,19 @@ impl<'a> Gen<'a> {
                         value: Literal::Text(icon),
                         span,
                     } => {
-                        if icon.is_empty()
+                        // The application's own icon: a declared `.svg` resource.
+                        if icon.to_ascii_lowercase().ends_with(".svg") {
+                            if let Err(message) = bern_protocol::check_resource_name(icon) {
+                                self.error(*span, message);
+                            }
+                        } else if icon.is_empty()
                             || !icon
                                 .chars()
                                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.')
                         {
                             self.error(
                                 *span,
-                                "icon names use the Bern icon set (SF Symbols naming), e.g. \"gearshape\"",
+                                "icon names use the Bern icon set (SF Symbols naming), e.g. \"gearshape\", or name a declared .svg resource",
                             );
                         }
                     }

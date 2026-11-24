@@ -128,6 +128,12 @@ inline controls::ColumnDefinition Column(xaml::GridLength width) {
     return column;
 }
 
+inline controls::RowDefinition GridRow(xaml::GridLength height) {
+    controls::RowDefinition row;
+    row.Height(height);
+    return row;
+}
+
 /// A card row of a form section holding `content`.
 inline controls::Border Card(xaml::UIElement const& content) {
     if (auto framework = content.try_as<xaml::FrameworkElement>(); framework && framework.VerticalAlignment() == xaml::VerticalAlignment::Stretch)
@@ -2568,6 +2574,32 @@ inline void AttachSearchResults(controls::AutoSuggestBox const& box, Ctx const& 
     Reactive::OnCleanup([flyout] { flyout.Hide(); });
 }
 
+/// A menu in the appearance of the region it opens from (a player's dark
+/// bar), as a context menu there is: that appearance's text and, where the
+/// system has it, its frosted glass. Without an appearance of its own the
+/// menu keeps the window's.
+inline void ThemeMenu(controls::MenuFlyout const& flyout, std::string const& appearance) {
+    if (appearance.empty()) return;
+#if BERN_WINUI
+    bool dark = appearance == "dark";
+    auto style = xaml::Markup::XamlReader::Load(LR"(<Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" TargetType="MenuFlyoutPresenter" />)").as<xaml::Style>();
+    if (auto themed = PresenterTheme(L"MenuFlyoutPresenter", appearance)) style.BasedOn(themed);
+    style.Setters().Append(xaml::Setter(xaml::FrameworkElement::RequestedThemeProperty(), winrt::box_value(dark ? xaml::ElementTheme::Dark : xaml::ElementTheme::Light)));
+    if (DesktopAcrylicAvailable()) {
+        flyout.SystemBackdrop(winrt::make<ThemedAcrylicBackdrop>(dark));
+        style.Setters().Append(xaml::Setter(controls::Control::BackgroundProperty(), media::SolidColorBrush(winrt::Windows::UI::Colors::Transparent())));
+    }
+    flyout.MenuFlyoutPresenterStyle(style);
+#else
+    // A popup window of its own would draw the window's material behind the
+    // region's text: the menu stays inside the window.
+    if (auto style = PresenterTheme(L"MenuFlyoutPresenter", appearance)) {
+        flyout.MenuFlyoutPresenterStyle(style);
+        flyout.ShouldConstrainToRootBounds(true);
+    }
+#endif
+}
+
 /// A search field; with results, they show below it while it is in use.
 inline void Search(Parent const& p, Ctx const& ctx, SearchProps props, Build const& results) {
     if (!props.field) return;
@@ -2597,6 +2629,8 @@ struct SwitchProps {
     char const* icon = nullptr;
     bool labelHidden = false;
     std::optional<ControlShape> shape;
+    /// A `style!` variant: its `foreground` colors the knob while on.
+    StyleDef const* look = nullptr;
 };
 
 /// What a control shows and how a change is made: a draft field, after
@@ -2693,6 +2727,12 @@ inline void Switch(Parent const& p, Ctx const& ctx, SwitchProps props) {
         toggle.OnContent(nullptr);
         toggle.OffContent(nullptr);
         toggle.MinWidth(0);
+        // The style's foreground is the knob while on, in every state.
+        if (props.look && props.look->base.foreground) {
+            auto knob = *props.look->base.foreground;
+            Styles::Restyle(toggle, ThemedXaml({{L"ToggleSwitchKnobFillOn", knob}, {L"ToggleSwitchKnobFillOnPointerOver", knob},
+                {L"ToggleSwitchKnobFillOnPressed", knob}}));
+        }
         BindName(toggle, text);
         Reactive::Run([toggle, on, updating] {
             bool value = on();
@@ -2733,6 +2773,9 @@ struct SliderProps {
     /// `hover`: where the pointer is along the track while it is over the
     /// slider, and none otherwise.
     std::optional<Field> hover;
+    /// `axis: vertical`: upright, the minimum at the bottom, as tall as it
+    /// is given.
+    bool vertical = false;
 };
 
 /// Where the pointer is along a slider's travel, from 0 at its minimum to
@@ -2740,6 +2783,22 @@ struct SliderProps {
 /// Positions relative to the track already run from its minimum end, the
 /// right one when it flows right to left.
 inline double SliderFraction(controls::Slider const& slider, xaml::Input::PointerRoutedEventArgs const& args) {
+    if (slider.Orientation() == controls::Orientation::Vertical) {
+        // Upright: the minimum is at the bottom unless reversed.
+        xaml::UIElement track = slider;
+        double height = slider.ActualHeight(), inset = 0;
+        if (auto thumb = TemplatePart(slider, L"VerticalThumb")) {
+            inset = thumb.ActualHeight();
+            if (auto frame = media::VisualTreeHelper::GetParent(thumb).try_as<xaml::FrameworkElement>()) {
+                track = frame;
+                height = frame.ActualHeight();
+            }
+        }
+        double travel = height - inset;
+        double y = args.GetCurrentPoint(track).Position().Y;
+        double fromTop = travel > 0 ? (std::clamp)((y - inset / 2) / travel, 0.0, 1.0) : 0.0;
+        return slider.IsDirectionReversed() ? fromTop : 1 - fromTop;
+    }
     xaml::UIElement track = slider;
     double width = slider.ActualWidth(), inset = 0;
     if (auto thumb = TemplatePart(slider, L"HorizontalThumb")) {
@@ -2770,8 +2829,15 @@ inline void Slider(Parent const& p, Ctx const& ctx, SliderProps props) {
     slider.StepFrequency(step);
     slider.SmallChange(step);
     slider.LargeChange((high - low) / 10);
-    slider.MinWidth(props.labelHidden ? 80 : 200);
-    slider.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+    if (props.vertical) {
+        slider.Orientation(controls::Orientation::Vertical);
+        slider.MinHeight(80);
+        slider.HorizontalAlignment(xaml::HorizontalAlignment::Center);
+        slider.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+    } else {
+        slider.MinWidth(props.labelHidden ? 80 : 200);
+        slider.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+    }
     auto run = Run(ctx, props.commit);
     auto snap = [low, high, explicitStep = props.step](double value) {
         if (explicitStep && *explicitStep > 0) value = low + std::round((value - low) / *explicitStep) * *explicitStep;
@@ -2844,26 +2910,65 @@ inline void Slider(Parent const& p, Ctx const& ctx, SliderProps props) {
         Reactive::OnCleanup([set] { set(std::nullopt); });
     }
     controls::Grid track;
-    track.ColumnSpacing(8);
-    track.ColumnDefinitions().Append(Column(AutoLength()));
-    track.ColumnDefinitions().Append(Column(Star()));
-    track.ColumnDefinitions().Append(Column(AutoLength()));
-    if (props.minIcon) {
-        auto icon = Icons::Icon(props.minIcon, 14);
-        icon.VerticalAlignment(xaml::VerticalAlignment::Center);
-        track.Children().Append(icon);
+    if (props.vertical) {
+        // Upright: the maximum's icon above, the minimum's below.
+        track.RowSpacing(8);
+        track.RowDefinitions().Append(GridRow(AutoLength()));
+        track.RowDefinitions().Append(GridRow(Star()));
+        track.RowDefinitions().Append(GridRow(AutoLength()));
+        if (props.maxIcon) {
+            auto icon = Icons::Icon(props.maxIcon, 14);
+            icon.HorizontalAlignment(xaml::HorizontalAlignment::Center);
+            track.Children().Append(icon);
+        }
+        controls::Grid::SetRow(slider, 1);
+        track.Children().Append(slider);
+        if (props.minIcon) {
+            auto icon = Icons::Icon(props.minIcon, 14);
+            icon.HorizontalAlignment(xaml::HorizontalAlignment::Center);
+            controls::Grid::SetRow(icon, 2);
+            track.Children().Append(icon);
+        }
+    } else {
+        track.ColumnSpacing(8);
+        track.ColumnDefinitions().Append(Column(AutoLength()));
+        track.ColumnDefinitions().Append(Column(Star()));
+        track.ColumnDefinitions().Append(Column(AutoLength()));
+        if (props.minIcon) {
+            auto icon = Icons::Icon(props.minIcon, 14);
+            icon.VerticalAlignment(xaml::VerticalAlignment::Center);
+            track.Children().Append(icon);
+        }
+        controls::Grid::SetColumn(slider, 1);
+        track.Children().Append(slider);
+        if (props.maxIcon) {
+            auto icon = Icons::Icon(props.maxIcon, 14);
+            icon.VerticalAlignment(xaml::VerticalAlignment::Center);
+            controls::Grid::SetColumn(icon, 2);
+            track.Children().Append(icon);
+        }
     }
-    controls::Grid::SetColumn(slider, 1);
-    track.Children().Append(slider);
-    if (props.maxIcon) {
-        auto icon = Icons::Icon(props.maxIcon, 14);
-        icon.VerticalAlignment(xaml::VerticalAlignment::Center);
-        controls::Grid::SetColumn(icon, 2);
-        track.Children().Append(icon);
+    xaml::UIElement content{nullptr};
+    if (props.labelHidden) {
+        content = track;
+    } else if (props.vertical) {
+        // Vertical slider with a visible label: give the track the remaining height.
+        controls::Grid box;
+        box.RowSpacing(6);
+        box.RowDefinitions().Append(GridRow(AutoLength()));
+        box.RowDefinitions().Append(GridRow(Star()));
+        auto caption = TextOf(text);
+        caption.HorizontalAlignment(xaml::HorizontalAlignment::Center);
+        box.Children().Append(caption);
+        controls::Grid::SetRow(track, 1);
+        box.Children().Append(track);
+        content = box;
+    } else {
+        content = Stacked(text, track);
     }
-    xaml::UIElement content = props.labelHidden ? xaml::UIElement(track) : xaml::UIElement(Stacked(text, track));
-    // A slider takes the width it is given, as on the other targets.
-    SetRole(content.as<xaml::FrameworkElement>(), L"bern-fill-width");
+    // A slider takes the width it is given, as on the other targets; an
+    // upright one the height.
+    SetRole(content.as<xaml::FrameworkElement>(), props.vertical ? L"bern-fill-height" : L"bern-fill-width");
     if (p.isList) p.Add(Card(content));
     else p.Add(content);
     Controls::Register(ctx, props.id, "slider", text, nullptr,
@@ -2996,6 +3101,134 @@ struct Segments {
     std::function<void(int)> select;
     std::function<void(std::function<void(int)>)> onSelect;
 };
+
+/// `shape: capsule` segments: the options on a capsule track, the chosen
+/// one on a solid capsule of its own, its text semibold. Uses ToggleButtons
+/// so screen readers and UI Automation expose the selected option.
+inline Segments MakeCapsuleSegments(Ctx const& ctx, std::vector<Str> const& labels, std::optional<ControlShape> const& shape = std::nullopt) {
+    Segments segments;
+    controls::Border track;
+    track.CornerRadius(xaml::CornerRadius{16, 16, 16, 16});
+    track.Padding(xaml::Thickness{3, 3, 3, 3});
+    track.HorizontalAlignment(xaml::HorizontalAlignment::Left);
+    track.VerticalAlignment(xaml::VerticalAlignment::Center);
+    if (auto style = Styles::Themed(L"Border", {{L"Background", RoleKey("fill.subtle")}})) track.Style(style);
+    controls::StackPanel row;
+    row.Orientation(controls::Orientation::Horizontal);
+    track.Child(row);
+    struct Item {
+        controls::Border thumb;
+        controls::Primitives::ToggleButton button;
+        controls::TextBlock text;
+    };
+    auto items = std::make_shared<std::vector<Item>>();
+    auto handler = std::make_shared<std::function<void(int)>>();
+    auto updating = std::make_shared<bool>(false);
+    auto show = [weak = std::weak_ptr<std::vector<Item>>(items), updating](int index) {
+        auto items = weak.lock();
+        if (!items) return;
+        *updating = true;
+        for (size_t j = 0; j < items->size(); ++j) {
+            bool on = static_cast<int>(j) == index;
+            (*items)[j].thumb.Opacity(on ? 1.0 : 0.0);
+            (*items)[j].button.IsChecked(on);
+            (*items)[j].text.FontWeight(WeightNamed(on ? "semibold" : "regular"));
+        }
+        *updating = false;
+    };
+    xaml::ScalarTransition fade;
+    fade.Duration(std::chrono::milliseconds(150));
+    auto noneBrush = kWinUI ? L"SubtleFillColorTransparentBrush" : L"SystemControlTransparentBrush";
+    auto hoverBrush = RoleKey("fill.subtle");
+    auto textBrush = kWinUI ? L"TextFillColorPrimaryBrush" : L"SystemControlForegroundBaseHighBrush";
+    auto segButtonXaml = Styles::LightweightXaml({
+        {L"ToggleButtonBackground", noneBrush}, {L"ToggleButtonBackgroundPointerOver", hoverBrush},
+        {L"ToggleButtonBackgroundPressed", hoverBrush}, {L"ToggleButtonBackgroundChecked", noneBrush},
+        {L"ToggleButtonBackgroundCheckedPointerOver", noneBrush}, {L"ToggleButtonBackgroundCheckedPressed", noneBrush},
+        {L"ToggleButtonForeground", textBrush}, {L"ToggleButtonForegroundPointerOver", textBrush},
+        {L"ToggleButtonForegroundPressed", textBrush}, {L"ToggleButtonForegroundChecked", textBrush},
+        {L"ToggleButtonForegroundCheckedPointerOver", textBrush}, {L"ToggleButtonForegroundCheckedPressed", textBrush},
+        {L"ToggleButtonBorderBrush", noneBrush}, {L"ToggleButtonBorderBrushPointerOver", noneBrush},
+        {L"ToggleButtonBorderBrushPressed", noneBrush}, {L"ToggleButtonBorderBrushChecked", noneBrush},
+        {L"ToggleButtonBorderBrushCheckedPointerOver", noneBrush}, {L"ToggleButtonBorderBrushCheckedPressed", noneBrush},
+    });
+    for (size_t i = 0; i < labels.size(); ++i) {
+        controls::Grid cell;
+        controls::Border thumb;
+        thumb.CornerRadius(xaml::CornerRadius{13, 13, 13, 13});
+        thumb.BorderThickness(xaml::Thickness{1, 1, 1, 1});
+        if (auto style = Styles::Themed(L"Border", {{L"Background", RoleKey("control.thumb")}, {L"BorderBrush", RoleKey("control.border")}}))
+            thumb.Style(style);
+        thumb.Opacity(0);
+        thumb.OpacityTransition(fade);
+        controls::Primitives::ToggleButton button;
+        Styles::Restyle(button, segButtonXaml);
+        button.MinWidth(0);
+        button.MinHeight(0);
+        button.Padding(xaml::Thickness{14, 4, 14, 4});
+        button.CornerRadius(xaml::CornerRadius{13, 13, 13, 13});
+        controls::TextBlock text;
+        auto label = labels[i];
+        Reactive::Run([button, text, label, ctx] {
+            auto shown = label(ctx);
+            text.Text(shown);
+            xaml::Automation::AutomationProperties::SetName(button, shown);
+        });
+        button.Content(text);
+        int index = static_cast<int>(i);
+        button.Click([show, handler, updating, index](auto&&, auto&&) {
+            if (*updating) return;
+            show(index);
+            if (*handler) (*handler)(index);
+        });
+        cell.Children().Append(thumb);
+        cell.Children().Append(button);
+        row.Children().Append(cell);
+        items->push_back(Item{thumb, button, text});
+    }
+    if (shape && shape->height.Given()) {
+        BindLen(ctx, shape->height, nullptr, [track, items](double h) {
+            double size = (std::max)(0.0, h);
+            double outer = size / 2.0;
+            double inner = (std::max)(0.0, outer - 3.0);
+            track.Height(size);
+            track.CornerRadius(xaml::CornerRadius{outer, outer, outer, outer});
+            for (auto const& item : *items) {
+                item.thumb.CornerRadius(xaml::CornerRadius{inner, inner, inner, inner});
+                item.button.CornerRadius(xaml::CornerRadius{inner, inner, inner, inner});
+                item.button.Padding(xaml::Thickness{14, 0, 14, 0});
+                item.button.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+            }
+        });
+    }
+    segments.element = track;
+    // The items live as long as the track.
+    segments.select = [show, items](int index) { show(index); };
+    segments.onSelect = [handler](std::function<void(int)> next) { *handler = std::move(next); };
+    return segments;
+}
+
+/// Narrow a `ComboBox`'s default `MinWidth(160)` when an enclosing container
+/// has a narrower explicit `Width` or `MaxWidth`.
+inline void FitNarrowCombo(controls::ComboBox const& combo) {
+    combo.Loaded([](IInspectable const& sender, auto&&) {
+        auto combo = sender.as<controls::ComboBox>();
+        double limit = combo.MinWidth();
+        for (auto node = media::VisualTreeHelper::GetParent(combo); node; node = media::VisualTreeHelper::GetParent(node)) {
+            auto framework = node.try_as<xaml::FrameworkElement>();
+            if (!framework) continue;
+            double bound = std::numeric_limits<double>::infinity();
+            if (!std::isnan(framework.Width())) bound = (std::min)(bound, framework.Width());
+            if (std::isfinite(framework.MaxWidth())) bound = (std::min)(bound, framework.MaxWidth());
+            if (!std::isfinite(bound)) continue;
+            if (bound < limit) {
+                combo.MinWidth(0);
+                combo.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+            }
+            break;
+        }
+    });
+}
 
 inline Segments MakeSegments(Ctx const& ctx, std::vector<Str> const& labels, std::vector<char const*> const& icons = {}) {
     Segments segments;
@@ -3170,8 +3403,31 @@ inline void Picker(Parent const& p, Ctx const& ctx, PickerProps props) {
         auto check = [](Buttons const& buttons, std::optional<int> chosen) {
             for (size_t j = 0; j < buttons.size(); ++j) buttons[j].IsChecked(chosen && *chosen == static_cast<int>(j));
         };
+        // `shape: capsule`: capsules on a subtle fill, the chosen one inverted
+        // (high-contrast text color over page surface), with no border.
+        bool capsules = props.shape.has_value();
         for (size_t i = 0; i < options->size(); ++i) {
             controls::Primitives::ToggleButton button;
+            if (capsules) {
+                auto rest = RoleKey("fill.subtle");
+                auto over = kWinUI ? L"SubtleFillColorTertiaryBrush" : L"SystemControlBackgroundListMediumBrush";
+                auto on = kWinUI ? L"TextFillColorPrimaryBrush" : L"SystemControlForegroundBaseHighBrush";
+                auto onOver = kWinUI ? L"TextFillColorSecondaryBrush" : L"SystemControlForegroundBaseMediumHighBrush";
+                auto onText = kWinUI ? L"SolidBackgroundFillColorBaseBrush" : L"SystemControlPageBackgroundChromeLowBrush";
+                auto none = kWinUI ? L"SubtleFillColorTransparentBrush" : L"SystemControlTransparentBrush";
+                Styles::Restyle(button, Styles::LightweightXaml({{L"ToggleButtonBackground", rest}, {L"ToggleButtonBackgroundPointerOver", over},
+                    {L"ToggleButtonBackgroundPressed", over}, {L"ToggleButtonBackgroundChecked", on}, {L"ToggleButtonBackgroundCheckedPointerOver", onOver},
+                    {L"ToggleButtonBackgroundCheckedPressed", onOver}, {L"ToggleButtonForegroundChecked", onText},
+                    {L"ToggleButtonForegroundCheckedPointerOver", onText}, {L"ToggleButtonForegroundCheckedPressed", onText},
+                    {L"ToggleButtonBorderBrush", none}, {L"ToggleButtonBorderBrushPointerOver", none}, {L"ToggleButtonBorderBrushPressed", none},
+                    {L"ToggleButtonBorderBrushChecked", none}, {L"ToggleButtonBorderBrushCheckedPointerOver", none},
+                    {L"ToggleButtonBorderBrushCheckedPressed", none}}));
+                button.CornerRadius(xaml::CornerRadius{14, 14, 14, 14});
+                button.Padding(xaml::Thickness{10, 4, 10, 5});
+                button.MinWidth(0);
+                button.MinHeight(0);
+                button.FontSize(13);
+            }
             auto label = (*options)[i].label;
             Reactive::Run([button, label, ctx] { button.Content(winrt::box_value(label(ctx))); });
             int index = static_cast<int>(i);
@@ -3194,7 +3450,8 @@ inline void Picker(Parent const& p, Ctx const& ctx, PickerProps props) {
     } else if (style == "segmented" || style == "radio" || style == "inline") {
         std::vector<Str> labels;
         for (auto const& option : *options) labels.push_back(option.label);
-        auto segments = MakeSegments(ctx, labels);
+        // `shape: capsule`: on a capsule track.
+        auto segments = props.shape && style == "segmented" ? MakeCapsuleSegments(ctx, labels, props.shape) : MakeSegments(ctx, labels);
         Reactive::Run([segments, model, indexOf] {
             if (auto index = indexOf(model.read())) segments.select(*index);
         });
@@ -3216,7 +3473,7 @@ inline void Picker(Parent const& p, Ctx const& ctx, PickerProps props) {
             item.Click([choose, index](auto&&, auto&&) { choose(index); });
             flyout.Items().Append(item);
         }
-        if (auto style = PresenterTheme(L"MenuFlyoutPresenter", ctx.appearance)) flyout.MenuFlyoutPresenterStyle(style);
+        ThemeMenu(flyout, ctx.appearance);
         button.Flyout(flyout);
         Reactive::Run([chosen, flyout, options, model, indexOf, ctx] {
             auto index = indexOf(model.read());
@@ -3229,6 +3486,7 @@ inline void Picker(Parent const& p, Ctx const& ctx, PickerProps props) {
     } else {
         controls::ComboBox combo;
         combo.MinWidth(160);
+        FitNarrowCombo(combo);
         auto updating = std::make_shared<bool>(false);
         Reactive::Run([combo, options, ctx, model, indexOf, updating] {
             std::vector<winrt::hstring> labels;
@@ -3405,7 +3663,7 @@ inline void DynamicPicker(Parent const& p, Ctx const& ctx, DynamicPickerProps pr
         controls::TextBlock chosen;
         button.Content(chosen);
         controls::MenuFlyout flyout;
-        if (auto st = PresenterTheme(L"MenuFlyoutPresenter", ctx.appearance)) flyout.MenuFlyoutPresenterStyle(st);
+        ThemeMenu(flyout, ctx.appearance);
         button.Flyout(flyout);
         Reactive::Run([chosen, flyout, readItems, snapshot, model, indexOf, chooseValue, prompt, text] {
             *snapshot = readItems();
@@ -3430,6 +3688,7 @@ inline void DynamicPicker(Parent const& p, Ctx const& ctx, DynamicPickerProps pr
     } else {
         controls::ComboBox combo;
         combo.MinWidth(160);
+        FitNarrowCombo(combo);
         if (prompt) Reactive::Run([combo, prompt] { combo.PlaceholderText(prompt()); });
         auto updating = std::make_shared<bool>(false);
         Reactive::Run([combo, readItems, snapshot, model, indexOf, updating] {
@@ -3473,18 +3732,108 @@ inline void DynamicPicker(Parent const& p, Ctx const& ctx, DynamicPickerProps pr
             }});
 }
 
-/// `Tooltip`: attaches native ToolTipService text to its single child without extra wrapper panels.
-inline void Tooltip(Parent const& p, Ctx const& ctx, Str content, Build const& children) {
+inline winrt::hstring ShortcutText(char const* keys);
+
+struct TooltipProps {
+    Str content;
+    /// `keys`: a literal shortcut shown after the text, one key cap per key.
+    char const* keys = nullptr;
+    /// `boundKeys`: a state-bound shortcut text followed reactively.
+    Str boundKeys;
+    /// `placement`: `above` or `below` the child; else where Windows puts it.
+    char const* placement = nullptr;
+};
+
+/// Each key of the shortcut `keys` in a cap of its own, as keyboards
+/// print them; `filled` caps stand on a fill of their own (in a settings
+/// row), others are outlined only (in a tip).
+inline controls::StackPanel KeyCaps(char const* keys, bool filled = false) {
+    controls::StackPanel caps;
+    caps.Orientation(controls::Orientation::Horizontal);
+    caps.Spacing(filled ? 4 : 3);
+    caps.VerticalAlignment(xaml::VerticalAlignment::Center);
+    std::wstring all(ShortcutText(keys));
+    std::wstring key;
+    auto capBg = kWinUI ? L"ControlFillColorDefaultBrush" : L"SystemControlBackgroundAltHighBrush";
+    auto cap = [&caps, filled, capBg](std::wstring const& name) {
+        if (name.empty()) return;
+        controls::Border border;
+        border.CornerRadius({4, 4, 4, 4});
+        border.BorderThickness({1, 1, 1, 1});
+        border.Padding(filled ? xaml::Thickness{7, 2, 7, 3} : xaml::Thickness{5, 0, 5, 1});
+        border.MinWidth(filled ? 28 : 20);
+        if (filled) {
+            if (auto style = Styles::Themed(L"Border", {{L"BorderBrush", RoleKey("control.border")}, {L"Background", capBg}})) border.Style(style);
+        } else if (auto style = Styles::Themed(L"Border", {{L"BorderBrush", RoleKey("control.border")}})) {
+            border.Style(style);
+        }
+        controls::TextBlock glyph;
+        glyph.Text(winrt::hstring(name));
+        glyph.FontSize(12);
+        glyph.HorizontalAlignment(xaml::HorizontalAlignment::Center);
+        border.Child(glyph);
+        caps.Children().Append(border);
+    };
+    for (wchar_t c : all) {
+        if (c == L'+' && !key.empty()) {
+            cap(key);
+            key.clear();
+        } else {
+            key += c;
+        }
+    }
+    cap(key);
+    return caps;
+}
+
+/// The tip's text, then each key of `keys` in a cap of its own.
+inline xaml::UIElement TooltipContent(winrt::hstring const& text, char const* keys) {
+    controls::StackPanel row;
+    row.Orientation(controls::Orientation::Horizontal);
+    row.Spacing(8);
+    controls::TextBlock words;
+    words.Text(text);
+    words.VerticalAlignment(xaml::VerticalAlignment::Center);
+    row.Children().Append(words);
+    row.Children().Append(KeyCaps(keys));
+    return row;
+}
+
+/// `Tooltip`: attaches a native tip to its single child without extra
+/// wrapper panels: its text, the key caps of `keys` after it, `placement`
+/// above or below the child.
+inline void Tooltip(Parent const& p, Ctx const& ctx, TooltipProps props, Build const& children) {
     if (!p.region) return children(p, ctx);
     auto before = p.region->items.size();
     children(p, ctx);
-    auto text = Bound(ctx, content);
+    auto text = Bound(ctx, props.content);
     if (!text) return;
+    std::string_view placement = props.placement ? props.placement : "";
+    std::string literalKeys = props.keys ? props.keys : "";
+    auto boundKeys = props.boundKeys;
+    bool hasKeys = !literalKeys.empty() || static_cast<bool>(boundKeys);
     for (auto i = before; i < p.region->items.size(); ++i) {
         if (auto const& element = p.region->items[i].element) {
-            Reactive::Run([element, text] {
-                controls::ToolTipService::SetToolTip(element, winrt::box_value(text()));
-            });
+            if (placement == "above") controls::ToolTipService::SetPlacement(element, controls::Primitives::PlacementMode::Top);
+            else if (placement == "below") controls::ToolTipService::SetPlacement(element, controls::Primitives::PlacementMode::Bottom);
+            if (!hasKeys) {
+                Reactive::Run([element, text] {
+                    controls::ToolTipService::SetToolTip(element, winrt::box_value(text()));
+                });
+            } else {
+                controls::ToolTip tip;
+                controls::ToolTipService::SetToolTip(element, tip);
+                Reactive::Run([tip, text, literalKeys, boundKeys, ctx] {
+                    auto label = text();
+                    std::string keys = boundKeys ? Utf8(boundKeys(ctx)) : literalKeys;
+                    if (keys.empty() || ShortcutText(keys.c_str()).empty()) {
+                        tip.Content(winrt::box_value(label));
+                    } else {
+                        tip.Content(TooltipContent(label, keys.c_str()));
+                    }
+                    xaml::Automation::AutomationProperties::SetName(tip, label);
+                });
+            }
         }
     }
 }
@@ -3518,23 +3867,61 @@ inline void Banner(Parent const& p, Ctx const& ctx, BannerProps props, Build con
     else if (sev == "warning") bar.Severity(controls::InfoBarSeverity::Warning);
     else if (sev == "error") bar.Severity(controls::InfoBarSeverity::Error);
     else bar.Severity(controls::InfoBarSeverity::Informational);
-    if (props.icon) {
+    bool pathIcon = props.icon && bern::IconPath(iconName) != nullptr;
+    if (props.icon && !pathIcon) {
         controls::FontIconSource iconSrc;
         iconSrc.Glyph(Icons::Glyph(iconName));
         iconSrc.FontFamily(media::FontFamily(L"Segoe Fluent Icons"));
         bar.IconSource(iconSrc);
     }
-    if (title) Reactive::Run([bar, title] { bar.Title(title()); });
-    if (content) Reactive::Run([bar, content] { bar.Message(content()); });
-    bar.IsClosable(static_cast<bool>(dismiss));
-    if (actions) {
-        controls::StackPanel row;
-        row.Orientation(controls::Orientation::Horizontal);
-        row.Spacing(8);
-        row.Margin(xaml::Thickness{0, 0, 0, 12});
-        actions(Parent::Of(row), ctx);
-        bar.Content(row);
+    if (pathIcon) {
+        // InfoBar's PathIconSource throws E_INVALIDARG in WinUI 3; draw the
+        // path icon inline beside the text inside Content instead.
+        bar.IsIconVisible(false);
+        controls::StackPanel outer;
+        outer.Orientation(controls::Orientation::Horizontal);
+        outer.Spacing(12);
+        outer.Margin(xaml::Thickness{0, 12, 16, 12});
+        auto glyph = Icons::Icon(iconName, 16);
+        glyph.VerticalAlignment(xaml::VerticalAlignment::Top);
+        glyph.Margin(xaml::Thickness{0, 2, 0, 0});
+        outer.Children().Append(glyph);
+        controls::StackPanel col;
+        col.Spacing(4);
+        if (title) {
+            auto t = TextOf(title);
+            t.FontWeight(WeightNamed("semibold"));
+            t.TextWrapping(xaml::TextWrapping::Wrap);
+            col.Children().Append(t);
+        }
+        if (content) {
+            auto m = TextOf(content);
+            m.TextWrapping(xaml::TextWrapping::Wrap);
+            col.Children().Append(m);
+        }
+        if (actions) {
+            controls::StackPanel row;
+            row.Orientation(controls::Orientation::Horizontal);
+            row.Spacing(8);
+            row.Margin(xaml::Thickness{0, 4, 0, 0});
+            actions(Parent::Of(row), ctx);
+            col.Children().Append(row);
+        }
+        outer.Children().Append(col);
+        bar.Content(outer);
+    } else {
+        if (title) Reactive::Run([bar, title] { bar.Title(title()); });
+        if (content) Reactive::Run([bar, content] { bar.Message(content()); });
+        if (actions) {
+            controls::StackPanel row;
+            row.Orientation(controls::Orientation::Horizontal);
+            row.Spacing(8);
+            row.Margin(xaml::Thickness{0, 0, 0, 12});
+            actions(Parent::Of(row), ctx);
+            bar.Content(row);
+        }
     }
+    bar.IsClosable(static_cast<bool>(dismiss));
     if (dismiss) {
         bar.Closing([dismiss](controls::InfoBar const&, controls::InfoBarClosingEventArgs const& args) {
             args.Cancel(true);
@@ -4284,8 +4671,8 @@ inline void Layers(Parent const& p, Ctx const& ctx, LayersProps props, Build con
         bool allFillW = true, allFillH = true;
         for (auto child : layers.Children()) {
             auto r = RoleOf(Unwrapped(child));
-            bool fw = r == L"bern-canvas" || r == L"bern-rail-w" || r == L"bern-rail-wh" || r == L"bern-layers-w" || r == L"bern-layers-wh" || r == L"bern-fill" || r == L"bern-fill-width";
-            bool fh = r == L"bern-canvas" || r == L"bern-rail-h" || r == L"bern-rail-wh" || r == L"bern-layers-h" || r == L"bern-layers-wh" || r == L"bern-fill" || r == L"bern-fill-height";
+            bool fw = r == L"bern-canvas" || r == L"bern-rail-w" || r == L"bern-rail-wh" || r == L"bern-layers-w" || r == L"bern-layers-wh" || r == L"bern-fill" || r == L"bern-fill-width" || r == L"bern-native";
+            bool fh = r == L"bern-canvas" || r == L"bern-rail-h" || r == L"bern-rail-wh" || r == L"bern-layers-h" || r == L"bern-layers-wh" || r == L"bern-fill" || r == L"bern-fill-height" || r == L"bern-native";
             allFillW = allFillW && fw;
             allFillH = allFillH && fh;
         }
@@ -4340,6 +4727,13 @@ inline void Layers(Parent const& p, Ctx const& ctx, LayersProps props, Build con
         if (auto const& foreground = style->base.foreground)
             PaintWith<controls::ContentControl>(holder, L"ContentControl", L"Foreground", *foreground,
                 [](controls::ContentControl const& e, media::Brush const& b) { e.Foreground(b); });
+        // The border is drawn inside the stack's edge, under its rounded
+        // corners.
+        if (auto const& border = style->base.border; border && BorderWidth(*style) > 0) {
+            double width = BorderWidth(*style);
+            layers.BorderThickness(xaml::Thickness{width, width, width, width});
+            PaintWith<controls::Grid>(layers, L"Grid", L"BorderBrush", *border, [](controls::Grid const& e, media::Brush const& b) { e.BorderBrush(b); });
+        }
         if (style->corner) {
             double r = *style->corner;
             layers.CornerRadius(xaml::CornerRadius{r, r, r, r});
@@ -5791,6 +6185,16 @@ inline Parent ToolsParent(controls::Panel const& holder, std::weak_ptr<Page> wea
     auto origInsert = items->insert;
     auto origRemove = items->remove;
     items->insert = [origInsert, weakPage](uint32_t at, xaml::UIElement const& element) {
+        // Items stand in the middle of the bar's height; a text after other
+        // items stands apart from them, as a title beside the way back.
+        if (auto framework = element.try_as<xaml::FrameworkElement>()) {
+            framework.VerticalAlignment(xaml::VerticalAlignment::Center);
+            if (at > 0 && Unwrapped(element).try_as<controls::TextBlock>()) {
+                auto margin = framework.Margin();
+                margin.Left = (std::max)(margin.Left, 8.0);
+                framework.Margin(margin);
+            }
+        }
         origInsert(at, element);
         if (auto page = weakPage.lock()) page->version.Bump();
     };
@@ -5842,26 +6246,36 @@ inline void LeadingToolbar(Parent const&, Ctx const& ctx, Build const& children)
 
 inline void LanguagePicker(Parent const& p, Ctx const& ctx, char const* id, Str const& label, bool labelHidden = false) {
     auto const& supported = bern::Text::Supported();
+    // First "use the system setting", then each language by its own name.
     controls::ComboBox combo;
     combo.MinWidth(160);
+    FitNarrowCombo(combo);
+    combo.Items().Append(winrt::box_value(bern::Text::Tr("bern.language.system")));
     for (auto const& tag : supported) combo.Items().Append(winrt::box_value(bern::Text::Autonym(tag)));
     auto text = Bound(ctx, label);
     auto updating = std::make_shared<bool>(false);
     Reactive::Run([combo, updating] {
         auto const& all = bern::Text::Supported();
         auto found = std::find(all.begin(), all.end(), bern::Text::Language());
-        int index = found == all.end() ? -1 : static_cast<int>(found - all.begin());
-        if (combo.SelectedIndex() != index) {
-            *updating = true;
-            combo.SelectedIndex(index);
-            *updating = false;
-        }
+        int index = bern::Text::FollowsSystem() ? 0 : found == all.end() ? -1 : static_cast<int>(found - all.begin()) + 1;
+        *updating = true;
+        // The first item names the system setting in the language shown.
+        combo.Items().SetAt(0, winrt::box_value(bern::Text::Tr("bern.language.system")));
+        if (combo.SelectedIndex() != index) combo.SelectedIndex(index);
+        *updating = false;
     });
     combo.SelectionChanged([weak = winrt::make_weak(combo), updating](auto&&, auto&&) {
         auto combo = weak.get();
         if (!combo || *updating || combo.SelectedIndex() < 0) return;
-        auto tag = bern::Text::Supported()[combo.SelectedIndex()];
+        int index = combo.SelectedIndex();
         // Text bindings update after the selection change finishes.
+        if (index == 0) {
+            Host::Post([] { bern::Text::FollowSystem(); });
+            return;
+        }
+        auto const& all = bern::Text::Supported();
+        if (static_cast<size_t>(index - 1) >= all.size()) return;
+        auto tag = all[index - 1];
         Host::Post([tag] { bern::Text::SetLanguage(tag); });
     });
     BindName(combo, text);
@@ -5869,7 +6283,13 @@ inline void LanguagePicker(Parent const& p, Ctx const& ctx, char const* id, Str 
     else if (p.isList) p.Add(LabeledCard(text, combo));
     else p.Add(Stacked(text, combo));
     Controls::Register(ctx, id, "picker", text, nullptr,
-        Actions{.select = [](std::string const& tag) { return bern::Text::SetLanguage(tag); },
+        Actions{.select = [](std::string const& tag) {
+                    if (tag == "system") {
+                        bern::Text::FollowSystem();
+                        return true;
+                    }
+                    return bern::Text::SetLanguage(tag);
+                },
             .value = [] { return std::optional<std::string>(bern::Text::PeekLanguage()); }});
 }
 
@@ -5913,7 +6333,19 @@ struct MenuLook {
     bool iconOnly = false;
     std::optional<ControlShape> shape;
     bool hideDisabled = false;
+    /// `placement`: `above` or `below` the button; else where Windows puts it.
+    char const* placement = nullptr;
+    /// `bold`: the label in bold.
+    bool bold = false;
 };
+
+/// Opens `flyout` above or below what shows it, as `placement` says; it
+/// stays where Windows puts it otherwise.
+inline void PlaceFlyout(controls::Primitives::FlyoutBase const& flyout, char const* placement) {
+    std::string_view where = placement ? placement : "";
+    if (where == "above") flyout.Placement(controls::Primitives::FlyoutPlacementMode::Top);
+    else if (where == "below") flyout.Placement(controls::Primitives::FlyoutPlacementMode::Bottom);
+}
 
 /// An item of a menu, ready before the menu exists: what it shows and
 /// what it does.
@@ -6006,27 +6438,11 @@ inline void ContextMenuOn(Ctx const& ctx, xaml::UIElement const& element, std::v
     auto scope = std::make_shared<Scope>();
     Reactive::OnCleanup([scope] { scope->Dispose(); });
     auto flyout = std::make_shared<controls::MenuFlyout>(nullptr);
-    std::string appearance = ctx.appearance;
-    element.ContextRequested([plan, scope, flyout, appearance](xaml::UIElement const& sender, xaml::Input::ContextRequestedEventArgs const& args) {
+    element.ContextRequested([plan, scope, flyout, appearance = ctx.appearance](xaml::UIElement const& sender, xaml::Input::ContextRequestedEventArgs const& args) {
         if (scope->disposed) return;
         if (!*flyout) {
             *flyout = controls::MenuFlyout();
-            if (!appearance.empty()) {
-                bool dark = appearance == "dark";
-                auto theme = dark ? xaml::ElementTheme::Dark : xaml::ElementTheme::Light;
-#if BERN_WINUI
-                auto style = xaml::Markup::XamlReader::Load(LR"(<Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" TargetType="MenuFlyoutPresenter" />)").as<xaml::Style>();
-                if (auto themed = PresenterTheme(L"MenuFlyoutPresenter", appearance)) style.BasedOn(themed);
-                style.Setters().Append(xaml::Setter(xaml::FrameworkElement::RequestedThemeProperty(), winrt::box_value(theme)));
-                if (DesktopAcrylicAvailable()) {
-                    flyout->SystemBackdrop(winrt::make<ThemedAcrylicBackdrop>(dark));
-                    style.Setters().Append(xaml::Setter(controls::Control::BackgroundProperty(), media::SolidColorBrush(winrt::Windows::UI::Colors::Transparent())));
-                }
-                flyout->MenuFlyoutPresenterStyle(style);
-#else
-                if (auto style = PresenterTheme(L"MenuFlyoutPresenter", appearance)) flyout->MenuFlyoutPresenterStyle(style);
-#endif
-            }
+            ThemeMenu(*flyout, appearance);
             scope->Run([&] { MenuItems(*flyout, *plan); });
         }
         controls::Primitives::FlyoutShowOptions options;
@@ -6064,21 +6480,31 @@ inline void WindowButtons(Parent const& p, Ctx const& ctx) {
 inline void Menu(Parent const& p, Ctx const& ctx, char const* id, Str const& label, char const* icon, MenuLook look, std::vector<std::optional<MenuItemDef>> items) {
     controls::Button button{nullptr};
     auto text = Bound(ctx, label);
-    if (look.iconOnly && icon) {
-        // An app bar button: no background until pointed at.
+    if (look.iconOnly) {
+        // An app bar button: no background until pointed at, and no arrow;
+        // without an icon it shows the label itself.
         controls::Button plain;
-        plain.Content(Icons::Icon(icon));
+        if (icon) plain.Content(Icons::Icon(icon));
+        else if (text) {
+            auto label = TextOf(text);
+            if (look.bold) label.FontWeight(WeightNamed("bold"));
+            plain.Content(label);
+        }
         Styles::MakeSubtle(plain);
         if (look.shape && look.shape->height.Given())
-            BindLen(ctx, look.shape->height, nullptr, [plain](double d) {
+            BindLen(ctx, look.shape->height, nullptr, [plain, square = icon != nullptr, capsule = look.shape->capsule](double d) {
                 double size = (std::max)(0.0, d);
-                plain.Width(size);
+                // A label keeps its own width.
+                if (square) plain.Width(size);
                 plain.Height(size);
                 plain.MinWidth(0);
                 plain.MinHeight(0);
-                plain.Padding(xaml::Thickness{0, 0, 0, 0});
+                plain.Padding(square ? xaml::Thickness{0, 0, 0, 0} : xaml::Thickness{10, 0, 10, 0});
+                if (capsule) plain.CornerRadius(xaml::CornerRadius{size / 2.0, size / 2.0, size / 2.0, size / 2.0});
             });
-        if (text) Reactive::Run([plain, text] { controls::ToolTipService::SetToolTip(plain, winrt::box_value(text())); });
+        else if (look.shape && look.shape->capsule)
+            plain.CornerRadius(xaml::CornerRadius{999, 999, 999, 999});
+        if (text && icon) Reactive::Run([plain, text] { controls::ToolTipService::SetToolTip(plain, winrt::box_value(text())); });
         button = plain;
     } else {
         controls::DropDownButton drop;
@@ -6086,7 +6512,11 @@ inline void Menu(Parent const& p, Ctx const& ctx, char const* id, Str const& lab
         content.Orientation(controls::Orientation::Horizontal);
         content.Spacing(8);
         if (icon) content.Children().Append(Icons::Icon(icon));
-        if (text) content.Children().Append(TextOf(text));
+        if (text) {
+            auto label = TextOf(text);
+            if (look.bold) label.FontWeight(WeightNamed("bold"));
+            content.Children().Append(label);
+        }
         drop.Content(content);
         ShapeControl(ctx, drop, look.shape);
         button = drop;
@@ -6094,7 +6524,8 @@ inline void Menu(Parent const& p, Ctx const& ctx, char const* id, Str const& lab
     BindName(button, text);
     controls::MenuFlyout flyout;
     MenuEntries(ctx, flyout, items, look.hideDisabled);
-    if (auto style = PresenterTheme(L"MenuFlyoutPresenter", ctx.appearance)) flyout.MenuFlyoutPresenterStyle(style);
+    ThemeMenu(flyout, ctx.appearance);
+    PlaceFlyout(flyout, look.placement);
     button.Flyout(flyout);
     auto open = std::make_shared<bool>(false);
     flyout.Opened([open](auto&&, auto&&) { *open = true; });
@@ -6967,9 +7398,11 @@ inline void Reorderable(Parent const& p, Ctx const& ctx, ReorderableProps props,
         if (runAction) runAction();
     };
 
+    // The rows one under another, parted by lines; a row is dragged by the
+    // grip at its leading end to its new place, the rows it passes making
+    // way, as a Fluent list is reordered.
     controls::StackPanel host;
     host.Orientation(controls::Orientation::Vertical);
-    host.Spacing(4);
     host.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
     auto rowScopes = std::make_shared<std::vector<std::unique_ptr<Scope>>>();
     Reactive::OnCleanup([rowScopes] {
@@ -6977,42 +7410,64 @@ inline void Reorderable(Parent const& p, Ctx const& ctx, ReorderableProps props,
         rowScopes->clear();
     });
     std::string varName = props.variable ? props.variable : "";
-    auto win = ctx.win;
-    Reactive::Run([host, rowScopes, ctx, itemsFn = props.items, keyIdx = props.key, varName, row, commitMove, countCell, win] {
+    // The rows in order, for a drag to move.
+    auto holders = std::make_shared<std::vector<controls::Grid>>();
+    Reactive::Run([host, rowScopes, ctx, itemsFn = props.items, keyIdx = props.key, varName, row, commitMove, countCell, holders] {
         auto list = R::AsList(itemsFn(ctx));
         Reactive::Untrack([&] {
             *countCell = list.size();
             for (auto& s : *rowScopes) s->Dispose();
             rowScopes->clear();
             host.Children().Clear();
+            holders->clear();
             size_t total = list.size();
             for (size_t i = 0; i < total; ++i) {
                 auto k = R::KeyText(R::At(list[i], {keyIdx}));
-                controls::Border card;
-                card.CornerRadius(xaml::CornerRadius{8, 8, 8, 8});
-                card.Padding(xaml::Thickness{8, 6, 8, 6});
-                card.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
-                card.Background(media::SolidColorBrush(ColorOf(win, IsDark(host), Paint("text.primary"), 0.04)));
+                controls::Grid item;
+                item.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+                item.RenderTransform(media::TranslateTransform{});
+                controls::RowDefinition lineRow, bodyRow;
+                lineRow.Height(xaml::GridLength{1, xaml::GridUnitType::Auto});
+                bodyRow.Height(xaml::GridLength{1, xaml::GridUnitType::Auto});
+                item.RowDefinitions().Append(lineRow);
+                item.RowDefinitions().Append(bodyRow);
+                if (i > 0) {
+                    controls::Border line;
+                    line.Height(1);
+                    line.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+                    if (auto style = Styles::Themed(L"Border", {{L"Background", Keys::Divider}})) line.Style(style);
+                    item.Children().Append(line);
+                }
 
                 controls::Grid grid;
-                controls::ColumnDefinition c0, c1, c2;
-                c0.Width(xaml::GridLength{26, xaml::GridUnitType::Pixel});
+                controls::Grid::SetRow(grid, 1);
+                controls::ColumnDefinition c0, c1;
+                c0.Width(xaml::GridLength{1, xaml::GridUnitType::Auto});
                 c1.Width(xaml::GridLength{1, xaml::GridUnitType::Star});
-                c2.Width(xaml::GridLength{1, xaml::GridUnitType::Auto});
                 grid.ColumnDefinitions().Append(c0);
                 grid.ColumnDefinitions().Append(c1);
-                grid.ColumnDefinitions().Append(c2);
 
-                auto grip = Icons::Icon("line.3.horizontal", 13);
-                grip.HorizontalAlignment(xaml::HorizontalAlignment::Center);
-                grip.VerticalAlignment(xaml::VerticalAlignment::Center);
+                // The grip: focusable for keyboard reordering (Up/Down) and
+                // pointer-capturing for drag reordering.
+                controls::Button grip;
+                Styles::MakeSubtle(grip);
+                grip.MinWidth(0);
+                grip.MinHeight(0);
+                grip.Padding(xaml::Thickness{12, 4, 8, 4});
+                grip.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+                auto glyph = Icons::Icon("line.2.horizontal", 14);
+                glyph.VerticalAlignment(xaml::VerticalAlignment::Center);
+                if (auto style = Styles::Themed(L"IconElement", {{L"Foreground", Keys::SecondaryText}})) glyph.Style(style);
+                grip.Content(glyph);
+                xaml::Automation::AutomationProperties::SetName(grip, L"Reorder");
                 controls::Grid::SetColumn(grip, 0);
                 grid.Children().Append(grip);
 
-                controls::StackPanel contentBox;
-                contentBox.Orientation(controls::Orientation::Horizontal);
+                // A flex row, so a `Spacer` in the row pushes what follows it to
+                // the far end of the row, as in any other `Row`.
+                auto contentBox = MakeFlex(true, 6);
                 contentBox.VerticalAlignment(xaml::VerticalAlignment::Center);
-                contentBox.Spacing(6);
+                contentBox.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
                 controls::Grid::SetColumn(contentBox, 1);
                 auto scope = std::make_unique<Scope>();
                 Value itemVal = list[i];
@@ -7020,29 +7475,115 @@ inline void Reorderable(Parent const& p, Ctx const& ctx, ReorderableProps props,
                 scope->Run([&] { row(Parent::Of(contentBox), rowCtx); });
                 rowScopes->push_back(std::move(scope));
                 grid.Children().Append(contentBox);
+                item.Children().Append(grid);
 
-                controls::StackPanel btns;
-                btns.Orientation(controls::Orientation::Horizontal);
-                btns.Spacing(2);
-                controls::Button upBtn, downBtn;
-                Styles::MakeSubtle(upBtn);
-                Styles::MakeSubtle(downBtn);
-                upBtn.Width(26); upBtn.Height(26); upBtn.Padding(xaml::Thickness{0, 0, 0, 0});
-                downBtn.Width(26); downBtn.Height(26); downBtn.Padding(xaml::Thickness{0, 0, 0, 0});
-                upBtn.Content(Icons::Icon("chevron.up", 11));
-                downBtn.Content(Icons::Icon("chevron.down", 11));
-                upBtn.IsEnabled(i > 0);
-                downBtn.IsEnabled(i + 1 < total);
+                struct Drag {
+                    bool on = false;
+                    double start = 0;
+                    int64_t target = 0;
+                };
+                auto drag = std::make_shared<Drag>();
                 int64_t idx = static_cast<int64_t>(i);
-                upBtn.Click([commitMove, idx](auto&&, auto&&) { commitMove(idx, idx - 1); });
-                downBtn.Click([commitMove, idx](auto&&, auto&&) { commitMove(idx, idx + 1); });
-                btns.Children().Append(upBtn);
-                btns.Children().Append(downBtn);
-                controls::Grid::SetColumn(btns, 2);
-                grid.Children().Append(btns);
+                drag->target = idx;
+                auto weakHolders = std::weak_ptr<std::vector<controls::Grid>>(holders);
+                auto weakHost = winrt::make_weak(host);
+                auto weakItem = winrt::make_weak(item);
+                // Keyboard reordering when the grip has focus.
+                grip.KeyDown([commitMove, idx, total](auto&&, xaml::Input::KeyRoutedEventArgs const& args) {
+                    if (args.Key() == winrt::Windows::System::VirtualKey::Up && idx > 0) {
+                        args.Handled(true);
+                        Host::Post([commitMove, idx] { commitMove(idx, idx - 1); });
+                    } else if (args.Key() == winrt::Windows::System::VirtualKey::Down && idx + 1 < static_cast<int64_t>(total)) {
+                        args.Handled(true);
+                        Host::Post([commitMove, idx] { commitMove(idx, idx + 1); });
+                    }
+                });
+                // Where the dragged row lands for the pointer at `y`; handles
+                // rows of varying height by summing real row heights.
+                auto follow = [weakHolders, idx, drag](double y) {
+                    auto holders = weakHolders.lock();
+                    if (!holders || idx >= static_cast<int64_t>(holders->size())) return;
+                    int64_t count = static_cast<int64_t>(holders->size());
+                    double draggedH = (std::max)(1.0, (*holders)[idx].ActualHeight());
+                    double dy = y - drag->start;
+                    double minDy = 0, maxDy = 0;
+                    for (int64_t j = 0; j < idx; ++j) minDy -= (std::max)(1.0, (*holders)[j].ActualHeight());
+                    for (int64_t j = idx + 1; j < count; ++j) maxDy += (std::max)(1.0, (*holders)[j].ActualHeight());
+                    double clampedDy = std::clamp(dy, minDy, maxDy);
+                    int64_t target = idx;
+                    if (clampedDy > 0) {
+                        double acc = 0;
+                        for (int64_t j = idx + 1; j < count; ++j) {
+                            double h = (std::max)(1.0, (*holders)[j].ActualHeight());
+                            if (clampedDy >= acc + h / 2.0) target = j;
+                            acc += h;
+                        }
+                    } else if (clampedDy < 0) {
+                        double acc = 0;
+                        for (int64_t j = idx - 1; j >= 0; --j) {
+                            double h = (std::max)(1.0, (*holders)[j].ActualHeight());
+                            if (-clampedDy >= acc + h / 2.0) target = j;
+                            acc += h;
+                        }
+                    }
+                    drag->target = target;
+                    for (int64_t j = 0; j < count; ++j) {
+                        auto move = (*holders)[j].RenderTransform().as<media::TranslateTransform>();
+                        if (j == idx) move.Y(clampedDy);
+                        else if (idx < j && j <= target) move.Y(-draggedH);
+                        else if (target <= j && j < idx) move.Y(draggedH);
+                        else move.Y(0);
+                    }
+                };
+                auto settle = [weakHolders, idx, drag, commitMove](bool commit) {
+                    if (!drag->on) return;
+                    drag->on = false;
+                    if (auto holders = weakHolders.lock()) {
+                        for (auto const& holder : *holders) {
+                            holder.RenderTransform().as<media::TranslateTransform>().Y(0);
+                            controls::Canvas::SetZIndex(holder, 0);
+                        }
+                    }
+                    auto target = drag->target;
+                    drag->target = idx;
+                    // The move builds the rows again: not inside the
+                    // grip's own pointer event.
+                    if (commit && target != idx) Host::Post([commitMove, idx, target] { commitMove(idx, target); });
+                };
+                grip.AddHandler(xaml::UIElement::PointerPressedEvent(),
+                    winrt::box_value(xaml::Input::PointerEventHandler([drag, weakItem, weakHost](IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args) {
+                        auto host = weakHost.get();
+                        auto item = weakItem.get();
+                        if (!host || !item) return;
+                        auto point = args.GetCurrentPoint(host);
+                        if (args.Pointer().PointerDeviceType() == PointerKind::Mouse && !point.Properties().IsLeftButtonPressed()) return;
+                        auto grip = sender.as<xaml::UIElement>();
+                        if (!grip.CapturePointer(args.Pointer())) return;
+                        drag->on = true;
+                        drag->start = point.Position().Y;
+                        controls::Canvas::SetZIndex(item, 1);
+                        args.Handled(true);
+                    })),
+                    true);
+                grip.AddHandler(xaml::UIElement::PointerMovedEvent(),
+                    winrt::box_value(xaml::Input::PointerEventHandler([drag, follow, weakHost](auto&&, xaml::Input::PointerRoutedEventArgs const& args) {
+                        if (!drag->on) return;
+                        if (auto host = weakHost.get()) follow(args.GetCurrentPoint(host).Position().Y);
+                        args.Handled(true);
+                    })),
+                    true);
+                grip.AddHandler(xaml::UIElement::PointerReleasedEvent(),
+                    winrt::box_value(xaml::Input::PointerEventHandler([settle](IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args) {
+                        args.Handled(true);
+                        sender.as<xaml::UIElement>().ReleasePointerCapture(args.Pointer());
+                        settle(true);
+                    })),
+                    true);
+                grip.PointerCaptureLost([settle](auto&&, auto&&) { settle(false); });
+                grip.PointerCanceled([settle](auto&&, auto&&) { settle(false); });
 
-                card.Child(grid);
-                host.Children().Append(card);
+                host.Children().Append(item);
+                holders->push_back(item);
             }
             return 0;
         });

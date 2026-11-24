@@ -274,8 +274,16 @@ impl Generator<'_> {
         out.line("theme: bernNativeTheme");
         out.close(")");
         out.close("}");
-        if element.prop("width").is_none() {
-            out.line(".frame(maxWidth: .infinity, alignment: .leading)");
+        match (
+            element.prop("width").is_none(),
+            ctx.in_stack && element.prop("height").is_none(),
+        ) {
+            (true, true) => {
+                out.line(".frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)")
+            }
+            (true, false) => out.line(".frame(maxWidth: .infinity, alignment: .leading)"),
+            (false, true) => out.line(".frame(maxHeight: .infinity, alignment: .leading)"),
+            (false, false) => {}
         }
 
         // Register every declared Bern entry in `BernControls` via non-visual

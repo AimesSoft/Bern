@@ -6,10 +6,53 @@
 //! table, and its check rejects the names it lacks;
 //! `image-missing-symbolic` is only a last resort.
 
+use std::cell::RefCell;
+
 const ICONS: &[(&str, &str)] = include!("icon_table.rs");
 
-/// The theme icon of a Bern icon name.
+thread_local! {
+    /// Registered application `.svg` icons: `(bern_name, theme_symbolic_name)`.
+    static APP_ICONS: RefCell<Vec<(&'static str, &'static str)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Register application `.svg` icons into a per-build symbolic icon directory
+/// added to GTK's icon theme search path so every widget tints them natively.
+pub(crate) fn install(
+    app_id: &str,
+    fingerprint: u64,
+    icons: &'static [(&'static str, &'static str)],
+) {
+    if icons.is_empty() {
+        return;
+    }
+    let dir = gtk::glib::user_cache_dir()
+        .join("bern-icons")
+        .join(format!("{app_id}-{fingerprint:016x}"));
+    let _ = std::fs::create_dir_all(&dir);
+    let mut mapped = Vec::with_capacity(icons.len());
+    for (index, (bern_name, svg)) in icons.iter().enumerate() {
+        let theme_name: &'static str =
+            Box::leak(format!("bern-app-icon-{index}-symbolic").into_boxed_str());
+        let file = dir.join(format!("{theme_name}.svg"));
+        let _ = std::fs::write(&file, svg.as_bytes());
+        mapped.push((*bern_name, theme_name));
+    }
+    APP_ICONS.with(|cell| *cell.borrow_mut() = mapped);
+    if let Some(display) = gtk::gdk::Display::default() {
+        gtk::IconTheme::for_display(&display).add_search_path(&dir);
+    }
+}
+
+/// The theme icon of a Bern icon name or registered application `.svg` icon.
 pub(crate) fn name(icon: &str) -> &'static str {
+    if let Some(theme) = APP_ICONS.with(|cell| {
+        cell.borrow()
+            .iter()
+            .find(|(bern, _)| *bern == icon)
+            .map(|(_, theme)| *theme)
+    }) {
+        return theme;
+    }
     ICONS
         .iter()
         .find(|(bern, _)| *bern == icon)

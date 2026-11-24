@@ -37,13 +37,20 @@ pub fn backend_extensions(backend: &str) -> &'static [&'static str] {
     }
 }
 
-/// Supported scalar types for `NativeValue(value:)` bindings.
+/// Supported types for `NativeValue(value:)` bindings: scalars, optional
+/// numbers and texts, and lists of scalars (see [`is_native_list_type`]).
 pub fn is_native_scalar_type(ty: &Type) -> bool {
     match ty {
         Type::Bool | Type::Int | Type::Float | Type::Text => true,
         Type::Optional { inner } => matches!(**inner, Type::Int | Type::Float | Type::Text),
-        _ => false,
+        _ => is_native_list_type(ty),
     }
+}
+
+/// `Vec<bool>`, `Vec<i64>`, `Vec<f64>` or `Vec<String>`: a list a
+/// `NativeValue` passes to targets with `native_lists`.
+pub fn is_native_list_type(ty: &Type) -> bool {
+    matches!(ty, Type::List { inner } if matches!(**inner, Type::Bool | Type::Int | Type::Float | Type::Text))
 }
 
 /// Supported session field types for `NativeDraft(value:)` bindings.

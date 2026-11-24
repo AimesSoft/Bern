@@ -92,6 +92,18 @@ impl Generator<'_> {
         } else {
             ""
         };
+        if let Some(hold) = self.field(element, "hold") {
+            if !matches!(self.platform, Platform::Tvos | Platform::Watchos)
+                && let Some(shortcut) = self.keyboard(element, "key")
+            {
+                let after = double(element.number("hold_after").unwrap_or(0.3));
+                out.line(format!(
+                    "BernHoldKeyShortcut(shortcut: {shortcut}, enabled: {enabled}{quiet}, hold: {}, holdAfter: {after}) {{ {action} }}",
+                    self.binding_of(&hold)
+                ));
+            }
+            return;
+        }
         if let Some(source) = source {
             out.line(format!(
                 "BernKeyShortcut({source}, enabled: {enabled}{quiet}) {{ {action} }}"
@@ -186,6 +198,15 @@ impl Generator<'_> {
                         .unwrap_or_else(|| "true".into());
                     out.line(format!("BernIconGlyph(name: {}, progress: {progress}, badge: {badge}, badgeVisible: {visible})", string(icon)));
                     out.line(format!(".accessibilityElement(children: .ignore).accessibilityLabel(SwiftUI.Text(verbatim: {label}))"));
+                } else if Self::uses_custom_icon(icon) {
+                    let size = element
+                        .number("font_size")
+                        .map(|s| format!(", size: {}", double(s)))
+                        .unwrap_or_default();
+                    out.line(format!("BernIcon(name: {}{size})", string(icon)));
+                    out.line(format!(
+                        ".accessibilityLabel(SwiftUI.Text(verbatim: {label}))"
+                    ));
                 } else {
                     out.line(format!(
                         "SwiftUI.Label({label}, systemImage: {})",
@@ -210,13 +231,26 @@ impl Generator<'_> {
                     .number("height")
                     .is_some_and(|height| height <= 30.0);
                 out.open("SwiftUI.HStack(spacing: 6) {");
-                out.line(format!(
-                    "SwiftUI.Image(systemName: {}).frame(width: {box}, height: {box}).accessibilityHidden(true)",
-                    string(icon),
-                    box = if chip { "14" } else { "16" }
-                ));
+                let box_sz = if chip { "14" } else { "16" };
+                if Self::uses_custom_icon(icon) {
+                    out.line(format!(
+                        "BernIcon(name: {}, size: {box_sz}).frame(width: {box_sz}, height: {box_sz}).accessibilityHidden(true)",
+                        string(icon)
+                    ));
+                } else {
+                    out.line(format!(
+                        "SwiftUI.Image(systemName: {}).frame(width: {box_sz}, height: {box_sz}).accessibilityHidden(true)",
+                        string(icon),
+                    ));
+                }
                 out.line(format!("SwiftUI.Text(verbatim: {label})"));
                 out.close("}");
+            }
+            (_, Some(icon)) if Self::uses_custom_icon(icon) => {
+                out.line(format!(
+                    "BernIconLabel(title: {label}, icon: {})",
+                    string(icon)
+                ));
             }
             (_, Some(icon)) => {
                 out.line(format!(
@@ -472,8 +506,12 @@ impl Generator<'_> {
             .number("font_size")
             .map(|size| format!(", iconSize: {}", double(size)))
             .unwrap_or_default();
+        let placement = element
+            .keyword("placement")
+            .map(|where_| format!(", placement: {}", string(where_)))
+            .unwrap_or_default();
         out.open(format!(
-            "BernPopoverButton(label: {label}, systemImage: {icon}, presented: {presented}, target: {}, windowTheme: {window_theme}, style: {style}{icon_size}) {{",
+            "BernPopoverButton(label: {label}, systemImage: {icon}, presented: {presented}, target: {}, windowTheme: {window_theme}, style: {style}{icon_size}{placement}) {{",
             self.target(element, ctx)
         ));
         self.nodes(out, &element.children, ctx);
@@ -787,6 +825,13 @@ impl Generator<'_> {
     }
 
     pub(super) fn slider(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let vertical = element.keyword("axis") == Some("vertical");
+        let icon_arg = |name: &str| {
+            element
+                .icon(name)
+                .map(string)
+                .unwrap_or_else(|| "nil".into())
+        };
         if let Some(current) = element.expr("current") {
             let (value, _, commit) = self.control_value(element, "current");
             // The slider shows a whole number as a `Double`.
@@ -796,7 +841,20 @@ impl Generator<'_> {
                 value
             };
             let label = self.text_prop(element, "label").unwrap_or_default();
-            out.line(format!("BernControlledSlider(value: {value}, minimum: {}, maximum: {}, step: {}, label: {label}, labelHidden: {}, continuous: {}, commit: {commit})", double(element.number("min").unwrap_or(0.0)), double(element.number("max").unwrap_or(1.0)), element.number("step").map(double).unwrap_or_else(|| "nil".into()), element.keyword("label_hidden") == Some("true"), element.keyword("continuous") == Some("true")));
+            if vertical {
+                out.line(format!(
+                    "BernControlledVerticalSlider(value: {value}, minimum: {}, maximum: {}, step: {}, label: {label}, labelHidden: {}, continuous: {}, minimumIcon: {}, maximumIcon: {}, commit: {commit})",
+                    double(element.number("min").unwrap_or(0.0)),
+                    double(element.number("max").unwrap_or(1.0)),
+                    element.number("step").map(double).unwrap_or_else(|| "nil".into()),
+                    element.keyword("label_hidden") == Some("true"),
+                    element.keyword("continuous") == Some("true"),
+                    icon_arg("min_icon"),
+                    icon_arg("max_icon"),
+                ));
+            } else {
+                out.line(format!("BernControlledSlider(value: {value}, minimum: {}, maximum: {}, step: {}, label: {label}, labelHidden: {}, continuous: {}, commit: {commit})", double(element.number("min").unwrap_or(0.0)), double(element.number("max").unwrap_or(1.0)), element.number("step").map(double).unwrap_or_else(|| "nil".into()), element.keyword("label_hidden") == Some("true"), element.keyword("continuous") == Some("true")));
+            }
             self.slider_hover(out, element);
             out.line(format!(".bernControl({}, role: \"slider\", label: {label}, actions: BernControlActions(setNumber: {commit}, value: {{ BernText.text({value}) }}))", self.target(element, ctx)));
             return;
@@ -810,6 +868,31 @@ impl Generator<'_> {
             .map(|step| format!(", step: {}", double(step)))
             .unwrap_or_default();
         let action = element.action.as_ref().map(|a| self.action(a));
+        if vertical && self.platform != Platform::Tvos {
+            out.open(format!(
+                "BernVerticalSlider(value: {}, minimum: {min}, maximum: {max}, step: {}, label: {label}, labelHidden: {}, minimumIcon: {}, maximumIcon: {}, onEditingChanged: {{ editing in",
+                self.binding_of(&field),
+                element.number("step").map(double).unwrap_or_else(|| "nil".into()),
+                element.keyword("label_hidden") == Some("true"),
+                icon_arg("min_icon"),
+                icon_arg("max_icon"),
+            ));
+            match &action {
+                Some(action) => out.line(format!("if !editing {{ {action} }}")),
+                None => out.line("_ = editing"),
+            }
+            out.close("})");
+            out.line(".bernAccentTint()");
+            self.slider_hover(out, element);
+            let commit = action
+                .map(|action| format!("; {action}"))
+                .unwrap_or_default();
+            out.line(format!(
+                ".bernControl({}, role: \"slider\", label: {label}, actions: BernControlActions(setNumber: {{ value in {field} = value{commit} }}, value: {{ BernText.text({field}) }}))",
+                self.target(element, ctx)
+            ));
+            return;
+        }
         // tvOS has no slider: the remote's left and right move a focused
         // track by its step.
         if self.platform == Platform::Tvos {
@@ -861,12 +944,18 @@ impl Generator<'_> {
             out.close("} minimumValueLabel: {");
             out.indent += 1;
             match min_icon {
+                Some(icon) if Self::uses_custom_icon(icon) => {
+                    out.line(format!("BernIcon(name: {})", string(icon)))
+                }
                 Some(icon) => out.line(format!("SwiftUI.Image(systemName: {})", string(icon))),
                 None => out.line("SwiftUI.EmptyView()"),
             }
             out.close("} maximumValueLabel: {");
             out.indent += 1;
             match max_icon {
+                Some(icon) if Self::uses_custom_icon(icon) => {
+                    out.line(format!("BernIcon(name: {})", string(icon)))
+                }
                 Some(icon) => out.line(format!("SwiftUI.Image(systemName: {})", string(icon))),
                 None => out.line("SwiftUI.EmptyView()"),
             }
@@ -897,7 +986,14 @@ impl Generator<'_> {
             return;
         }
         if let Some(hover) = self.field(element, "hover") {
-            out.line(format!(".bernSliderHover({})", self.binding_of(&hover)));
+            if element.keyword("axis") == Some("vertical") {
+                out.line(format!(
+                    ".bernSliderHover({}, vertical: true)",
+                    self.binding_of(&hover)
+                ));
+            } else {
+                out.line(format!(".bernSliderHover({})", self.binding_of(&hover)));
+            }
         }
     }
 
@@ -957,9 +1053,17 @@ impl Generator<'_> {
 
     pub(super) fn tooltip(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         let content = self.text_prop(element, "content").unwrap_or_default();
+        let keys = match element.prop("keys") {
+            Some(Prop::Keyword { value }) => Some(string(value)),
+            Some(Prop::Expr { expr }) => Some(self.expr(expr)),
+            _ => None,
+        };
         if let Some(child) = element.children.first() {
             self.node(out, child, ctx);
-            out.line(format!(".bernTooltip({content})"));
+            match keys {
+                Some(keys) => out.line(format!(".bernTooltip({content}, keys: {keys})")),
+                None => out.line(format!(".bernTooltip({content})")),
+            }
         }
     }
 
@@ -1350,7 +1454,16 @@ impl Generator<'_> {
             "BernReorderable(target: {}, label: {label}, items: {items}, keyOf: {{ $0.{key_prop} }}, onMove: {{ fromIndex, toIndex in {from_field} = fromIndex; {to_field} = toIndex; {act} }}) {{ {var} in",
             self.target(element, ctx)
         ));
-        self.nodes(out, &element.children, ctx);
+        out.open("SwiftUI.HStack(spacing: 6) {");
+        self.nodes(
+            out,
+            &element.children,
+            &Ctx {
+                row: true,
+                ..ctx.clone()
+            },
+        );
+        out.close("}");
         out.close("}");
     }
 
@@ -1539,7 +1652,8 @@ impl Generator<'_> {
             && menu
             && element.keyword("shape") != Some("capsule")
             && element.keyword("label_hidden") != Some("true");
-        let capsule = row || element.keyword("shape") == Some("capsule");
+        let segmented = element.keyword("style") == Some("segmented");
+        let capsule = row || (element.keyword("shape") == Some("capsule") && !segmented);
         if row {
             if self.platform == Platform::Ios {
                 out.open("SwiftUI.LabeledContent {");
@@ -1762,7 +1876,8 @@ impl Generator<'_> {
             && menu
             && element.keyword("shape") != Some("capsule")
             && element.keyword("label_hidden") != Some("true");
-        let capsule = row || element.keyword("shape") == Some("capsule");
+        let segmented = element.keyword("style") == Some("segmented");
+        let capsule = row || (element.keyword("shape") == Some("capsule") && !segmented);
         if row {
             if self.platform == Platform::Ios {
                 out.open("SwiftUI.LabeledContent {");
@@ -1860,7 +1975,7 @@ impl Generator<'_> {
         let label = self.text_prop(element, "label").unwrap_or_default();
         if self.platform == Platform::Watchos {
             out.line(format!(
-                "BernWatchPicker(selection: SwiftUI.Binding(get: {{ BernLanguage.shared.current }}, set: {{ BernLanguage.shared.select($0) }}), label: {label}, options: BernLanguage.shared.supported.map {{ (BernLanguage.autonym($0), $0) }}, labelHidden: {})",
+                "BernWatchPicker(selection: SwiftUI.Binding(get: {{ BernLanguage.shared.selection }}, set: {{ BernLanguage.shared.select($0) }}), label: {label}, options: [(BernText.string(\"bern.language.system\"), \"system\")] + BernLanguage.shared.supported.map {{ (BernLanguage.autonym($0), $0) }}, labelHidden: {})",
                 element.keyword("label_hidden") == Some("true")
             ));
             out.line(format!(
@@ -1870,7 +1985,10 @@ impl Generator<'_> {
             return;
         }
         out.open(
-            "SwiftUI.Picker(selection: SwiftUI.Binding(get: { BernLanguage.shared.current }, set: { BernLanguage.shared.select($0) })) {",
+            "SwiftUI.Picker(selection: SwiftUI.Binding(get: { BernLanguage.shared.selection }, set: { BernLanguage.shared.select($0) })) {",
+        );
+        out.line(
+            "SwiftUI.Text(verbatim: BernText.string(\"bern.language.system\")).tag(\"system\")",
         );
         out.open("SwiftUI.ForEach(BernLanguage.shared.supported, id: \\.self) { language in");
         out.line("SwiftUI.Text(verbatim: BernLanguage.autonym(language)).tag(language)");

@@ -502,7 +502,8 @@ pub(crate) fn eject_windows(
     let product = product_name(app);
     let exe = executable(app);
     let frontends = Frontends::of(&context.target.frontends);
-    let generator = Generator::with_project_dir(app, &context.project_dir);
+    let generator = Generator::with_project_dir(app, &context.project_dir)
+        .with_app_icons(crate::app_icon_paths(app, context)?);
     let svg = bern_target_api::svg::svg_used(app);
     let webpage = bern_target_api::svg::webpage_used(app);
 

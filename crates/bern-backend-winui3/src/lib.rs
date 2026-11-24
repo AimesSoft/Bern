@@ -166,6 +166,14 @@ const FEATURES: &[&str] = &[
     bern_target_api::feature::PAGE_BADGES,
     bern_target_api::feature::IDLE_CONTROL,
     bern_target_api::feature::QUIET_SHORTCUTS,
+    bern_target_api::feature::APP_ICONS,
+    bern_target_api::feature::POPUP_PLACEMENT,
+    bern_target_api::feature::SWITCH_KNOB,
+    bern_target_api::feature::BOLD_MENUS,
+    bern_target_api::feature::TOOLTIP_KEYS,
+    bern_target_api::feature::VERTICAL_SLIDERS,
+    bern_target_api::feature::HOLD_SHORTCUTS,
+    bern_target_api::feature::NATIVE_LISTS,
     bern_target_api::feature::FILL_BUTTONS,
     bern_target_api::feature::GRID_CELLS,
     bern_target_api::feature::PAGE_SEARCH,
@@ -268,6 +276,23 @@ fn status_icos(
         })
     })
     .collect()
+}
+
+/// The application's own `.svg` icons, each as one filled outline in the
+/// 20-unit square `PathIcon` draws the Fluent artwork in.
+pub(crate) fn app_icon_paths(
+    app: &Application,
+    context: &BuildContext,
+) -> Result<Vec<(String, String)>, Vec<Diagnostic>> {
+    bern_target_api::app_icon::used(app)
+        .into_iter()
+        .map(|name| {
+            let path = bern_target_api::svg::resource_path(context, &name);
+            bern_target_api::app_icon::outline(&path)
+                .map(|data| (name.clone(), data))
+                .map_err(|message| vec![Diagnostic::error(format!("icon `{name}`: {message}"))])
+        })
+        .collect()
 }
 
 /// The file of the alternate icon `name` beside the executable.
@@ -415,7 +440,8 @@ impl Target for WinUi3Windows {
                 contents,
             });
         }
-        let generator = Generator::with_project_dir(app, &context.project_dir);
+        let generator = Generator::with_project_dir(app, &context.project_dir)
+            .with_app_icons(app_icon_paths(app, context)?);
         let svg = bern_target_api::svg::svg_used(app);
         let webpage = bern_target_api::svg::webpage_used(app);
         let svg_identity = format!(

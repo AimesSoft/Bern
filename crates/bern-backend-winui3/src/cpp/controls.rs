@@ -263,6 +263,7 @@ impl Generator<'_> {
                 (element.keyword("label_hidden") == Some("true")).then(|| "true".to_string()),
             ),
             ("shape", self.shape(element)),
+            ("look", self.style("Switch", element.keyword("variant"))),
         ]);
         out.line(format!("B::Switch(p, c, {});", designated(&fields)));
         self.shortcut(out, element, "activate");
@@ -303,6 +304,10 @@ impl Generator<'_> {
                 (element.keyword("label_hidden") == Some("true")).then(|| "true".to_string()),
             ),
             ("hover", self.field(element, "hover")),
+            (
+                "vertical",
+                (element.keyword("axis") == Some("vertical")).then(|| "true".to_string()),
+            ),
         ]);
         out.line(format!("B::Slider(p, c, {});", designated(&fields)));
     }
@@ -336,10 +341,16 @@ impl Generator<'_> {
     }
 
     pub(super) fn tooltip(&self, out: &mut Out, element: &Element) {
-        let content = null(self.text_prop(element, "content"));
+        let props = designated(&[
+            ("content", self.text_prop(element, "content")),
+            ("keys", Self::keyword(element, "keys")),
+            ("boundKeys", self.shortcut_keys(element, "keys")),
+            ("placement", Self::keyword(element, "placement")),
+        ])
+        .replacen('{', "B::TooltipProps{", 1);
         self.call(
             out,
-            &format!("B::Tooltip(p, c, {content}, "),
+            &format!("B::Tooltip(p, c, {props}, "),
             &element.children,
         );
     }
@@ -793,6 +804,7 @@ impl Generator<'_> {
         ));
         fields.push(("iconSize", Self::number(element, "font_size")));
         fields.push(("shape", self.shape(element)));
+        fields.push(("placement", Self::keyword(element, "placement")));
         self.call(
             out,
             &format!("B::PopoverButton(p, c, {}, ", designated(&fields)),
@@ -836,6 +848,11 @@ impl Generator<'_> {
                 (
                     "hideDisabled",
                     (element.keyword("hide_disabled") == Some("true")).then(|| "true".into()),
+                ),
+                ("placement", Self::keyword(element, "placement")),
+                (
+                    "bold",
+                    (element.keyword("bold") == Some("true")).then(|| "true".into()),
                 ),
             ])
             .replacen('{', "B::MenuLook{", 1),

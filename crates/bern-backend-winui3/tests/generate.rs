@@ -660,6 +660,221 @@ fn a_scroll_position_is_written_after_layout() {
     }
 }
 
+/// A small application written here: `ui` is the interface source of the
+/// root component `app` (client `inline_app::Client`), `toml` is added to
+/// `Bern.toml`, `files` are written beside it. Checked for Windows, the
+/// problems other than notes returned with the generated files.
+fn generate_inline(
+    name: &str,
+    ui: &str,
+    toml: &str,
+    files: &[(&str, &str)],
+) -> (
+    Vec<bern_target_api::Diagnostic>,
+    Vec<bern_target_api::GeneratedFile>,
+) {
+    let protocol = r#"
+#[bern::protocol(namespace = "inline_app", version = 1)]
+pub mod inline_app {
+    use bern::prelude::*;
+
+    #[state]
+    pub struct State {
+        pub count: i64,
+        pub level: f64,
+        pub fast: bool,
+    }
+
+    #[commands]
+    pub trait Commands {
+        fn bump(&mut self) -> Result<(), CommandError>;
+        fn set_level(&mut self, level: f64) -> Result<(), CommandError>;
+        fn set_fast(&mut self, fast: bool) -> Result<(), CommandError>;
+    }
+}
+"#;
+    let root = workspace();
+    let dir = root.join(format!("target/bern-test/winui3-{name}-src"));
+    let out_dir = root.join(format!("target/bern-test/winui3-{name}"));
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&out_dir);
+    for (package, source) in [
+        ("inline-app-protocol", protocol),
+        ("inline-app-ui", ui),
+        ("inline-app-core", ""),
+    ] {
+        std::fs::create_dir_all(dir.join(package).join("src")).unwrap();
+        std::fs::write(
+            dir.join(package).join("Cargo.toml"),
+            format!("[package]\nname = \"{package}\"\n"),
+        )
+        .unwrap();
+        std::fs::write(dir.join(package).join("src/lib.rs"), source).unwrap();
+    }
+    for (file, contents) in files {
+        let path = dir.join(file);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, contents).unwrap();
+    }
+    std::fs::write(
+        dir.join("Bern.toml"),
+        format!("[app]\nid = \"inline_app\"\nbundle_id = \"dev.bern.inlineapp\"\nversion = \"0.1.0\"\nname = {{ \"en\" = \"Inline\" }}\n[languages]\nsupported = [\"en\"]\ndefault = \"en\"\n[protocol]\npackage = \"inline-app-protocol\"\nsource = \"inline-app-protocol/src/lib.rs\"\n[engine]\npackage = \"inline-app-core\"\ntype = \"inline_app_core::Engine\"\n[ui]\npackage = \"inline-app-ui\"\nsources = [\"inline-app-ui/src/lib.rs\"]\nroot = \"app\"\n[targets.windows]\nplatform = \"windows\"\n{toml}"),
+    )
+    .unwrap();
+    let config = bern_compiler::config::load(&dir.join("Bern.toml")).unwrap();
+    let compiled = bern_compiler::compile(&config).unwrap_or_else(|errors| {
+        panic!(
+            "{}",
+            errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    });
+    let target = windows_target(&config);
+    let problems: Vec<_> = WinUi3Windows
+        .check(&compiled.app, &target)
+        .into_iter()
+        .filter(|problem| problem.severity != bern_target_api::Severity::Note)
+        .collect();
+    let context = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: out_dir.clone(),
+        target,
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    let generated = WinUi3Windows.generate(&compiled.app, &context).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&out_dir);
+    (problems, generated)
+}
+
+fn generated_text<'a>(files: &'a [bern_target_api::GeneratedFile], path: &str) -> &'a str {
+    files
+        .iter()
+        .find(|file| file.path == Path::new(path))
+        .map(|file| std::str::from_utf8(&file.contents).unwrap())
+        .unwrap_or_else(|| panic!("no {path}"))
+}
+
+/// `icon: "play.svg"` names the application's own icon: its outline joins
+/// the Fluent paths in the icon catalog, so every control draws it.
+#[test]
+fn an_app_icon_is_outlined_into_the_icon_catalog() {
+    let ui = r#"
+use bern::prelude::*;
+use inline_app_protocol::inline_app;
+
+#[component]
+pub fn app(app: inline_app::Client, windows: AppWindows) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Icons" }, initial: open) {
+                Row {
+                    IconButton(id: play, icon: "icons/play.svg", label: tr! { "en" => "Play" }) => app.bump()
+                    PopoverButton(id: more, icon: "icons/play.svg", label: tr! { "en" => "More" }) {
+                        Text(content: tr! { "en" => "Inside" })
+                    }
+                }
+            }
+        }
+    }
+}
+"#;
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="3 3 18 18" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round"><path d="M8.5 6v12M15.5 6v12"/></svg>"##;
+    let (problems, files) = generate_inline(
+        "app-icon",
+        ui,
+        "[resources]\npaths = [\"icons/play.svg\"]\n",
+        &[("icons/play.svg", svg)],
+    );
+    assert!(problems.is_empty(), "{problems:?}");
+    let catalog = generated_text(&files, "app/app_catalog.cpp");
+    let line = catalog
+        .lines()
+        .find(|line| line.contains("if (name == \"icons/play.svg\") return L\"F1 M0,0 L20,20 Z M"))
+        .expect("the icon's outline is in the catalog");
+    assert_eq!(line.matches('Z').count(), 3, "{line}");
+}
+
+/// A menu that opens from a region with an appearance of its own (a
+/// player's dark bar) takes that appearance's text and material, as a
+/// context menu there does.
+#[test]
+fn a_menu_takes_the_appearance_of_its_region() {
+    let widgets = include_str!("../templates/cpp/bern_ui_widgets.inl");
+    let start = widgets
+        .find("inline void ThemeMenu(")
+        .expect("menus are themed in one place");
+    let theme = &widgets[start..];
+    assert!(theme.contains("RequestedThemeProperty()"));
+    assert!(theme.contains("ThemedAcrylicBackdrop>(dark)"));
+    assert!(theme.contains("flyout.ShouldConstrainToRootBounds(true);"));
+    assert!(!widgets.contains("PresenterTheme(L\"MenuFlyoutPresenter\", ctx.appearance)"));
+    let structure = include_str!("../templates/cpp/bern_ui_structure.inl");
+    assert!(structure.contains("ThemeMenu(flyout, ctx.appearance);"));
+}
+
+/// Regression checks for PR #173 fixes: bound `Tooltip(keys:)`, `HoldKeys`
+/// quiet/deactivation safety, `ClearImmersiveDrag` clearing `Caption`, and
+/// `Stack` recognizing `bern-native`.
+#[test]
+fn player_control_fixes_are_wired_in_winui3() {
+    let ui = r#"
+use bern::prelude::*;
+use inline_app_protocol::inline_app;
+
+#[session(id = "main")]
+pub struct Draft {
+    pub fast: bool,
+    pub key: String,
+}
+
+#[component]
+pub fn app(app: inline_app::Client, windows: AppWindows, #[session] draft: Draft) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Player" }, initial: open) {
+                Column {
+                    Shortcut(key: "right", hold: draft.fast, hold_after: 0.25, quiet: true) => app.bump()
+                    Tooltip(content: tr! { "en" => "Play" }, keys: draft.key, placement: above) {
+                        Button(id: play, label: tr! { "en" => "Play" }) => app.bump()
+                    }
+                }
+            }
+        }
+    }
+}
+"#;
+    let (problems, files) = generate_inline("player-fixes", ui, "", &[]);
+    assert!(problems.is_empty(), "{problems:?}");
+    let generated = generated_text(&files, "app/app_ui.inl");
+    assert!(generated.contains(".boundKeys ="), "{generated}");
+    assert!(generated.contains(".placement = \"above\""), "{generated}");
+    assert!(generated.contains(".hold ="), "{generated}");
+    assert!(generated.contains(".quiet = true"), "{generated}");
+
+    let windows = include_str!("../templates/cpp/bern_ui_windows.inl");
+    assert!(windows.contains("ClearRegionRects(NonClientRegionKind::Caption)"));
+    assert!(windows.contains("if (quiet->direct && quiet->key == args.Key()"));
+    assert!(windows.contains("QueueImmersiveDrag"));
+    assert!(windows.contains("win->onDeactivate"));
+
+    let widgets = include_str!("../templates/cpp/bern_ui_widgets.inl");
+    assert!(widgets.contains("r == L\"bern-native\""));
+    assert!(widgets.contains("WeightNamed(\"bold\")"));
+}
+
 /// A `quiet` shortcut's key is no input for `window.idle`: both the runtime
 /// template hooks, generated `.quiet = true` code, and target capability
 /// checking are verified end-to-end.

@@ -13,9 +13,9 @@ use crate::{Appearance, CloseCheck, Ctx, Failure, WindowDef, text, theme};
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyWindowHandle, App, AppContext, Bounds, Context, FontWeight, InteractiveElement, IntoElement,
-    KeyDownEvent, MouseButton, ParentElement, Render, StatefulInteractiveElement, Styled,
-    TitlebarOptions, WeakEntity, Window, WindowAppearance, WindowBounds, WindowOptions, div, point,
-    size,
+    KeyDownEvent, KeyUpEvent, MouseButton, ParentElement, Render, StatefulInteractiveElement,
+    Styled, TitlebarOptions, WeakEntity, Window, WindowAppearance, WindowBounds, WindowOptions,
+    div, point, size,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -684,6 +684,7 @@ impl Render for WindowView {
         crate::skeleton::begin(&self.win.id);
         crate::host::begin_openers(&self.win.id);
         self.win.bar_toolbar_built.set(false);
+        self.win.has_idle_areas.set(false);
         let content = (self.def.content)(&ctx.grown(crate::Grow::ALL));
         // A toolbar came into the title bar's row or left it: the bar
         // takes its height from the next frame on.
@@ -748,9 +749,28 @@ impl Render for WindowView {
                     }
                 }
             })
+            .on_key_up(|event: &KeyUpEvent, _, cx| {
+                crate::controls::key_up(&event.keystroke, cx);
+            })
+            .on_hover({
+                let win = Rc::clone(&self.win);
+                move |hovered, _, _| {
+                    let was_idle = win.idle();
+                    win.pointer_inside.set(*hovered);
+                    if !*hovered {
+                        win.hovered_idle_area.set(None);
+                        if !was_idle {
+                            win.last_input.set(std::time::Instant::now());
+                        }
+                    }
+                }
+            })
             .on_mouse_move({
                 let win = Rc::clone(&self.win);
-                move |_, _, _| woke(&win)
+                move |_, _, _| {
+                    win.pointer_inside.set(true);
+                    woke(&win)
+                }
             })
             .child(content)
             .children(title_bar)
@@ -1199,7 +1219,7 @@ fn open(kind: usize, def: &'static WindowDef, cx: &mut App) -> Result<String, Fa
                 loop {
                     cx.background_executor()
                         .timer(std::time::Duration::from_secs_f64(
-                            (after / 4.0).clamp(0.1, 1.0),
+                            (after / 4.0).clamp(0.1, 0.25),
                         ))
                         .await;
                     let Some(win) = watched.upgrade() else { break };
@@ -1219,13 +1239,15 @@ fn open(kind: usize, def: &'static WindowDef, cx: &mut App) -> Result<String, Fa
             // Colors follow the window's light or dark appearance.
             cx.observe_window_appearance(window, |_, _, cx| cx.notify())
                 .detach();
-            // A window coming to the front tries what the network failed
-            // and refreshes reported facts.
+            // A window coming to the front tries what the network failed,
+            // refreshes reported facts, and releases any held shortcut on blur.
             let act_win = Rc::clone(&win);
             cx.observe_window_activation(window, move |_, window, _| {
                 report_facts(&act_win, def, window, 1, false);
                 if window.is_window_active() {
                     crate::pictures::try_again();
+                } else {
+                    crate::controls::cancel_hold();
                 }
             })
             .detach();

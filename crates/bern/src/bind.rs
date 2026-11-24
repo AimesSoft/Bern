@@ -140,6 +140,11 @@ impl NativeScalar for String {}
 impl NativeScalar for Option<i64> {}
 impl NativeScalar for Option<f64> {}
 impl NativeScalar for Option<String> {}
+// Lists, for targets with `native_lists` (the compiler checks the target).
+impl NativeScalar for Vec<bool> {}
+impl NativeScalar for Vec<i64> {}
+impl NativeScalar for Vec<f64> {}
+impl NativeScalar for Vec<String> {}
 
 /// Writable session field types a `NativeView` can read and update via `NativeDraft`.
 pub trait NativeDraftValue {}

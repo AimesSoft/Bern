@@ -96,6 +96,8 @@ impl Generator<'_> {
                 format!("Number({expr})")
             } else if matches!(&val.expr.ty, Type::Optional { inner } if **inner == Type::Int) {
                 format!("((v) => v == null ? null : Number(v))({expr})")
+            } else if matches!(&val.expr.ty, Type::List { inner } if **inner == Type::Int) {
+                format!("({expr}).map(Number)")
             } else {
                 expr
             };
@@ -110,6 +112,8 @@ impl Generator<'_> {
             let cell = self.native_field_cell(draft.field);
             let read = if draft.field.ty == Type::Int {
                 format!("Number({cell}.get())")
+            } else if matches!(&draft.field.ty, Type::List { inner } if **inner == Type::Int) {
+                format!("{cell}.get().map(Number)")
             } else {
                 format!("{cell}.get()")
             };
@@ -151,6 +155,8 @@ impl Generator<'_> {
             let cell = self.native_field_cell(draft.field);
             let pack = if draft.field.ty == Type::Int {
                 "BigInt(Math.round(Number(v)))"
+            } else if matches!(&draft.field.ty, Type::List { inner } if **inner == Type::Int) {
+                "(v ?? []).map((n) => BigInt(Math.round(Number(n))))"
             } else {
                 "v"
             };

@@ -137,7 +137,7 @@ impl Checker<'_> {
                 self.error(
                     expr.span(),
                     format!(
-                        "`{prop_name}` accepts bool, i64, f64, String, or an optional of i64/f64/String, found {}",
+                        "`{prop_name}` accepts bool, i64, f64, String, an optional of i64/f64/String, or a Vec of bool/i64/f64/String, found {}",
                         lowered.ty.display()
                     ),
                 );
@@ -205,6 +205,15 @@ impl Checker<'_> {
                 value: Literal::Text(name),
                 span,
             } => {
+                // The application's own icon: a declared `.svg` resource,
+                // checked against `[resources]` with the other pictures.
+                if name.to_ascii_lowercase().ends_with(".svg") {
+                    if let Err(message) = bern_protocol::check_resource_name(name) {
+                        self.error(*span, message);
+                        return None;
+                    }
+                    return Some(ir::Prop::Icon { name: name.clone() });
+                }
                 if name.is_empty()
                     || !name
                         .chars()
@@ -212,7 +221,7 @@ impl Checker<'_> {
                 {
                     self.error(
                         *span,
-                        "icon names use the Bern icon set (SF Symbols naming), e.g. \"gearshape\"",
+                        "icon names use the Bern icon set (SF Symbols naming), e.g. \"gearshape\", or name a declared .svg resource",
                     );
                     return None;
                 }

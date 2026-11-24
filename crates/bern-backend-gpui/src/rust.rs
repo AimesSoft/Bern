@@ -263,6 +263,7 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "shape",
             "height",
             "icon",
+            "variant",
             "shortcut",
             "login_item",
         ],
@@ -312,6 +313,7 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "font_size",
             "shape",
             "height",
+            "placement",
             "shortcut",
         ],
     ),
@@ -528,6 +530,8 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "style",
             "shape",
             "height",
+            "bold",
+            "placement",
         ],
     ),
     (
@@ -582,13 +586,17 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "max_icon",
             "tint",
             "hover",
+            "axis",
         ],
     ),
     (
         "ColorPicker",
         &["id", "label", "label_hidden", "value", "current", "feature"],
     ),
-    ("Shortcut", &["key", "enabled", "quiet"]),
+    (
+        "Shortcut",
+        &["key", "enabled", "quiet", "hold", "hold_after"],
+    ),
     (
         "ShortcutInput",
         &[
@@ -623,7 +631,7 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
     ("SidebarFooter", &[]),
     ("Detail", &["titled"]),
     ("DetailFooter", &[]),
-    ("Tooltip", &["content"]),
+    ("Tooltip", &["content", "keys", "placement"]),
     (
         "Banner",
         &[
@@ -1401,6 +1409,24 @@ impl<'a> Generator<'a> {
     fn icon_table(&self) -> String {
         let mut entries = Vec::new();
         for (index, name) in self.icons.borrow().iter().enumerate() {
+            if bern_target_api::app_icon::is_app_icon(name) {
+                if let Some(dir) = self.project_dir {
+                    match bern_target_api::app_icon::outline(&dir.join(name)) {
+                        Ok(path) => {
+                            let document = bern_target_api::app_icon::svg_document(&path);
+                            entries.push(format!("    ({}, {}),", string(name), string(&document)));
+                        }
+                        Err(error) => {
+                            self.diagnostics
+                                .borrow_mut()
+                                .push(Diagnostic::error(format!(
+                                    "cannot outline icon `{name}`: {error}"
+                                )))
+                        }
+                    }
+                }
+                continue;
+            }
             match bern_backend_web::icons::svg(name) {
                 Some(markup) => {
                     let markup = markup.replace(
@@ -1868,9 +1894,11 @@ pub fn app() -> b::AppDef {{
                     StyleEffect::Foreground { color } => {
                         fields.push(format!("foreground: Some({})", color_expr(color)))
                     }
-                    StyleEffect::Border { color, .. } => {
-                        fields.push(format!("border: Some({})", color_expr(color)))
-                    }
+                    StyleEffect::Border { color, width } => fields.push(format!(
+                        "border: Some(({}, {}))",
+                        color_expr(color),
+                        float(*width)
+                    )),
                     StyleEffect::Corner { radius } => {
                         fields.push(format!("corner: Some({})", float(*radius)))
                     }
@@ -1952,7 +1980,14 @@ pub fn app() -> b::AppDef {{
     /// stable order: `surface` ones or `control` ones.
     fn styled(&self, family: &str) -> Vec<(String, Option<String>)> {
         let kinds: &[&str] = if family == "surface" {
-            &["Stack", "Form", "Sidebar", "Detail", "PopoverButton"]
+            &[
+                "Stack",
+                "Form",
+                "Sidebar",
+                "Detail",
+                "PopoverButton",
+                "Switch",
+            ]
         } else {
             &["Button", "IconButton", "SidebarItem"]
         };
@@ -2190,8 +2225,12 @@ pub fn app() -> b::AppDef {{
                 height: parent == Axis::Row,
             },
             "NativeView" => Greed {
-                width: parent == Axis::Column,
-                height: false,
+                width: parent == Axis::Column || self.layers.get(),
+                height: self.layers.get(),
+            },
+            "Slider" if element.keyword("axis") == Some("vertical") => Greed {
+                width: false,
+                height: true,
             },
             "TextInput" | "NumberInput" | "DatePicker" | "TimePicker" | "EmptyState" | "Banner"
             | "Disclosure" | "TreeView" | "Reorderable" | "Refreshable" | "Progress" | "Slider"
@@ -2870,6 +2909,13 @@ pub fn app() -> b::AppDef {{
         } else {
             code
         };
+        let code = match element.number("idle_area") {
+            Some(seconds) => format!(
+                "b::idle_area(c, {}, {seconds:?}, {code})",
+                string(&format!("{}#idle", element.path))
+            ),
+            None => code,
+        };
         let code = if leaving {
             self.left(element, code)
         } else {
@@ -2889,10 +2935,6 @@ pub fn app() -> b::AppDef {{
                 float(element.number("glow_opacity").unwrap_or(0.4)),
                 self.optional_length(element, "corner"),
             ),
-            None => code,
-        };
-        let code = match element.number("idle_area") {
-            Some(seconds) => format!("b::idle_area(c, {seconds:?}, {code})"),
             None => code,
         };
         let code = self.wrap_inspector(&element.children, code);
@@ -3830,7 +3872,7 @@ pub fn app() -> b::AppDef {{
                     self.model(element, "checked")?
                 };
                 format!(
-                    "b::switch(c, {}, {}, {model}, b::SwitchProps {{ style: b::SwitchStyle::{}, label_hidden: {}, icon: {}, shape: {}, height: {}, shortcut: {} }})",
+                    "b::switch(c, {}, {}, {model}, b::SwitchProps {{ style: b::SwitchStyle::{}, label_hidden: {}, icon: {}, shape: {}, height: {}, look: {}, shortcut: {} }})",
                     id(),
                     text("label"),
                     match element.keyword("style") {
@@ -3842,6 +3884,7 @@ pub fn app() -> b::AppDef {{
                     self.icon(element.icon("icon")),
                     shape(),
                     self.optional_length(element, "height"),
+                    self.surface_style("Switch", element),
                     self.shortcut(element),
                 )
             }
@@ -3906,10 +3949,10 @@ pub fn app() -> b::AppDef {{
                     id(),
                     text("label"),
                     element.prop("label_hidden").is_some(),
-                    if element.keyword("style") == Some("segmented") {
-                        "Segmented"
-                    } else {
-                        "Menu"
+                    match element.keyword("style") {
+                        Some("segmented") => "Segmented",
+                        Some("chips") => "Chips",
+                        _ => "Menu",
                     },
                     shape(),
                     self.optional_length(element, "height"),
@@ -3917,8 +3960,19 @@ pub fn app() -> b::AppDef {{
             }
             "Tooltip" => {
                 let children = self.children(&element.children, Axis::Column);
+                let keys = match element.prop("keys") {
+                    Some(Prop::Keyword { value }) => format!("Some({}.to_string())", string(value)),
+                    Some(Prop::Expr { expr }) => {
+                        format!("Some(rt::plain(&{}))", self.expr(expr, at))
+                    }
+                    _ => "None".into(),
+                };
+                let placement = match element.keyword("placement") {
+                    Some(side) => format!("Some({})", string(side)),
+                    None => "None".into(),
+                };
                 format!(
-                    "b::tooltip(c, {}, {}, ({children}).into_iter().next().unwrap_or_else(|| b::column(c, b::Flex::default(), vec![])))",
+                    "b::tooltip(c, {}, b::TooltipProps {{ content: {}, keys: {keys}, placement: {placement} }}, ({children}).into_iter().next().unwrap_or_else(|| b::column(c, b::Flex::default(), vec![])))",
                     string(&element.path),
                     text("content"),
                 )
@@ -4205,7 +4259,7 @@ pub fn app() -> b::AppDef {{
                     field_ref(self.session_index(&to_field.session), to_field.field),
                     self.expr(items, at),
                     string(&template.var),
-                    column(&element.children),
+                    self.children(&element.children, Axis::Row),
                     self.action(element),
                 )
             }
@@ -4291,7 +4345,7 @@ pub fn app() -> b::AppDef {{
                     "None".into()
                 };
                 format!(
-                    "b::popover_button(c, {}, {}, {}, b::PopoverProps {{ presented: {presented}, dark: {}, style: {}, plain: {}, size: {}, shape: {}, height: {}, shortcut: {} }}, || {})",
+                    "b::popover_button(c, {}, {}, {}, b::PopoverProps {{ presented: {presented}, dark: {}, style: {}, plain: {}, size: {}, shape: {}, height: {}, placement: {}, shortcut: {} }}, || {})",
                     id(),
                     text("label"),
                     self.icon(element.icon("icon")),
@@ -4305,6 +4359,10 @@ pub fn app() -> b::AppDef {{
                     self.optional_length(element, "font_size"),
                     shape(),
                     self.optional_length(element, "height"),
+                    match element.keyword("placement") {
+                        Some(side) => format!("Some({})", string(side)),
+                        None => "None".into(),
+                    },
                     self.shortcut(element),
                     column(&element.children)
                 )
@@ -4344,7 +4402,7 @@ pub fn app() -> b::AppDef {{
             ),
             "Tabs" => self.tabs(element, "c")?,
             "Menu" => format!(
-                "b::menu(c, {}, {}, b::MenuProps {{ icon: {}, icon_only: {}, shape: {}, height: {}, hide_disabled: {} }}, {})",
+                "b::menu(c, {}, {}, b::MenuProps {{ icon: {}, icon_only: {}, shape: {}, height: {}, hide_disabled: {}, bold: {}, placement: {} }}, {})",
                 id(),
                 text("label"),
                 self.icon(element.icon("icon")),
@@ -4352,6 +4410,11 @@ pub fn app() -> b::AppDef {{
                 shape(),
                 self.optional_length(element, "height"),
                 element.prop("hide_disabled").is_some(),
+                element.keyword("bold") == Some("true"),
+                match element.keyword("placement") {
+                    Some(side) => format!("Some({})", string(side)),
+                    None => "None".into(),
+                },
                 self.menu_entries(&element.children)
             ),
             "ControlGroup" => format!(
@@ -4368,7 +4431,7 @@ pub fn app() -> b::AppDef {{
                         (None, None) => format!("{fallback:?}"),
                     };
                 format!(
-                    "b::slider(c, {}, {}, {model}, b::SliderProps {{ tint: {}, min: {}, max: {}, step: {}, continuous: {}, label_hidden: {}, min_icon: {}, max_icon: {}, hover: {} }})",
+                    "b::slider(c, {}, {}, {model}, b::SliderProps {{ tint: {}, min: {}, max: {}, step: {}, continuous: {}, label_hidden: {}, min_icon: {}, max_icon: {}, hover: {}, vertical: {} }})",
                     id(),
                     text("label"),
                     match element.keyword("tint") {
@@ -4393,6 +4456,7 @@ pub fn app() -> b::AppDef {{
                         ),
                         None => "None".into(),
                     },
+                    element.keyword("axis") == Some("vertical"),
                 )
             }
             "ColorPicker" => {
@@ -4411,8 +4475,16 @@ pub fn app() -> b::AppDef {{
                     _ => "String::new()".into(),
                 };
                 let quiet = element.keyword("quiet") == Some("true");
+                let hold = match element.field("hold") {
+                    Some(field) => format!(
+                        "Some({})",
+                        field_ref(self.session_index(&field.session), field.field)
+                    ),
+                    None => "None".into(),
+                };
+                let hold_after = element.number("hold_after").unwrap_or(0.3);
                 format!(
-                    "b::shortcut(c, {key}, {}, {quiet}, {})",
+                    "b::shortcut(c, b::ShortcutProps {{ key: {key}, enabled: {}, quiet: {quiet}, hold: {hold}, hold_after: {hold_after:?} }}, {})",
                     self.enabled(element),
                     self.action(element)
                 )

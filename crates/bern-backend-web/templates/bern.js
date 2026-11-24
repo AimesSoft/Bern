@@ -337,25 +337,31 @@ export function eq(a, b) {
 // The session's language and its strings are cells: switching language
 // re-runs every binding that shows text, in one update.
 const languageCell = cell("en");
+const followsSystemCell = cell(true);
 const stringsCell = cell({});
 let supportedLanguages = [];
+let defaultLanguage = "en";
 let allStrings = {};
 
 /// The supported language that best matches the browser's, most preferred
 /// first: an earlier tag wins over a closer match of a later one, so
 /// `de-DE, en` chooses `de` over `en`.
-function chooseLanguage(supported, fallback) {
-  // The language chosen in the app stays through a reload.
-  try {
-    const kept = localStorage.getItem("bern.language");
-    if (supported.includes(kept)) return kept;
-  } catch {}
+function systemLanguage(supported, fallback) {
   const wanted = [...(navigator.languages || []), navigator.language].filter(Boolean);
   for (const tag of wanted) {
     const match = matchingLanguage(supported, tag);
     if (match) return match;
   }
   return fallback;
+}
+
+function chooseLanguage(supported, fallback) {
+  // The language chosen in the app stays through a reload.
+  try {
+    const kept = localStorage.getItem("bern.language");
+    if (supported.includes(kept)) return kept;
+  } catch {}
+  return systemLanguage(supported, fallback);
 }
 
 /// The supported language for one wanted tag: the tag itself in any case,
@@ -379,12 +385,25 @@ export function tr(key) {
 }
 
 /// Switch the interface language. Drafts, navigation and windows stay;
-/// only text bindings update.
+/// only text bindings update. `"system"` follows the browser's language.
 function setLanguage(tag) {
+  if (tag === "system") {
+    const resolved = systemLanguage(supportedLanguages, defaultLanguage);
+    batch(() => {
+      followsSystemCell.set(true);
+      languageCell.set(resolved);
+      try {
+        localStorage.removeItem("bern.language");
+      } catch {}
+      stringsCell.set(allStrings[resolved] ?? allStrings[defaultLanguage] ?? {});
+    });
+    return;
+  }
   if (!supportedLanguages.includes(tag)) {
     throw new CommandFailure("unsupported_language", `\`${tag}\` is not supported; supported: ${supportedLanguages.join(", ")}`);
   }
   batch(() => {
+    followsSystemCell.set(false);
     languageCell.set(tag);
     try {
       localStorage.setItem("bern.language", tag);
@@ -1327,6 +1346,8 @@ function sessionPrefix() {
 export const hooks = {
   /// `(node, style, { selected })`: a `style!` override on a control.
   style: null,
+  /// `(value)`: CSS color string for a Bern color reference.
+  cssColor: null,
   /// `(node, done)`: plays the disappearing transition of `node`, then
   /// calls `done`; false when it has none.
   exit: null,
@@ -1350,6 +1371,7 @@ export const hooks = {
 
 const SVG = "http://www.w3.org/2000/svg";
 let icons = {};
+let appIcons = {};
 
 export function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
@@ -1365,10 +1387,21 @@ export function el(tag, attrs = {}, ...children) {
 
 let iconSequence = 0;
 
-/// A Lucide icon: the shapes inherit Lucide's stroke from the root, and a
-/// knocked-out icon's mask gets an id of its own.
+/// A Lucide icon (or an outlined app `.svg` icon): the shapes inherit
+/// Lucide's stroke from the root, and a knocked-out icon's mask gets an id
+/// of its own.
 export function icon(name, size = 16) {
   const svg = document.createElementNS(SVG, "svg");
+  if (appIcons[name]) {
+    for (const [attribute, value] of [
+      ["viewBox", "0 0 20 20"], ["width", size], ["height", size], ["fill", "currentColor"], ["stroke", "none"],
+      ["aria-hidden", "true"], ["class", "bern-icon"],
+    ]) svg.setAttribute(attribute, value);
+    const path = document.createElementNS(SVG, "path");
+    path.setAttribute("d", appIcons[name]);
+    svg.append(path);
+    return svg;
+  }
   for (const [attribute, value] of [
     ["viewBox", "0 0 24 24"], ["width", size], ["height", size], ["fill", "none"], ["stroke", "currentColor"],
     ["stroke-width", "2"], ["stroke-linecap", "round"], ["stroke-linejoin", "round"], ["aria-hidden", "true"],
@@ -2403,12 +2436,15 @@ export function SearchItem(p, ctx, { id, label, icon: name, detail, hint, naviga
   p.append(node);
 }
 
-export function Switch(p, ctx, { id, label, field, style, labelHidden }) {
+export function Switch(p, ctx, { id, label, field, style, look, labelHidden }) {
   let node;
   if (style === "checkbox") {
     node = el("button", { class: "bern-checkbox", type: "button", role: "checkbox" }, icon("checkmark", 12));
   } else {
     node = el("button", { class: "bern-switch", type: "button", role: "switch" }, el("span", { class: "bern-switch-thumb" }));
+    if (look?.base?.foreground && hooks.cssColor) {
+      node.style.setProperty("--bern-switch-knob-on", hooks.cssColor(look.base.foreground));
+    }
   }
   effect(() => node.setAttribute("aria-checked", field.get() ? "true" : "false"));
   node.addEventListener("click", () => field.set(!field.peek()));
@@ -2423,8 +2459,16 @@ export function Switch(p, ctx, { id, label, field, style, labelHidden }) {
   } else p.append(labelled(node, label, false));
 }
 
-export function Slider(p, ctx, { id, label, field, hover, min, max, step, minIcon, maxIcon, labelHidden, controlled, continuous }, commit) {
-  const input = el("input", { class: "bern-slider", type: "range", min, max, step: step ?? "any" });
+export function Slider(p, ctx, { id, label, field, hover, min, max, step, minIcon, maxIcon, axis, labelHidden, controlled, continuous }, commit) {
+  const vertical = axis === "vertical";
+  const input = el("input", {
+    class: vertical ? "bern-slider bern-slider-vertical" : "bern-slider",
+    type: "range",
+    min,
+    max,
+    step: step ?? "any",
+    ...(vertical ? { orient: "vertical" } : {}),
+  });
   const fill = () => {
     const ratio = max > min ? (Number(input.value) - min) / (max - min) : 0;
     input.style.setProperty("--bern-fill", `${Math.min(1, Math.max(0, ratio)) * 100}%`);
@@ -2444,7 +2488,7 @@ export function Slider(p, ctx, { id, label, field, hover, min, max, step, minIco
   });
   input.addEventListener("change", () => { editing = false; if (controlled) field.set(Number(input.value)); commit?.(); });
   input.addEventListener("pointerup", () => { editing = false; });
-  if (hover) sliderHover(input, hover);
+  if (hover) sliderHover(input, hover, vertical);
   mark(input, ctx, id);
   control(ctx, {
     target: () => target(ctx, id), role: "slider", label,
@@ -2456,7 +2500,9 @@ export function Slider(p, ctx, { id, label, field, hover, min, max, step, minIco
       value: () => num(field.peek()),
     },
   });
-  const track = el("div", { class: "bern-slider-track bern-fill-width" }, minIcon ? icon(minIcon, 14) : null, input, maxIcon ? icon(maxIcon, 14) : null);
+  const track = vertical
+    ? el("div", { class: "bern-slider-track bern-slider-track-vertical bern-fill-height" }, maxIcon ? icon(maxIcon, 14) : null, input, minIcon ? icon(minIcon, 14) : null)
+    : el("div", { class: "bern-slider-track bern-fill-width" }, minIcon ? icon(minIcon, 14) : null, input, maxIcon ? icon(maxIcon, 14) : null);
   if (labelHidden) {
     bindAttr(input, "aria-label", label);
     p.append(track);
@@ -2498,7 +2544,7 @@ export function ColorPicker(p, ctx, { id, label, field, labelHidden }, commit) {
 /// `hover`: where a mouse or pen over the slider stands along its track,
 /// from 0 at `min` to 1 at `max`, and `null` once it leaves. The thumb's
 /// center travels the track less a thumb's width.
-function sliderHover(input, hover) {
+function sliderHover(input, hover, vertical = false) {
   let over = false;
   const write = (value) => {
     if (hover.peek() !== value) hover.set(value);
@@ -2509,9 +2555,15 @@ function sliderHover(input, hover) {
     const rect = input.getBoundingClientRect();
     const style = getComputedStyle(input);
     const thumb = parseFloat(style.getPropertyValue?.("--bern-slider-thumb")) || 16;
-    const room = rect.width - thumb;
-    const along = room > 0 ? Math.min(1, Math.max(0, (event.clientX - rect.left - thumb / 2) / room)) : 0;
-    write(style.direction === "rtl" ? 1 - along : along);
+    if (vertical) {
+      const room = rect.height - thumb;
+      const along = room > 0 ? Math.min(1, Math.max(0, 1 - (event.clientY - rect.top - thumb / 2) / room)) : 0;
+      write(along);
+    } else {
+      const room = rect.width - thumb;
+      const along = room > 0 ? Math.min(1, Math.max(0, (event.clientX - rect.left - thumb / 2) / room)) : 0;
+      write(style.direction === "rtl" ? 1 - along : along);
+    }
   };
   const leave = () => {
     if (!over) return;
@@ -2532,7 +2584,7 @@ let typeaheadReset = 0;
 /// commands is at most 328 high and opens upwards when less than 160 is
 /// left below; a panel of other content is as high as its content, as a
 /// native popover is, and opens upwards when only the room above holds it.
-export function placePopover(popover, anchor) {
+export function placePopover(popover, anchor, placement = null) {
   popover.bernAnchor = anchor;
   const rect = anchor.getBoundingClientRect();
   const below = innerHeight - rect.bottom - 12;
@@ -2545,7 +2597,12 @@ export function placePopover(popover, anchor) {
   popover.style.left = leftwards ? "auto" : `${Math.max(8, Math.min(rect.left, innerWidth - 168))}px`;
   popover.style.right = leftwards ? `${Math.max(8, innerWidth - rect.right)}px` : "auto";
   const panel = popover.classList.contains("bern-popover-panel");
-  const up = (panel ? below < naturalHeight(popover) : below < 160) && above > below;
+  const needed = panel ? naturalHeight(popover) : 160;
+  const up = placement === "above"
+    ? (above >= Math.min(needed, 80) || above >= below)
+    : placement === "below"
+      ? (below < Math.min(needed, 80) && above > below)
+      : (below < needed && above > below);
   popover.style.top = up ? "auto" : `${rect.bottom + 4}px`;
   popover.style.bottom = up ? `${innerHeight - rect.top + 4}px` : "auto";
   popover.style.maxHeight = `${panel ? (up ? above : below) : Math.min(328, up ? above : below)}px`;
@@ -2912,6 +2969,15 @@ export function Picker(p, ctx, { id, label, field, options, prompt, style, label
       chips: ["bern-chips", "bern-chip"],
     }[style] ?? ["bern-radio-group", "bern-radio"];
     node = el("div", { class: group, role: "radiogroup" });
+    if (style === "segmented") {
+      if (shape === "capsule") node.classList.add("bern-segmented-capsule");
+      if (height != null) {
+        node.classList.add("bern-segmented-sized");
+        length(node, "height", height);
+      }
+    } else if (style === "chips" && shape === "capsule") {
+      node.classList.add("bern-chips-capsule");
+    }
     bindAttr(node, "aria-label", label);
     let currentOptions = [];
     let buttons = [];
@@ -4467,16 +4533,24 @@ export function Adaptive(p, ctx, { id, breakpoints, layouts }) {
 /// A menu button (WAI-ARIA APG Menu Button): the menu is a popover in the
 /// top layer and takes focus while open. Each item runs its command through
 /// the same closure external entries activate, open or not.
-export function Menu(p, ctx, { id, label, icon: name, style, shape, height, hideDisabled = false }, items) {
+export function Menu(p, ctx, { id, label, icon: name, style, shape, height, bold = false, placement = null, hideDisabled = false }, items) {
   const menuId = `bern-menu-${++fieldSequence}`;
   const text = el("span");
   bindText(text, label);
-  // In a toolbar a menu with an icon shows only the icon.
+  // In a toolbar a menu with an icon shows only the icon; an icon-less
+  // `Menu(style: icon)` shows a plain text trigger without a chevron.
   const iconOnly = Boolean(name) && (ctx.inToolbar || style === "icon");
+  const plainText = !name && style === "icon";
   const trigger = el("button", {
-    class: iconOnly ? "bern-icon-button bern-menu-button" : "bern-button bern-button-standard bern-menu-button", type: "button",
+    class: iconOnly
+      ? "bern-icon-button bern-menu-button"
+      : plainText
+        ? "bern-button bern-button-plain bern-menu-button bern-menu-text-only"
+        : "bern-button bern-button-standard bern-menu-button",
+    type: "button",
     "aria-haspopup": "menu", "aria-expanded": "false", "aria-controls": menuId, popovertarget: menuId,
-  }, name ? icon(name, 16) : null, iconOnly ? null : text, iconOnly ? null : icon("chevron.down", 16));
+  }, name ? icon(name, 16) : null, iconOnly ? null : text, (iconOnly || plainText) ? null : icon("chevron.down", 16));
+  if (bold) trigger.classList.add("bern-menu-bold");
   if (iconOnly) {
     bindAttr(trigger, "aria-label", label);
     bindAttr(trigger, "title", label);
@@ -4535,7 +4609,7 @@ export function Menu(p, ctx, { id, label, icon: name, style, shape, height, hide
   list.addEventListener("beforetoggle", (event) => {
     const open = event.newState === "open";
     trigger.setAttribute("aria-expanded", open ? "true" : "false");
-    if (open) placePopover(list, trigger);
+    if (open) placePopover(list, trigger, placement);
   });
   list.addEventListener("toggle", (event) => {
     if (event.newState === "open") focusAt(focusLast ? -1 : 0);
@@ -4824,13 +4898,20 @@ export function Table(p, ctx, { id, label, selection, items, key }, columns, men
   p.append(el("div", { class: "bern-table-scroll" }, table, list));
 }
 
-/// Switches the interface language among the supported languages; each is
-/// listed by its own name.
+/// Switches the interface language among the supported languages, with a
+/// leading “Follow System” choice; each language is listed by its own name.
 export function LanguagePicker(p, ctx, { id, label, labelHidden = false }) {
-  const options = supportedLanguages.map((tag) => ({ value: tag, name: tag, label: () => autonym(tag) }));
-  const field = { get: () => languageCell.get(), peek: () => languageCell.peek(), set: setLanguage };
+  const options = [
+    { value: "system", name: "system", label: () => tr("bern.language.system") },
+    ...supportedLanguages.map((tag) => ({ value: tag, name: tag, label: () => autonym(tag) })),
+  ];
+  const field = {
+    get: () => (followsSystemCell.get() ? "system" : languageCell.get()),
+    peek: () => (followsSystemCell.peek() ? "system" : languageCell.peek()),
+    set: setLanguage,
+  };
   const select = (name) => {
-    if (!supportedLanguages.includes(name)) return false;
+    if (name !== "system" && !supportedLanguages.includes(name)) return false;
     setLanguage(name);
     return true;
   };
@@ -4838,7 +4919,7 @@ export function LanguagePicker(p, ctx, { id, label, labelHidden = false }) {
   mark(node.control, ctx, id);
   control(ctx, {
     target: () => target(ctx, id), role: "picker", label,
-    actions: { select, value: () => languageCell.peek() },
+    actions: { select, value: () => field.peek() },
   });
   if (ctx.inToolbar || labelHidden) {
     if (labelHidden) bindAttr(node.control, "aria-label", label);
@@ -6426,9 +6507,16 @@ export function closeWindow(id) {
 /// that open at launch.
 export async function start(app) {
   icons = app.icons;
+  appIcons = app.appIcons ?? {};
   supportedLanguages = app.languages;
+  defaultLanguage = app.defaultLanguage;
   allStrings = app.strings;
+  let kept = null;
+  try {
+    kept = localStorage.getItem("bern.language");
+  } catch {}
   const initial = chooseLanguage(app.languages, app.defaultLanguage);
+  followsSystemCell.set(!(kept && app.languages.includes(kept)));
   languageCell.set(initial);
   stringsCell.set(app.strings[initial] ?? app.strings[app.defaultLanguage] ?? {});
   effect(() => {
@@ -6575,7 +6663,7 @@ export function Marquee(p, ctx, { duration, phase = 0, paused, opacity }, childr
   });
 }
 
-export function Tooltip(p, ctx, { content }, children) {
+export function Tooltip(p, ctx, { content, keys, placement }, children) {
   const before = p.childNodes.length;
   children(p, ctx);
   if (!content) return;
@@ -6585,12 +6673,76 @@ export function Tooltip(p, ctx, { content }, children) {
     if (child && child.nodeType === 1) targets.push(child);
   }
   if (!targets.length) return;
+  const custom = keys !== undefined || placement !== undefined;
+  if (!custom) {
+    effect(() => {
+      const text = readValue(content) ?? "";
+      for (const node of targets) {
+        node.title = text;
+        node.dataset.bernTooltip = text;
+      }
+    });
+    return;
+  }
+  const tipId = `bern-tooltip-${++fieldSequence}`;
+  const labelSpan = el("span");
+  const kbdEl = el("kbd", { class: "bern-tooltip-kbd" });
+  const tip = el("div", { class: "bern-tooltip", id: tipId, role: "tooltip", popover: "manual" }, labelSpan, kbdEl);
+  let anchor = null;
+  let open = false;
+  const position = () => {
+    if (!anchor?.getBoundingClientRect) return;
+    const rect = anchor.getBoundingClientRect();
+    const tipRect = tip.getBoundingClientRect?.() ?? { width: 0, height: 28 };
+    const cx = Math.max(8, Math.min(rect.left + rect.width / 2 - tipRect.width / 2, (globalThis.innerWidth ?? 1024) - tipRect.width - 8));
+    const below = (globalThis.innerHeight ?? 768) - rect.bottom - 8;
+    const above = rect.top - 8;
+    const preferBelow = placement === "below";
+    const placeAbove = preferBelow ? (below < tipRect.height + 6 && above > below) : (above >= tipRect.height + 6 || above >= below);
+    tip.style.left = `${cx}px`;
+    tip.style.top = placeAbove ? `${Math.max(6, rect.top - tipRect.height - 6)}px` : `${rect.bottom + 6}px`;
+  };
+  const show = (node) => {
+    anchor = node;
+    if (!tip.isConnected && document.body?.append) document.body.append(tip);
+    if (!open && tip.showPopover) {
+      try { tip.showPopover(); } catch {}
+    }
+    open = true;
+    position();
+  };
+  const hide = () => {
+    if (!open) return;
+    open = false;
+    if (tip.hidePopover) {
+      try { tip.hidePopover(); } catch {}
+    }
+  };
   effect(() => {
     const text = readValue(content) ?? "";
+    const formatted = keys === undefined ? "" : shortcutText(readValue(keys) ?? "");
+    labelSpan.textContent = text;
+    kbdEl.textContent = formatted;
+    kbdEl.hidden = !formatted;
     for (const node of targets) {
-      node.title = text;
+      node.removeAttribute?.("title");
       node.dataset.bernTooltip = text;
+      node.dataset.bernTooltipKeys = formatted;
+      node.dataset.bernTooltipPlacement = placement ?? "above";
+      node.setAttribute?.("aria-describedby", tipId);
     }
+    if (open) position();
+  });
+  for (const node of targets) {
+    node.addEventListener("pointerenter", () => show(node));
+    node.addEventListener("focusin", () => show(node));
+    node.addEventListener("pointerleave", hide);
+    node.addEventListener("focusout", hide);
+    node.addEventListener("pointerdown", hide);
+  }
+  onCleanup(() => {
+    hide();
+    tip.remove?.();
   });
 }
 

@@ -15,8 +15,9 @@ use gpui::{
     Subscription, Window, div,
 };
 use gpui_base::input::{Input, InputEvent, InputState, Textarea, TextareaState};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::Duration;
 
 /// `Button.prominence`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -233,11 +234,32 @@ thread_local! {
     static CLEAR_KEYS: RefCell<std::collections::HashMap<String, i64>> = RefCell::new(std::collections::HashMap::new());
 }
 
+#[derive(Clone)]
+struct ShortcutEntry {
+    keys: String,
+    press: crate::ctx::Press,
+    quiet: bool,
+    hold: Option<(Ctx, Field, f64)>,
+}
+
+struct ActiveHold {
+    keys: String,
+    base_key: String,
+    ctx: Ctx,
+    field: Field,
+    press: crate::ctx::Press,
+    quiet: bool,
+    fired: Rc<Cell<bool>>,
+    token: u64,
+}
+
 thread_local! {
     /// Key combinations of the buttons and shortcuts shown, as GPUI writes
-    /// them, with what they press and whether they are `quiet` for
-    /// `window.idle`; rebuilt as windows draw.
-    static SHORTCUTS: RefCell<Vec<(String, crate::ctx::Press, bool)>> = const { RefCell::new(Vec::new()) };
+    /// them, with what they press, whether they are `quiet` for
+    /// `window.idle`, and optional hold state; rebuilt as windows draw.
+    static SHORTCUTS: RefCell<Vec<ShortcutEntry>> = const { RefCell::new(Vec::new()) };
+    static ACTIVE_HOLD: RefCell<Option<ActiveHold>> = const { RefCell::new(None) };
+    static HOLD_TOKEN: Cell<u64> = const { Cell::new(0) };
 }
 
 /// Bern's `cmd+shift+o` as GPUI's `cmd-shift-o`.
@@ -249,19 +271,105 @@ pub(crate) fn clear_shortcuts() {
     SHORTCUTS.with(|shortcuts| shortcuts.borrow_mut().clear());
 }
 
+/// Release any in-flight `Shortcut(hold:)` without triggering its tap action
+/// (e.g. when the window loses focus).
+pub(crate) fn cancel_hold() {
+    let active = ACTIVE_HOLD.with(|slot| slot.borrow_mut().take());
+    if let Some(active) = active
+        && active.fired.get()
+    {
+        active.ctx.write(active.field, Value::Bool(false));
+    }
+}
+
+/// Handle a key release for an active `Shortcut(hold:)`.
+pub(crate) fn key_up(keystroke: &gpui::Keystroke, cx: &mut App) {
+    let released = keystroke.key.to_ascii_lowercase();
+    let is_mod = matches!(
+        released.as_str(),
+        "shift" | "control" | "alt" | "platform" | "cmd"
+    );
+    let finished = ACTIVE_HOLD.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let matches = slot.as_ref().is_some_and(|active| {
+            released == active.base_key || (is_mod && active.keys.contains('-'))
+        });
+        if matches { slot.take() } else { None }
+    });
+    if let Some(active) = finished {
+        if active.fired.get() {
+            active.ctx.write(active.field, Value::Bool(false));
+        } else {
+            (active.press)(cx);
+        }
+    }
+}
+
 /// Press the button whose shortcut `keystroke` is; false when none has it.
 pub(crate) fn run_shortcut(keystroke: &str, cx: &mut App) -> bool {
+    let holding_same = ACTIVE_HOLD.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .is_some_and(|active| active.keys == keystroke)
+    });
+    if holding_same {
+        return true;
+    }
     let found = SHORTCUTS.with(|shortcuts| {
         shortcuts
             .borrow()
             .iter()
             .rev()
-            .find(|(keys, _, _)| keys == keystroke)
-            .map(|(_, press, _)| Rc::clone(press))
+            .find(|entry| entry.keys == keystroke)
+            .cloned()
     });
     match found {
-        Some(press) => {
-            press(cx);
+        Some(entry) => {
+            if let Some((ctx, field, hold_after)) = entry.hold {
+                cancel_hold();
+                let token = HOLD_TOKEN.with(|counter| {
+                    let next = counter.get().wrapping_add(1);
+                    counter.set(next);
+                    next
+                });
+                let base_key = entry
+                    .keys
+                    .rsplit('-')
+                    .next()
+                    .unwrap_or(entry.keys.as_str())
+                    .to_string();
+                let fired = Rc::new(Cell::new(false));
+                ACTIVE_HOLD.with(|slot| {
+                    *slot.borrow_mut() = Some(ActiveHold {
+                        keys: entry.keys.clone(),
+                        base_key,
+                        ctx,
+                        field,
+                        press: entry.press,
+                        quiet: entry.quiet,
+                        fired: Rc::clone(&fired),
+                        token,
+                    });
+                });
+                cx.spawn(async move |cx| {
+                    cx.background_executor()
+                        .timer(Duration::from_secs_f64(hold_after.max(0.0)))
+                        .await;
+                    cx.update(|_| {
+                        ACTIVE_HOLD.with(|slot| {
+                            if let Some(active) = slot.borrow().as_ref()
+                                && active.token == token
+                            {
+                                active.fired.set(true);
+                                active.ctx.write(active.field, Value::Bool(true));
+                            }
+                        });
+                    });
+                })
+                .detach();
+            } else {
+                (entry.press)(cx);
+            }
             true
         }
         None => false,
@@ -283,9 +391,35 @@ pub(crate) fn register_shortcut_with_quiet(
         && !c.listing()
     {
         SHORTCUTS.with(|shortcuts| {
-            shortcuts
-                .borrow_mut()
-                .push((keystroke(shortcut), Rc::clone(press), quiet))
+            shortcuts.borrow_mut().push(ShortcutEntry {
+                keys: keystroke(shortcut),
+                press: Rc::clone(press),
+                quiet,
+                hold: None,
+            })
+        });
+    }
+}
+
+pub(crate) fn register_hold_shortcut(
+    c: &Ctx,
+    shortcut: Option<&str>,
+    press: &crate::ctx::Press,
+    quiet: bool,
+    hold: Field,
+    hold_after: f64,
+) {
+    if let Some(shortcut) = shortcut
+        && !shortcut.is_empty()
+        && !c.listing()
+    {
+        SHORTCUTS.with(|shortcuts| {
+            shortcuts.borrow_mut().push(ShortcutEntry {
+                keys: keystroke(shortcut),
+                press: Rc::clone(press),
+                quiet,
+                hold: Some((c.clone(), hold, hold_after)),
+            })
         });
     }
 }
@@ -317,13 +451,21 @@ pub(crate) fn is_quiet_keystroke(keystroke: &gpui::Keystroke) -> bool {
     if bare && crate::search::is_open() {
         return false;
     }
+    let active_quiet = ACTIVE_HOLD.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .is_some_and(|active| active.keys == formatted && active.quiet)
+    });
+    if active_quiet {
+        return true;
+    }
     SHORTCUTS.with(|shortcuts| {
         shortcuts
             .borrow()
             .iter()
             .rev()
-            .find(|(keys, _, _)| *keys == formatted)
-            .is_some_and(|(_, _, quiet)| *quiet)
+            .find(|entry| entry.keys == formatted)
+            .is_some_and(|entry| entry.quiet)
     })
 }
 
@@ -869,6 +1011,8 @@ pub struct SwitchProps {
     pub icon: Option<&'static str>,
     pub shape: Shape,
     pub height: Option<f32>,
+    /// Optional `style!` rule (`foreground` colors the on-state knob).
+    pub look: Option<&'static crate::Style>,
     pub shortcut: Option<String>,
 }
 
@@ -985,6 +1129,15 @@ pub fn switch(c: &Ctx, id: &'static str, label: String, model: Model, props: Swi
         .min_h(px(28.0));
     let element = match style {
         SwitchStyle::Switch => {
+            let thumb_color = if on && enabled {
+                props
+                    .look
+                    .and_then(|s| s.foreground)
+                    .map(|fg| crate::layout::color(c, fg))
+                    .unwrap_or_else(|| c.slot("switch", state, "thumb"))
+            } else {
+                c.slot("switch", state, "thumb")
+            };
             let track = div()
                 .flex()
                 .flex_none()
@@ -1003,12 +1156,7 @@ pub fn switch(c: &Ctx, id: &'static str, label: String, model: Model, props: Swi
                         track.justify_start()
                     }
                 })
-                .child(
-                    div()
-                        .size(px(14.0))
-                        .rounded_full()
-                        .bg(c.slot("switch", state, "thumb")),
-                );
+                .child(div().size(px(14.0)).rounded_full().bg(thumb_color));
             if props.label_hidden {
                 element.child(track)
             } else {
@@ -1061,6 +1209,8 @@ pub enum PickerStyle {
     Menu,
     /// All options side by side, the chosen one raised.
     Segmented,
+    /// Capsule pill chips wrapping in a row.
+    Chips,
 }
 
 /// `Picker`: one of `options`, each a value and its label.
@@ -1131,7 +1281,9 @@ pub fn picker(
                         .flex()
                         .items_center()
                         .justify_center()
-                        .h(px(height.map(|height| height - 6.0).unwrap_or(28.0)))
+                        .h(px(height
+                            .map(|height| (height - 6.0).max(16.0))
+                            .unwrap_or(28.0)))
                         .px(px(10.0))
                         .rounded(px(if capsule { 999.0 } else { 6.0 }))
                         .text_size(px(13.0))
@@ -1173,6 +1325,60 @@ pub fn picker(
                 .children(segments)
                 .into_any_element()
         }
+        PickerStyle::Chips => {
+            let accent = c.color("accent");
+            let on_accent = c.color("on_accent");
+            let border = c.color("control.border");
+            let secondary = c.color("text.secondary");
+            let hover = c.color("hover.overlay");
+            let chips = options
+                .into_iter()
+                .enumerate()
+                .map(|(index, (value, text))| {
+                    let selected = value == current;
+                    let chip = div()
+                        .id(c.element_id(&format!("{id}.chip.{index}")))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .h(px(30.0))
+                        .px(px(12.0))
+                        .rounded_full()
+                        .border_1()
+                        .border_color(if selected { accent } else { border })
+                        .bg(if selected {
+                            accent
+                        } else {
+                            gpui::Rgba {
+                                r: 0.0,
+                                g: 0.0,
+                                b: 0.0,
+                                a: 0.0,
+                            }
+                        })
+                        .text_size(px(13.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(if selected { on_accent } else { secondary })
+                        .child(text);
+                    if !enabled || selected {
+                        return chip;
+                    }
+                    let choose = Rc::clone(&choose);
+                    chip.hover(move |style| style.bg(hover))
+                        .on_click(move |_, _, cx| {
+                            cx.stop_propagation();
+                            choose(value.clone())
+                        })
+                });
+            div()
+                .flex()
+                .flex_row()
+                .flex_wrap()
+                .items_center()
+                .gap(px(8.0))
+                .children(chips)
+                .into_any_element()
+        }
         PickerStyle::Menu => crate::overlay::menu_button(
             c,
             id,
@@ -1211,15 +1417,24 @@ pub fn picker(
         .into_any_element()
 }
 
-/// `LanguagePicker`: the supported languages by their own names; choosing
-/// one switches the interface language. With `label_hidden` the label is
-/// only its accessible name.
+/// `LanguagePicker`: “Follow System” followed by the supported languages by
+/// their own names; choosing one switches the interface language. With
+/// `label_hidden` the label is only its accessible name.
 pub fn language_picker(c: &Ctx, id: &'static str, label: String, label_hidden: bool) -> El {
-    let current = crate::text::language();
-    let options: Vec<(Value, String)> = crate::text::supported()
-        .into_iter()
-        .map(|tag| (Value::Text(tag.to_string()), crate::text::autonym(tag)))
-        .collect();
+    let current = if crate::text::follows_system() {
+        "system".to_string()
+    } else {
+        crate::text::language()
+    };
+    let mut options: Vec<(Value, String)> = vec![(
+        Value::Text("system".to_string()),
+        crate::text::tr("bern.language.system"),
+    )];
+    options.extend(
+        crate::text::supported()
+            .into_iter()
+            .map(|tag| (Value::Text(tag.to_string()), crate::text::autonym(tag))),
+    );
     let model = Model::Controlled(
         Value::Text(current),
         Rc::new(|_, value| {
@@ -1803,9 +2018,24 @@ mod shortcut_tests {
         let noop: crate::ctx::Press = Rc::new(|_| {});
         SHORTCUTS.with(|s| {
             let mut s = s.borrow_mut();
-            s.push((keystroke("right"), Rc::clone(&noop), true));
-            s.push((keystroke("cmd+left"), Rc::clone(&noop), true));
-            s.push((keystroke("space"), Rc::clone(&noop), false));
+            s.push(ShortcutEntry {
+                keys: keystroke("right"),
+                press: Rc::clone(&noop),
+                quiet: true,
+                hold: None,
+            });
+            s.push(ShortcutEntry {
+                keys: keystroke("cmd+left"),
+                press: Rc::clone(&noop),
+                quiet: true,
+                hold: None,
+            });
+            s.push(ShortcutEntry {
+                keys: keystroke("space"),
+                press: Rc::clone(&noop),
+                quiet: false,
+                hold: None,
+            });
         });
         assert!(is_quiet_keystroke(&press("right", false, false)));
         assert!(is_quiet_keystroke(&press("left", true, false)));
@@ -1814,8 +2044,12 @@ mod shortcut_tests {
         assert!(!is_quiet_keystroke(&press("a", false, false)));
         // A later non-quiet shortcut on the same key overrides an earlier quiet one.
         SHORTCUTS.with(|s| {
-            s.borrow_mut()
-                .push((keystroke("right"), Rc::clone(&noop), false))
+            s.borrow_mut().push(ShortcutEntry {
+                keys: keystroke("right"),
+                press: Rc::clone(&noop),
+                quiet: false,
+                hold: None,
+            })
         });
         assert!(!is_quiet_keystroke(&press("right", false, false)));
         clear_shortcuts();

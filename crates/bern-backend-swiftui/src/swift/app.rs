@@ -107,6 +107,62 @@ impl Generator<'_> {
             out.line(format!("let bernSceneBodySize: CGFloat = {}", double(body)));
             out.line("");
         }
+        if !self.app_icons.is_empty() {
+            out.line("/// Application `.svg` icons outlined in a 20×20 coordinate square.");
+            out.open("enum BernAppIconCatalog {");
+            out.open("static func path(_ name: String) -> SwiftUI.Path? {");
+            out.open("switch name {");
+            for (name, contours) in &self.app_icons {
+                out.open(format!("case {}:", string(name)));
+                out.open("return SwiftUI.Path { p in");
+                for contour in contours {
+                    out.line(format!(
+                        "p.move(to: CGPoint(x: {}, y: {}))",
+                        double(contour.start.x as f64),
+                        double(contour.start.y as f64)
+                    ));
+                    for seg in &contour.segments {
+                        match *seg {
+                            bern_target_api::app_icon::Segment::Line(to) => {
+                                out.line(format!(
+                                    "p.addLine(to: CGPoint(x: {}, y: {}))",
+                                    double(to.x as f64),
+                                    double(to.y as f64)
+                                ));
+                            }
+                            bern_target_api::app_icon::Segment::Quad(c, to) => {
+                                out.line(format!(
+                                    "p.addQuadCurve(to: CGPoint(x: {}, y: {}), control: CGPoint(x: {}, y: {}))",
+                                    double(to.x as f64),
+                                    double(to.y as f64),
+                                    double(c.x as f64),
+                                    double(c.y as f64)
+                                ));
+                            }
+                            bern_target_api::app_icon::Segment::Cubic(c1, c2, to) => {
+                                out.line(format!(
+                                    "p.addCurve(to: CGPoint(x: {}, y: {}), control1: CGPoint(x: {}, y: {}), control2: CGPoint(x: {}, y: {}))",
+                                    double(to.x as f64),
+                                    double(to.y as f64),
+                                    double(c1.x as f64),
+                                    double(c1.y as f64),
+                                    double(c2.x as f64),
+                                    double(c2.y as f64)
+                                ));
+                            }
+                        }
+                    }
+                    out.line("p.closeSubpath()");
+                }
+                out.close("}");
+                out.indent = out.indent.saturating_sub(1);
+            }
+            out.line("default: return nil");
+            out.close("}");
+            out.close("}");
+            out.close("}");
+            out.line("");
+        }
     }
 
     fn emit_app_entry(&self, out: &mut Out, fingerprint: u64, include_native_types: bool) {
@@ -195,6 +251,9 @@ impl Generator<'_> {
             Platform::Tvos | Platform::Watchos => {}
         }
         out.open("init() {");
+        if !self.app_icons.is_empty() {
+            out.line("BernAppIcons.install(BernAppIconCatalog.path)");
+        }
         out.open(format!(
             "BernHost.shared.start(fingerprint: 0x{fingerprint:016x}, kinds: [{}], primary: {}) {{ field, reader in",
             kinds.join(", "),

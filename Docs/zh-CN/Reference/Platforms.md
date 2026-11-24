@@ -2,7 +2,7 @@
 
 # 平台能力与验证范围
 
-更新：2026-11-21。下表按 [bern-target-api](../../../crates/bern-target-api/src/lib.rs) 与各后端 `TargetDescriptor.features` 整理。macOS 与 iOS 共用同一份 SwiftUI 清单；tvOS 与 watchOS 与它们共用 SwiftUI 生成器，清单在 [tvOS 描述](../../../crates/bern-backend-swiftui/src/tvos.rs)与 [watchOS 描述](../../../crates/bern-backend-swiftui/src/watchos.rs)中单列。
+更新：2026-11-25。下表按 [bern-target-api](../../../crates/bern-target-api/src/lib.rs) 与各后端 `TargetDescriptor.features` 整理。macOS 与 iOS 共用同一份 SwiftUI 清单；tvOS 与 watchOS 与它们共用 SwiftUI 生成器，清单在 [tvOS 描述](../../../crates/bern-backend-swiftui/src/tvos.rs)与 [watchOS 描述](../../../crates/bern-backend-swiftui/src/watchos.rs)中单列。
 
 可选的 GPUI 目标（`ui = "gpui"`，macOS、Windows、Linux）现已与 macOS、Windows、Linux 三端原生后端完成桌面能力对齐——包括 `StatusItem`、`Switch(login_item:)`、三端原生 `WebPage`、内置媒体执行器与 `Video(controls:)`、全部 UI 会话命令及 `bern package` 打包，详见 [GPUI 平台手册](../Platforms/GPUI.md)。
 
@@ -64,6 +64,14 @@
 | `untitled_detail` | 无标题详情 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `idle_control` | 按状态启停空闲检测（`Window(idle_enabled:)`） | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `quiet_shortcuts` | 不算空闲检测输入的快捷键（`Shortcut(quiet:)`） | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `app_icons` | 应用自己的图标：`icon: "icons/play.svg"` 指一个声明了的 SVG，构建时转成轮廓，按控件的前景色画 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `popup_placement` | `Menu`、`PopoverButton`、`Tooltip` 的 `placement: above / below` | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `tooltip_keys` | `Tooltip(keys:)`：提示文字后面用按键框写出快捷键（SwiftUI 拼入原生 `.help(...)`） | 支持 | 支持 | — | 支持 | 支持 | 支持 | 支持 |
+| `vertical_sliders` | 竖着的滑块（`Slider(axis: vertical)`） | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `hold_shortcuts` | 按按住多久区分的键（`Shortcut(hold:, hold_after:)`） | 支持 | 支持 | — | 支持 | 支持 | 支持 | 支持 |
+| `native_lists` | 传进原生视图的列表（`NativeValue(value:)` 给 `Vec`） | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `switch_knob` | 开关滑钮前景色定制（`Switch(variant:)` 的 `foreground`） | —（系统滑钮，警告） | —（系统滑钮，警告） | —（系统滑钮，警告） | 支持 | 支持 | 支持 | 支持 |
+| `bold_menus` | 菜单触发按钮粗体文字（`Menu(bold: true)`） | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `fill_buttons` | 横向撑满容器的系统按钮（`Button(width: fill)`） | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `page_search` | 页面里的系统搜索框（不在 `Toolbar` / `Sidebar` 里的 `Search`），结果列在框下 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `window_short` | 窗口高度低于紧凑断点（`window.short`），如手机横屏 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
@@ -91,7 +99,7 @@
 | 能力 | 当前范围 |
 | --- | --- |
 | `Window(idle_enabled:)` | 六个目标都消费启停状态（能力 `idle_control`）：为假时 `window.idle` 保持为假且不计时，变真时重新计时 |
-| 静置区（`idle_area`） | 七个目标的动效能力都声明它。macOS、Web、Android、Linux、Windows 上，页面有静置区时鼠标只在静置区上停住才静置，停在别处或移出窗口保持醒着，触摸、遥控器与键盘仍按 `idle_after`；iOS 与 tvOS 上静置区不改变计时（接上鼠标的 iPad 也是）。macOS 用一个实际应用的播放画面实测；Web 有运行时测试；Android 编译打包、Windows 两种前端经 MSVC 编译、Linux 运行时在 macOS 的 GTK 4 上通过 Clippy，这三者都未运行实测 |
+| 静置区（`idle_area`） | 全部目标（含 GPUI）的动效能力都声明它。macOS、Web、Android、Linux、Windows 与 GPUI 上，页面有静置区时，鼠标在静置区停满该区域时长后窗口静置，停在窗口内其他区域时保持醒着，指针移出窗口后回落到窗口自身的 `idle_after` 计时；触摸、遥控器与键盘仍按 `idle_after`；iOS 与 tvOS 上静置区不改变计时（接上鼠标的 iPad 也是） |
 | `Window(landscape:)` 在网页上 | 用屏幕方向接口锁成横屏：浏览器只在手机与平板上锁定，多数还要求页面全屏或作为已安装的应用运行，iOS 的 Safari 不提供锁定；被拒绝时保持设备方向，进入全屏时再请求。运行时测试覆盖，未在手机浏览器上实测 |
 | 图片跨分栏 Hero | macOS 使用窗口级覆盖层，Web 使用视口级副本；iOS 与 macOS 其他视图沿用匹配几何。Video 连续画面传递另行验证 |
 | 本地持久化 | 原生 FFI 宿主提供文件存储，Web app 使用同源 localStorage；未安装存储宿主时不持久化 |

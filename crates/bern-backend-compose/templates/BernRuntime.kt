@@ -246,16 +246,30 @@ interface BernLabeled {
 object BernLanguage {
     var supported: List<String> = emptyList()
         private set
+    private var defaultTag: String = "en"
     var current by mutableStateOf("en")
         private set
+    var followsSystem by mutableStateOf(true)
+        private set
+
+    val selection: String
+        get() = if (followsSystem) "system" else current
 
     /// Where the language chosen in the app is kept: it stays through a restart.
     private var kept: android.content.SharedPreferences? = null
 
     internal fun setup(context: Context, supported: List<String>, default: String) {
         this.supported = supported
+        defaultTag = default
         kept = context.getSharedPreferences("bern", Context.MODE_PRIVATE)
-        current = kept?.getString("language", null)?.takeIf { it in supported } ?: initial(supported) ?: default
+        val saved = kept?.getString("language", null)?.takeIf { it in supported }
+        if (saved != null) {
+            followsSystem = false
+            current = saved
+        } else {
+            followsSystem = true
+            current = initial(supported) ?: default
+        }
     }
 
     /// The first system language the app supports: by full tag, by
@@ -283,9 +297,17 @@ object BernLanguage {
         return null
     }
 
-    /// Switch to a supported language; false for any other tag.
+    /// Switch to a supported language, or `"system"` to follow the system
+    /// language; false for any other tag.
     fun select(language: String): Boolean {
+        if (language == "system") {
+            followsSystem = true
+            current = initial(supported) ?: defaultTag
+            kept?.edit()?.remove("language")?.apply()
+            return true
+        }
         if (language !in supported) return false
+        followsSystem = false
         current = language
         kept?.edit()?.putString("language", language)?.apply()
         return true
@@ -620,12 +642,19 @@ class BernWindowContext(
     /// Whether the pointer that came last is a mouse: only a mouse rests
     /// over an `idle_area`.
     internal var mouse by mutableStateOf(false)
+    /// Whether the mouse pointer is currently inside the window.
+    internal var pointerInsideWindow by mutableStateOf(true)
 
     /// How long the window waits before it rests: `idleAfter`, or with
-    /// `idle_area`s on screen and a mouse, the seconds of the area it
-    /// rests over; null when it rests over none, or is outside the window.
+    /// `idle_area`s on screen and a mouse inside the window, the seconds of
+    /// the area it rests over (null when it rests over controls outside any
+    /// area). Once the pointer leaves the window, fall back to `idleAfter`.
     internal fun idleWait(idleAfter: Double): Double? =
-        if (mouse && idleAreas.isNotEmpty()) idleAreasHovered.values.minOrNull() else idleAfter
+        if (mouse && idleAreas.isNotEmpty()) {
+            if (!pointerInsideWindow) idleAfter else idleAreasHovered.values.minOrNull()
+        } else {
+            idleAfter
+        }
     /// The window's width in dp once laid out; before that, an estimate
     /// from the screen or the declared size.
     var measuredWidth by mutableStateOf<Double?>(null)
@@ -2390,6 +2419,11 @@ fun BernWindowRoot(
                             val event = awaitPointerEvent(PointerEventPass.Initial)
                             val change = event.changes.firstOrNull() ?: continue
                             context.mouse = change.type == PointerType.Mouse
+                            if (event.type == PointerEventType.Exit) {
+                                context.pointerInsideWindow = false
+                                continue
+                            }
+                            context.pointerInsideWindow = true
                             if (event.type == PointerEventType.Move && change.position == last) continue
                             last = change.position
                             input += 1
