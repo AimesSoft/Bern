@@ -1660,8 +1660,9 @@ inline void Button(Parent const& p, Ctx const& ctx, ButtonProps props) {
     if (!props.menu.empty()) ContextMenuOn(ctx, button, props.menu);
     xaml::UIElement shown = button;
     ShapeControl(ctx, button, props.shape);
-    if (props.fill) {
+    if (props.fill || p.fillRows) {
         button.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+        if (p.fillRows && !props.fill) button.HorizontalContentAlignment(xaml::HorizontalAlignment::Left);
         SetRole(button, L"bern-fill-width");
     } else {
         KeepWidth(button);
@@ -1708,10 +1709,17 @@ inline void ContentButton(Parent const& p, Ctx const& ctx, ButtonProps props, Bu
         button.BorderThickness(xaml::Thickness{0, 0, 0, 0});
         Styles::MakeSubtle(button);
     }
-    // A button takes its content's size; content that fills stretches it.
+    // A button takes its content's size; `width: fill`, a full-width row
+    // container (such as search suggestions), or filling content stretches it.
     Mirror(button, holder);
-    if (FillsRow(holder)) button.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
-    else KeepWidth(button);
+    if (props.fill || p.fillRows) {
+        button.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+        if (!FillsRow(holder)) SetRole(button, FillsColumn(holder) ? L"bern-fill" : L"bern-fill-width");
+    } else if (FillsRow(holder)) {
+        button.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+    } else {
+        KeepWidth(button);
+    }
     // Content that does not fill the height stands in the middle of a
     // taller button, as a label does.
     if (FillsColumn(holder)) button.VerticalAlignment(xaml::VerticalAlignment::Stretch);
@@ -2444,7 +2452,9 @@ struct ThemedAcrylicBackdrop : media::SystemBackdropT<ThemedAcrylicBackdrop> {
 inline void AttachSearchResults(controls::AutoSuggestBox const& box, Ctx const& ctx, SearchProps const& props, Build const& results) {
     if (!props.field || !results) return;
     auto content = MakeFlex(false, 2, xaml::Thickness{4, 4, 4, 4});
-    results(Parent::Of(content), ctx);
+    auto rows = Parent::Of(content);
+    rows.fillRows = true;
+    results(rows, ctx);
     controls::Flyout flyout;
     auto configureListPresenter = [](xaml::Style const& look) {
         // Match AutoSuggestBox's compact dropdown list geometry instead of
@@ -2509,12 +2519,13 @@ inline void AttachSearchResults(controls::AutoSuggestBox const& box, Ctx const& 
     // The field's text box inside the search box has the focus.
     auto focused = std::make_shared<bool>(false);
     bool suggest = props.suggest;
-    auto show = [weakBox, flyout, open, focused, ctx, field, suggest] {
+    auto show = [weakBox, flyout, content, open, focused, ctx, field, suggest] {
         auto box = weakBox.get();
         if (!box || !box.XamlRoot()) return;
         bool isFocused = *focused || box.FocusState() != xaml::FocusState::Unfocused;
         bool typed = suggest || !R::AsText(ctx.Peek(field)).empty();
         if (isFocused && typed && !*open) {
+            content.MinWidth(box.ActualWidth() > 0 ? (std::max)(160.0, box.ActualWidth() - 2.0) : 200.0);
             controls::Primitives::FlyoutShowOptions options;
             options.ShowMode(controls::Primitives::FlyoutShowMode::Transient);
             options.Placement(controls::Primitives::FlyoutPlacementMode::BottomEdgeAlignedLeft);
