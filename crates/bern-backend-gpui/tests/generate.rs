@@ -1370,6 +1370,7 @@ fn gallery_passes_gpui_check_and_generates_parity_widgets() {
         "b::text_input_controlled(c,",
         "b::sidebar_selection(c,",
         "b::drop_area(c,",
+        "c.in_section(true)",
     ] {
         assert!(
             ui.contains(expected),

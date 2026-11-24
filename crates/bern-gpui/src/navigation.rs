@@ -195,6 +195,9 @@ pub fn nav_link(c: &Ctx, id: &'static str, label: String, route: Value, children
         },
     });
     let hover = c.slot("row", "hover", "background");
+    // Outside a grouped `Section`, `NavLink` provides its own row insets
+    // (16pt horizontal, 12pt vertical), matching SwiftUI, WinUI 3, Compose and Web.
+    let in_section = c.in_section_row() && c.sidebar().is_none();
     let element = div()
         .id(c.element_id(id))
         .flex()
@@ -202,7 +205,10 @@ pub fn nav_link(c: &Ctx, id: &'static str, label: String, route: Value, children
         .items_center()
         .gap(px(8.0))
         .w_full()
-        .rounded(px(6.0))
+        .when(!in_section, |el| {
+            el.px(px(16.0)).py(px(12.0)).rounded(px(8.0))
+        })
+        .when(in_section, |el| el.rounded(px(6.0)))
         .child(div().flex_1().min_w(px(0.0)).children(children))
         .child(icons::icon(
             "chevron.right",

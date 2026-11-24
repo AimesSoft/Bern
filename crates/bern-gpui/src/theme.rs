@@ -95,21 +95,41 @@ impl Theme {
             return rgba(Srgb::new(r, g, b), 0xff);
         }
         // Roles the theme derives from others, as the Web target does.
-        let role = match role {
+        let mapped = match role {
             "fill.subtle" => "hover.overlay",
             "fill.strong" => "pressed.overlay",
             "selection.background" => "accent",
             "selection.foreground" => "on_accent",
             role => role,
         };
-        if let Some((light, dark)) = PALETTE_MAP.with(|map| map.borrow().get(role).copied()) {
+        if let Some((light, dark)) = PALETTE_MAP.with(|map| map.borrow().get(mapped).copied()) {
             let (r, g, b) = if self.dark { dark } else { light };
             return rgba(Srgb::new(r, g, b), 0xff);
+        }
+        // Subtle fills, pointer overlays and hairlines are translucent tints of
+        // the foreground (matching SwiftUI, WinUI 3, GTK and Compose), so cards
+        // and hover states blend smoothly over blurred/colored backdrops while
+        // matching the same neutral steps on plain light/dark canvases.
+        if let Some(alpha) = match mapped {
+            "hover.overlay" => Some(15u8),    // ~6%
+            "pressed.overlay" => Some(31u8),  // ~12%
+            "disabled.surface" => Some(13u8), // ~5%
+            "separator" => Some(31u8),        // ~12%
+            _ => None,
+        } {
+            let base = self
+                .snapshot
+                .tokens
+                .iter()
+                .find(|token| token.name == "text.primary")
+                .map(|token| token.color)
+                .unwrap_or(if self.dark { Srgb::WHITE } else { Srgb::BLACK });
+            return rgba(base, alpha);
         }
         self.snapshot
             .tokens
             .iter()
-            .find(|token| token.name == role)
+            .find(|token| token.name == mapped)
             .map(|token| rgba(token.color, token.alpha))
             .unwrap_or(rgba(Srgb::new(0xff, 0x00, 0xff), 0xff))
     }
@@ -167,4 +187,32 @@ pub(crate) fn of(dark: bool, seed: Option<(u8, u8, u8)>) -> Rc<Theme> {
             })
         }))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn subtle_fills_and_separators_are_translucent_in_both_modes() {
+        for dark in [false, true] {
+            let theme = of(dark, None);
+            for role in [
+                "fill.subtle",
+                "fill.strong",
+                "hover.overlay",
+                "pressed.overlay",
+                "disabled.surface",
+                "separator",
+            ] {
+                let c = theme.color(role);
+                assert!(
+                    c.a > 0.0 && c.a < 0.2,
+                    "dark={dark} role={role} should be translucent, got a={}",
+                    c.a
+                );
+            }
+            assert!(theme.color("fill.subtle").a < theme.color("fill.strong").a);
+        }
+    }
 }
