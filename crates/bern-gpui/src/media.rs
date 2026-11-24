@@ -177,6 +177,8 @@ pub struct VideoProps {
     /// `VideoFit`'s code: contain, cover, fill.
     pub fit: u32,
     pub corner: f32,
+    /// Show Bern's standard GPUI playback control bar (`controls: standard`).
+    pub controls: bool,
 }
 
 /// One video view.
@@ -395,6 +397,9 @@ pub(crate) fn attach_kernel() {
         KIND.with(|current| current.set(SurfaceKind::from_code(kind)));
     }
     log(|| format!("kernel attached: {:?}", KIND.with(Cell::get)));
+    if KIND.with(Cell::get).is_none() {
+        crate::media_executor::attach();
+    }
 }
 
 /// Development aid: `BERN_MEDIA_LOG` prints how videos reach the kernel.
@@ -416,7 +421,7 @@ pub(crate) fn holes(window: &str) -> Holes {
 
 /// Whether `window` showed a video under its content when it last drew.
 pub(crate) fn has_video(window: &str) -> bool {
-    KIND.with(Cell::get).is_some_and(under)
+    (KIND.with(Cell::get).is_some_and(under) || crate::media_executor::uses_underlay())
         && VIEWS.with(|views| views.borrow().values().any(|view| view.window == window))
 }
 
@@ -454,10 +459,14 @@ pub(crate) fn end(window: &str, closed: bool) {
 
 fn detach(token: &str, view: View) {
     if view.size.is_some() {
-        clock::stop(token);
-        let mut writer = Writer::new();
-        writer.text(token);
-        post(bern_ffi::media::bern_media_surface_detach, &writer.bytes);
+        if KIND.with(Cell::get).is_some() {
+            clock::stop(token);
+            let mut writer = Writer::new();
+            writer.text(token);
+            post(bern_ffi::media::bern_media_surface_detach, &writer.bytes);
+        } else {
+            crate::media_executor::remove_view(token);
+        }
         let mut writer = Writer::new();
         writer.text(token);
         writer.u8(0);
@@ -471,6 +480,244 @@ fn detach(token: &str, view: View) {
         writer.text(&view.player);
         post(bern_ffi::media::bern_media_release, &writer.bytes);
     }
+}
+
+fn format_media_time(seconds: f64) -> String {
+    let total = if seconds.is_finite() && seconds > 0.0 {
+        seconds.floor() as u64
+    } else {
+        0
+    };
+    let h = total / 3600;
+    let m = (total % 3600) / 60;
+    let s = total % 60;
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m}:{s:02}")
+    }
+}
+
+thread_local! {
+    static SEEK_BOUNDS: RefCell<HashMap<String, Bounds<Pixels>>> = RefCell::new(HashMap::new());
+}
+
+fn control_bar(c: &Ctx, id: &'static str, player: &str) -> El {
+    use gpui::{InteractiveElement, MouseButton, StatefulInteractiveElement};
+    use std::rc::Rc;
+
+    let playing = crate::value::truthy(&player_field(player, "playing"));
+    let muted = crate::value::truthy(&player_field(player, "muted"));
+    let seekable = crate::value::truthy(&player_field(player, "seekable"));
+    let position = crate::value::as_f64(&player_field(player, "position"));
+    let duration = crate::value::as_f64(&player_field(player, "duration"));
+    let progress = if duration > 0.0 {
+        (position / duration).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let hidden = playing && c.win().idle();
+
+    let player_toggle = player.to_string();
+    let toggle_play: crate::ctx::Press = {
+        let c = c.clone();
+        Rc::new(move |_| {
+            let op = if playing {
+                MediaOp::Pause
+            } else {
+                MediaOp::Play
+            };
+            media(&c, op, &player_toggle, Vec::new());
+        })
+    };
+    let player_mute = player.to_string();
+    let toggle_mute: crate::ctx::Press = {
+        let c = c.clone();
+        Rc::new(move |_| {
+            media(
+                &c,
+                MediaOp::SetMuted,
+                &player_mute,
+                vec![Value::Bool(!muted)],
+            );
+        })
+    };
+    let player_seek = player.to_string();
+    let do_seek: Rc<dyn Fn(f64)> = {
+        let c = c.clone();
+        Rc::new(move |ms: f64| {
+            let target = ms.max(0.0).round() as i64;
+            media(&c, MediaOp::Seek, &player_seek, vec![Value::Int(target)]);
+        })
+    };
+
+    c.list(crate::session::Control {
+        target: c.target(&format!("{id}.play_pause")),
+        window: c.win().id.clone(),
+        role: "button",
+        label: if playing { "Pause" } else { "Play" }.to_string(),
+        value: Some(if playing { "playing" } else { "paused" }.to_string()),
+        enabled: c.enabled(),
+        actions: crate::session::Actions {
+            activate: Some(Rc::clone(&toggle_play)),
+            ..crate::session::Actions::default()
+        },
+    });
+    c.list(crate::session::Control {
+        target: c.target(&format!("{id}.seek")),
+        window: c.win().id.clone(),
+        role: "slider",
+        label: "Seek".to_string(),
+        value: Some(format!("{}", (position * 1000.0).round() as i64)),
+        enabled: c.enabled() && seekable,
+        actions: crate::session::Actions {
+            set_number: Some(Rc::clone(&do_seek)),
+            ..crate::session::Actions::default()
+        },
+    });
+    c.list(crate::session::Control {
+        target: c.target(&format!("{id}.mute")),
+        window: c.win().id.clone(),
+        role: "button",
+        label: if muted { "Unmute" } else { "Mute" }.to_string(),
+        value: Some(muted.to_string()),
+        enabled: c.enabled(),
+        actions: crate::session::Actions {
+            activate: Some(Rc::clone(&toggle_mute)),
+            ..crate::session::Actions::default()
+        },
+    });
+
+    if hidden {
+        return div().into_any_element();
+    }
+
+    let fg = gpui::rgba(0xffffffff);
+    let muted_fg = gpui::rgba(0xffffffb8);
+    let accent = c.color("accent");
+    let track_bg = gpui::rgba(0xffffff3d);
+    let pill_bg = gpui::rgba(0x141418cc);
+    let hover_bg = gpui::rgba(0xffffff22);
+
+    let play_icon = if playing { "pause.fill" } else { "play.fill" };
+    let mute_icon = if muted {
+        "speaker.slash.fill"
+    } else {
+        "speaker.wave.3.fill"
+    };
+
+    let seek_key = format!("{}/{id}.seek", c.win().id);
+    let seek_key_probe = seek_key.clone();
+    let seek_key_down = seek_key;
+    let seek_cb = Rc::clone(&do_seek);
+    let duration_ms = (duration * 1000.0).max(0.0);
+
+    let seek_track = div()
+        .id(c.element_id(&format!("{id}.seek_track")))
+        .relative()
+        .flex()
+        .items_center()
+        .flex_1()
+        .h(crate::units::px(22.0))
+        .cursor_pointer()
+        .child(
+            gpui::canvas(
+                move |bounds, _, _| {
+                    SEEK_BOUNDS.with(|map| {
+                        map.borrow_mut().insert(seek_key_probe.clone(), bounds);
+                    });
+                },
+                |_, _, _, _| {},
+            )
+            .absolute()
+            .size_full(),
+        )
+        .child(
+            div()
+                .relative()
+                .w_full()
+                .h(crate::units::px(4.0))
+                .rounded(crate::units::px(2.0))
+                .bg(track_bg)
+                .overflow_hidden()
+                .child(div().h_full().w(gpui::relative(progress as f32)).bg(accent)),
+        )
+        .on_mouse_down(MouseButton::Left, move |event, _, cx| {
+            cx.stop_propagation();
+            if !seekable || duration_ms <= 0.0 {
+                return;
+            }
+            let bounds = SEEK_BOUNDS.with(|map| map.borrow().get(&seek_key_down).copied());
+            if let Some(bounds) = bounds {
+                let w = f32::from(bounds.size.width).max(1.0);
+                let frac = ((f32::from(event.position.x) - f32::from(bounds.origin.x)) / w)
+                    .clamp(0.0, 1.0);
+                seek_cb(f64::from(frac) * duration_ms);
+            }
+        });
+
+    div()
+        .absolute()
+        .bottom(crate::units::px(12.0))
+        .left(crate::units::px(12.0))
+        .right(crate::units::px(12.0))
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(crate::units::px(10.0))
+        .px(crate::units::px(12.0))
+        .py(crate::units::px(8.0))
+        .rounded(crate::units::px(10.0))
+        .bg(pill_bg)
+        .border_1()
+        .border_color(gpui::rgba(0xffffff1f))
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .child(
+            div()
+                .id(c.element_id(&format!("{id}.play_btn")))
+                .flex()
+                .items_center()
+                .justify_center()
+                .size(crate::units::px(28.0))
+                .rounded(crate::units::px(6.0))
+                .cursor_pointer()
+                .hover(move |s| s.bg(hover_bg))
+                .child(crate::icons::icon(play_icon, 14.0, fg))
+                .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    toggle_play(cx);
+                }),
+        )
+        .child(
+            div()
+                .text_size(crate::units::px(11.5))
+                .text_color(muted_fg)
+                .child(format_media_time(position)),
+        )
+        .child(seek_track)
+        .child(
+            div()
+                .text_size(crate::units::px(11.5))
+                .text_color(muted_fg)
+                .child(format_media_time(duration)),
+        )
+        .child(
+            div()
+                .id(c.element_id(&format!("{id}.mute_btn")))
+                .flex()
+                .items_center()
+                .justify_center()
+                .size(crate::units::px(28.0))
+                .rounded(crate::units::px(6.0))
+                .cursor_pointer()
+                .hover(move |s| s.bg(hover_bg))
+                .child(crate::icons::icon(mute_icon, 14.0, fg))
+                .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    toggle_mute(cx);
+                }),
+        )
+        .into_any_element()
 }
 
 /// `Video`: the picture of a player, letterboxed or filling the view as
@@ -560,22 +807,48 @@ pub fn video(c: &Ctx, id: &'static str, props: VideoProps) -> El {
         let window_id = window.clone();
         let player = player.clone();
         let painted = token.clone();
+        let painted_player = player.clone();
         gpui::canvas(
             move |bounds, window, _| {
                 place(&token, &window_id, &player, bounds, corner, fit, window)
             },
-            move |bounds, _, window, _| paint(&painted, bounds, corner, window),
+            move |bounds, _, window, _| {
+                paint(&painted, &painted_player, bounds, corner, fit, window)
+            },
         )
         .absolute()
         .size_full()
     };
-    let element = div()
+    let mut element = div()
         .relative()
         .flex()
         .min_w(gpui::px(0.0))
         .min_h(gpui::px(0.0))
         .rounded(crate::units::px(props.corner))
         .child(probe);
+    if props.controls {
+        let toggle_player = player.clone();
+        let toggle_ctx = c.clone();
+        let click_layer = {
+            use gpui::{InteractiveElement, StatefulInteractiveElement};
+            div()
+                .id(c.element_id(&format!("{id}.surface_toggle")))
+                .absolute()
+                .inset_0()
+                .on_click(move |_, _, _| {
+                    let is_playing = crate::value::truthy(&player_field(&toggle_player, "playing"));
+                    let op = if is_playing {
+                        MediaOp::Pause
+                    } else {
+                        MediaOp::Play
+                    };
+                    media(&toggle_ctx, op, &toggle_player, Vec::new());
+                })
+        };
+        element = element
+            .child(click_layer)
+            .child(control_bar(c, id, &player));
+    }
     c.grow().apply(element.size_full()).into_any_element()
 }
 
@@ -591,7 +864,39 @@ fn place(
     window: &mut gpui::Window,
 ) {
     let Some(kind) = KIND.with(Cell::get) else {
-        log(|| format!("{token}: no kernel surface"));
+        if !crate::media_executor::active() {
+            log(|| format!("{token}: no kernel or built-in executor"));
+            return;
+        }
+        if crate::media_executor::uses_underlay() {
+            HOLES.with(|holes| {
+                holes
+                    .borrow_mut()
+                    .entry(window_id.to_string())
+                    .or_default()
+                    .push((bounds, corner))
+            });
+        }
+        let scale = window.scale_factor();
+        let size = (
+            ((f64::from(f32::from(bounds.size.width)) * f64::from(scale)).round() as u32).max(1),
+            ((f64::from(f32::from(bounds.size.height)) * f64::from(scale)).round() as u32).max(1),
+            f64::from(scale),
+        );
+        let first = VIEWS.with(|views| {
+            let mut views = views.borrow_mut();
+            let view = views.get_mut(token)?;
+            Some(view.size.replace(size).is_none())
+        });
+        if first == Some(true) {
+            let mut view = Writer::new();
+            view.text(token);
+            view.u8(1);
+            view.text(player);
+            view.text(window_id);
+            post(bern_ffi::media::bern_media_view, &view.bytes);
+        }
+        crate::media_executor::place_view(token, player, window, bounds, corner, fit);
         return;
     };
     if under(kind) {
@@ -654,26 +959,65 @@ fn place(
     }
 }
 
-/// Paint the view `token`: nothing over a native surface, else black with
-/// the kernel's newest picture over it.
-fn paint(token: &str, bounds: Bounds<Pixels>, corner: f32, window: &mut gpui::Window) {
+/// Compute destination rect inside `bounds` for a `frame` size under `fit`
+/// (`0` = contain, `1` = cover, `2` = fill).
+fn fit_bounds(bounds: Bounds<Pixels>, image: &RenderImage, fit: u32) -> Bounds<Pixels> {
+    if fit == 2 {
+        return bounds;
+    }
+    let img = image.size(0);
+    let iw = img.width.0.max(1) as f32;
+    let ih = img.height.0.max(1) as f32;
+    let bw = f32::from(bounds.size.width).max(1.0);
+    let bh = f32::from(bounds.size.height).max(1.0);
+    let scale = if fit == 1 {
+        (bw / iw).max(bh / ih)
+    } else {
+        (bw / iw).min(bh / ih)
+    };
+    let w = iw * scale;
+    let h = ih * scale;
+    Bounds::new(
+        gpui::point(
+            bounds.origin.x + gpui::px((bw - w) * 0.5),
+            bounds.origin.y + gpui::px((bh - h) * 0.5),
+        ),
+        gpui::size(gpui::px(w), gpui::px(h)),
+    )
+}
+
+/// Paint the view `token`: nothing over a native surface/underlay, else black
+/// with the newest picture over it.
+fn paint(
+    token: &str,
+    player: &str,
+    bounds: Bounds<Pixels>,
+    corner: f32,
+    fit: u32,
+    window: &mut gpui::Window,
+) {
     for gone in DROPPED.with(|dropped| std::mem::take(&mut *dropped.borrow_mut())) {
         let _ = window.drop_image(gone);
     }
-    if KIND.with(Cell::get).is_some_and(under) {
+    if KIND.with(Cell::get).is_some_and(under) || crate::media_executor::uses_underlay() {
         return;
     }
     let corners = gpui::Corners::all(gpui::px(corner));
     window.paint_quad(gpui::fill(bounds, gpui::black()).corner_radii(corners));
-    let shown = VIEWS.with(
-        |views| match views.borrow_mut().get_mut(token)?.surface.as_mut()? {
-            Surface::Pictures(pictures) => pictures.shown(window),
-            #[allow(unreachable_patterns)]
-            _ => None,
-        },
-    );
+    let shown = if KIND.with(Cell::get).is_some() {
+        VIEWS.with(
+            |views| match views.borrow_mut().get_mut(token)?.surface.as_mut()? {
+                Surface::Pictures(pictures) => pictures.shown(window),
+                #[allow(unreachable_patterns)]
+                _ => None,
+            },
+        )
+    } else {
+        crate::media_executor::take_frame(player, window)
+    };
     if let Some(image) = shown {
-        let _ = window.paint_image(bounds, bounds, corners, image, 0, false);
+        let dest = fit_bounds(bounds, &image, fit);
+        let _ = window.paint_image(dest, bounds, corners, image, 0, false);
     }
 }
 
@@ -872,18 +1216,21 @@ mod clock {
             }
             // SAFETY: null-terminated ASCII module/export names and standard Win32 waitable timer creation.
             unsafe {
-                let module = LoadLibraryA(b"dcomp.dll\0".as_ptr());
+                let module = LoadLibraryA(c"dcomp.dll".as_ptr().cast::<u8>());
                 let boost = if module.is_null() {
                     None
                 } else {
-                    let p = GetProcAddress(module, b"DCompositionBoostCompositorClock\0".as_ptr());
+                    let p =
+                        GetProcAddress(module, c"DCompositionBoostCompositorClock".as_ptr().cast());
                     (!p.is_null()).then(|| std::mem::transmute::<*const c_void, BoostFn>(p))
                 };
                 let wait = if module.is_null() {
                     None
                 } else {
-                    let p =
-                        GetProcAddress(module, b"DCompositionWaitForCompositorClock\0".as_ptr());
+                    let p = GetProcAddress(
+                        module,
+                        c"DCompositionWaitForCompositorClock".as_ptr().cast(),
+                    );
                     (!p.is_null()).then(|| std::mem::transmute::<*const c_void, WaitFn>(p))
                 };
                 let timer = CreateWaitableTimerExW(

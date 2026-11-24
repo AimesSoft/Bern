@@ -105,6 +105,8 @@ pub enum Align {
 pub struct Style {
     pub background: Option<Color>,
     pub foreground: Option<Color>,
+    pub border: Option<Color>,
+    pub hover_background: Option<Color>,
     pub corner: Option<f32>,
     /// Blur radius, offset down and opacity of the shadow.
     pub shadow: Option<(f32, f32, f32)>,
@@ -115,6 +117,8 @@ impl Style {
     pub const NONE: Style = Style {
         background: None,
         foreground: None,
+        border: None,
+        hover_background: None,
         corner: None,
         shadow: None,
     };
@@ -151,6 +155,13 @@ pub(crate) fn styled(c: &Ctx, element: Div, style: Option<&Style>) -> Div {
     }
     if let Some(foreground) = style.foreground {
         element = element.text_color(color(c, foreground));
+    }
+    if let Some(border) = style.border {
+        element = element.border_1().border_color(color(c, border));
+    }
+    if let Some(hover_bg) = style.hover_background {
+        let hover_bg = color(c, hover_bg);
+        element = element.hover(move |s| s.bg(hover_bg));
     }
     match style.corner {
         Some(corner) => element = element.rounded(px(corner)).overflow_hidden(),
@@ -288,6 +299,89 @@ pub fn divider(c: &Ctx) -> El {
         .w_full()
         .h(px(1.0))
         .bg(c.color("separator"))
+        .into_any_element()
+}
+
+/// `List`: a vertical list of static or keyed rows.
+pub fn list(c: &Ctx, children: Vec<El>) -> El {
+    let element = div()
+        .flex()
+        .flex_col()
+        .gap(px(2.0))
+        .w_full()
+        .children(children);
+    c.grow().apply(element).into_any_element()
+}
+
+/// `Inspector`: a trailing side panel shown beside `body` while `presented` is true.
+pub fn inspector(
+    c: &Ctx,
+    presented: crate::Field,
+    width: Option<f32>,
+    body: El,
+    panel: Vec<El>,
+) -> El {
+    let open = c.read(presented) == crate::protocol::Value::Bool(true);
+    let side = open.then(|| {
+        div()
+            .flex()
+            .flex_col()
+            .flex_none()
+            .h_full()
+            .w(px(width.unwrap_or(280.0)))
+            .bg(c.color("surface.panel"))
+            .border_l_1()
+            .border_color(c.color("separator"))
+            .p(px(12.0))
+            .gap(px(8.0))
+            .overflow_hidden()
+            .children(panel)
+    });
+    c.grow()
+        .apply(
+            div()
+                .flex()
+                .flex_row()
+                .size_full()
+                .min_w(px(0.0))
+                .min_h(px(0.0))
+                .child(div().flex_1().min_w(px(0.0)).min_h(px(0.0)).child(body))
+                .children(side),
+        )
+        .into_any_element()
+}
+
+/// `WindowButtons`: the horizontal room the window's own caption buttons take
+/// at `trailing` (or leading when false) under a unified title bar.
+pub fn window_buttons(c: &Ctx, trailing: bool) -> El {
+    let (leading_w, trailing_w) = c.win().caption.get();
+    let width = if trailing { trailing_w } else { leading_w };
+    if width <= 0.5 {
+        return div().flex_none().w(px(0.0)).h(px(0.0)).into_any_element();
+    }
+    div().flex_none().w(px(width)).h(px(1.0)).into_any_element()
+}
+
+/// `idle_area`: while the pointer rests over this area, the window waits
+/// `seconds` of inactivity before going idle (overriding the window default).
+pub fn idle_area(c: &Ctx, seconds: f64, child: El) -> El {
+    let win_enter = std::rc::Rc::clone(c.win());
+    let win_move = std::rc::Rc::clone(c.win());
+    div()
+        .id(c.element_id("idle-area"))
+        .flex()
+        .flex_col()
+        .on_hover(move |hovered, _, _| {
+            if *hovered {
+                win_enter.idle_override.set(Some(seconds));
+            } else if win_enter.idle_override.get() == Some(seconds) {
+                win_enter.idle_override.set(None);
+            }
+        })
+        .on_mouse_move(move |_, _, _| {
+            win_move.idle_override.set(Some(seconds));
+        })
+        .child(child)
         .into_any_element()
 }
 

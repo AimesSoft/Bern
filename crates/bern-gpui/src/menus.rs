@@ -29,7 +29,7 @@ pub enum MenuEntry {
     Divider,
 }
 
-/// A menu item: its action, with the open panel first when it picks.
+/// A menu item: its action, with the open panel or clipboard paste first.
 #[allow(clippy::too_many_arguments)]
 pub fn menu_item(
     c: &Ctx,
@@ -40,11 +40,13 @@ pub fn menu_item(
     checked: Option<bool>,
     enabled: bool,
     pick: Option<crate::FilePrompt>,
+    paste: Option<crate::Field>,
     shortcut: Option<String>,
     action: Option<crate::Act>,
 ) -> MenuEntry {
     let enabled = enabled && c.enabled();
-    let press = crate::controls::press(c, pick, action);
+    let (set_file, file_kinds) = crate::controls::file_actions(c, pick.as_ref(), action.as_ref());
+    let press = crate::controls::press_with_paste(c, pick, paste, action);
     c.list(Control {
         target: c.target(id),
         window: c.win().id.clone(),
@@ -54,6 +56,8 @@ pub fn menu_item(
         enabled,
         actions: Actions {
             activate: Some(Rc::clone(&press)),
+            set_file,
+            file_kinds,
             ..Actions::default()
         },
     });

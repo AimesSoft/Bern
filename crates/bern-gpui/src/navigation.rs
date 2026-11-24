@@ -67,11 +67,37 @@ impl RenderOnce for ResetNavigation {
 /// pushed onto `path` under a bar with the way back.
 pub fn navigation(
     c: &Ctx,
+    id: Option<&'static str>,
     path: Field,
     depth: usize,
     title: Option<String>,
     content: Vec<El>,
 ) -> El {
+    let nav_id = id.unwrap_or("navigation");
+    let back_fn: Rc<dyn Fn() -> bool> = {
+        let c = c.clone();
+        Rc::new(move || {
+            let mut routes = crate::value::as_list(c.read(path));
+            if routes.pop().is_some() {
+                c.write(path, Value::List(routes));
+                true
+            } else {
+                false
+            }
+        })
+    };
+    c.list(Control {
+        target: c.target(nav_id),
+        window: c.win().id.clone(),
+        role: "navigation",
+        label: title.clone().unwrap_or_default(),
+        value: Some(depth.to_string()),
+        enabled: c.enabled(),
+        actions: Actions {
+            back: Some(Rc::clone(&back_fn)),
+            ..Actions::default()
+        },
+    });
     let body = div()
         .flex()
         .flex_col()
@@ -83,11 +109,9 @@ pub fn navigation(
         return c.grow().apply(element.child(body)).into_any_element();
     }
     let back: crate::ctx::Press = {
-        let c = c.clone();
+        let back_fn = Rc::clone(&back_fn);
         Rc::new(move |_| {
-            let mut routes = crate::value::as_list(c.read(path));
-            routes.pop();
-            c.write(path, Value::List(routes));
+            back_fn();
         })
     };
     c.list(Control {
@@ -99,6 +123,7 @@ pub fn navigation(
         enabled: c.enabled(),
         actions: Actions {
             activate: Some(Rc::clone(&back)),
+            back: Some(back_fn),
             ..Actions::default()
         },
     });
@@ -362,6 +387,30 @@ pub fn sidebar_item(
     crate::controls::painted(c, &target, build, states, style, choose)
         .flex_shrink_0()
         .into_any_element()
+}
+
+/// Reconcile the sidebar's `selection` against its currently mounted items;
+/// when the chosen item is absent, switch to `fallback` (if present) or the
+/// first mounted item and persist it back to `field`.
+pub fn sidebar_selection(
+    c: &Ctx,
+    items: &[(Value, String)],
+    chosen: Value,
+    fallback: Option<Value>,
+    field: Field,
+) -> Value {
+    let present = |value: &Value| items.iter().any(|(item, _)| item == value);
+    if items.is_empty() || present(&chosen) {
+        return chosen;
+    }
+    let Some(replacement) = fallback
+        .filter(|value| present(value))
+        .or_else(|| items.first().map(|(value, _)| value.clone()))
+    else {
+        return chosen;
+    };
+    c.write(field, replacement.clone());
+    replacement
 }
 
 /// The label of the sidebar item the selection names, as the detail

@@ -4,7 +4,7 @@
 
 Updated: 2026-11-21. The tables below are compiled from [bern-target-api](../../crates/bern-target-api/src/lib.rs) and each backend's `TargetDescriptor.features`. macOS and iOS share one SwiftUI list; tvOS and watchOS share the SwiftUI generator with them, and their lists are given separately in the [tvOS descriptor](../../crates/bern-backend-swiftui/src/tvos.rs) and [watchOS descriptor](../../crates/bern-backend-swiftui/src/watchos.rs).
 
-The optional GPUI target (`ui = "gpui"`, macOS, Windows, Linux) is a first version, built and run on all three platforms, and is not included in the tables below; the components and features it declares are in the [GPUI platform guide](../Platforms/GPUI.md).
+The optional GPUI target (`ui = "gpui"`, macOS, Windows, Linux) now reaches desktop feature parity with the native macOS, Windows, and Linux backends—including `StatusItem`, `Switch(login_item:)`, native `WebPage`, built-in media executors with `Video(controls:)`, all UI session commands, and `bern package`; see the [GPUI platform guide](../Platforms/GPUI.md).
 
 ## Compile-time feature support
 

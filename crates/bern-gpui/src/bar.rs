@@ -49,7 +49,7 @@ pub fn bar_submenu(label: String, entries: Vec<BarEntry>) -> BarEntry {
     BarEntry::Menu { label, entries }
 }
 
-/// A `CommandItem`: its action, with the open panel first when it picks.
+/// A `CommandItem`: its action, with the open panel or clipboard paste first.
 #[allow(clippy::too_many_arguments)]
 pub fn bar_item(
     c: &Ctx,
@@ -59,6 +59,7 @@ pub fn bar_item(
     enabled: bool,
     checked: bool,
     pick: Option<crate::FilePrompt>,
+    paste: Option<crate::Field>,
     action: Option<crate::Act>,
 ) -> BarEntry {
     BarEntry::Item {
@@ -70,7 +71,7 @@ pub fn bar_item(
             .filter(|keys| !keys.is_empty()),
         enabled: enabled && c.enabled(),
         checked,
-        press: crate::controls::press(c, pick, action),
+        press: crate::controls::press_with_paste(c, pick, paste, action),
     }
 }
 
