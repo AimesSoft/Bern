@@ -503,12 +503,77 @@ fn lit_here(id: &str, overlay: &Overlay, style: TextStyle) {
     let _ = (id, overlay, style);
 }
 
+/// Pending update queued for the Windows overlay thread.
+#[cfg(any(target_os = "windows", test))]
+#[derive(Clone, Debug, PartialEq)]
+enum WinOp {
+    Show(String, Overlay, TextStyle),
+    /// Only line colors (and optionally lit progress/route) changed.
+    Color(String, Overlay, TextStyle),
+    /// Only how far the lines are lit, or their routes, changed.
+    Lit(String, Overlay, TextStyle),
+    Hide(String),
+}
+
+#[cfg(any(target_os = "windows", test))]
+impl WinOp {
+    fn id(&self) -> &str {
+        match self {
+            Self::Show(id, _, _) | Self::Color(id, _, _) | Self::Lit(id, _, _) | Self::Hide(id) => {
+                id
+            }
+        }
+    }
+}
+
+/// Coalesce back-to-back updates for the same overlay id so high-rate color
+/// or lit frames never pile up in the Win32 message loop or starve timers.
+#[cfg(any(target_os = "windows", test))]
+fn coalesce_win_ops(ops: Vec<WinOp>) -> Vec<WinOp> {
+    let mut out: Vec<WinOp> = Vec::with_capacity(ops.len());
+    for op in ops {
+        let Some(pos) = out.iter().rposition(|prev| prev.id() == op.id()) else {
+            out.push(op);
+            continue;
+        };
+        match (&out[pos], op) {
+            (_, WinOp::Hide(id)) => {
+                out.remove(pos);
+                out.push(WinOp::Hide(id));
+            }
+            (_, WinOp::Show(id, overlay, style)) => {
+                out[pos] = WinOp::Show(id, overlay, style);
+            }
+            (
+                WinOp::Show(..),
+                WinOp::Color(id, overlay, style) | WinOp::Lit(id, overlay, style),
+            ) => {
+                out[pos] = WinOp::Show(id, overlay, style);
+            }
+            (
+                WinOp::Color(..),
+                WinOp::Color(id, overlay, style) | WinOp::Lit(id, overlay, style),
+            ) => {
+                out[pos] = WinOp::Color(id, overlay, style);
+            }
+            (WinOp::Lit(..), WinOp::Color(id, overlay, style)) => {
+                out[pos] = WinOp::Color(id, overlay, style);
+            }
+            (WinOp::Lit(..), WinOp::Lit(id, overlay, style)) => {
+                out[pos] = WinOp::Lit(id, overlay, style);
+            }
+            (WinOp::Hide(_), next) => out.push(next),
+        }
+    }
+    out
+}
+
 /// Repaint line colors of an overlay in place without rebuilding its window or controls.
 fn color_here(id: &str, overlay: &Overlay, style: TextStyle) {
     #[cfg(target_os = "macos")]
     mac::color(id.to_string(), overlay.clone(), style);
     #[cfg(target_os = "windows")]
-    win::show(id.to_string(), overlay.clone(), style);
+    win::color(id.to_string(), overlay.clone(), style);
     #[cfg(target_os = "android")]
     let _ = crate::platform::request("overlay_show", id, &as_json(overlay, style));
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "android")))]
@@ -1655,27 +1720,23 @@ mod win {
         DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForWindow, SetThreadDpiAwarenessContext,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DispatchMessageW, FindWindowExW, FindWindowW, GWL_EXSTYLE,
-        GWL_STYLE, GetCursorPos, GetMessageW, GetParent, GetWindowLongPtrW, GetWindowRect,
-        HTCAPTION, HTCLIENT, HTTRANSPARENT, HWND_MESSAGE, HWND_NOTOPMOST, HWND_TOP, HWND_TOPMOST,
-        IDC_ARROW, IsWindow, IsWindowVisible, KillTimer, LoadCursorW, MA_NOACTIVATE, MSG,
-        PostMessageW, PostThreadMessageW, RegisterClassExW, SPI_GETWORKAREA, SW_HIDE,
-        SW_SHOWNOACTIVATE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetParent,
-        SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow, SystemParametersInfoW,
-        TranslateMessage, ULW_ALPHA, UPDATELAYEREDWINDOWINFO, UpdateLayeredWindow,
-        UpdateLayeredWindowIndirect, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_EXITSIZEMOVE,
-        WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_NCHITTEST, WM_TIMER, WNDCLASSEXW,
-        WS_CHILD, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
+        CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, FindWindowExW,
+        FindWindowW, GWL_EXSTYLE, GWL_STYLE, GetCursorPos, GetMessageW, GetParent,
+        GetWindowLongPtrW, GetWindowRect, HTCAPTION, HTCLIENT, HTTRANSPARENT, HWND_MESSAGE,
+        HWND_NOTOPMOST, HWND_TOP, HWND_TOPMOST, IDC_ARROW, IsWindow, IsWindowVisible, KillTimer,
+        LoadCursorW, MA_NOACTIVATE, MSG, PostMessageW, PostThreadMessageW, RegisterClassExW,
+        SET_WINDOW_POS_FLAGS, SPI_GETWORKAREA, SW_HIDE, SWP_FRAMECHANGED, SWP_NOACTIVATE,
+        SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SetParent, SetTimer, SetWindowLongPtrW,
+        SetWindowPos, ShowWindow, SystemParametersInfoW, TranslateMessage, ULW_ALPHA,
+        UPDATELAYEREDWINDOWINFO, UpdateLayeredWindow, UpdateLayeredWindowIndirect, WINDOW_EX_STYLE,
+        WINDOW_STYLE, WM_APP, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_LBUTTONDOWN, WM_LBUTTONUP,
+        WM_MOUSEACTIVATE, WM_NCHITTEST, WM_TIMER, WNDCLASSEXW, WS_CHILD, WS_EX_LAYERED,
+        WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
     };
     use windows::core::{BOOL, PCWSTR, w};
     use windows_numerics::Vector2;
 
-    enum Message {
-        Show(String, Overlay, TextStyle),
-        /// Only how far the lines are lit, or their routes, changed.
-        Lit(String, Overlay, TextStyle),
-        Hide(String),
-    }
+    use super::{WinOp as Message, coalesce_win_ops};
 
     /// `(sender, wake_hwnd)` where `wake_hwnd` is a message-only window so
     /// `WM_APP` is dispatched even while modal Win32 dialogs (`ChooseColorW`)
@@ -1746,6 +1807,10 @@ mod win {
         send(Message::Show(id, overlay, style));
     }
 
+    pub fn color(id: String, overlay: Overlay, style: TextStyle) {
+        send(Message::Color(id, overlay, style));
+    }
+
     pub fn lit(id: String, overlay: Overlay, style: TextStyle) {
         send(Message::Lit(id, overlay, style));
     }
@@ -1806,6 +1871,14 @@ mod win {
         /// On the taskbar, the room it had when it was last drawn.
         room: Option<Room>,
         style: TextStyle,
+        /// Whether `HOVER_TIMER` is currently armed on `hwnd`.
+        hover_timer: bool,
+        /// Whether `TASKBAR_TIMER` is currently armed on `hwnd`.
+        taskbar_timer: bool,
+        /// Whether `LIT_TIMER` is currently armed on `hwnd`.
+        lit_timer: bool,
+        /// True while the user is dragging the window inside Win32's move loop.
+        dragging: bool,
     }
 
     #[derive(Clone, PartialEq, Eq)]
@@ -2111,12 +2184,15 @@ mod win {
     }
 
     /// A timer while a line on a route has somewhere to go.
-    unsafe fn keep_moving(window: &Window) {
+    unsafe fn keep_moving(window: &mut Window) {
         let moving = window
             .overlay
             .lines
             .iter()
             .any(|line| line.route.as_ref().is_some_and(Route::moving));
+        if moving == window.lit_timer {
+            return;
+        }
         // SAFETY: a window of this thread.
         unsafe {
             if moving {
@@ -2125,6 +2201,7 @@ mod win {
                 let _ = KillTimer(Some(window.hwnd), LIT_TIMER);
             }
         }
+        window.lit_timer = moving;
     }
 
     impl Window {
@@ -2136,6 +2213,51 @@ mod win {
                     x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom
                 })
                 .map(|(_, index)| *index)
+        }
+
+        /// Arm the hover poll timer once; never reset an already-running timer
+        /// so high-frequency redraws cannot starve `WM_TIMER(HOVER_TIMER)`.
+        unsafe fn ensure_hover_timer(&mut self) {
+            if !self.hover_timer {
+                unsafe { SetTimer(Some(self.hwnd), HOVER_TIMER, HOVER_EVERY, None) };
+                self.hover_timer = true;
+            }
+        }
+
+        unsafe fn stop_hover_timer(&mut self) {
+            if self.hover_timer {
+                let _ = unsafe { KillTimer(Some(self.hwnd), HOVER_TIMER) };
+                self.hover_timer = false;
+            }
+        }
+
+        unsafe fn ensure_taskbar_timer(&mut self) {
+            if !self.taskbar_timer {
+                unsafe { SetTimer(Some(self.hwnd), TASKBAR_TIMER, 1000, None) };
+                self.taskbar_timer = true;
+            }
+        }
+
+        unsafe fn stop_taskbar_timer(&mut self) {
+            if self.taskbar_timer {
+                let _ = unsafe { KillTimer(Some(self.hwnd), TASKBAR_TIMER) };
+                self.taskbar_timer = false;
+            }
+        }
+
+        unsafe fn stop_lit_timer(&mut self) {
+            if self.lit_timer {
+                let _ = unsafe { KillTimer(Some(self.hwnd), LIT_TIMER) };
+                self.lit_timer = false;
+            }
+        }
+
+        unsafe fn stop_all_timers(&mut self) {
+            unsafe {
+                self.stop_taskbar_timer();
+                self.stop_hover_timer();
+                self.stop_lit_timer();
+            }
         }
     }
 
@@ -2213,30 +2335,39 @@ mod win {
                 }
                 LRESULT(0)
             }
+            WM_ENTERSIZEMOVE => {
+                with_window(hwnd, |window, _, _| {
+                    window.dragging = true;
+                });
+                LRESULT(0)
+            }
             WM_EXITSIZEMOVE => {
                 let mut rect = RECT::default();
                 // SAFETY: the window this procedure serves.
-                if unsafe { GetWindowRect(hwnd, &mut rect) }.is_ok() {
+                let got_rect = unsafe { GetWindowRect(hwnd, &mut rect) }.is_ok();
+                with_window(hwnd, |window, _, _| {
+                    window.dragging = false;
+                    if !got_rect {
+                        return;
+                    }
                     let place = ((rect.left + rect.right) as f64 / 2.0, rect.bottom as f64);
-                    with_window(hwnd, |window, _, _| {
-                        window.place = Some(place);
-                        super::save_place(&window.id, place.0, place.1);
-                        let allowed = window.visible
-                            && !window.overlay.locked
-                            && window.overlay.place == Place::Free;
-                        if allowed {
-                            super::update_rect(
-                                &window.id,
-                                Some((
-                                    rect.left as f64,
-                                    rect.top as f64,
-                                    (rect.right - rect.left) as f64,
-                                    (rect.bottom - rect.top) as f64,
-                                )),
-                            );
-                        }
-                    });
-                }
+                    window.place = Some(place);
+                    super::save_place(&window.id, place.0, place.1);
+                    let allowed = window.visible
+                        && !window.overlay.locked
+                        && window.overlay.place == Place::Free;
+                    if allowed {
+                        super::update_rect(
+                            &window.id,
+                            Some((
+                                rect.left as f64,
+                                rect.top as f64,
+                                (rect.right - rect.left) as f64,
+                                (rect.bottom - rect.top) as f64,
+                            )),
+                        );
+                    }
+                });
                 LRESULT(0)
             }
             WM_TIMER if wparam.0 == LIT_TIMER => {
@@ -2248,6 +2379,17 @@ mod win {
             }
             WM_TIMER if wparam.0 == HOVER_TIMER => {
                 with_window(hwnd, |window, d2d, dwrite| {
+                    if window.dragging {
+                        return;
+                    }
+                    if window.visible && window.overlay.place == Place::Free {
+                        // SAFETY: reads extended style of this thread's window.
+                        let ex = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } as u32;
+                        if (ex & WS_EX_TOPMOST.0) == 0 {
+                            let _ = unsafe { draw(window, d2d, dwrite, false) };
+                            return;
+                        }
+                    }
                     let mut cursor = POINT::default();
                     let mut rect = RECT::default();
                     // SAFETY: reads the pointer and this thread's window.
@@ -2270,7 +2412,7 @@ mod win {
                         window.over = over;
                         window.hot = hot;
                         // SAFETY: draws a window of this thread.
-                        let _ = unsafe { draw(window, d2d, dwrite) };
+                        let _ = unsafe { draw(window, d2d, dwrite, false) };
                     }
                 });
                 LRESULT(0)
@@ -2296,7 +2438,7 @@ mod win {
                             )
                         });
                         if tray != window.parent || desired != window.room {
-                            let _ = draw(window, d2d, dwrite);
+                            let _ = draw(window, d2d, dwrite, false);
                         } else if window.parent.is_some() {
                             let _ = SetWindowPos(
                                 hwnd,
@@ -2320,22 +2462,34 @@ mod win {
     thread_local! {
         static INBOX: RefCell<Option<mpsc::Receiver<Message>>> = const { RefCell::new(None) };
         static INSTANCE_HANDLE: std::cell::Cell<isize> = const { std::cell::Cell::new(0) };
+        static FLUENT_ICONS: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+    }
+
+    fn current_instance() -> windows::Win32::Foundation::HINSTANCE {
+        windows::Win32::Foundation::HINSTANCE(INSTANCE_HANDLE.with(|i| i.get()) as *mut _)
     }
 
     fn drain_inbox() {
-        let instance =
-            windows::Win32::Foundation::HINSTANCE(INSTANCE_HANDLE.with(|i| i.get()) as *mut _);
-        loop {
-            let next =
-                INBOX.with(|inbox| inbox.borrow().as_ref().and_then(|rx| rx.try_recv().ok()));
-            let Some(next) = next else { break };
-            FACTORIES.with(|factories| {
-                if let Some((d2d, dwrite)) = factories.borrow().as_ref() {
-                    // SAFETY: overlay thread owns these factories and windows.
-                    unsafe { apply(next, d2d, dwrite, instance) };
+        let mut pending = Vec::new();
+        INBOX.with(|inbox| {
+            if let Some(rx) = inbox.borrow().as_ref() {
+                while let Ok(next) = rx.try_recv() {
+                    pending.push(next);
                 }
-            });
+            }
+        });
+        if pending.is_empty() {
+            return;
         }
+        let coalesced = coalesce_win_ops(pending);
+        FACTORIES.with(|factories| {
+            if let Some((d2d, dwrite)) = factories.borrow().as_ref() {
+                for next in coalesced {
+                    // SAFETY: overlay thread owns these factories and windows.
+                    unsafe { apply(next, d2d, dwrite) };
+                }
+            }
+        });
     }
 
     extern "system" fn wake_proc(
@@ -2413,7 +2567,7 @@ mod win {
                             if let Some((d2d, dwrite)) = factories.borrow().as_ref() {
                                 for window in windows.values_mut() {
                                     if window.visible && window.overlay.place == Place::Taskbar {
-                                        let _ = draw(window, d2d, dwrite);
+                                        let _ = draw(window, d2d, dwrite, false);
                                     }
                                 }
                             }
@@ -2427,12 +2581,35 @@ mod win {
         }
     }
 
-    unsafe fn apply(
-        message: Message,
-        d2d: &ID2D1Factory,
-        dwrite: &IDWriteFactory,
-        instance: windows::Win32::Foundation::HINSTANCE,
-    ) {
+    /// Create an overlay window with `WS_EX_TOPMOST` baked in for free overlays:
+    /// on Windows 11 a non-foreground process cannot promote a non-topmost
+    /// window via `SetWindowPos(HWND_TOPMOST, SWP_NOACTIVATE)`.
+    unsafe fn create_overlay_window(place: Place) -> HWND {
+        let mut ex = WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
+        if place == Place::Free {
+            ex |= WS_EX_TOPMOST;
+        }
+        // SAFETY: a window of the class this thread registered.
+        unsafe {
+            CreateWindowExW(
+                ex,
+                w!("BernOverlay"),
+                w!(""),
+                WS_POPUP,
+                0,
+                0,
+                1,
+                1,
+                None,
+                None,
+                Some(current_instance()),
+                None,
+            )
+        }
+        .unwrap_or_default()
+    }
+
+    unsafe fn apply(message: Message, d2d: &ID2D1Factory, dwrite: &IDWriteFactory) {
         match message {
             Message::Hide(id) => WINDOWS.with(|windows| {
                 let mut windows = windows.borrow_mut();
@@ -2440,12 +2617,11 @@ mod win {
                     window.visible = false;
                     window.over = false;
                     window.hot = None;
+                    window.dragging = false;
                     super::update_rect(&id, None);
                     // SAFETY: a window of this thread.
                     unsafe {
-                        let _ = KillTimer(Some(window.hwnd), TASKBAR_TIMER);
-                        let _ = KillTimer(Some(window.hwnd), HOVER_TIMER);
-                        let _ = KillTimer(Some(window.hwnd), LIT_TIMER);
+                        window.stop_all_timers();
                         let _ = ShowWindow(window.hwnd, SW_HIDE);
                     }
                 }
@@ -2468,31 +2644,36 @@ mod win {
                 });
                 if !moved {
                     // SAFETY: as this call's own.
-                    unsafe { apply(Message::Show(id, overlay, style), d2d, dwrite, instance) };
+                    unsafe { apply(Message::Show(id, overlay, style), d2d, dwrite) };
+                }
+            }
+            Message::Color(id, overlay, style) => {
+                let repainted = WINDOWS.with(|windows| {
+                    let mut windows = windows.borrow_mut();
+                    let Some(window) = windows
+                        .get_mut(&id)
+                        .filter(|window| window.visible && window.frame.is_some())
+                    else {
+                        return false;
+                    };
+                    window.overlay = overlay.clone();
+                    window.style = style;
+                    // SAFETY: repaints pixels in place on a window of this thread
+                    // without resetting hover timers, window styles, or drag position.
+                    let _ = unsafe { draw(window, d2d, dwrite, true) };
+                    true
+                });
+                if !repainted {
+                    // SAFETY: as this call's own.
+                    unsafe { apply(Message::Show(id, overlay, style), d2d, dwrite) };
                 }
             }
             Message::Show(id, overlay, style) => WINDOWS.with(|windows| {
                 let mut windows = windows.borrow_mut();
                 {
+                    let initial_place = overlay.place;
                     let window = windows.entry(id.clone()).or_insert_with(|| {
-                        // SAFETY: a window of the class this thread registered.
-                        let hwnd = unsafe {
-                            CreateWindowExW(
-                                WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
-                                w!("BernOverlay"),
-                                w!(""),
-                                WS_POPUP,
-                                0,
-                                0,
-                                1,
-                                1,
-                                None,
-                                None,
-                                Some(instance),
-                                None,
-                            )
-                        }
-                        .unwrap_or_default();
+                        let hwnd = unsafe { create_overlay_window(initial_place) };
                         Window {
                             id: id.clone(),
                             hwnd,
@@ -2507,6 +2688,10 @@ mod win {
                             visible: false,
                             room: None,
                             style: TextStyle::default(),
+                            hover_timer: false,
+                            taskbar_timer: false,
+                            lit_timer: false,
+                            dragging: false,
                         }
                     });
                     window.overlay = overlay;
@@ -2516,7 +2701,7 @@ mod win {
                 refresh_scanner(&windows);
                 if let Some(window) = windows.get_mut(&id) {
                     // SAFETY: draws a window of this thread.
-                    let _ = unsafe { draw(window, d2d, dwrite) };
+                    let _ = unsafe { draw(window, d2d, dwrite, false) };
                 }
             }),
         }
@@ -2586,17 +2771,24 @@ mod win {
         let code = GLYPHS.iter().find(|(name, _)| *name == symbol)?.1;
         // SAFETY: DirectWrite objects made and used on this thread.
         unsafe {
-            let mut fonts: Option<IDWriteFontCollection> = None;
-            dwrite.GetSystemFontCollection(&mut fonts, false).ok()?;
-            let (mut index, mut exists) = (0u32, BOOL(0));
-            let fluent = fonts
-                .and_then(|fonts| {
-                    fonts
-                        .FindFamilyName(w!("Segoe Fluent Icons"), &mut index, &mut exists)
-                        .ok()
-                })
-                .is_some()
-                && exists.as_bool();
+            let fluent = match FLUENT_ICONS.with(|cached| cached.get()) {
+                Some(has) => has,
+                None => {
+                    let mut fonts: Option<IDWriteFontCollection> = None;
+                    dwrite.GetSystemFontCollection(&mut fonts, false).ok()?;
+                    let (mut index, mut exists) = (0u32, BOOL(0));
+                    let has = fonts
+                        .and_then(|fonts| {
+                            fonts
+                                .FindFamilyName(w!("Segoe Fluent Icons"), &mut index, &mut exists)
+                                .ok()
+                        })
+                        .is_some()
+                        && exists.as_bool();
+                    FLUENT_ICONS.with(|cached| cached.set(Some(has)));
+                    has
+                }
+            };
             let family: PCWSTR = if fluent {
                 w!("Segoe Fluent Icons")
             } else {
@@ -2870,6 +3062,7 @@ mod win {
                 let style = GetWindowLongPtrW(window.hwnd, GWL_STYLE) as u32;
                 let current_parent = GetParent(window.hwnd).ok();
                 if (style & WS_CHILD.0) == 0 || current_parent != Some(tray) {
+                    window.stop_all_timers();
                     let _ = SetWindowPos(
                         window.hwnd,
                         Some(HWND_NOTOPMOST),
@@ -2896,19 +3089,17 @@ mod win {
                 }
             } else {
                 let style = GetWindowLongPtrW(window.hwnd, GWL_STYLE) as u32;
-                if (style & WS_CHILD.0) != 0 {
-                    let _ = SetParent(window.hwnd, None);
-                    let new_style = (style & !WS_CHILD.0) | WS_POPUP.0;
-                    SetWindowLongPtrW(window.hwnd, GWL_STYLE, new_style as isize);
-                    let _ = SetWindowPos(
-                        window.hwnd,
-                        Some(HWND_TOPMOST),
-                        0,
-                        0,
-                        0,
-                        0,
-                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED,
-                    );
+                let ex = GetWindowLongPtrW(window.hwnd, GWL_EXSTYLE) as u32;
+                let is_child = (style & WS_CHILD.0) != 0;
+                let missing_topmost = (ex & WS_EX_TOPMOST.0) == 0;
+                if (is_child || missing_topmost) && !window.dragging {
+                    window.stop_all_timers();
+                    let old = window.hwnd;
+                    window.frame = None;
+                    window.hwnd = create_overlay_window(Place::Free);
+                    if !old.0.is_null() {
+                        let _ = DestroyWindow(old);
+                    }
                 }
                 window.parent = None;
                 window.room = None;
@@ -2931,14 +3122,17 @@ mod win {
         window: &mut Window,
         d2d: &ID2D1Factory,
         dwrite: &IDWriteFactory,
+        color_only: bool,
     ) -> windows::core::Result<()> {
-        let hwnd = window.hwnd;
         // SAFETY: Win32, Direct2D and DirectWrite calls on this thread's
         // window and its own device contexts and bitmap.
         unsafe {
             let free = window.overlay.place == Place::Free;
-            let tray = if free { None } else { find_taskbar() };
-            sync_parent(window, tray);
+            if !color_only {
+                let tray = if free { None } else { find_taskbar() };
+                sync_parent(window, tray);
+            }
+            let hwnd = window.hwnd;
 
             let dpi = GetDpiForWindow(hwnd).max(96);
             let scale = dpi as f32 / 96.0;
@@ -2950,6 +3144,8 @@ mod win {
             };
             let room = if free {
                 None
+            } else if color_only && window.room.is_some() {
+                window.room
             } else if let Some(tray) = window.parent {
                 live_taskbar_room(
                     tray,
@@ -2972,11 +3168,11 @@ mod win {
                 window.room = room;
             }
             if !free && room.is_none() {
-                let _ = KillTimer(Some(hwnd), HOVER_TIMER);
-                let _ = KillTimer(Some(hwnd), LIT_TIMER);
+                window.stop_hover_timer();
+                window.stop_lit_timer();
                 let _ = ShowWindow(hwnd, SW_HIDE);
                 window.frame = None;
-                SetTimer(Some(hwnd), TASKBAR_TIMER, 1000, None);
+                window.ensure_taskbar_timer();
                 return Ok(());
             }
             // On the taskbar a line is as wide as its room; one that has not
@@ -3065,14 +3261,14 @@ mod win {
                 })
                 .collect();
             if lines.is_empty() {
-                let _ = KillTimer(Some(hwnd), HOVER_TIMER);
-                let _ = KillTimer(Some(hwnd), LIT_TIMER);
+                window.stop_hover_timer();
+                window.stop_lit_timer();
                 let _ = ShowWindow(hwnd, SW_HIDE);
                 window.frame = None;
                 super::update_rect(&window.id, None);
                 // Still on the taskbar, it checks again if the layout changes.
                 if !free {
-                    SetTimer(Some(hwnd), TASKBAR_TIMER, 1000, None);
+                    window.ensure_taskbar_timer();
                 }
                 return Ok(());
             }
@@ -3112,6 +3308,28 @@ mod win {
                     (rect, index)
                 })
                 .collect();
+
+            // Refresh hover/hot right before drawing whenever the overlay is
+            // already on screen and not being dragged: Win32 treats `WM_TIMER`
+            // as lower priority than posted `WM_APP` updates, so checking here
+            // keeps hover controls and click-through responsive even under
+            // continuous animation frames.
+            if free && !window.dragging && IsWindowVisible(hwnd).as_bool() {
+                let mut cursor = POINT::default();
+                let mut rect = RECT::default();
+                if GetCursorPos(&mut cursor).is_ok() && GetWindowRect(hwnd, &mut rect).is_ok() {
+                    let over = cursor.x >= rect.left
+                        && cursor.x < rect.right
+                        && cursor.y >= rect.top
+                        && cursor.y < rect.bottom;
+                    window.over = over;
+                    window.hot = if over {
+                        window.button_at(cursor.x - rect.left, cursor.y - rect.top)
+                    } else {
+                        None
+                    };
+                }
+            }
 
             let screen = GetDC(None);
             let memory = CreateCompatibleDC(Some(screen));
@@ -3372,47 +3590,70 @@ mod win {
                 }
             }
 
-            let (left, top) = match window.overlay.place {
-                Place::Taskbar => room.map_or((0, 0), |room| {
-                    let screen_x = room.right - width;
-                    let screen_y = (room.top + room.bottom) / 2 - height / 2;
-                    if let Some(tray) = window.parent {
-                        let mut pt = POINT {
-                            x: screen_x,
-                            y: screen_y,
-                        };
-                        let _ = ScreenToClient(tray, &mut pt);
-                        (pt.x, pt.y)
-                    } else {
-                        (screen_x, screen_y)
-                    }
-                }),
-                Place::Free => {
-                    let (x, y) = window.place.unwrap_or_else(|| {
-                        let mut area = RECT::default();
-                        let _ = SystemParametersInfoW(
-                            SPI_GETWORKAREA,
-                            0,
-                            Some(&mut area as *mut RECT as *mut _),
-                            Default::default(),
-                        );
-                        (
-                            (area.left + area.right) as f64 / 2.0,
-                            area.bottom as f64 - (area.bottom - area.top) as f64 * 0.1,
-                        )
-                    });
-                    ((x - width as f64 / 2.0) as i32, (y - height as f64) as i32)
-                }
-            };
-            // Locked, clicks go through but over a button that shows.
-            let through = window.overlay.locked && !(window.over && window.hot.is_some());
-            let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
-            let style = if through {
-                style | WS_EX_TRANSPARENT.0
+            let prev_size = window.frame.as_ref().map(|f| (f.width, f.height));
+            let same_size = prev_size == Some((width, height));
+            let keep_pos = (color_only && free && same_size) || (window.dragging && same_size);
+            let dst_point = if keep_pos {
+                None
             } else {
-                style & !WS_EX_TRANSPARENT.0
+                let (left, top) = match window.overlay.place {
+                    Place::Taskbar => room.map_or((0, 0), |room| {
+                        let screen_x = room.right - width;
+                        let screen_y = (room.top + room.bottom) / 2 - height / 2;
+                        if let Some(tray) = window.parent {
+                            let mut pt = POINT {
+                                x: screen_x,
+                                y: screen_y,
+                            };
+                            let _ = ScreenToClient(tray, &mut pt);
+                            (pt.x, pt.y)
+                        } else {
+                            (screen_x, screen_y)
+                        }
+                    }),
+                    Place::Free => {
+                        let (x, y) = if window.dragging {
+                            let mut rect = RECT::default();
+                            if GetWindowRect(hwnd, &mut rect).is_ok() {
+                                ((rect.left + rect.right) as f64 / 2.0, rect.bottom as f64)
+                            } else {
+                                window.place.unwrap_or((0.0, 0.0))
+                            }
+                        } else {
+                            window.place.unwrap_or_else(|| {
+                                let mut area = RECT::default();
+                                let _ = SystemParametersInfoW(
+                                    SPI_GETWORKAREA,
+                                    0,
+                                    Some(&mut area as *mut RECT as *mut _),
+                                    Default::default(),
+                                );
+                                (
+                                    (area.left + area.right) as f64 / 2.0,
+                                    area.bottom as f64 - (area.bottom - area.top) as f64 * 0.1,
+                                )
+                            })
+                        };
+                        ((x - width as f64 / 2.0) as i32, (y - height as f64) as i32)
+                    }
+                };
+                Some(POINT { x: left, y: top })
             };
-            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style as isize);
+            let mut style_changed = false;
+            // Locked, clicks go through except over a button that shows.
+            // Checked on color-only repaints too so hovering the unlock button
+            // during high-rate color frames clears `WS_EX_TRANSPARENT` at once.
+            let through = window.overlay.locked && !(window.over && window.hot.is_some());
+            let old_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+            let new_style = if through {
+                old_style | WS_EX_TRANSPARENT.0
+            } else {
+                old_style & !WS_EX_TRANSPARENT.0
+            };
+            if new_style != old_style {
+                SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_style as isize);
+                style_changed = true;
+            }
             let blend = BLENDFUNCTION {
                 BlendOp: AC_SRC_OVER as u8,
                 BlendFlags: 0,
@@ -3422,7 +3663,7 @@ mod win {
             let result = UpdateLayeredWindow(
                 hwnd,
                 Some(screen),
-                Some(&POINT { x: left, y: top }),
+                dst_point.as_ref().map(|pt| pt as *const POINT),
                 Some(&SIZE {
                     cx: width,
                     cy: height,
@@ -3437,38 +3678,54 @@ mod win {
             ReleaseDC(None, screen);
             result?;
             keep_moving(window);
-            let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-            let insert_after = if window.parent.is_some() {
-                HWND_TOP
-            } else {
-                HWND_TOPMOST
-            };
-            let _ = SetWindowPos(
-                hwnd,
-                Some(insert_after),
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-            );
-            match window.overlay.place {
-                Place::Taskbar => {
-                    super::update_rect(&window.id, None);
-                    SetTimer(Some(hwnd), TASKBAR_TIMER, 1000, None);
-                }
-                Place::Free => {
-                    if !window.overlay.locked {
-                        super::update_rect(
-                            &window.id,
-                            Some((left as f64, top as f64, width as f64, height as f64)),
-                        );
+            if !color_only || style_changed {
+                let was_visible = IsWindowVisible(hwnd).as_bool();
+                if !was_visible || style_changed || (!color_only && window.parent.is_some()) {
+                    let insert_after = if window.parent.is_some() {
+                        HWND_TOP
                     } else {
-                        super::update_rect(&window.id, None);
+                        HWND_TOPMOST
+                    };
+                    let mut flags: SET_WINDOW_POS_FLAGS = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
+                    if !was_visible {
+                        flags |= SWP_SHOWWINDOW;
                     }
-                    SetTimer(Some(hwnd), HOVER_TIMER, HOVER_EVERY, None);
+                    if style_changed {
+                        flags |= SWP_FRAMECHANGED;
+                    }
+                    let _ = SetWindowPos(hwnd, Some(insert_after), 0, 0, 0, 0, flags);
                 }
-            };
+            }
+            if !color_only {
+                match window.overlay.place {
+                    Place::Taskbar => {
+                        window.stop_hover_timer();
+                        super::update_rect(&window.id, None);
+                        window.ensure_taskbar_timer();
+                    }
+                    Place::Free => {
+                        window.stop_taskbar_timer();
+                        if !window.overlay.locked {
+                            let rect_pos = dst_point.or_else(|| {
+                                let mut rect = RECT::default();
+                                GetWindowRect(hwnd, &mut rect).ok().map(|_| POINT {
+                                    x: rect.left,
+                                    y: rect.top,
+                                })
+                            });
+                            if let Some(pt) = rect_pos {
+                                super::update_rect(
+                                    &window.id,
+                                    Some((pt.x as f64, pt.y as f64, width as f64, height as f64)),
+                                );
+                            }
+                        } else {
+                            super::update_rect(&window.id, None);
+                        }
+                        window.ensure_hover_timer();
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -3744,5 +4001,327 @@ mod tests {
         // Repeated None updates do not fire again.
         update_rect(id, None);
         assert_eq!(*events.lock().unwrap(), vec![id.to_string()]);
+    }
+
+    #[test]
+    fn coalesce_win_ops_collapses_high_rate_color_and_lit_updates() {
+        let make = |color: [u8; 4], lit: Option<f64>| Overlay {
+            lines: vec![Line {
+                text: "hello".into(),
+                ruby: String::new(),
+                size: 28.0,
+                bold: true,
+                color,
+                lit,
+                route: None,
+            }],
+            place: Place::Free,
+            ..Overlay::default()
+        };
+        let style = TextStyle::default();
+        let c1 = make([255, 0, 0, 255], Some(1.0));
+        let c2 = make([0, 255, 0, 255], Some(1.5));
+        let c3 = make([0, 255, 0, 255], Some(2.0));
+
+        // Consecutive Color and Lit updates collapse into a single latest Color
+        // without dropping the pending color change.
+        let out = coalesce_win_ops(vec![
+            WinOp::Color("lyrics".into(), c1.clone(), style),
+            WinOp::Color("lyrics".into(), c2.clone(), style),
+            WinOp::Lit("lyrics".into(), c3.clone(), style),
+        ]);
+        assert_eq!(out, vec![WinOp::Color("lyrics".into(), c3.clone(), style)]);
+
+        // A pending Show absorbs later Color updates as Show so creation/layout runs.
+        let out = coalesce_win_ops(vec![
+            WinOp::Show("lyrics".into(), c1.clone(), style),
+            WinOp::Color("lyrics".into(), c2.clone(), style),
+        ]);
+        assert_eq!(out, vec![WinOp::Show("lyrics".into(), c2.clone(), style)]);
+
+        // Hide supersedes earlier pending frames, while a subsequent Show still runs.
+        let out = coalesce_win_ops(vec![
+            WinOp::Show("lyrics".into(), c1.clone(), style),
+            WinOp::Color("lyrics".into(), c2.clone(), style),
+            WinOp::Hide("lyrics".into()),
+            WinOp::Color("lyrics".into(), c3.clone(), style),
+        ]);
+        assert_eq!(
+            out,
+            vec![
+                WinOp::Hide("lyrics".into()),
+                WinOp::Color("lyrics".into(), c3, style),
+            ]
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    #[ignore = "requires an interactive Windows desktop session"]
+    fn windows_free_overlay_stays_topmost_and_hover_works_during_color_frames() {
+        use std::thread;
+        use std::time::{Duration, Instant};
+        use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT, WPARAM};
+        use windows::Win32::UI::HiDpi::{
+            DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForWindow,
+            SetThreadDpiAwarenessContext,
+        };
+        use windows::Win32::UI::WindowsAndMessaging::{
+            EnumWindows, GWL_EXSTYLE, GetClassNameW, GetCursorPos, GetWindowLongPtrW,
+            GetWindowRect, GetWindowThreadProcessId, HTCLIENT, IsWindowVisible, SWP_NOACTIVATE,
+            SWP_NOSIZE, SWP_NOZORDER, SendMessageW, SetWindowPos, WM_ENTERSIZEMOVE,
+            WM_EXITSIZEMOVE, WM_NCHITTEST, WS_EX_TOPMOST, WS_EX_TRANSPARENT,
+        };
+        use windows::core::BOOL;
+
+        unsafe {
+            let _ = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        }
+
+        unsafe extern "system" fn collect_own_overlays(hwnd: HWND, lparam: LPARAM) -> BOOL {
+            let out = unsafe { &mut *(lparam.0 as *mut Vec<HWND>) };
+            let mut pid = 0u32;
+            unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+            if pid == std::process::id() {
+                let mut buf = [0u16; 64];
+                let len = unsafe { GetClassNameW(hwnd, &mut buf) };
+                if len > 0 && String::from_utf16_lossy(&buf[..len as usize]) == "BernOverlay" {
+                    out.push(hwnd);
+                }
+            }
+            BOOL(1)
+        }
+
+        fn find_own_overlay() -> Option<HWND> {
+            let mut found = Vec::new();
+            unsafe {
+                let _ = EnumWindows(
+                    Some(collect_own_overlays),
+                    LPARAM(&mut found as *mut Vec<HWND> as isize),
+                );
+            }
+            found
+                .into_iter()
+                .find(|&h| unsafe { IsWindowVisible(h) }.as_bool())
+        }
+
+        let make = |rgb: [u8; 4], locked: bool, place: Place| Overlay {
+            lines: vec![
+                Line {
+                    text: "Bern Overlay Probe Line".into(),
+                    ruby: String::new(),
+                    size: 28.0,
+                    bold: true,
+                    color: rgb,
+                    lit: None,
+                    route: None,
+                },
+                Line {
+                    text: "Second Line".into(),
+                    ruby: String::new(),
+                    size: 18.0,
+                    bold: false,
+                    color: [220, 220, 220, 215],
+                    lit: None,
+                    route: None,
+                },
+            ],
+            place,
+            locked,
+            buttons: vec![
+                Button {
+                    id: "previous".into(),
+                    symbol: "backward.fill".into(),
+                    while_locked: false,
+                },
+                Button {
+                    id: "lock".into(),
+                    symbol: "lock.fill".into(),
+                    while_locked: true,
+                },
+                Button {
+                    id: "next".into(),
+                    symbol: "forward.fill".into(),
+                    while_locked: false,
+                },
+            ],
+        };
+
+        let mut cursor = POINT::default();
+        assert!(unsafe { GetCursorPos(&mut cursor) }.is_ok());
+
+        let id = "bern_win_overlay_probe_live";
+        show_styled(
+            id,
+            &make([255, 255, 255, 255], false, Place::Free),
+            TextStyle::default(),
+        );
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let hwnd = loop {
+            if let Some(h) = find_own_overlay() {
+                break h;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "BernOverlay window never became visible"
+            );
+            thread::sleep(Duration::from_millis(20));
+        };
+        let ex = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } as u32;
+        assert_ne!(
+            ex & WS_EX_TOPMOST.0,
+            0,
+            "free overlay must have WS_EX_TOPMOST on creation, got Ex=0x{ex:08X}"
+        );
+
+        // Move the overlay directly under the current cursor (without moving
+        // the user's mouse) and commit its position via WM_EXITSIZEMOVE.
+        let mut rect = RECT::default();
+        assert!(unsafe { GetWindowRect(hwnd, &mut rect) }.is_ok());
+        let scale = unsafe { GetDpiForWindow(hwnd) }.max(96) as f32 / 96.0;
+        let width = rect.right - rect.left;
+        let btn_center_y = ((12.0 + 14.0) * scale).round() as i32;
+        let place_x = cursor.x - width / 2;
+        let place_y = cursor.y - btn_center_y;
+        unsafe {
+            let _ = SetWindowPos(
+                hwnd,
+                None,
+                place_x,
+                place_y,
+                0,
+                0,
+                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+            let _ = SendMessageW(hwnd, WM_EXITSIZEMOVE, Some(WPARAM(0)), Some(LPARAM(0)));
+        }
+
+        // Drive 24 ms color updates (simulating high-rate animated text colors)
+        // for ~530 ms and verify hover stays responsive and buttons are hit-testable.
+        let mut saw_button_hit = false;
+        for step in 0..22u8 {
+            let color = [255 - step * 8, 60 + step * 8, 120 + step * 5, 255];
+            show_styled(id, &make(color, false, Place::Free), TextStyle::default());
+            thread::sleep(Duration::from_millis(24));
+            if let Some(h) = find_own_overlay() {
+                let ex_now = unsafe { GetWindowLongPtrW(h, GWL_EXSTYLE) } as u32;
+                assert_ne!(
+                    ex_now & WS_EX_TOPMOST.0,
+                    0,
+                    "lost WS_EX_TOPMOST during color frame {step}: Ex=0x{ex_now:08X}"
+                );
+                let mut r = RECT::default();
+                if unsafe { GetWindowRect(h, &mut r) }.is_ok() {
+                    let bx = (r.left + r.right) / 2;
+                    let by = r.top + btn_center_y;
+                    let lparam = LPARAM((((by & 0xffff) << 16) | (bx & 0xffff)) as isize);
+                    let hit =
+                        unsafe { SendMessageW(h, WM_NCHITTEST, Some(WPARAM(0)), Some(lparam)) };
+                    if hit.0 == HTCLIENT as isize {
+                        saw_button_hit = true;
+                    }
+                }
+            }
+        }
+        assert!(
+            saw_button_hit,
+            "HOVER_TIMER was starved during 24ms color updates: button bar never became interactive"
+        );
+
+        // Simulated drag during 24 ms color frames must not snap the window back.
+        let drag_x = place_x + 40;
+        let drag_y = place_y + 20;
+        unsafe {
+            let _ = SendMessageW(hwnd, WM_ENTERSIZEMOVE, Some(WPARAM(0)), Some(LPARAM(0)));
+            let _ = SetWindowPos(
+                hwnd,
+                None,
+                drag_x,
+                drag_y,
+                0,
+                0,
+                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+        }
+        for step in 0..5u8 {
+            let color = [100 + step * 20, 200, 255 - step * 20, 255];
+            show_styled(id, &make(color, false, Place::Free), TextStyle::default());
+            thread::sleep(Duration::from_millis(24));
+        }
+        let mut dragged = RECT::default();
+        assert!(unsafe { GetWindowRect(hwnd, &mut dragged) }.is_ok());
+        assert_eq!(
+            (dragged.left, dragged.top),
+            (drag_x, drag_y),
+            "color frames snapped dragging window back to old position"
+        );
+        unsafe {
+            let _ = SetWindowPos(
+                hwnd,
+                None,
+                place_x,
+                place_y,
+                0,
+                0,
+                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+            let _ = SendMessageW(hwnd, WM_EXITSIZEMOVE, Some(WPARAM(0)), Some(LPARAM(0)));
+        }
+
+        // Locked + cursor over unlock button during 24 ms color frames must clear
+        // WS_EX_TRANSPARENT while keeping WS_EX_TOPMOST.
+        show_styled(
+            id,
+            &make([255, 255, 255, 255], true, Place::Free),
+            TextStyle::default(),
+        );
+        for step in 0..5u8 {
+            let color = [255, 80 + step * 30, 80, 255];
+            show_styled(id, &make(color, true, Place::Free), TextStyle::default());
+            thread::sleep(Duration::from_millis(24));
+        }
+        if let Some(h) = find_own_overlay() {
+            let ex_locked = unsafe { GetWindowLongPtrW(h, GWL_EXSTYLE) } as u32;
+            assert_ne!(
+                ex_locked & WS_EX_TOPMOST.0,
+                0,
+                "lost WS_EX_TOPMOST while locked"
+            );
+            assert_eq!(
+                ex_locked & WS_EX_TRANSPARENT.0,
+                0,
+                "unlock button under cursor must remain clickable while locked during color frames"
+            );
+        }
+
+        // Switch Taskbar -> Free and verify recreated HWND restores WS_EX_TOPMOST.
+        show_styled(
+            id,
+            &make([255, 255, 255, 255], false, Place::Taskbar),
+            TextStyle::default(),
+        );
+        thread::sleep(Duration::from_millis(120));
+        show_styled(
+            id,
+            &make([255, 255, 255, 255], false, Place::Free),
+            TextStyle::default(),
+        );
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let h_after = loop {
+            if let Some(h) = find_own_overlay() {
+                break h;
+            }
+            assert!(Instant::now() < deadline, "overlay did not return to Free");
+            thread::sleep(Duration::from_millis(20));
+        };
+        let ex_after = unsafe { GetWindowLongPtrW(h_after, GWL_EXSTYLE) } as u32;
+        assert_ne!(
+            ex_after & WS_EX_TOPMOST.0,
+            0,
+            "lost WS_EX_TOPMOST after Taskbar -> Free transition: Ex=0x{ex_after:08X}"
+        );
+
+        hide(id);
+        thread::sleep(Duration::from_millis(50));
     }
 }
