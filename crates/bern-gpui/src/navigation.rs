@@ -238,8 +238,18 @@ pub fn split_view(c: &Ctx, collapsed: Option<Field>, sidebar: El, detail: El) ->
     c.grow().apply(element.size_full()).into_any_element()
 }
 
-/// `Sidebar`: its header, its items scrolling, and its footer, on the
-/// panel surface at the leading edge.
+/// Default translucent tint for `Sidebar` when no explicit `style!`
+/// `background` is set: subtle contrast over plain light/dark canvases while
+/// letting window backdrops (`Stack(under_bars: true)`) shine through.
+fn sidebar_default_bg(theme: &crate::theme::Theme) -> gpui::Rgba {
+    let mut tint = theme.color("text.primary");
+    tint.a = if theme.dark { 0.045 } else { 0.035 };
+    tint
+}
+
+/// `Sidebar`: its header, its items scrolling, and its footer, on a
+/// translucent panel surface at the leading edge that reaches under the
+/// unified title bar so window backdrops flow seamlessly behind it.
 pub fn sidebar(
     c: &Ctx,
     width: Option<f32>,
@@ -248,16 +258,24 @@ pub fn sidebar(
     footer: Vec<El>,
     style: Option<&'static Style>,
 ) -> El {
+    let top = c.win().title_bar.get();
+    let under_bar = top > 0.0 && !c.in_modal_content();
+    let bg = match style.and_then(|style| style.background) {
+        Some(background) => color(c, background),
+        None => sidebar_default_bg(c.theme()),
+    };
     div()
         .flex()
         .flex_col()
         .flex_none()
-        .h_full()
-        .w(px(width.unwrap_or(240.0)))
-        .bg(match style.and_then(|style| style.background) {
-            Some(background) => color(c, background),
-            None => c.color("surface.panel"),
+        .when(under_bar, |el| {
+            el.mt(px(-top))
+                .pt(px(top))
+                .h(px(c.win().height.get() + top))
         })
+        .when(!under_bar, |el| el.h_full())
+        .w(px(width.unwrap_or(240.0)))
+        .bg(bg)
         .border_r_1()
         .border_color(c.color("separator"))
         .when(!header.is_empty(), |element| {
@@ -529,6 +547,19 @@ pub fn detail(
 #[cfg(test)]
 mod reset_tests {
     use super::*;
+
+    #[test]
+    fn sidebar_default_background_is_translucent_in_both_modes() {
+        for dark in [false, true] {
+            let theme = crate::theme::of(dark, None);
+            let bg = sidebar_default_bg(&theme);
+            assert!(
+                bg.a > 0.0 && bg.a < 0.1,
+                "dark={dark} sidebar tint should be translucent, got a={}",
+                bg.a
+            );
+        }
+    }
 
     #[test]
     fn navigation_reset_only_clears_on_mount_or_key_change() {
