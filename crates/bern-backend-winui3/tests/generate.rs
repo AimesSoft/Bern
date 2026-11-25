@@ -3478,3 +3478,37 @@ fn nav_link_marks_fill_width_so_columns_keep_it_stretched() {
         "NavLink must mark bern-fill-width:\n{nav_link}"
     );
 }
+
+#[test]
+fn refill_stretches_dynamic_filling_children_inside_frame_and_wrap_containers() {
+    let core = include_str!("../templates/cpp/bern_ui_core.inl");
+    let scene = include_str!("../templates/cpp/bern_ui_scene.inl");
+    for (src, part) in [
+        (core, "} else if (role == L\"bern-frame\") {"),
+        (core, "} else if (role == L\"bern-wrap\") {"),
+        (
+            scene,
+            "controls::Grid space;\n    SetRole(space, L\"bern-frame\");",
+        ),
+        (
+            scene,
+            "controls::Grid content;\n    SetRole(content, L\"bern-frame\");",
+        ),
+    ] {
+        assert!(src.contains(part), "missing `{part}`");
+    }
+}
+
+#[test]
+fn stack_content_shadow_stays_in_root_region_and_behind_conditional_children() {
+    let widgets = include_str!("../templates/cpp/bern_ui_widgets.inl");
+    for part in [
+        "auto root = RootRegion(layers);",
+        "root->items.insert(root->items.begin(), Region::Entry{cast->host});",
+        "layers.Children().InsertAt(0, cast->host);",
+        "if (*disposed) cast->Detach();",
+        "if (!grid || !grid.IsLoaded()) cast->Detach();",
+    ] {
+        assert!(widgets.contains(part), "missing `{part}`");
+    }
+}

@@ -1051,6 +1051,15 @@ inline void Refill(xaml::FrameworkElement element) {
                 if (w) parent.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
                 if (h) parent.VerticalAlignment(xaml::VerticalAlignment::Stretch);
             }
+        } else if (role == L"bern-frame") {
+            if (across) element.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+            if (down) element.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+            return;
+        } else if (role == L"bern-wrap") {
+            if (across) element.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+            if (down) element.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+            if (across) parent.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+            if (down) parent.VerticalAlignment(xaml::VerticalAlignment::Stretch);
         } else if (role == L"bern-column") {
             if (across) element.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
         } else if (role == L"bern-row") {
