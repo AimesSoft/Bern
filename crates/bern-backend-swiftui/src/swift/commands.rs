@@ -224,13 +224,13 @@ impl Generator<'_> {
         let Some(item) = self.app.windows.status_item.as_ref() else {
             return;
         };
+        let icon = item.icon("icon").unwrap_or("circle");
         let image = if item.resource("image").is_some() {
             "SwiftUI.Image(nsImage: BernStatusArea.picture)".to_string()
+        } else if Self::uses_custom_icon(icon) {
+            format!("BernIcon(name: {})", string(icon))
         } else {
-            format!(
-                "SwiftUI.Image(systemName: {})",
-                string(item.icon("icon").unwrap_or("circle"))
-            )
+            format!("SwiftUI.Image(systemName: {})", string(icon))
         };
         // `shown`: read in the body of a scene of its own, which follows it.
         match item.expr("shown") {

@@ -779,6 +779,10 @@ impl Generator<'_> {
         let label = self.text_prop(element, "label").unwrap_or_default();
         out.open(format!("SwiftUI.Toggle(isOn: {binding}) {{"));
         match element.icon("icon") {
+            Some(icon) if Self::uses_custom_icon(icon) => out.line(format!(
+                "BernIconLabel(title: {label}, icon: {})",
+                string(icon)
+            )),
             Some(icon) => out.line(format!(
                 "SwiftUI.Label({label}, systemImage: {})",
                 string(icon)

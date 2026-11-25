@@ -227,10 +227,17 @@ impl Generator<'_> {
     pub(super) fn label_view(&self, out: &mut Out, element: &Element) {
         let title = self.text_prop(element, "title").unwrap_or_default();
         let icon = element.icon("icon").unwrap_or("circle");
-        out.line(format!(
-            "SwiftUI.Label({title}, systemImage: {})",
-            string(icon)
-        ));
+        if Self::uses_custom_icon(icon) {
+            out.line(format!(
+                "BernIconLabel(title: {title}, icon: {})",
+                string(icon)
+            ));
+        } else {
+            out.line(format!(
+                "SwiftUI.Label({title}, systemImage: {})",
+                string(icon)
+            ));
+        }
         if element.keyword("display") == Some("icon") {
             out.line(".labelStyle(.iconOnly)");
         }

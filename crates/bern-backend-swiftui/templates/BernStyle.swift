@@ -1738,7 +1738,7 @@ struct BernToast: View {
     var body: some View {
         SwiftUI.Group {
             if let systemImage {
-                SwiftUI.Label(text, systemImage: systemImage)
+                BernIconLabel(title: text, icon: systemImage)
             } else {
                 SwiftUI.Text(verbatim: text)
             }

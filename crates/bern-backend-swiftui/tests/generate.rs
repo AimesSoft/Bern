@@ -3452,6 +3452,8 @@ pub fn main_view(app: player_proto::Client, #[session] draft: Draft) -> impl Vie
             Tooltip(content: tr! { "en" => "Equal" }, keys: "space", placement: above) {
                 IconButton(id: eq, icon: "line.2.horizontal", label: tr! { "en" => "Equal" }) => app.toggle()
             }
+            Label(title: tr! { "en" => "Two" }, icon: "line.2.horizontal", display: icon)
+            Label(title: tr! { "en" => "Custom" }, icon: "icons/custom.svg", display: icon)
             Menu(id: speed, label: tr! { "en" => "1.0x" }, style: icon, bold: true, placement: above) {
                 MenuItem(id: fast, label: tr! { "en" => "2.0x" }, icon: "arrow.uturn.backward") => app.toggle()
             }
@@ -3611,12 +3613,18 @@ struct CanvasNativeView: View {
         ".bernTooltip(",
         "bern.language.system",
         "let tags: [String]",
+        "BernIconLabel(title: BernText.string(\"main_view.0.3.title\"), icon: \"line.2.horizontal\")",
+        "BernIconLabel(title: BernText.string(\"main_view.0.4.title\"), icon: \"icons/custom.svg\")",
     ] {
         assert!(
             generated.contains(expected),
             "BernGenerated.swift lacks `{expected}`:\n{generated}"
         );
     }
+    assert!(
+        !generated.contains("systemImage: \"line.2.horizontal\""),
+        "BernGenerated.swift must never emit raw SF Symbol `line.2.horizontal`:\n{generated}"
+    );
     #[cfg(target_os = "macos")]
     {
         let mut cmd = Command::new("xcrun");

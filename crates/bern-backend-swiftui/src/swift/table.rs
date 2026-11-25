@@ -228,6 +228,10 @@ impl Generator<'_> {
                         self.expr(checked)
                     ));
                     match item.icon("icon") {
+                        Some(icon) if Self::uses_custom_icon(icon) => out.line(format!(
+                            "BernIconLabel(title: {item_label}, icon: {})",
+                            string(icon)
+                        )),
                         Some(icon) => out.line(format!(
                             "SwiftUI.Label({item_label}, systemImage: {})",
                             string(icon)
@@ -246,6 +250,10 @@ impl Generator<'_> {
                         "SwiftUI.Button({role}action: {{ {choose}{action} }}) {{"
                     ));
                     match item.icon("icon") {
+                        Some(icon) if Self::uses_custom_icon(icon) => out.line(format!(
+                            "BernIconLabel(title: {item_label}, icon: {})",
+                            string(icon)
+                        )),
                         Some(icon) => out.line(format!(
                             "SwiftUI.Label({item_label}, systemImage: {})",
                             string(icon)
