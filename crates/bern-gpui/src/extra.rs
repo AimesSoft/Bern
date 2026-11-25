@@ -224,7 +224,7 @@ pub fn tooltip(c: &Ctx, key: &'static str, props: TooltipProps, child: El) -> El
                 |_, _, _, _| {},
             )
             .absolute()
-            .size_full(),
+            .inset_0(),
         )
         .child(child)
         .when(hovered, |el| {

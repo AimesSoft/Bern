@@ -4284,9 +4284,17 @@ enum BernTiming {
 @MainActor
 enum BernAppIcons {
     private static var lookup: ((String) -> SwiftUI.Path?)?
+    #if os(macOS)
+    private static var cache: [String: NSImage] = [:]
+    #elseif os(iOS)
+    private static var cache: [String: UIImage] = [:]
+    #else
+    private static var cache: [String: CGImage] = [:]
+    #endif
 
     static func install(_ provider: @escaping (String) -> SwiftUI.Path?) {
         lookup = provider
+        cache.removeAll()
     }
 
     static func path(_ name: String) -> SwiftUI.Path? {
@@ -4298,6 +4306,81 @@ enum BernAppIcons {
         case "line.2.horizontal": return "equal"
         default: return name
         }
+    }
+
+    /// Renders an outlined 20×20 application icon into a native template image
+    /// so SwiftUI buttons (including iOS 26 Liquid Glass), menus, and toolbars
+    /// tint it identically to SF Symbols.
+    static func templateImage(_ name: String, side: CGFloat, scale: CGFloat) -> SwiftUI.Image? {
+        guard let path = lookup?(name), side > 0 else { return nil }
+        let safeScale = max(1, scale)
+        #if os(macOS)
+        let key = "\(name)|\(Int((side * 10).rounded()))"
+        if let cached = cache[key] {
+            return SwiftUI.Image(nsImage: cached).renderingMode(.template)
+        }
+        let cgPath = path.cgPath
+        let image = NSImage(size: NSSize(width: side, height: side), flipped: true) { _ in
+            guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
+            let factor = side / 20.0
+            ctx.saveGState()
+            ctx.scaleBy(x: factor, y: factor)
+            ctx.addPath(cgPath)
+            ctx.setFillColor(CGColor(gray: 0, alpha: 1))
+            ctx.fillPath(using: .winding)
+            ctx.restoreGState()
+            return true
+        }
+        image.isTemplate = true
+        cache[key] = image
+        return SwiftUI.Image(nsImage: image).renderingMode(.template)
+        #elseif os(iOS)
+        let key = "\(name)|\(Int((side * 10).rounded()))|\(Int((safeScale * 10).rounded()))"
+        if let cached = cache[key] {
+            return SwiftUI.Image(uiImage: cached).renderingMode(.template)
+        }
+        let format = UIGraphicsImageRendererFormat()
+        format.opaque = false
+        format.scale = safeScale
+        let cgPath = path.cgPath
+        let rendered = UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format).image { rendererCtx in
+            let ctx = rendererCtx.cgContext
+            let factor = side / 20.0
+            ctx.scaleBy(x: factor, y: factor)
+            ctx.addPath(cgPath)
+            ctx.setFillColor(UIColor.black.cgColor)
+            ctx.fillPath(using: .winding)
+        }.withRenderingMode(.alwaysTemplate)
+        cache[key] = rendered
+        return SwiftUI.Image(uiImage: rendered).renderingMode(.template)
+        #else
+        let pixels = max(1, Int((side * safeScale).rounded()))
+        let key = "\(name)|\(pixels)"
+        if let cached = cache[key] {
+            return SwiftUI.Image(decorative: cached, scale: safeScale).renderingMode(.template)
+        }
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil,
+            width: pixels,
+            height: pixels,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            return nil
+        }
+        let factor = CGFloat(pixels) / 20.0
+        ctx.translateBy(x: 0, y: CGFloat(pixels))
+        ctx.scaleBy(x: factor, y: -factor)
+        ctx.addPath(path.cgPath)
+        ctx.setFillColor(CGColor(gray: 0, alpha: 1))
+        ctx.fillPath(using: .winding)
+        guard let cgImage = ctx.makeImage() else { return nil }
+        cache[key] = cgImage
+        return SwiftUI.Image(decorative: cgImage, scale: safeScale).renderingMode(.template)
+        #endif
     }
 }
 
@@ -4320,13 +4403,19 @@ struct BernVectorIconShape: Shape {
 struct BernIcon: View {
     let name: String
     var size: CGFloat? = nil
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         if let path = BernAppIcons.path(name) {
             let side = size ?? 16
-            BernVectorIconShape(source: path)
-                .fill(style: FillStyle(eoFill: false))
-                .frame(width: side, height: side)
+            if let image = BernAppIcons.templateImage(name, side: side, scale: displayScale) {
+                image
+                    .frame(width: side, height: side)
+            } else {
+                BernVectorIconShape(source: path)
+                    .fill(style: FillStyle(eoFill: false))
+                    .frame(width: side, height: side)
+            }
         } else if let size {
             SwiftUI.Image(systemName: BernAppIcons.systemName(name))
                 .font(.system(size: size))

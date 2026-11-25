@@ -38,7 +38,7 @@ pub(crate) fn opener_place(target: &str) -> impl IntoElement {
         |_, _, _, _| {},
     )
     .absolute()
-    .size_full()
+    .inset_0()
 }
 
 /// Open the menu `target` at `position` in the window, as a secondary

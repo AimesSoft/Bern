@@ -294,6 +294,7 @@ pub fn slider(c: &Ctx, id: &'static str, label: String, model: Model, props: Sli
         value: Some(crate::value::number(value)),
         enabled,
         actions: Actions {
+            set_number: Some(Rc::clone(&set)),
             edit: Some({
                 let set = Rc::clone(&set);
                 Rc::new(move |text: String| {
