@@ -275,6 +275,9 @@ inline void ShadowTexts(controls::Grid const& holder, controls::Canvas const& ho
                     shadow.BlurRadius(1);
                     shadow.Offset(float3{0, 1, 0});
                     auto sprite = compositor.CreateSpriteVisual();
+#if BERN_WINUI
+                    sprite.IsHitTestVisible(false);
+#endif
                     sprite.Size(float2{static_cast<float>(text.ActualWidth()), static_cast<float>(text.ActualHeight())});
                     sprite.Offset(float3{at.X, at.Y, 0});
                     sprite.Shadow(shadow);

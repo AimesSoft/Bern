@@ -1600,8 +1600,15 @@ struct Win {
     controls::TitleBar titleBar{nullptr};
     std::array<double, 3> titleBarInsets{-1, -1, 0};
     controls::IconSource titleIcon{nullptr};
-    xaml::IUIElementProtected idleCursorTarget{nullptr};
-    winrt::Microsoft::UI::Input::InputCursor idleCursor{nullptr}, previousCursor{nullptr};
+    HWND cursorShield = nullptr;
+    POINT cursorShieldOrigin{};
+    enum class FullscreenTransition { None, EnteringFromMaximized, LeavingToMaximized };
+    FullscreenTransition fullscreenTransition = FullscreenTransition::None;
+    bool fullscreenWasMaximized = false;
+    bool hasFullscreenNormalRect = false;
+    RECT fullscreenNormalRect{};
+    RECT fullscreenMonitorRect{};
+    RECT fullscreenWorkRect{};
 #else
     xaml::Hosting::DesktopWindowXamlSource source{nullptr};
     HWND island = nullptr;
@@ -1676,7 +1683,12 @@ struct Win {
     /// own: while any is, the title bar shows only the caption buttons,
     /// in the appearance of the page shown last ("" for the window's).
     Cell<int> covering{0};
-    std::vector<std::pair<uint64_t, std::string>> coverings;
+    struct CoveringLayer {
+        uint64_t token = 0;
+        std::string appearance;
+        winrt::weak_ref<xaml::UIElement> root;
+    };
+    std::vector<CoveringLayer> coverings;
 #if BERN_WINUI
     /// The regions a window whose bar is hidden last gave the system for
     /// its drag strip: the controls in it, then the strip.

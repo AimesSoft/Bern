@@ -1337,9 +1337,13 @@ pub(crate) fn open(kind_id: &str) -> Result<String, Failure> {
         if let (Some(enabled), Some(rest)) = (def.idle_enabled, rest) {
             let at = ctx.clone();
             let shown = Rc::clone(&win);
+            let initialized = StdCell::new(false);
             effect(move || {
                 let on = enabled(&at);
                 untrack(|| {
+                    if initialized.replace(true) && shown.idle_enabled.get() == on {
+                        return;
+                    }
                     shown.idle_enabled.set(on);
                     // Turning idling on starts the count again; off, the
                     // window is not idle.

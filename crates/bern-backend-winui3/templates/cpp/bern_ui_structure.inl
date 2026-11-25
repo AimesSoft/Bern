@@ -2334,6 +2334,9 @@ struct VideoScreen : std::enable_shared_from_this<VideoScreen> {
         brush = compositor.CreateSurfaceBrush();
         brush.Stretch(composition::CompositionStretch::Fill);
         sprite = compositor.CreateSpriteVisual();
+#if BERN_WINUI
+        sprite.IsHitTestVisible(false);
+#endif
         xaml::Hosting::ElementCompositionPreview::SetElementChildVisual(surface, sprite);
     }
 

@@ -734,6 +734,9 @@ private:
                 cast.shadow = compositor.CreateDropShadow();
                 Shade(cast.shadow);
                 cast.sprite = compositor.CreateSpriteVisual();
+#if BERN_WINUI
+                cast.sprite.IsHitTestVisible(false);
+#endif
                 cast.sprite.Shadow(cast.shadow);
                 layer.Children().InsertAtTop(cast.sprite);
                 casts.push_back(cast);

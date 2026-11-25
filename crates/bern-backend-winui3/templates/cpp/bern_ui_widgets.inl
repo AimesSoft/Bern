@@ -4608,7 +4608,7 @@ inline void Layers(Parent const& p, Ctx const& ctx, LayersProps props, Build con
             });
         }
         if (props.covers) {
-            win->coverings.emplace_back(token, ctx.appearance);
+            win->coverings.push_back(Win::CoveringLayer{token, ctx.appearance, winrt::make_weak(xaml::UIElement(layers))});
             win->covering.Set(win->covering.Peek() + 1);
             overlayPage = std::make_shared<Page>();
             overlayPage->win = win;
@@ -4616,7 +4616,7 @@ inline void Layers(Parent const& p, Ctx const& ctx, LayersProps props, Build con
             overlayPage->tools.Spacing(0);
             overlayPage->leadingTools.Spacing(0);
             Reactive::OnCleanup([win, token] {
-                std::erase_if(win->coverings, [token](auto const& page) { return page.first == token; });
+                std::erase_if(win->coverings, [token](auto const& page) { return page.token == token; });
                 win->covering.Set(win->covering.Peek() - 1);
             });
         }
