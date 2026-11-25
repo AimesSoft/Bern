@@ -550,3 +550,14 @@ pub fn app(app: player_web::Client, windows: AppWindows, #[session] draft: Draft
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn nav_link_stretches_inside_leading_columns_and_stacks() {
+    let css = include_str!("../templates/bern.css");
+    for expected in [
+        ".bern-vstack > .bern-navlink {\n  align-self: stretch;\n  width: 100%;\n}",
+        ".bern-layers > .bern-navlink {\n  justify-self: stretch;\n  width: 100%;\n}",
+    ] {
+        assert!(css.contains(expected), "missing `{expected}` in bern.css");
+    }
+}
