@@ -1483,6 +1483,20 @@ pub unsafe extern "C" fn bern_overlay_rect(
     1
 }
 
+/// Native window handle of an active free overlay (`HWND` on Windows), or `0`
+/// when absent, hidden, taskbar-anchored, or unsupported on this platform.
+///
+/// # Safety
+/// `id` must point to `len` readable UTF-8 bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bern_overlay_window(id: *const u8, len: usize) -> isize {
+    // SAFETY: the caller keeps `id` readable for this call.
+    let Some(id) = (unsafe { url_text(id, len) }) else {
+        return 0;
+    };
+    bern_command::overlay::native_handle(id).unwrap_or(0)
+}
+
 /// The system opened the application with the file at `url` (UTF-8), of a
 /// kind `[[app.opens]]` declares: the engine takes it with
 /// `bern::files::take_opened`. Hosts may call it before `bern_app_start`.

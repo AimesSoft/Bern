@@ -1210,6 +1210,7 @@ fn engine_window_host_dispatches_open_and_close_and_overlay_rect_reports_absent(
         unsafe { bern_overlay_rect(id.as_ptr(), id.len(), &mut x, &mut y, &mut w, &mut h) },
         0
     );
+    assert_eq!(unsafe { bern_overlay_window(id.as_ptr(), id.len()) }, 0);
 
     let frontend = Frontend::default();
     let app = start(&frontend, descriptor().fingerprint()).unwrap();

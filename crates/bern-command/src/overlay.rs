@@ -51,6 +51,7 @@ impl Default for TextStyle {
 }
 
 static RECTS: Mutex<BTreeMap<String, (f64, f64, f64, f64)>> = Mutex::new(BTreeMap::new());
+static HANDLES: Mutex<BTreeMap<String, isize>> = Mutex::new(BTreeMap::new());
 type SyncHook = Arc<dyn Fn(&str) + Send + Sync>;
 static SYNC_HOOK: RwLock<Option<SyncHook>> = RwLock::new(None);
 
@@ -63,6 +64,41 @@ pub fn screen_rect(id: &str) -> Option<(f64, f64, f64, f64)> {
         .unwrap_or_else(|e| e.into_inner())
         .get(id)
         .copied()
+}
+
+/// Native window handle of an active free overlay (`HWND` on Windows), or
+/// `None` when hidden, taskbar-anchored, or unsupported on this platform.
+pub fn native_handle(id: &str) -> Option<isize> {
+    HANDLES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(id)
+        .copied()
+}
+
+/// Whether the system taskbar currently uses a light theme (`false` on
+/// platforms without a system taskbar theme setting).
+pub fn taskbar_light() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        win::taskbar_light()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        false
+    }
+}
+
+pub(crate) fn update_handle(id: &str, handle: Option<isize>) {
+    let mut handles = HANDLES.lock().unwrap_or_else(|e| e.into_inner());
+    match handle.filter(|&h| h != 0) {
+        Some(h) => {
+            handles.insert(id.to_string(), h);
+        }
+        None => {
+            handles.remove(id);
+        }
+    }
 }
 
 /// Register a callback invoked when an active free overlay locks, hides, or
@@ -470,6 +506,9 @@ pub fn show_styled(id: &str, overlay: &Overlay, style: TextStyle) {
     if change == Change::All && (overlay.locked || overlay.place != Place::Free) {
         update_rect(id, None);
     }
+    if change == Change::All && overlay.place != Place::Free {
+        update_handle(id, None);
+    }
     match (change, host()) {
         (Change::Nothing, _) => {}
         (Change::Lit, Some(host)) => host.lit(id, overlay),
@@ -484,6 +523,7 @@ pub fn show_styled(id: &str, overlay: &Overlay, style: TextStyle) {
 /// Take the overlay `id` down.
 pub fn hide(id: &str) {
     update_rect(id, None);
+    update_handle(id, None);
     SHOWN.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
     match host() {
         Some(host) => host.hide(id),
@@ -1707,6 +1747,7 @@ mod win {
         CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
     };
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
     use windows::Win32::System::Threading::GetCurrentThreadId;
     use windows::Win32::UI::Accessibility::{
         CUIAutomation, IUIAutomation, IUIAutomationCondition, IUIAutomationElement,
@@ -1745,6 +1786,25 @@ mod win {
 
     /// Posted to the overlay thread when the background taskbar scan updates.
     const WM_TASKBAR_ROOM: u32 = WM_APP + 1;
+
+    /// Whether Windows currently renders the system taskbar with a light theme.
+    pub(super) fn taskbar_light() -> bool {
+        let mut light: u32 = 0;
+        let mut size = std::mem::size_of::<u32>() as u32;
+        // SAFETY: queries a single DWORD registry value from HKCU.
+        let status = unsafe {
+            RegGetValueW(
+                HKEY_CURRENT_USER,
+                w!(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"),
+                w!("SystemUsesLightTheme"),
+                RRF_RT_REG_DWORD,
+                None,
+                Some(&mut light as *mut u32 as *mut std::ffi::c_void),
+                Some(&mut size),
+            )
+        };
+        status.is_ok() && light != 0
+    }
 
     /// Around the text and between lines, in points.
     const MARGIN: f32 = 12.0;
@@ -2619,6 +2679,7 @@ mod win {
                     window.hot = None;
                     window.dragging = false;
                     super::update_rect(&id, None);
+                    super::update_handle(&id, None);
                     // SAFETY: a window of this thread.
                     unsafe {
                         window.stop_all_timers();
@@ -3086,6 +3147,7 @@ mod win {
                     );
                     window.parent = Some(tray);
                     window.room = None;
+                    super::update_handle(&window.id, None);
                 }
             } else {
                 let style = GetWindowLongPtrW(window.hwnd, GWL_STYLE) as u32;
@@ -3100,6 +3162,7 @@ mod win {
                     if !old.0.is_null() {
                         let _ = DestroyWindow(old);
                     }
+                    super::update_handle(&window.id, Some(window.hwnd.0 as isize));
                 }
                 window.parent = None;
                 window.room = None;
@@ -3266,6 +3329,7 @@ mod win {
                 let _ = ShowWindow(hwnd, SW_HIDE);
                 window.frame = None;
                 super::update_rect(&window.id, None);
+                super::update_handle(&window.id, None);
                 // Still on the taskbar, it checks again if the layout changes.
                 if !free {
                     window.ensure_taskbar_timer();
@@ -3701,10 +3765,12 @@ mod win {
                     Place::Taskbar => {
                         window.stop_hover_timer();
                         super::update_rect(&window.id, None);
+                        super::update_handle(&window.id, None);
                         window.ensure_taskbar_timer();
                     }
                     Place::Free => {
                         window.stop_taskbar_timer();
+                        super::update_handle(&window.id, Some(hwnd.0 as isize));
                         if !window.overlay.locked {
                             let rect_pos = dst_point.or_else(|| {
                                 let mut rect = RECT::default();
@@ -4001,6 +4067,18 @@ mod tests {
         // Repeated None updates do not fire again.
         update_rect(id, None);
         assert_eq!(*events.lock().unwrap(), vec![id.to_string()]);
+    }
+
+    #[test]
+    fn native_handle_tracks_and_clears() {
+        let id = "test_overlay_native_handle";
+        assert_eq!(native_handle(id), None);
+        update_handle(id, Some(0));
+        assert_eq!(native_handle(id), None);
+        update_handle(id, Some(0x1234));
+        assert_eq!(native_handle(id), Some(0x1234));
+        update_handle(id, None);
+        assert_eq!(native_handle(id), None);
     }
 
     #[test]
