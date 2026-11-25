@@ -4740,14 +4740,26 @@ inline void Layers(Parent const& p, Ctx const& ctx, LayersProps props, Build con
             RoundedClip(layers, [r](float, float) { return static_cast<float>(r); });
         }
         // Its texts, icons, pictures and shapes cast the shadow, behind
-        // every layer.
+        // every layer. Record the host in the root region so conditional or
+        // repeated children added later insert after it rather than behind it,
+        // and keep the casts alive while a leaving stack fades out.
         if (auto const& shadow = style->base.shadow) {
             auto cast = std::make_shared<ContentShadow>();
             auto [radius, y, opacity] = *shadow;
             cast->Set(radius, y, opacity);
+            auto root = RootRegion(layers);
+            root->items.insert(root->items.begin(), Region::Entry{cast->host});
             layers.Children().InsertAt(0, cast->host);
             cast->Follow(layers);
-            Reactive::OnCleanup([cast] { cast->Detach(); });
+            auto disposed = std::make_shared<bool>(false);
+            layers.Unloaded([cast, disposed](auto&&, auto&&) {
+                if (*disposed) cast->Detach();
+            });
+            Reactive::OnCleanup([cast, disposed, weak = winrt::make_weak(layers)] {
+                *disposed = true;
+                auto grid = weak.get();
+                if (!grid || !grid.IsLoaded()) cast->Detach();
+            });
         }
     }
     if (auto isEnabled = Enabled(ctx, props.enabled)) Reactive::Run([holder, isEnabled] { holder.IsEnabled(isEnabled()); });

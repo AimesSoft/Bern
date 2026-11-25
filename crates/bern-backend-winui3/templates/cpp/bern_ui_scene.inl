@@ -118,6 +118,7 @@ inline void ScaleBox(Parent const& p, Ctx const& ctx, ScaleBoxProps props, Build
     });
     // The space the children stack in, from its top leading corner.
     controls::Grid space;
+    SetRole(space, L"bern-frame");
     space.HorizontalAlignment(xaml::HorizontalAlignment::Left);
     space.VerticalAlignment(xaml::VerticalAlignment::Top);
     auto inner = ctx;
@@ -246,6 +247,7 @@ inline void Positioned(Parent const& p, Ctx const& ctx, PositionedProps props, B
     auto inner = ctx;
     inner.scene = nullptr;
     controls::Grid content;
+    SetRole(content, L"bern-frame");
     children(Parent::Aligned(content, xaml::HorizontalAlignment::Center, xaml::VerticalAlignment::Center), inner);
     panel.Children().Append(content);
     p.Add(panel);
