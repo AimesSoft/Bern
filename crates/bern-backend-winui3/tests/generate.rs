@@ -3054,12 +3054,12 @@ pub fn app(app: palette::Client, windows: AppWindows) -> impl View {
     assert!(generated.contains("B::ColorPicker("), "{generated}");
     assert!(generated.contains("w.utility = true;"), "{generated}");
     assert!(generated.contains("w.overlay = \"lyrics\";"), "{generated}");
-    let widgets = std::fs::read_to_string(output.join("app/bern_ui_widgets.inl")).unwrap();
+    let widgets = std::fs::read_to_string(output.join("runtime/bern_ui_widgets.inl")).unwrap();
     assert!(
         widgets.contains("flyout.ShouldConstrainToRootBounds(false);"),
         "ColorPicker flyout should render unconstrained"
     );
-    let windows = std::fs::read_to_string(output.join("app/bern_ui_windows.inl")).unwrap();
+    let windows = std::fs::read_to_string(output.join("runtime/bern_ui_windows.inl")).unwrap();
     assert!(
         windows.contains("ClampBelowOverlay(") && windows.contains("bern_overlay_window("),
         "anchored utility windows should keep below their overlay"
