@@ -8,8 +8,15 @@ use crate::layout::{Style, color};
 use crate::look::{Colors, ControlStyle, Look};
 use crate::protocol::Value;
 use crate::session::{Actions, Control};
+use crate::surface::{GpuiRenderer, apply_box, as_box};
 use crate::units::px;
 use crate::{El, icons};
+use bern_surface::ColorValue;
+use bern_surface::controls::{
+    DetailSpec, NavLinkSpec, NavigationBarSpec, SidebarItemSpec, SidebarSpec, detail as ir_detail,
+    nav_link as ir_nav_link, navigation_bar as ir_navigation_bar, sidebar as ir_sidebar,
+    sidebar_item as ir_sidebar_item,
+};
 use gpui::prelude::FluentBuilder;
 use gpui::{
     App, ElementId, FontWeight, InteractiveElement, IntoElement, ParentElement, RenderOnce,
@@ -128,37 +135,23 @@ pub fn navigation(
         },
     });
     let hover = c.color("hover.overlay");
-    let bar = div()
+    let back_btn = div()
+        .id(c.element_id("back"))
         .flex()
-        .flex_row()
-        .flex_none()
         .items_center()
-        .gap(px(4.0))
-        .h(px(44.0))
-        .px(px(8.0))
-        .border_b_1()
-        .border_color(c.color("separator"))
-        .child(
-            div()
-                .id(c.element_id("back"))
-                .flex()
-                .items_center()
-                .justify_center()
-                .size(px(32.0))
-                .rounded(px(8.0))
-                .hover(move |style| style.bg(hover))
-                .child(icons::icon("chevron.left", 18.0, c.color("accent.text")))
-                .on_click(move |_, _, cx| {
-                    cx.stop_propagation();
-                    back(cx)
-                }),
-        )
-        .children(title.map(|title| {
-            div()
-                .text_size(px(17.0))
-                .font_weight(FontWeight::SEMIBOLD)
-                .child(title)
-        }));
+        .justify_center()
+        .size(px(32.0))
+        .rounded(px(8.0))
+        .hover(move |style| style.bg(hover))
+        .child(icons::icon("chevron.left", 18.0, c.color("accent.text")))
+        .on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            back(cx)
+        })
+        .into_any_element();
+    let bar = GpuiRenderer::new(c)
+        .slot_one("back", back_btn)
+        .render(&ir_navigation_bar(NavigationBarSpec { title }));
     c.grow()
         .apply(element.child(bar).child(body))
         .into_any_element()
@@ -194,21 +187,17 @@ pub fn nav_link(c: &Ctx, id: &'static str, label: String, route: Value, children
             ..Actions::default()
         },
     });
-    let hover = c.slot("row", "hover", "background");
     // Outside a grouped `Section`, `NavLink` provides its own row insets
     // (16pt horizontal, 12pt vertical), matching SwiftUI, WinUI 3, Compose and Web.
     let in_section = c.in_section_row() && c.sidebar().is_none();
-    let element = div()
+    let ir = ir_nav_link(NavLinkSpec {
+        in_section,
+        enabled,
+    });
+    let element = as_box(&ir)
+        .map(|b| apply_box(c, div(), b))
+        .unwrap_or_else(div)
         .id(c.element_id(id))
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap(px(8.0))
-        .w_full()
-        .when(!in_section, |el| {
-            el.px(px(16.0)).py(px(12.0)).rounded(px(8.0))
-        })
-        .when(in_section, |el| el.rounded(px(6.0)))
         .child(div().flex_1().min_w(px(0.0)).children(children))
         .child(icons::icon(
             "chevron.right",
@@ -219,7 +208,6 @@ pub fn nav_link(c: &Ctx, id: &'static str, label: String, route: Value, children
         return element.into_any_element();
     }
     element
-        .hover(move |style| style.bg(hover))
         .on_click(move |_, _, cx| {
             cx.stop_propagation();
             push(cx)
@@ -238,13 +226,12 @@ pub fn split_view(c: &Ctx, collapsed: Option<Field>, sidebar: El, detail: El) ->
     c.grow().apply(element.size_full()).into_any_element()
 }
 
-/// Default translucent tint for `Sidebar` when no explicit `style!`
-/// `background` is set: subtle contrast over plain light/dark canvases while
+/// Default translucent tint for `Sidebar` from `bern-surface::SurfacePalette`
+/// (`sidebar.surface`): subtle contrast over plain light/dark canvases while
 /// letting window backdrops (`Stack(under_bars: true)`) shine through.
+#[cfg(test)]
 fn sidebar_default_bg(theme: &crate::theme::Theme) -> gpui::Rgba {
-    let mut tint = theme.color("text.primary");
-    tint.a = if theme.dark { 0.045 } else { 0.035 };
-    tint
+    theme.color("sidebar.surface")
 }
 
 /// `Sidebar`: its header, its items scrolling, and its footer, on a
@@ -260,50 +247,54 @@ pub fn sidebar(
 ) -> El {
     let top = c.win().title_bar.get();
     let under_bar = top > 0.0 && !c.in_modal_content();
-    let bg = match style.and_then(|style| style.background) {
-        Some(background) => color(c, background),
-        None => sidebar_default_bg(c.theme()),
-    };
-    div()
-        .flex()
-        .flex_col()
-        .flex_none()
-        .when(under_bar, |el| {
-            el.mt(px(-top))
-                .pt(px(top))
-                .h(px(c.win().height.get() + top))
-        })
-        .when(!under_bar, |el| el.h_full())
-        .w(px(width.unwrap_or(240.0)))
-        .bg(bg)
-        .border_r_1()
-        .border_color(c.color("separator"))
-        .when(!header.is_empty(), |element| {
-            element.child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .px(px(12.0))
-                    .pt(px(12.0))
-                    .children(header),
-            )
-        })
-        .child(
+    let ir = ir_sidebar(SidebarSpec {
+        width,
+        background: style.and_then(|s| s.background).map(|bg| {
+            let resolved = color(c, bg);
+            ColorValue::Rgba(bern_surface::Rgba8::new(
+                (resolved.r.clamp(0.0, 1.0) * 255.0).round() as u8,
+                (resolved.g.clamp(0.0, 1.0) * 255.0).round() as u8,
+                (resolved.b.clamp(0.0, 1.0) * 255.0).round() as u8,
+                (resolved.a.clamp(0.0, 1.0) * 255.0).round() as u8,
+            ))
+        }),
+        has_header: !header.is_empty(),
+        has_footer: !footer.is_empty(),
+    });
+    let base = as_box(&ir)
+        .map(|b| apply_box(c, div(), b))
+        .unwrap_or_else(div);
+    base.when(under_bar, |el| {
+        el.mt(px(-top))
+            .pt(px(top))
+            .h(px(c.win().height.get() + top))
+    })
+    .when(!header.is_empty(), |element| {
+        element.child(
             div()
-                .id(c.element_id("sidebar"))
                 .flex()
                 .flex_col()
-                .flex_1()
-                .min_h(px(0.0))
-                .gap(px(2.0))
-                .p(px(8.0))
-                .overflow_y_scroll()
-                .children(items),
+                .px(px(12.0))
+                .pt(px(12.0))
+                .children(header),
         )
-        .when(!footer.is_empty(), |element| {
-            element.child(div().flex().flex_col().p(px(8.0)).children(footer))
-        })
-        .into_any_element()
+    })
+    .child(
+        div()
+            .id(c.element_id("sidebar"))
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h(px(0.0))
+            .gap(px(2.0))
+            .p(px(8.0))
+            .overflow_y_scroll()
+            .children(items),
+    )
+    .when(!footer.is_empty(), |element| {
+        element.child(div().flex().flex_col().p(px(8.0)).children(footer))
+    })
+    .into_any_element()
 }
 
 /// `SidebarItem`: a destination of the sidebar, filled with the accent
@@ -341,25 +332,24 @@ pub fn sidebar_item(
             ..Actions::default()
         },
     });
-    let base = Colors {
-        background: c.color("transparent"),
-        foreground: c.color("text.primary"),
-        border: None,
-        shadow: None,
-        opacity: 1.0,
-    }
-    .with(c, style.map(|style| &style.base));
+    let ir = ir_sidebar_item(SidebarItemSpec {
+        label: label.clone(),
+        icon,
+        badge,
+        selected,
+        enabled: c.enabled(),
+        corner: style.and_then(|s| s.corner),
+        padding_x: style.and_then(|s| s.padding),
+    });
+    let ir_box = as_box(&ir);
+    let base = Colors::recipe(c, "nav_item", "rest", false).with(c, style.map(|s| &s.base));
     let rest = if selected {
         let chosen = style
             .and_then(|style| style.selected)
             .filter(|look| !look.none && (look.fill.is_some() || look.background.is_some()));
         match chosen {
             Some(look) => base.with(c, Some(&look)),
-            None => Colors {
-                background: c.color("accent"),
-                foreground: c.color("on_accent"),
-                ..base
-            },
+            None => Colors::recipe(c, "nav_item", "selected", false),
         }
     } else {
         base
@@ -369,25 +359,35 @@ pub fn sidebar_item(
         Some(rules) => Some(default.unwrap_or(rest).with(c, Some(rules))),
         None => default,
     };
-    let hover_default = (!selected).then(|| Colors {
-        background: c.color("hover.overlay"),
-        ..rest
-    });
+    let hover_default = (!selected).then(|| Colors::recipe(c, "nav_item", "hover", false));
     let hover = state(style.and_then(|style| style.hover.as_ref()), hover_default);
     let pressed = state(style.and_then(|style| style.pressed.as_ref()), hover);
-    let corner = style.and_then(|style| style.corner).unwrap_or(8.0);
-    let padding = style.and_then(|style| style.padding).unwrap_or(10.0);
+    let corner = style
+        .and_then(|style| style.corner)
+        .unwrap_or(bern_surface::controls::navigation::SIDEBAR_ITEM_CORNER);
+    let padding = style
+        .and_then(|style| style.padding)
+        .unwrap_or(bern_surface::controls::navigation::SIDEBAR_ITEM_PADDING_X);
+    let item_height = bern_surface::controls::navigation::SIDEBAR_ITEM_HEIGHT;
+    let gap = ir_box.map_or(10.0, |b| b.layout.gap);
+    let font_size = ir_box
+        .and_then(|b| b.style.typography)
+        .map_or(13.5, |t| t.size);
+    let font_weight = ir_box
+        .and_then(|b| b.style.typography)
+        .map_or(FontWeight::MEDIUM, |t| FontWeight(f32::from(t.weight)));
     let foreground = rest.foreground;
     let build = move || {
         div()
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(8.0))
-            .h(px(34.0))
+            .gap(px(gap))
+            .h(px(item_height))
             .px(px(padding))
             .rounded(px(corner))
-            .text_size(px(14.0))
+            .text_size(px(font_size))
+            .font_weight(font_weight)
             .children(icon.map(|icon| icons::icon(icon, 16.0, foreground)))
             .child(div().flex_1().child(label.clone()))
             .children(badge.filter(|count| *count > 0).map(|count| {
@@ -497,51 +497,29 @@ pub fn detail(
                 cx.stop_propagation();
                 flip(cx);
             })
+            .into_any_element()
     });
-    let has_header = title.is_some() || toggle.is_some();
-    div()
-        .flex()
-        .flex_col()
-        .flex_1()
-        .min_w(px(0.0))
-        .h_full()
-        .when_some(
-            style.and_then(|style| style.background),
-            |element, background| element.bg(color(c, background)),
-        )
-        .when(has_header, |element| {
-            element.child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .flex_none()
-                    .items_center()
-                    .gap(px(8.0))
-                    .px(px(if title.is_some() { 24.0 } else { 12.0 }))
-                    .pt(px(if title.is_some() { 16.0 } else { 8.0 }))
-                    .pb(px(if title.is_some() { 8.0 } else { 4.0 }))
-                    .children(toggle)
-                    .children(title.map(|title| {
-                        div()
-                            .text_size(px(20.0))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(c.color("text.primary"))
-                            .child(title)
-                    })),
-            )
-        })
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .flex_1()
-                .min_h(px(0.0))
-                .children(content),
-        )
-        .when(!footer.is_empty(), |element| {
-            element.child(div().flex().flex_col().flex_none().children(footer))
-        })
-        .into_any_element()
+    let ir = ir_detail(DetailSpec {
+        title,
+        has_toggle: toggle.is_some(),
+        has_footer: !footer.is_empty(),
+        background: style.and_then(|s| s.background).map(|bg| {
+            let resolved = color(c, bg);
+            ColorValue::Rgba(bern_surface::Rgba8::new(
+                (resolved.r.clamp(0.0, 1.0) * 255.0).round() as u8,
+                (resolved.g.clamp(0.0, 1.0) * 255.0).round() as u8,
+                (resolved.b.clamp(0.0, 1.0) * 255.0).round() as u8,
+                (resolved.a.clamp(0.0, 1.0) * 255.0).round() as u8,
+            ))
+        }),
+    });
+    let mut renderer = GpuiRenderer::new(c)
+        .slot("content", content)
+        .slot("footer", footer);
+    if let Some(toggle_el) = toggle {
+        renderer = renderer.slot_one("toggle", toggle_el);
+    }
+    renderer.render(&ir)
 }
 
 #[cfg(test)]

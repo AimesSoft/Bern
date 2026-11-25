@@ -207,21 +207,19 @@ pub fn search(
         })
         .child(input)
         .children(shown.map(|results| {
-            let panel = div()
+            let ir = bern_surface::controls::search(bern_surface::controls::SearchSpec {
+                width,
+                has_results: true,
+            });
+            let results_box = crate::surface::as_box(&ir)
+                .and_then(|b| b.children.get(1))
+                .and_then(crate::surface::as_box);
+            let panel = results_box
+                .map(|b| crate::surface::apply_box(c, div(), b))
+                .unwrap_or_else(div)
                 .id(gpui::ElementId::Name(format!("{key}.results").into()))
                 .occlude()
-                .flex()
-                .flex_col()
-                .min_w(px(280.0))
-                .max_h(px(420.0))
                 .overflow_y_scroll()
-                .p(px(6.0))
-                .rounded(px(10.0))
-                .border_1()
-                .border_color(c.slot("menu", "popup", "border"))
-                .bg(c.slot("menu", "popup", "background"))
-                .text_color(c.color("text.primary"))
-                .shadow_lg()
                 .children(results(&c.in_toolbar(false)));
             deferred(
                 anchored()
@@ -295,34 +293,34 @@ fn palette(
     if enabled {
         controls::register_shortcut(c, props.shortcut.as_deref(), &open);
     }
+    let palette_ir =
+        bern_surface::controls::search_palette(bern_surface::controls::SearchPaletteSpec {
+            prompt: props.prompt.clone(),
+            shortcut_hint: props.shortcut.as_deref().map(shortcut_text),
+            icon_only: props.icon_only,
+            width: props.width.unwrap_or(640.0),
+            height: props.height.unwrap_or(480.0),
+            enabled,
+        });
+    let trigger_box = crate::surface::as_box(&palette_ir)
+        .and_then(|b| b.children.first())
+        .and_then(crate::surface::as_box);
+    let panel_box = crate::surface::as_box(&palette_ir)
+        .and_then(|b| b.children.get(1))
+        .and_then(crate::surface::as_box);
     let secondary = c.color("text.secondary");
     let primary = c.color("text.primary");
     let trigger = {
         let open = Rc::clone(&open);
-        let base = div()
+        let base = trigger_box
+            .map(|b| crate::surface::apply_box(c, div(), b))
+            .unwrap_or_else(div)
             .id(c.element_id(id))
-            .flex()
-            .flex_row()
-            .flex_none()
-            .items_center()
             .when(is_open, |trigger| trigger.invisible());
         let styled = if props.icon_only {
-            base.justify_center()
-                .w(px(32.0))
-                .h(px(32.0))
-                .rounded(px(16.0))
-                .child(icons::icon("magnifyingglass", 16.0, primary))
+            base.child(icons::icon("magnifyingglass", 16.0, primary))
         } else {
-            base.gap(px(6.0))
-                .w(px(260.0))
-                .h(px(32.0))
-                .px(px(10.0))
-                .rounded(px(16.0))
-                .border_1()
-                .border_color(c.slot("field", "rest", "border"))
-                .bg(c.slot("field", "rest", "background"))
-                .text_size(px(13.0))
-                .text_color(secondary)
+            base.text_size(px(13.0))
                 .child(icons::icon("magnifyingglass", 14.0, secondary))
                 .child(div().flex_1().overflow_hidden().child(props.prompt.clone()))
                 .children(props.shortcut.as_deref().map(|shortcut| {
@@ -337,7 +335,6 @@ fn palette(
                 }))
         };
         styled
-            .when(!enabled, |trigger| trigger.opacity(0.5))
             .when(enabled, |trigger| {
                 trigger.on_click(move |_, _, cx| {
                     cx.stop_propagation();
@@ -441,20 +438,13 @@ fn palette(
         PALETTE.with(|palette| palette.borrow_mut().take());
         crate::host::redraw();
     }
-    let panel = div()
+    let panel = panel_box
+        .map(|b| crate::surface::apply_box(c, div(), b))
+        .unwrap_or_else(div)
         .id(gpui::ElementId::Name(format!("{key}.palette").into()))
         .occlude()
-        .flex()
-        .flex_col()
         .w(px(width))
         .h(px(height))
-        .rounded(px(14.0))
-        .border_1()
-        .border_color(c.slot("menu", "popup", "border"))
-        .bg(c.slot("menu", "popup", "background"))
-        .text_color(c.color("text.primary"))
-        .shadow_lg()
-        .overflow_hidden()
         .on_mouse_down_out(|_, _, _| close())
         .child(
             div()
@@ -600,18 +590,18 @@ pub fn search_item(
         })
         .flatten();
     let highlighted = place.is_some_and(|(_, highlighted)| highlighted);
-    let hover = c.color("hover.overlay");
-    let element = div()
+    let item_ir = bern_surface::controls::search_item(bern_surface::controls::SearchItemSpec {
+        label: props.label.clone(),
+        icon: props.icon,
+        detail: props.detail.clone(),
+        hint: props.hint.clone(),
+        highlighted,
+        custom_content: content.is_some(),
+    });
+    let element = crate::surface::as_box(&item_ir)
+        .map(|b| crate::surface::apply_box(c, div(), b))
+        .unwrap_or_else(div)
         .id(c.element_id(id))
-        .flex()
-        .w_full()
-        .rounded(px(8.0))
-        .when(highlighted, |element| {
-            element.bg(c.color("pressed.overlay"))
-        })
-        .when(!highlighted, |element| {
-            element.hover(move |style| style.bg(hover))
-        })
         .when_some(place, |element, (index, _)| {
             element.on_hover(move |hovered, _, _| {
                 if *hovered {
@@ -631,15 +621,10 @@ pub fn search_item(
             choose(cx)
         });
     let element = match content {
-        Some(content) => element.flex_col().p(px(4.0)).children(content),
+        Some(content) => element.children(content),
         None => {
             let secondary = c.color("text.secondary");
             element
-                .flex_row()
-                .items_center()
-                .gap(px(10.0))
-                .h(px(36.0))
-                .px(px(10.0))
                 .text_size(px(14.0))
                 .children(props.icon.map(|icon| icons::icon(icon, 16.0, secondary)))
                 .child(div().flex_1().overflow_hidden().child(props.label))
@@ -671,7 +656,14 @@ pub fn toolbar(c: &Ctx, leading: Vec<El>, trailing: Vec<El>) -> El {
     if c.win().immersive.get() {
         return div().into_any_element();
     }
-    let gap = 8.0;
+    let ir = bern_surface::controls::toolbar(bern_surface::controls::ToolbarSpec { height: 52.0 });
+    let gap = crate::surface::as_box(&ir).map_or(8.0, |b| b.layout.gap);
+    if !(c.is_under_bars() && c.win().title_bar.get() > 0.0) {
+        return crate::surface::GpuiRenderer::new(c)
+            .slot("leading", leading)
+            .slot("trailing", trailing)
+            .render(&ir);
+    }
     let row = div()
         .flex()
         .flex_row()
@@ -679,15 +671,6 @@ pub fn toolbar(c: &Ctx, leading: Vec<El>, trailing: Vec<El>) -> El {
         .items_center()
         .gap(px(gap))
         .w_full();
-    if !(c.is_under_bars() && c.win().title_bar.get() > 0.0) {
-        return row
-            .h(px(52.0))
-            .px(px(12.0))
-            .children(leading)
-            .child(div().flex_1())
-            .children(trailing)
-            .into_any_element();
-    }
     // Under the title bar it stands in the bar's row, as tall as the bar
     // and on the window buttons' middle line, its ends clear of them. Its
     // free room moves the window, and its items take their clicks.

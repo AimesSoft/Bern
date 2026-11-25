@@ -7,13 +7,19 @@
 use crate::ctx::{Act, Ctx, Model};
 use crate::protocol::Value;
 use crate::session::{Actions, Control};
+use crate::surface::{GpuiRenderer, ResolvedTrack, apply_box, as_box};
 use crate::units::px;
 use crate::{El, icons};
+use bern_surface::controls::{
+    ColorPickerSpec, ShortcutInputSpec, SliderSpec, ToastSpec, color_picker as ir_color_picker,
+    shortcut_input as ir_shortcut_input, slider as ir_slider, toast as ir_toast,
+};
+use bern_surface::{Axis, SurfaceNode};
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    App, Bounds, ElementId, FocusHandle, FontWeight, InteractiveElement, IntoElement, KeyDownEvent,
+    App, Bounds, ElementId, FocusHandle, InteractiveElement, IntoElement, KeyDownEvent,
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, RenderOnce,
-    SharedString, StatefulInteractiveElement, Styled, Task, Window, canvas, div, relative,
+    StatefulInteractiveElement, Styled, Task, Window, canvas, div,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -52,39 +58,43 @@ fn snapped(props: &SliderProps, fraction: f64) -> f64 {
     }
 }
 
+/// Find the lowered [`bern_surface::TrackNode`] inside a `controls::slider` IR tree.
+fn find_track(node: &SurfaceNode) -> Option<&bern_surface::TrackNode> {
+    match node {
+        SurfaceNode::Track(track) => Some(track),
+        SurfaceNode::Box(b) => b.children.iter().find_map(find_track),
+        _ => None,
+    }
+}
+
 #[derive(IntoElement)]
 struct Track {
     key: ElementId,
     props: SliderProps,
-    value: f64,
     enabled: bool,
     /// Show a value while dragging, and commit one when the drag ends.
     preview: Rc<dyn Fn(f64)>,
     commit: Rc<dyn Fn(f64)>,
     /// Report where the pointer is along the track, or that it left.
     hover: Option<Rc<dyn Fn(Option<f64>)>>,
-    colors: [gpui::Rgba; 3],
+    /// Lowered `bern-surface` track & white perpendicular pill thumb.
+    track: ResolvedTrack,
 }
 
 impl RenderOnce for Track {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        // Where the track was last laid out, and whether a drag is on.
+        // Where the track was last laid out, whether a drag is on, and whether
+        // the pointer is hovering the track (for active pill scaling).
         let state = window.use_keyed_state(self.key.clone(), cx, |_, _| {
             (
                 Rc::new(Cell::new(Bounds::<Pixels>::default())),
                 Rc::new(Cell::new(false)),
+                Rc::new(Cell::new(false)),
             )
         });
-        let (bounds, dragging) = state.read(cx).clone();
+        let (bounds, dragging, hovered) = state.read(cx).clone();
         let props = self.props;
-        let span = props.max - props.min;
-        let fraction = if span > 0.0 {
-            ((self.value - props.min) / span).clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
-        let [track, fill, thumb] = self.colors;
-        let vertical = props.vertical;
+        let vertical = self.track.axis == Axis::Vertical;
         let at = move |pos: gpui::Point<Pixels>, bounds: Bounds<Pixels>| {
             let fraction = if vertical {
                 let height = f64::from(bounds.size.height).max(1.0);
@@ -95,86 +105,44 @@ impl RenderOnce for Track {
             };
             snapped(&props, fraction)
         };
+        let active = dragging.get() || hovered.get();
+        let (rail, thumb) = self.track.build_visual(active);
         let measured = Rc::clone(&bounds);
-        let element = if vertical {
-            div()
+        let mut element = if vertical {
+            let mut d = div()
                 .id(self.key)
                 .relative()
                 .flex_1()
-                .w(px(24.0))
-                .min_h(px(120.0))
+                .w(px(self.track.hit_extent))
                 .flex()
-                .justify_center()
-                .child(
-                    canvas(move |bounds, _, _| measured.set(bounds), |_, _, _, _| {})
-                        .absolute()
-                        .size_full(),
-                )
-                .child(
-                    div()
-                        .w(px(4.0))
-                        .h_full()
-                        .rounded(px(2.0))
-                        .bg(track)
-                        .flex()
-                        .flex_col()
-                        .justify_end()
-                        .child(
-                            div()
-                                .w_full()
-                                .h(relative(fraction as f32))
-                                .rounded(px(2.0))
-                                .bg(fill),
-                        ),
-                )
-                .child(
-                    div()
-                        .absolute()
-                        .bottom(relative(fraction as f32))
-                        .mb(px(-9.0))
-                        .size(px(18.0))
-                        .rounded_full()
-                        .bg(thumb)
-                        .border_1()
-                        .border_color(fill)
-                        .shadow_sm(),
-                )
+                .justify_center();
+            if let Some(min_h) = self.track.min_main_extent {
+                d = d.min_h(px(min_h));
+            }
+            d
         } else {
             div()
                 .id(self.key)
                 .relative()
                 .flex_1()
-                .h(px(24.0))
+                .h(px(self.track.hit_extent))
                 .flex()
                 .items_center()
-                .child(
-                    canvas(move |bounds, _, _| measured.set(bounds), |_, _, _, _| {})
-                        .absolute()
-                        .size_full(),
-                )
-                .child(
-                    div().w_full().h(px(4.0)).rounded(px(2.0)).bg(track).child(
-                        div()
-                            .h_full()
-                            .w(relative(fraction as f32))
-                            .rounded(px(2.0))
-                            .bg(fill),
-                    ),
-                )
-                .child(
-                    div()
-                        .absolute()
-                        .left(relative(fraction as f32))
-                        .ml(px(-9.0))
-                        .size(px(18.0))
-                        .rounded_full()
-                        .bg(thumb)
-                        .border_1()
-                        .border_color(fill)
-                        .shadow_sm(),
-                )
         };
-        let element = match self.hover {
+        element = element
+            .child(
+                canvas(move |bounds, _, _| measured.set(bounds), |_, _, _, _| {})
+                    .absolute()
+                    .size_full(),
+            )
+            .child(rail)
+            .children(thumb);
+        if self.enabled {
+            element = element.cursor_pointer();
+        }
+        let hovered_state = Rc::clone(&hovered);
+        let hover_cb = self.hover;
+        let element = match hover_cb {
             Some(hover) => {
                 let (moving, left) = (Rc::clone(&hover), hover);
                 let measured = Rc::clone(&bounds);
@@ -190,13 +158,20 @@ impl RenderOnce for Track {
                         };
                         moving(Some(fraction.clamp(0.0, 1.0)));
                     })
-                    .on_hover(move |hovered, _, _| {
-                        if !*hovered {
+                    .on_hover(move |inside, window, _| {
+                        if hovered_state.replace(*inside) != *inside {
+                            window.refresh();
+                        }
+                        if !*inside {
                             left(None);
                         }
                     })
             }
-            None => element,
+            None => element.on_hover(move |inside, window, _| {
+                if hovered_state.replace(*inside) != *inside {
+                    window.refresh();
+                }
+            }),
         };
         if !self.enabled {
             return element.opacity(0.5);
@@ -206,12 +181,16 @@ impl RenderOnce for Track {
             (Rc::clone(&dragging), Rc::clone(&dragging), dragging);
         let (preview, preview_move, commit) = (Rc::clone(&self.preview), self.preview, self.commit);
         element
-            .on_mouse_down(MouseButton::Left, move |event: &MouseDownEvent, _, cx| {
-                // The slider takes the press: what lies under it does not.
-                cx.stop_propagation();
-                dragging_down.set(true);
-                preview(at(event.position, down.get()));
-            })
+            .on_mouse_down(
+                MouseButton::Left,
+                move |event: &MouseDownEvent, window, cx| {
+                    // The slider takes the press: what lies under it does not.
+                    cx.stop_propagation();
+                    dragging_down.set(true);
+                    window.refresh();
+                    preview(at(event.position, down.get()));
+                },
+            )
             .on_mouse_move(move |event: &MouseMoveEvent, _, _| {
                 if dragging_move.get() && event.pressed_button == Some(MouseButton::Left) {
                     preview_move(at(event.position, moving.get()));
@@ -221,14 +200,16 @@ impl RenderOnce for Track {
                 let dragging = Rc::clone(&dragging_up);
                 let commit = Rc::clone(&commit);
                 let bounds = Rc::clone(&up);
-                move |event: &MouseUpEvent, _, _| {
+                move |event: &MouseUpEvent, window, _| {
                     if dragging.replace(false) {
+                        window.refresh();
                         commit(at(event.position, bounds.get()));
                     }
                 }
             })
-            .on_mouse_up(MouseButton::Left, move |event: &MouseUpEvent, _, _| {
+            .on_mouse_up(MouseButton::Left, move |event: &MouseUpEvent, window, _| {
                 if dragging_up.replace(false) {
+                    window.refresh();
                     commit(at(event.position, up.get()));
                 }
             })
@@ -241,6 +222,12 @@ impl RenderOnce for Track {
 pub fn slider(c: &Ctx, id: &'static str, label: String, model: Model, props: SliderProps) -> El {
     let enabled = c.enabled();
     let value = crate::value::as_f64(&model.value(c));
+    let span = props.max - props.min;
+    let fraction = if span > 0.0 {
+        ((value - props.min) / span).clamp(0.0, 1.0) as f32
+    } else {
+        0.0
+    };
     let number = |value: f64| match &model {
         Model::Field(field, _) if matches!(c.read(*field), Value::Int(_)) => {
             Value::Int(value.round() as i64)
@@ -306,11 +293,23 @@ pub fn slider(c: &Ctx, id: &'static str, label: String, model: Model, props: Sli
             ..Actions::default()
         },
     });
-    let colors = [
-        c.color("separator"),
-        c.color(props.tint.unwrap_or("accent")),
-        c.color("surface.raised"),
-    ];
+    let lowered = ir_slider(SliderSpec {
+        label: (!props.label_hidden).then(|| label.clone()),
+        label_hidden: props.label_hidden,
+        axis: if props.vertical {
+            Axis::Vertical
+        } else {
+            Axis::Horizontal
+        },
+        fraction,
+        enabled,
+        tint: props.tint,
+        min_icon: props.min_icon,
+        max_icon: props.max_icon,
+    });
+    let resolved_track = find_track(&lowered)
+        .map(|node| ResolvedTrack::from_node(c, node))
+        .expect("bern-surface slider always contains a TrackNode");
     let icon_color = c.color("icon.secondary");
     // A draft of the window, written only when the place changes.
     let hover = props.hover.map(|field| {
@@ -328,12 +327,11 @@ pub fn slider(c: &Ctx, id: &'static str, label: String, model: Model, props: Sli
     let track = Track {
         key: c.element_id(id),
         props,
-        value,
         enabled,
         preview,
         commit: set,
         hover,
-        colors,
+        track: resolved_track,
     };
     if props.vertical {
         let col = c
@@ -474,15 +472,16 @@ pub fn color_picker(
     });
     let target = c.key(id);
     let open = crate::overlay::is_open(&target);
-    let swatch = div()
-        .id(c.element_id(id))
-        .flex_none()
-        .w(px(40.0))
-        .h(px(24.0))
-        .rounded(px(6.0))
-        .border_1()
-        .border_color(c.slot("button.standard", "rest", "border"))
-        .bg(gpui::rgb(current));
+    let swatch_ir = ir_color_picker(ColorPickerSpec {
+        label: label.clone(),
+        label_hidden: true,
+        rgb: current,
+        enabled,
+    });
+    let swatch = as_box(&swatch_ir)
+        .map(|b| apply_box(c, div(), b))
+        .unwrap_or_else(div)
+        .id(c.element_id(id));
     let swatch = if enabled {
         let toggle = target.clone();
         swatch.on_click(move |_, _, cx| {
@@ -490,7 +489,7 @@ pub fn color_picker(
             crate::overlay::set_open(&toggle, !crate::overlay::is_open(&toggle));
         })
     } else {
-        swatch.opacity(0.5)
+        swatch
     };
     let button_wrap = div()
         .relative()
@@ -504,11 +503,6 @@ pub fn color_picker(
             let r = f64::from((current >> 16) & 0xff);
             let g = f64::from((current >> 8) & 0xff);
             let b = f64::from(current & 0xff);
-            let colors = [
-                c.color("separator"),
-                c.color("accent"),
-                c.color("surface.raised"),
-            ];
             let channel = |name: &'static str, value: f64, shift: u32| {
                 let set_rgb = Rc::clone(&set_rgb);
                 let update: Rc<dyn Fn(f64)> = Rc::new(move |next: f64| {
@@ -516,6 +510,19 @@ pub fn color_picker(
                     let mask = !(0xffu32 << shift);
                     set_rgb((current & mask) | (byte << shift));
                 });
+                let ch_ir = ir_slider(SliderSpec {
+                    label: None,
+                    label_hidden: true,
+                    axis: Axis::Horizontal,
+                    fraction: (value / 255.0).clamp(0.0, 1.0) as f32,
+                    enabled,
+                    tint: None,
+                    min_icon: None,
+                    max_icon: None,
+                });
+                let ch_track = find_track(&ch_ir)
+                    .map(|node| ResolvedTrack::from_node(c, node))
+                    .expect("bern-surface slider always contains a TrackNode");
                 let track = Track {
                     key: ElementId::Name(format!("{target}.{name}").into()),
                     props: SliderProps {
@@ -530,12 +537,11 @@ pub fn color_picker(
                         hover: None,
                         vertical: false,
                     },
-                    value,
                     enabled,
                     preview: Rc::clone(&update),
                     commit: update,
                     hover: None,
-                    colors,
+                    track: ch_track,
                 };
                 div()
                     .flex()
@@ -681,11 +687,11 @@ pub struct ShortcutInputProps {
 
 #[derive(IntoElement)]
 struct Recorder {
+    c: Ctx,
     key: ElementId,
     current: String,
     props: ShortcutInputProps,
     choose: Rc<dyn Fn(String)>,
-    colors: [gpui::Rgba; 4],
 }
 
 impl RenderOnce for Recorder {
@@ -694,7 +700,6 @@ impl RenderOnce for Recorder {
             window.use_keyed_state(self.key.clone(), cx, |_, cx| cx.focus_handle());
         let focus = focus.read(cx).clone();
         let recording = focus.is_focused(window);
-        let [background, foreground, border, accent] = self.colors;
         let shown = if recording {
             self.props.prompt.clone()
         } else if self.current.is_empty() {
@@ -702,26 +707,22 @@ impl RenderOnce for Recorder {
         } else {
             self.current.clone()
         };
+        let ir = ir_shortcut_input(ShortcutInputSpec {
+            label: self.props.label.clone(),
+            label_hidden: true,
+            shown: shown.clone(),
+            recording,
+            enabled: self.props.enabled,
+        });
         let choose = self.choose;
-        let element = div()
+        let element = as_box(&ir)
+            .map(|b| apply_box(&self.c, div(), b))
+            .unwrap_or_else(div)
             .id(self.key)
             .track_focus(&focus)
-            .flex()
-            .items_center()
-            .justify_center()
-            .h(px(32.0))
-            .min_w(px(96.0))
-            .px(px(12.0))
-            .rounded(px(8.0))
-            .border_1()
-            .border_color(if recording { accent } else { border })
-            .bg(background)
-            .text_color(foreground)
-            .text_size(px(13.0))
-            .font_weight(FontWeight::MEDIUM)
             .child(shown);
         if !self.props.enabled {
-            return element.opacity(0.5);
+            return element;
         }
         let clicked = focus.clone();
         element
@@ -771,20 +772,14 @@ pub fn shortcut_input(
             ..Actions::default()
         },
     });
-    let colors = [
-        c.slot("field", "rest", "background"),
-        c.slot("field", "rest", "foreground"),
-        c.slot("field", "rest", "border"),
-        c.color("accent"),
-    ];
     let label = props.label.clone();
     let label_hidden = props.label_hidden;
     let recorder = Recorder {
+        c: c.clone(),
         key: c.element_id(id),
         current,
         props: ShortcutInputProps { enabled, ..props },
         choose: chosen,
-        colors,
     };
     if label_hidden {
         return recorder.into_any_element();
@@ -922,12 +917,12 @@ struct Shown {
 
 #[derive(IntoElement)]
 struct Notice {
+    c: Ctx,
     key: ElementId,
     shown_key: String,
     content: String,
     icon: Option<&'static str>,
     duration: Duration,
-    colors: [gpui::Rgba; 3],
 }
 
 impl RenderOnce for Notice {
@@ -950,10 +945,14 @@ impl RenderOnce for Notice {
             });
         }
         let visible = state.read(cx).since.elapsed() < duration;
-        let [background, foreground, border] = self.colors;
         let viewport = window.viewport_size();
         // Over the content, centred at the foot of the window.
         div().absolute().when(visible, |element| {
+            let toast_node = ir_toast(ToastSpec {
+                content: self.content,
+                icon: self.icon,
+            });
+            let toast_el = GpuiRenderer::new(&self.c).render(&toast_node);
             element.child(
                 gpui::deferred(
                     gpui::anchored()
@@ -962,24 +961,7 @@ impl RenderOnce for Notice {
                             viewport.width / 2.0,
                             viewport.height - px(24.0),
                         ))
-                        .child(
-                            div()
-                                .flex()
-                                .flex_row()
-                                .items_center()
-                                .gap(px(8.0))
-                                .px(px(14.0))
-                                .py(px(10.0))
-                                .rounded(px(10.0))
-                                .border_1()
-                                .border_color(border)
-                                .bg(background)
-                                .text_color(foreground)
-                                .text_size(px(13.0))
-                                .shadow_lg()
-                                .children(self.icon.map(|icon| icons::icon(icon, 16.0, foreground)))
-                                .child(SharedString::from(self.content)),
-                        ),
+                        .child(toast_el),
                 )
                 .with_priority(3),
             )
@@ -997,16 +979,12 @@ pub fn toast(
     duration: Option<f64>,
 ) -> El {
     Notice {
+        c: c.clone(),
         key: ElementId::Name(format!("{}.toast", c.key("toast")).into()),
         shown_key: key.unwrap_or_else(|| content.clone()),
         content,
         icon,
         duration: Duration::from_secs_f64(duration.unwrap_or(3.0).max(0.1)),
-        colors: [
-            c.color("surface.raised"),
-            c.color("text.primary"),
-            c.color("separator"),
-        ],
     }
     .into_any_element()
 }
@@ -1044,7 +1022,7 @@ pub fn focus_on_appear(c: &Ctx, id: &str, child: El) -> El {
 /// outside only ends the editing.
 #[derive(IntoElement)]
 struct Region {
-    key: SharedString,
+    key: gpui::SharedString,
     content: Vec<El>,
 }
 

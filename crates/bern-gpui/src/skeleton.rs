@@ -68,13 +68,30 @@ fn paint_skeleton_quad(
     )
 }
 
-/// Non-interactive theme-aware skeleton placeholder shape.
+/// Non-interactive theme-aware skeleton placeholder shape, aligned with
+/// `bern-surface::controls::skeleton`.
 pub fn skeleton(c: &Ctx, props: SkeletonProps) -> El {
+    let surface_shape = match props.shape {
+        SkeletonShape::Rect => bern_surface::controls::SkeletonShape::Rect,
+        SkeletonShape::Capsule => bern_surface::controls::SkeletonShape::Capsule,
+        SkeletonShape::Circle => bern_surface::controls::SkeletonShape::Circle,
+    };
+    let ir = bern_surface::controls::skeleton(bern_surface::controls::SkeletonSpec {
+        width: props.width,
+        height: props.height,
+        corner: props.corner,
+        shape: surface_shape,
+        base_opacity: props.base_opacity,
+    });
     let fg = c.color("text.primary");
+    let base_opacity = crate::surface::as_box(&ir)
+        .and_then(|b| b.style.background)
+        .map(|bg| crate::surface::resolve_color(c, bg).a)
+        .unwrap_or(props.base_opacity);
     let reduced = crate::motion::reduced(c);
     let paint = paint_skeleton_quad(
         fg,
-        props.base_opacity,
+        base_opacity,
         props.pulse,
         reduced,
         props.corner,

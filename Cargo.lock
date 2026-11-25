@@ -303,6 +303,7 @@ dependencies = [
  "bern-ir",
  "bern-media",
  "bern-protocol",
+ "bern-surface",
  "bern-target-api",
  "bern-theme",
  "serde_json",
@@ -463,6 +464,13 @@ dependencies = [
  "boa_gc",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "bern-surface"
+version = "0.3.3"
+dependencies = [
+ "bern-theme",
 ]
 
 [[package]]

@@ -1,0 +1,11 @@
+[package]
+name = "bern-surface"
+description = "Shared self-drawn UI intermediate representation (box model, visual tokens, and lowered controls) for Bern backends without native system widgets (Web, GPUI, and future canvas renderers)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+bern-theme.workspace = true

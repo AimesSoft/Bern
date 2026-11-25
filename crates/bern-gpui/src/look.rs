@@ -92,15 +92,22 @@ pub enum Shape {
     Chip,
 }
 
-/// Height, horizontal padding and text size of a button.
+/// Height, horizontal padding and text size of a button, lowered from
+/// `bern-surface::controls::button_metrics` so Web and GPUI share one table.
 pub(crate) fn metrics(size: Option<ControlSize>, shape: Shape) -> (f32, f32, f32) {
-    match (shape, size) {
-        (Shape::Chip, _) => (28.0, 12.0, 13.0),
-        (_, Some(ControlSize::Small)) => (28.0, 10.0, 12.5),
-        (_, Some(ControlSize::Large)) => (42.0, 20.0, 14.5),
-        (_, Some(ControlSize::ExtraLarge)) => (50.0, 24.0, 16.0),
-        _ => (36.0, 14.0, 13.5),
-    }
+    let surface_size = size.map(|s| match s {
+        ControlSize::Small => bern_surface::controls::ButtonSize::Small,
+        ControlSize::Regular => bern_surface::controls::ButtonSize::Regular,
+        ControlSize::Large => bern_surface::controls::ButtonSize::Large,
+        ControlSize::ExtraLarge => bern_surface::controls::ButtonSize::ExtraLarge,
+    });
+    let surface_shape = match shape {
+        Shape::Default => bern_surface::controls::ButtonShape::Default,
+        Shape::Capsule => bern_surface::controls::ButtonShape::Capsule,
+        Shape::Chip => bern_surface::controls::ButtonShape::Chip,
+    };
+    let m = bern_surface::controls::button_metrics(surface_size, surface_shape, None);
+    (m.height, m.padding_x, m.font_size)
 }
 
 /// The colors of a control in one state: its recipe's, then the rules'.

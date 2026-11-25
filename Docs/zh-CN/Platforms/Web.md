@@ -98,7 +98,7 @@ target/bern/web_app/bin/tasks window screenshot --output web.png
 
 ## 平台行为与适配要点
 
-- **Bern 网页主题**：采用 Bern 简洁的中性浅色/深色色板，自动响应系统 `prefers-color-scheme`、`WindowSet(appearance:)` 与 `Window(idle_enabled:)`。
+- **共享自绘视觉体系（`bern-surface`）**：基于 `bern-surface` 与 `bern-theme` 快照输出 `--bern-*` 主题变量与控件样式规则（与 GPUI 共享同一自绘 IR），统一呈现半透明表面、间距、排版与白色竖向胶囊滑块，同时保留语义化 HTML/CSS、原生输入法与 WAI-ARIA，并自动响应系统 `prefers-color-scheme`、`WindowSet(appearance:)` 与 `Window(idle_enabled:)`。
 - **窗口与对话框**：副窗口与 `Dialog` 在视口内渲染为具备无障碍语义的虚拟对话框。
 - **文件与存储**：`web_mode = "app"` 使用同源 `localStorage` 做本地持久化，`web_mode = "ui"` 直接使用原生文件存储。浏览器文件选择器返回 `blob:` URL，可直接交给 `MediaSource` 使用。
 - **横屏与电视适配**：`Window(landscape: true)` 在支持的移动浏览器中调用 Screen Orientation API；电视浏览器会自动启用 `Layout(size: tv)` 与 `font(tv:)`。

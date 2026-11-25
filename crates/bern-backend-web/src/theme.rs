@@ -10,28 +10,8 @@
 use bern_ir::{Application, ThemeMode};
 use bern_theme::{ContrastPolicy, Mode, Snapshot, Srgb, generate};
 
-/// `surface.canvas` → `--bern-surface-canvas`.
-pub fn variable(token: &str) -> String {
-    format!("--bern-{}", token.replace(['.', '_'], "-"))
-}
-
 fn declarations(snapshot: &Snapshot) -> String {
-    let mut css = format!("  color-scheme: {};\n", snapshot.mode.name());
-    for token in &snapshot.tokens {
-        let value = if token.alpha == 255 {
-            token.color.hex()
-        } else {
-            format!(
-                "rgb({} {} {} / {:.3})",
-                token.color.r,
-                token.color.g,
-                token.color.b,
-                f64::from(token.alpha) / 255.0
-            )
-        };
-        css.push_str(&format!("  {}: {value};\n", variable(token.name)));
-    }
-    css
+    bern_surface::web::theme_declarations(snapshot)
 }
 
 fn rule(selector: &str, snapshot: &Snapshot) -> String {
@@ -280,5 +260,16 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn theme_declarations_include_shared_surface_tokens() {
+        let light = generate(None, Mode::Light, ContrastPolicy::Standard);
+        let css = declarations(&light);
+        assert!(css.contains("--bern-slider-thumb: #ffffff;"));
+        assert!(css.contains("--bern-slider-thumb-border: rgb("));
+        assert!(css.contains("--bern-sidebar-surface: rgb("));
+        assert!(css.contains("--bern-hover-overlay: rgb("));
+        assert!(css.contains("--bern-separator: rgb("));
     }
 }

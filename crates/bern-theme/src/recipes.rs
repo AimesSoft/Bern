@@ -284,36 +284,34 @@ pub const RECIPES: &[Recipe] = &[
     },
     Recipe {
         name: "slider",
-        // The thumb is an accent dot inside a ring of the thumb color.
+        // The thumb is a white perpendicular capsule (vertical pill on a
+        // horizontal track) with a subtle hairline border and soft drop shadow.
         states: &[
             state(
                 "rest",
                 &[
                     ("fill", "accent"),
-                    ("track", "control.track"),
+                    ("track", "separator"),
                     ("thumb", "control.thumb"),
                     ("thumb_border", "control.border"),
-                    ("thumb_center", "accent"),
                 ],
             ),
             state(
                 "hover",
                 &[
                     ("fill", "accent"),
-                    ("track", "control.track"),
+                    ("track", "separator"),
                     ("thumb", "control.thumb"),
                     ("thumb_border", "control.border"),
-                    ("thumb_center", "button.prominent.hover"),
                 ],
             ),
             state(
                 "active",
                 &[
                     ("fill", "accent"),
-                    ("track", "control.track"),
+                    ("track", "separator"),
                     ("thumb", "control.thumb"),
                     ("thumb_border", "control.border"),
-                    ("thumb_center", "button.prominent.pressed"),
                 ],
             ),
             FOCUS,
@@ -322,9 +320,8 @@ pub const RECIPES: &[Recipe] = &[
                 &[
                     ("fill", "disabled.foreground"),
                     ("track", "disabled.surface"),
-                    ("thumb", "disabled.surface"),
+                    ("thumb", "surface.raised"),
                     ("thumb_border", "disabled.foreground"),
-                    ("thumb_center", "disabled.foreground"),
                 ],
             ),
         ],

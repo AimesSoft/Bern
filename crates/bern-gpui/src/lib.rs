@@ -49,6 +49,7 @@ mod session;
 mod skeleton;
 mod spin;
 mod status;
+mod surface;
 mod svg;
 mod table;
 pub use bar::{BarEntry, BarMenu, bar_item, bar_menu, bar_submenu};

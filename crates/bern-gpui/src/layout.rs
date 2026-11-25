@@ -13,8 +13,8 @@ use crate::units::px;
 use crate::{Color, El};
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    BoxShadow, Div, FontWeight, InteractiveElement, IntoElement, ParentElement,
-    StatefulInteractiveElement, Styled, div, hsla, point,
+    BoxShadow, Div, InteractiveElement, IntoElement, ParentElement, StatefulInteractiveElement,
+    Styled, div, hsla, point,
 };
 
 /// How an element takes the space its container gives: along the
@@ -329,23 +329,18 @@ pub fn spacer(_c: &Ctx) -> El {
     div().flex_1().into_any_element()
 }
 
-/// `Divider`: a hairline across its container.
+/// `Divider`: a hairline across its container, lowered through `bern-surface`.
 pub fn divider(c: &Ctx) -> El {
-    div()
-        .flex_none()
-        .w_full()
-        .h(px(1.0))
-        .bg(c.color("separator"))
-        .into_any_element()
+    let ir = bern_surface::controls::divider(bern_surface::controls::DividerSpec);
+    crate::surface::GpuiRenderer::new(c).render(&ir)
 }
 
-/// `List`: a vertical list of static or keyed rows.
+/// `List`: a vertical list of static or keyed rows, lowered through `bern-surface`.
 pub fn list(c: &Ctx, children: Vec<El>) -> El {
-    let element = div()
-        .flex()
-        .flex_col()
-        .gap(px(2.0))
-        .w_full()
+    let ir = bern_surface::controls::list(bern_surface::controls::ListSpec { gap: 2.0 });
+    let element = crate::surface::as_box(&ir)
+        .map(|b| crate::surface::apply_box(c, div(), b))
+        .unwrap_or_else(div)
         .children(children);
     c.grow().apply(element).into_any_element()
 }
@@ -359,32 +354,22 @@ pub fn inspector(
     panel: Vec<El>,
 ) -> El {
     let open = c.read(presented) == crate::protocol::Value::Bool(true);
-    let side = open.then(|| {
-        div()
-            .flex()
-            .flex_col()
-            .flex_none()
-            .h_full()
-            .w(px(width.unwrap_or(280.0)))
-            .bg(c.color("surface.panel"))
-            .border_l_1()
-            .border_color(c.color("separator"))
-            .p(px(12.0))
-            .gap(px(8.0))
-            .overflow_hidden()
-            .children(panel)
+    let ir = bern_surface::controls::inspector(bern_surface::controls::InspectorSpec {
+        presented: open,
+        width,
     });
+    let body_wrap = div()
+        .flex_1()
+        .min_w(px(0.0))
+        .min_h(px(0.0))
+        .child(body)
+        .into_any_element();
+    let el = crate::surface::GpuiRenderer::new(c)
+        .slot_one("body", body_wrap)
+        .slot("panel", panel)
+        .render(&ir);
     c.grow()
-        .apply(
-            div()
-                .flex()
-                .flex_row()
-                .size_full()
-                .min_w(px(0.0))
-                .min_h(px(0.0))
-                .child(div().flex_1().min_w(px(0.0)).min_h(px(0.0)).child(body))
-                .children(side),
-        )
+        .apply(div().size_full().child(el))
         .into_any_element()
 }
 
@@ -637,90 +622,69 @@ pub fn tabs(
     content: Vec<El>,
     accessory: Option<Vec<El>>,
 ) -> El {
-    let bar =
-        div()
-            .flex()
-            .flex_row()
-            .flex_none()
-            .w_full()
-            .h(px(56.0))
-            .border_t_1()
-            .border_color(c.color("separator"))
-            .bg(c.color("surface.panel"))
-            .children(tabs.into_iter().enumerate().map(
-                |(index, (value, label, icon, icon_only))| {
-                    let chosen = value == selected;
-                    let color = if chosen {
-                        c.color("accent.text")
-                    } else {
-                        c.color("text.secondary")
-                    };
-                    let target = format!("{id}.{index}");
-                    let ctx = c.clone();
-                    let model = model.clone();
-                    let pick = value.clone();
-                    let choose: std::rc::Rc<dyn Fn()> =
-                        std::rc::Rc::new(move || model.set(&ctx, pick.clone()));
-                    c.list(crate::session::Control {
-                        target: c.target(&target),
-                        window: c.win().id.clone(),
-                        role: "tab",
-                        label: label.clone(),
-                        value: Some(chosen.to_string()),
-                        enabled: c.enabled(),
-                        actions: crate::session::Actions {
-                            activate: Some(std::rc::Rc::new({
-                                let choose = choose.clone();
-                                move |_: &mut gpui::App| choose()
-                            })),
-                            ..Default::default()
-                        },
-                    });
-                    div()
-                        .id(c.element_id(&target))
-                        .flex_1()
-                        .flex()
-                        .flex_col()
-                        .items_center()
-                        .justify_center()
-                        .gap(px(2.0))
-                        .text_color(color)
-                        .text_size(px(11.0))
-                        .font_weight(FontWeight::MEDIUM)
-                        .children(icon.map(|icon| crate::icons::icon(icon, 22.0, color)))
-                        // With `display: icon` the label is only the accessible name.
-                        .when(!(icon_only && icon.is_some()), |tab| {
-                            tab.child(label.clone())
-                        })
-                        .on_click(move |_, _, cx| {
-                            cx.stop_propagation();
-                            choose()
-                        })
+    let tab_items: Vec<El> = tabs
+        .into_iter()
+        .enumerate()
+        .map(|(index, (value, label, icon, icon_only))| {
+            let chosen = value == selected;
+            let target = format!("{id}.{index}");
+            let ctx = c.clone();
+            let model = model.clone();
+            let pick = value.clone();
+            let choose: std::rc::Rc<dyn Fn()> =
+                std::rc::Rc::new(move || model.set(&ctx, pick.clone()));
+            c.list(crate::session::Control {
+                target: c.target(&target),
+                window: c.win().id.clone(),
+                role: "tab",
+                label: label.clone(),
+                value: Some(chosen.to_string()),
+                enabled: c.enabled(),
+                actions: crate::session::Actions {
+                    activate: Some(std::rc::Rc::new({
+                        let choose = choose.clone();
+                        move |_: &mut gpui::App| choose()
+                    })),
+                    ..Default::default()
                 },
-            ));
-    let element = div()
-        .flex()
-        .flex_col()
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .flex_1()
-                .min_h(px(0.0))
-                .children(content),
-        )
-        .children(accessory.map(|accessory| {
-            div()
-                .flex()
-                .flex_col()
-                .flex_none()
-                .border_t_1()
-                .border_color(c.color("separator"))
-                .bg(c.color("surface.panel"))
-                .children(accessory)
-        }))
-        .child(bar);
-    Grow::ALL.apply(element).into_any_element()
+            });
+            let ir = bern_surface::controls::tab_item(bern_surface::controls::TabItemSpec {
+                label: label.clone(),
+                icon,
+                icon_only,
+                selected: chosen,
+            });
+            let color = if chosen {
+                c.slot("tab", "selected", "foreground")
+            } else {
+                c.slot("tab", "rest", "foreground")
+            };
+            crate::surface::as_box(&ir)
+                .map(|b| crate::surface::apply_box(c, div(), b))
+                .unwrap_or_else(div)
+                .id(c.element_id(&target))
+                .children(icon.map(|icon| crate::icons::icon(icon, 22.0, color)))
+                // With `display: icon` the label is only the accessible name.
+                .when(!(icon_only && icon.is_some()), |tab| {
+                    tab.child(label.clone())
+                })
+                .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    choose()
+                })
+                .into_any_element()
+        })
+        .collect();
+    let has_accessory = accessory.is_some();
+    let ir = bern_surface::controls::tabs(bern_surface::controls::TabsSpec { has_accessory });
+    let mut renderer = crate::surface::GpuiRenderer::new(c)
+        .slot("content", content)
+        .slot("tabs", tab_items);
+    if let Some(acc) = accessory {
+        renderer = renderer.slot("accessory", acc);
+    }
+    let rendered = renderer.render(&ir);
+    Grow::ALL.apply(div().child(rendered)).into_any_element()
 }
 
 thread_local! {

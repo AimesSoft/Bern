@@ -98,7 +98,7 @@ For `web_mode = "ui"`, the standalone native host (`<app>-host`) listens on `127
 
 ## Platform behavior and adaptations
 
-- **Bern web theme**: Uses Bern's clean neutral light/dark palette, respecting system `prefers-color-scheme`, `WindowSet(appearance:)`, and `Window(idle_enabled:)`.
+- **Shared self-drawn visual system (`bern-surface`)**: Emits `--bern-*` theme tokens and control rules from `bern-surface` over `bern-theme` snapshots (shared with GPUI), delivering consistent translucent surfaces, spacing, typography, and perpendicular white capsule slider thumbs while preserving semantic HTML/CSS, native IME, and WAI-ARIA and respecting `prefers-color-scheme`, `WindowSet(appearance:)`, and `Window(idle_enabled:)`.
 - **Windows and dialogs**: Secondary windows and `Dialog` views render as accessible virtual dialogs inside the viewport.
 - **Files and storage**: Local persistence uses same-origin `localStorage` in `web_mode = "app"` and native file storage in `web_mode = "ui"`. Browser file pickers expose `blob:` URLs that plug straight into `MediaSource`.
 - **Orientation & TV**: `Window(landscape: true)` calls the Screen Orientation API where supported by mobile browsers; TV browsers activate `Layout(size: tv)` and `font(tv:)`.

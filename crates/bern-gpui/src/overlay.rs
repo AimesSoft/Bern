@@ -116,14 +116,6 @@ fn panel_with(
     placement: Option<&'static str>,
 ) -> impl IntoElement {
     let close = target.to_string();
-    let background = match style.and_then(|style| style.background) {
-        Some(background) => color(c, background),
-        None => c.slot("menu", "popup", "background"),
-    };
-    let foreground = match style.and_then(|style| style.foreground) {
-        Some(foreground) => color(c, foreground),
-        None => c.color("text.primary"),
-    };
     // Just above or below its button: from the button's trailing edge when the
     // button is in the window's trailing half, else from its leading edge,
     // so the panel stays by it instead of being pushed back from the
@@ -173,25 +165,38 @@ fn panel_with(
             })
             .offset(point(px(0.0), px(if above { -6.0 } else { 6.0 }))),
     };
-    deferred(
-        placed.snap_to_window_with_margin(px(8.0)).child(
-            div()
-                .id(gpui::ElementId::Name(format!("{target}.panel").into()))
-                .occlude()
-                .rounded(px(10.0))
-                .border_1()
-                .border_color(c.slot("menu", "popup", "border"))
-                .bg(background)
-                .text_color(foreground)
-                .shadow_lg()
-                .on_mouse_down_out(move |_, _, cx| match &dismiss {
-                    Some(dismiss) => dismiss(cx),
-                    None => set_open(&close, false),
-                })
-                .child(content),
-        ),
-    )
-    .with_priority(1)
+    let panel_ir =
+        bern_surface::controls::popover_panel(bern_surface::controls::PopoverPanelSpec {
+            background: style.and_then(|s| s.background).map(|bg| {
+                let r = color(c, bg);
+                bern_surface::ColorValue::Rgba(bern_surface::Rgba8::new(
+                    (r.r.clamp(0.0, 1.0) * 255.0).round() as u8,
+                    (r.g.clamp(0.0, 1.0) * 255.0).round() as u8,
+                    (r.b.clamp(0.0, 1.0) * 255.0).round() as u8,
+                    (r.a.clamp(0.0, 1.0) * 255.0).round() as u8,
+                ))
+            }),
+            foreground: style.and_then(|s| s.foreground).map(|fg| {
+                let r = color(c, fg);
+                bern_surface::ColorValue::Rgba(bern_surface::Rgba8::new(
+                    (r.r.clamp(0.0, 1.0) * 255.0).round() as u8,
+                    (r.g.clamp(0.0, 1.0) * 255.0).round() as u8,
+                    (r.b.clamp(0.0, 1.0) * 255.0).round() as u8,
+                    (r.a.clamp(0.0, 1.0) * 255.0).round() as u8,
+                ))
+            }),
+        });
+    let panel_box = crate::surface::as_box(&panel_ir)
+        .map(|b| crate::surface::apply_box(c, div(), b))
+        .unwrap_or_else(div)
+        .id(gpui::ElementId::Name(format!("{target}.panel").into()))
+        .occlude()
+        .on_mouse_down_out(move |_, _, cx| match &dismiss {
+            Some(dismiss) => dismiss(cx),
+            None => set_open(&close, false),
+        })
+        .child(content);
+    deferred(placed.snap_to_window_with_margin(px(8.0)).child(panel_box)).with_priority(1)
 }
 
 /// The button a popover or menu opens from: a label, an icon or both.
@@ -482,8 +487,8 @@ pub(crate) fn menu_button(c: &Ctx, id: &'static str, label: String, items: Vec<E
         .into_any_element()
 }
 
-/// The radius of a `Modal`'s card.
-pub(crate) const MODAL_CORNER: f32 = 12.0;
+/// The radius of a `Modal`'s card, shared with Web via `bern-surface`.
+pub(crate) const MODAL_CORNER: f32 = bern_surface::controls::overlay::MODAL_CORNER;
 
 /// Size of a `Modal`'s card, and whether it covers a compact window.
 #[derive(Clone, Default)]
@@ -513,32 +518,19 @@ pub fn modal(c: &Ctx, props: ModalProps, content: Vec<El>) -> El {
     let scale = pose.scale.max(0.001);
     let window_width = c.win().width.get() / scale;
     let window_height = c.win().height.get() / scale;
-    let card = div()
+    let clamped_w = props.width.unwrap_or(560.0).min(window_width - 32.0);
+    let clamped_h = props.height.map(|h| h.min(window_height - 32.0));
+    let ir = bern_surface::controls::modal(bern_surface::controls::ModalSpec {
+        width: Some(clamped_w),
+        height: clamped_h,
+        cover,
+    });
+    let card = crate::surface::as_box(&ir)
+        .map(|b| crate::surface::apply_box(c, div(), b))
+        .unwrap_or_else(div)
         .id("bern-modal")
         .occlude()
-        .flex()
-        .flex_col()
-        .flex_none()
-        .overflow_hidden()
-        .bg(c.slot("dialog", "open", "background"))
-        .text_color(c.slot("dialog", "open", "foreground"));
-    let card = if cover {
-        card.size_full()
-    } else {
-        let width = props.width.unwrap_or(560.0).min(window_width - 32.0);
-        let card = card
-            .w(px(width))
-            .max_h(px(window_height - 32.0))
-            .rounded(px(MODAL_CORNER))
-            .border_1()
-            .border_color(c.slot("dialog", "open", "border"))
-            .shadow_lg();
-        match props.height {
-            Some(height) => card.h(px(height.min(window_height - 32.0))),
-            None => card,
-        }
-    };
-    let card = card
+        .when(!cover, |el| el.max_h(px(window_height - 32.0)))
         .relative()
         .left(px(pose.x / scale))
         .top(px(pose.y / scale));
@@ -634,24 +626,17 @@ pub fn split_button(
     });
     let (height, _, _) = crate::look::metrics(None, props.shape);
     let height = props.height.unwrap_or(height);
-    let hover = c.color("hover.overlay");
-    let chevron = div()
+    let split_ir = bern_surface::controls::split_button(bern_surface::controls::SplitButtonSpec {
+        height,
+        open,
+    });
+    let chevron_box = crate::surface::as_box(&split_ir)
+        .and_then(|b| b.children.get(1))
+        .and_then(crate::surface::as_box);
+    let chevron = chevron_box
+        .map(|b| crate::surface::apply_box(c, div(), b))
+        .unwrap_or_else(div)
         .id(c.element_id(&more))
-        .flex()
-        .flex_none()
-        .items_center()
-        .justify_center()
-        .h(px(height))
-        .w(px(height * 0.8))
-        .rounded(px(height / 2.0))
-        .border_1()
-        .border_color(c.slot("button.standard", "rest", "border"))
-        .bg(if open {
-            c.slot("button.standard", "pressed", "background")
-        } else {
-            c.slot("button.standard", "rest", "background")
-        })
-        .hover(move |style| style.bg(hover))
         .child(icons::icon(
             "chevron.down",
             12.0,

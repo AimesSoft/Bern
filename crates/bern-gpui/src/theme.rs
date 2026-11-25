@@ -1,9 +1,11 @@
-//! Colors from the Bern theme algorithm: a snapshot per mode and seed,
-//! generated once, with optional runtime role overrides from
-//! `WindowSet(palette:)`. The seed is the brand color, or the accent the
-//! application chooses at run time (`WindowSet(accent:)` / `palette`).
+//! Colors from the Bern theme algorithm via `bern-surface::SurfacePalette`:
+//! a snapshot per mode and seed, generated once, with optional runtime role
+//! overrides from `WindowSet(palette:)`. The seed is the brand color, or the
+//! accent the application chooses at run time (`WindowSet(accent:)` /
+//! `palette`).
 
-use bern_theme::{ContrastPolicy, Mode, Snapshot, Srgb};
+use bern_surface::{Rgba8, SurfacePalette};
+use bern_theme::{ContrastPolicy, Mode, Srgb};
 use gpui::Rgba;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
@@ -11,26 +13,21 @@ use std::rc::Rc;
 
 type Pair = ((u8, u8, u8), (u8, u8, u8));
 
-/// The resolved colors of one mode.
+/// The resolved colors of one mode, backed by [`SurfacePalette`] so GPUI and
+/// Web resolve identical translucent overlays, separators, sidebar tints, and
+/// slider pill tokens.
 pub struct Theme {
-    snapshot: Snapshot,
+    palette: SurfacePalette,
     pub(crate) dark: bool,
 }
 
-const CLEAR: Rgba = Rgba {
-    r: 0.0,
-    g: 0.0,
-    b: 0.0,
-    a: 0.0,
-};
-
 pub(crate) fn rgba(color: Srgb, alpha: u8) -> Rgba {
-    Rgba {
-        r: f32::from(color.r) / 255.0,
-        g: f32::from(color.g) / 255.0,
-        b: f32::from(color.b) / 255.0,
-        a: f32::from(alpha) / 255.0,
-    }
+    rgba8(Rgba8::from_srgb(color, alpha))
+}
+
+pub(crate) fn rgba8(color: Rgba8) -> Rgba {
+    let [r, g, b, a] = color.to_f32_array();
+    Rgba { r, g, b, a }
 }
 
 thread_local! {
@@ -82,19 +79,18 @@ pub(crate) fn palette_accent() -> Option<Pair> {
 }
 
 impl Theme {
-    /// The color of a theme role, such as `surface.canvas` or `accent`.
-    /// A role the snapshot lacks is drawn in magenta, so a misspelt role
-    /// shows at once.
+    /// The color of a theme role, such as `surface.canvas`, `accent`,
+    /// `sidebar.surface`, or `slider.thumb`. A role the palette lacks is drawn
+    /// in diagnostic magenta, so a misspelt role shows at once.
     pub fn color(&self, role: &str) -> Rgba {
         if role == "transparent" {
-            return CLEAR;
+            return rgba8(Rgba8::TRANSPARENT);
         }
         // Check runtime palette override first (for both exact and mapped names).
         if let Some((light, dark)) = PALETTE_MAP.with(|map| map.borrow().get(role).copied()) {
             let (r, g, b) = if self.dark { dark } else { light };
             return rgba(Srgb::new(r, g, b), 0xff);
         }
-        // Roles the theme derives from others, as the Web target does.
         let mapped = match role {
             "fill.subtle" => "hover.overlay",
             "fill.strong" => "pressed.overlay",
@@ -106,32 +102,7 @@ impl Theme {
             let (r, g, b) = if self.dark { dark } else { light };
             return rgba(Srgb::new(r, g, b), 0xff);
         }
-        // Subtle fills, pointer overlays and hairlines are translucent tints of
-        // the foreground (matching SwiftUI, WinUI 3, GTK and Compose), so cards
-        // and hover states blend smoothly over blurred/colored backdrops while
-        // matching the same neutral steps on plain light/dark canvases.
-        if let Some(alpha) = match mapped {
-            "hover.overlay" => Some(15u8),    // ~6%
-            "pressed.overlay" => Some(31u8),  // ~12%
-            "disabled.surface" => Some(13u8), // ~5%
-            "separator" => Some(31u8),        // ~12%
-            _ => None,
-        } {
-            let base = self
-                .snapshot
-                .tokens
-                .iter()
-                .find(|token| token.name == "text.primary")
-                .map(|token| token.color)
-                .unwrap_or(if self.dark { Srgb::WHITE } else { Srgb::BLACK });
-            return rgba(base, alpha);
-        }
-        self.snapshot
-            .tokens
-            .iter()
-            .find(|token| token.name == mapped)
-            .map(|token| rgba(token.color, token.alpha))
-            .unwrap_or(rgba(Srgb::new(0xff, 0x00, 0xff), 0xff))
+        rgba8(self.palette.role(role))
     }
 
     /// Resolve a role to `(r, g, b)` bytes for `WindowSet(accent:)` role accents.
@@ -148,22 +119,7 @@ impl Theme {
     /// `button.prominent` at `hover`; the `rest` state's when the state
     /// does not name the slot, `"transparent"` when neither does.
     pub(crate) fn slot_role(recipe: &str, state: &str, slot: &str) -> &'static str {
-        bern_theme::RECIPES
-            .iter()
-            .find(|candidate| candidate.name == recipe)
-            .and_then(|recipe| {
-                let find = |state: &str| {
-                    recipe.state(state).and_then(|state| {
-                        state
-                            .slots
-                            .iter()
-                            .find(|(name, _)| *name == slot)
-                            .map(|(_, role)| *role)
-                    })
-                };
-                find(state).or_else(|| find("rest"))
-            })
-            .unwrap_or("transparent")
+        SurfacePalette::slot_role(recipe, state, slot)
     }
 }
 
@@ -182,7 +138,7 @@ pub(crate) fn of(dark: bool, seed: Option<(u8, u8, u8)>) -> Rc<Theme> {
             let mode = if dark { Mode::Dark } else { Mode::Light };
             let seed = seed.map(|(red, green, blue)| Srgb::new(red, green, blue));
             Rc::new(Theme {
-                snapshot: bern_theme::generate(seed, mode, ContrastPolicy::Standard),
+                palette: SurfacePalette::generate(seed, mode, ContrastPolicy::Standard),
                 dark,
             })
         }))
@@ -204,6 +160,7 @@ mod tests {
                 "pressed.overlay",
                 "disabled.surface",
                 "separator",
+                "sidebar.surface",
             ] {
                 let c = theme.color(role);
                 assert!(
@@ -213,6 +170,10 @@ mod tests {
                 );
             }
             assert!(theme.color("fill.subtle").a < theme.color("fill.strong").a);
+            let thumb = theme.color("slider.thumb");
+            assert_eq!(thumb, rgba8(Rgba8::WHITE));
+            assert!(theme.color("slider.thumb.border").a > 0.0);
+            assert!(theme.color("slider.thumb.shadow").a > 0.0);
         }
     }
 }

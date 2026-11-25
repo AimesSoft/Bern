@@ -72,7 +72,7 @@ target/bern/gpui_macos/bin/tasks window screenshot --output gpui.png
 ## 平台行为与适配要点
 
 - **完整桌面 IR 能力对齐**：覆盖桌面端全部组件、特性、样式与动效能力——包括 `Table`/`TableColumn`/`TableMenu`、`List`、`Inspector`、`Marquee`、`WindowButtons`、`Slot`、`Sidebar(fallback:)`、`Drop(opens:)`、`WindowRole::Settings` 与 `WindowRole::Dialog`（含模态阻塞）、`Window(confirm_close:)`、`WindowSet(palette:)`、`Text(lit*)`、`TextInput(current:)`、`paste:`、`Rail(overhang:)`、`idle_area`、`glow_opacity`、`Stack` 边框与悬停态、纯 Rust 动态 `Svg`（`BSVG`）以及进程内 `javascript = true`。
-- **统一视觉体系**：在 macOS、Windows 与 Linux 上均采用 `BernTheme`（高对比度中性色板、运行时语义调色板覆盖、统一间距、圆角与弹簧物理曲线）。
+- **统一视觉体系（`bern-surface`）**：基于 `bern-surface` 与 `BernTheme`（与 Web 目标共享同一自绘 IR）渲染全量自绘控件，在 macOS、Windows、Linux 与 Web 上呈现一致的高对比度中性色板、半透明表面、白色竖向胶囊滑块、运行时语义调色板覆盖、间距、圆角与弹簧物理曲线。
 - **原生系统集成**：
   - **菜单栏**：`platform = "macos"` 时原生呈现 macOS `MenuBar`。
   - **系统托盘（`StatusItem`）**：三端均提供原生托盘图标与动态菜单（macOS `NSStatusBar`、Windows `Shell_NotifyIconW`、Linux D-Bus `StatusNotifierItem` + `com.canonical.dbusmenu`），支持关窗常驻与 `--at-login` 静默启动。

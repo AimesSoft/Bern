@@ -13,6 +13,7 @@ members = [
     "crates/bern-script",
     "crates/bern-runtime",
     "crates/bern-theme",
+    "crates/bern-surface",
     "crates/bern-adapter-json",
     "crates/bern-transport-ipc",
     "crates/bern-transport-ws",
@@ -86,6 +87,7 @@ bern-svg = { version = "=0.3.3", path = "crates/bern-svg" }
 bern-script = { version = "=0.3.3", path = "crates/bern-script" }
 bern-runtime = { version = "=0.3.3", path = "crates/bern-runtime" }
 bern-theme = { version = "=0.3.3", path = "crates/bern-theme" }
+bern-surface = { version = "=0.3.3", path = "crates/bern-surface" }
 bern-target-api = { version = "=0.3.3", path = "crates/bern-target-api" }
 bern-compiler = { version = "=0.3.3", path = "crates/bern-compiler" }
 bern-backend-swiftui = { version = "=0.3.3", path = "crates/bern-backend-swiftui" }

@@ -72,7 +72,7 @@ Useful debugging environment variables:
 ## Platform behavior and adaptations
 
 - **Full desktop IR parity**: Supports all desktop Bern components, features, styles, and motion tokens—including `Table`/`TableColumn`/`TableMenu`, `List`, `Inspector`, `Marquee`, `WindowButtons`, `Slot`, `Sidebar(fallback:)`, `Drop(opens:)`, `WindowRole::Settings` and `WindowRole::Dialog` (modal blocking), `Window(confirm_close:)`, `WindowSet(palette:)`, `Text(lit*)`, `TextInput(current:)`, `paste:`, `Rail(overhang:)`, `idle_area`, `glow_opacity`, `Stack` border/hover styles, pure-Rust animated `Svg` (`BSVG`), and opt-in in-process `javascript = true`.
-- **Unified visual system**: Uses `BernTheme` (high-contrast neutral palette, runtime semantic palette overrides, consistent spacing, rounded corners, and spring physics) across macOS, Windows, and Linux.
+- **Unified visual system (`bern-surface`)**: Lowers self-drawn controls through `bern-surface` over `BernTheme` (shared with the Web target), delivering identical high-contrast neutral palettes, translucent surfaces, perpendicular white capsule slider thumbs, runtime semantic palette overrides, spacing, rounded corners, and spring physics across macOS, Windows, Linux, and Web.
 - **Native system integration**:
   - **Menu bar**: Native macOS `MenuBar` (`platform = "macos"`).
   - **Status item (`StatusItem`)**: Native tray icon and dynamic menu on all three platforms (macOS `NSStatusBar`, Windows `Shell_NotifyIconW`, Linux D-Bus `StatusNotifierItem` + `com.canonical.dbusmenu`), keeping the app alive after the last window closes and launching silently with `--at-login`.

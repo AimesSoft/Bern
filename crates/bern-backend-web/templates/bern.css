@@ -16,10 +16,15 @@
   --bern-nav-row: 34px;
   --bern-switch-width: 36px;
   --bern-switch-height: 20px;
-  --bern-switch-thumb: 16px;
-  --bern-slider-thumb: 16px;
-  --bern-track: 6px;
-  --bern-scrub-track: 6px;
+  --bern-switch-thumb: 14px;
+  --bern-slider-thumb: 7px;
+  --bern-slider-thumb-w: 7px;
+  --bern-slider-thumb-h: 18px;
+  --bern-slider-thumb-radius: 999px;
+  --bern-slider-thumb-scale: 1.12;
+  --bern-slider-thumb-shadow-box: 0 1px 4px var(--bern-slider-thumb-shadow, rgb(0 0 0 / 0.18));
+  --bern-track: 4px;
+  --bern-scrub-track: 4px;
   --bern-knob-width: 20px;
   --bern-knob-height: 16px;
   --bern-text-up: 0px;
@@ -49,7 +54,9 @@
     --bern-switch-width: 48px;
     --bern-switch-height: 26px;
     --bern-switch-thumb: 18px;
-    --bern-slider-thumb: 28px;
+    --bern-slider-thumb: 10px;
+    --bern-slider-thumb-w: 10px;
+    --bern-slider-thumb-h: 24px;
     --bern-track: 6px;
     --bern-scrub-track: 8px;
     --bern-knob-width: 28px;
@@ -1990,8 +1997,15 @@ textarea.bern-field {
 }
 
 .bern-slider-vertical::-webkit-slider-thumb {
+  width: var(--bern-slider-thumb-h);
+  height: var(--bern-slider-thumb-w);
   margin-top: 0;
-  margin-left: calc((var(--bern-track) - var(--bern-slider-thumb)) / 2);
+  margin-left: calc((var(--bern-track) - var(--bern-slider-thumb-h)) / 2);
+}
+
+.bern-slider-vertical::-moz-range-thumb {
+  width: var(--bern-slider-thumb-h);
+  height: var(--bern-slider-thumb-w);
 }
 
 .bern-slider {
@@ -2023,46 +2037,49 @@ textarea.bern-field {
   background: var(--bern-accent);
 }
 
-/* The thumb: a disc of the page color in an accent ring, a little larger
- * under the pointer and while dragged. */
+/* The thumb: a solid white vertical pill (horizontal on vertical tracks)
+ * with a subtle outline and soft drop shadow in both light and dark modes,
+ * lowered identically from bern-surface alongside GPUI. */
 .bern-slider::-webkit-slider-thumb {
   box-sizing: border-box;
-  width: var(--bern-slider-thumb);
-  height: var(--bern-slider-thumb);
-  margin-top: calc((var(--bern-track) - var(--bern-slider-thumb)) / 2);
-  border: 2px solid var(--bern-accent);
-  border-radius: 50%;
-  background: var(--bern-surface-canvas);
+  width: var(--bern-slider-thumb-w);
+  height: var(--bern-slider-thumb-h);
+  margin-top: calc((var(--bern-track) - var(--bern-slider-thumb-h)) / 2);
+  border: 1px solid var(--bern-slider-thumb-border, rgb(0 0 0 / 0.14));
+  border-radius: var(--bern-slider-thumb-radius);
+  background: var(--bern-slider-thumb, #ffffff);
+  box-shadow: var(--bern-slider-thumb-shadow-box);
   appearance: none;
   -webkit-appearance: none;
-  transition: transform var(--bern-motion) ease-out;
+  transition: transform var(--bern-motion) ease-out, box-shadow var(--bern-motion) ease-out;
 }
 
 .bern-slider::-moz-range-thumb {
   box-sizing: border-box;
-  width: var(--bern-slider-thumb);
-  height: var(--bern-slider-thumb);
-  border: 2px solid var(--bern-accent);
-  border-radius: 50%;
-  background: var(--bern-surface-canvas);
-  transition: transform var(--bern-motion) ease-out;
+  width: var(--bern-slider-thumb-w);
+  height: var(--bern-slider-thumb-h);
+  border: 1px solid var(--bern-slider-thumb-border, rgb(0 0 0 / 0.14));
+  border-radius: var(--bern-slider-thumb-radius);
+  background: var(--bern-slider-thumb, #ffffff);
+  box-shadow: var(--bern-slider-thumb-shadow-box);
+  transition: transform var(--bern-motion) ease-out, box-shadow var(--bern-motion) ease-out;
 }
 
 @media (hover: hover) {
   .bern-slider:hover:not(:disabled)::-webkit-slider-thumb {
-    transform: scale(1.15);
+    transform: scale(var(--bern-slider-thumb-scale));
   }
   .bern-slider:hover:not(:disabled)::-moz-range-thumb {
-    transform: scale(1.15);
+    transform: scale(var(--bern-slider-thumb-scale));
   }
 }
 
 .bern-slider:active:not(:disabled)::-webkit-slider-thumb {
-  transform: scale(1.15);
+  transform: scale(var(--bern-slider-thumb-scale));
 }
 
 .bern-slider:active:not(:disabled)::-moz-range-thumb {
-  transform: scale(1.15);
+  transform: scale(var(--bern-slider-thumb-scale));
 }
 
 .bern-slider:disabled::-webkit-slider-runnable-track {
@@ -2070,9 +2087,17 @@ textarea.bern-field {
 }
 
 .bern-slider:disabled::-webkit-slider-thumb {
-  border-color: var(--bern-disabled-surface);
-  background: var(--bern-disabled-foreground);
-  box-shadow: 0 0 0 1px var(--bern-disabled-foreground);
+  border-color: var(--bern-disabled-foreground);
+  background: var(--bern-surface-raised);
+  box-shadow: none;
+  opacity: 0.85;
+}
+
+.bern-slider:disabled::-moz-range-thumb {
+  border-color: var(--bern-disabled-foreground);
+  background: var(--bern-surface-raised);
+  box-shadow: none;
+  opacity: 0.85;
 }
 
 .bern-slider:focus-visible {
@@ -2500,7 +2525,7 @@ button.bern-menu-item:disabled .bern-icon {
   flex-direction: column;
   width: 232px;
   padding: 50px 10px 12px;
-  background: var(--bern-surface-panel);
+  background: var(--bern-sidebar-surface, var(--bern-surface-panel));
   /* Its edge takes no room from its content. */
   box-shadow: inset -1px 0 0 var(--bern-separator);
 }
@@ -2839,7 +2864,7 @@ button.bern-menu-item:disabled .bern-icon {
   padding: 12px;
   box-shadow: none;
   border-right: 1px solid var(--bern-separator);
-  background: var(--bern-surface-panel);
+  background: var(--bern-sidebar-surface, var(--bern-surface-panel));
   overflow: auto;
 }
 
