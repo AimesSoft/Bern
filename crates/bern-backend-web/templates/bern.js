@@ -2554,7 +2554,10 @@ function sliderHover(input, hover, vertical = false) {
     over = true;
     const rect = input.getBoundingClientRect();
     const style = getComputedStyle(input);
-    const thumb = parseFloat(style.getPropertyValue?.("--bern-slider-thumb")) || 16;
+    const thumb =
+      parseFloat(style.getPropertyValue?.("--bern-slider-thumb-w")) ||
+      parseFloat(style.getPropertyValue?.("--bern-slider-thumb")) ||
+      7;
     if (vertical) {
       const room = rect.height - thumb;
       const along = room > 0 ? Math.min(1, Math.max(0, 1 - (event.clientY - rect.top - thumb / 2) / room)) : 0;

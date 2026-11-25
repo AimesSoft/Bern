@@ -5,7 +5,19 @@ use crate::controls::ButtonProps;
 use crate::ctx::{Act, Ctx, Field, Model, Press};
 use crate::icons;
 use crate::session::{Actions, Control};
+use crate::surface::{GpuiRenderer, apply_box, as_box};
 use crate::{El, Prominence, Role, protocol::Value};
+use bern_surface::Axis;
+use bern_surface::controls::{
+    AlertSpec, AvatarSpec, BadgeSpec, BadgeTone, BannerSeverity, BannerSpec, BottomSheetSpec,
+    DatePickerSpec, DisclosureSpec, EmptyStateSpec, NumberInputSpec, RefreshableSpec,
+    ReorderRowSpec, SplitPaneSpec, TimePickerSpec, TooltipSpec, TreeRowSpec, alert as ir_alert,
+    avatar as ir_avatar, badge as ir_badge, banner as ir_banner, bottom_sheet as ir_bottom_sheet,
+    date_picker as ir_date_picker, disclosure as ir_disclosure, empty_state as ir_empty_state,
+    number_input as ir_number_input, refreshable as ir_refreshable, reorder_row as ir_reorder_row,
+    split_pane as ir_split_pane, time_picker as ir_time_picker, tooltip as ir_tooltip,
+    tree_row as ir_tree_row,
+};
 use gpui::prelude::*;
 use gpui::{
     Anchor, AnchoredPositionMode, App, Bounds, Context, FontWeight, MouseButton, MouseDownEvent,
@@ -98,47 +110,18 @@ fn format_shortcut_keys(spec: &str) -> String {
 }
 
 struct TooltipBubble {
+    c: Ctx,
     text: String,
     keys: Option<String>,
-    bg: gpui::Rgba,
-    border: gpui::Rgba,
-    fg: gpui::Rgba,
-    key_bg: gpui::Rgba,
-    key_fg: gpui::Rgba,
 }
 
 impl TooltipBubble {
-    fn view(&self) -> gpui::Div {
-        div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(6.0))
-            .px(px(8.0))
-            .py(px(4.0))
-            .rounded(px(6.0))
-            .bg(self.bg)
-            .border_1()
-            .border_color(self.border)
-            .text_color(self.fg)
-            .text_size(px(12.0))
-            .shadow_md()
-            .child(self.text.clone())
-            .when_some(self.keys.as_ref().filter(|k| !k.is_empty()), |el, keys| {
-                el.child(
-                    div()
-                        .px(px(5.0))
-                        .py(px(1.0))
-                        .rounded(px(4.0))
-                        .bg(self.key_bg)
-                        .border_1()
-                        .border_color(self.border)
-                        .text_color(self.key_fg)
-                        .text_size(px(11.0))
-                        .font_weight(FontWeight::MEDIUM)
-                        .child(keys.clone()),
-                )
-            })
+    fn view(&self) -> El {
+        let ir = ir_tooltip(TooltipSpec {
+            content: self.text.clone(),
+            keys: self.keys.clone(),
+        });
+        GpuiRenderer::new(&self.c).render(&ir)
     }
 }
 
@@ -151,43 +134,27 @@ impl Render for TooltipBubble {
 /// `Tooltip`: attaches a hover tooltip (with optional formatted shortcut keys
 /// and `above` / `below` placement) to its single child.
 pub fn tooltip(c: &Ctx, key: &'static str, props: TooltipProps, child: El) -> El {
-    let bg = c.color("surface.raised");
-    let border = c.color("control.border");
-    let fg = c.color("text.primary");
-    let key_bg = c.color("surface.panel");
-    let key_fg = c.color("text.secondary");
     let formatted_keys = props
         .keys
         .as_deref()
         .map(format_shortcut_keys)
         .filter(|s| !s.is_empty());
     let bubble = TooltipBubble {
+        c: c.clone(),
         text: props.content,
         keys: formatted_keys,
-        bg,
-        border,
-        fg,
-        key_bg,
-        key_fg,
     };
     let Some(placement) = props.placement else {
+        let c = c.clone();
         let text = bubble.text;
         let keys = bubble.keys;
         return div()
             .id(c.element_id(key))
             .tooltip(move |_window, cx: &mut App| {
+                let c = c.clone();
                 let text = text.clone();
                 let keys = keys.clone();
-                cx.new(move |_| TooltipBubble {
-                    text,
-                    keys,
-                    bg,
-                    border,
-                    fg,
-                    key_bg,
-                    key_fg,
-                })
-                .into()
+                cx.new(move |_| TooltipBubble { c, text, keys }).into()
             })
             .child(child)
             .into_any_element();
@@ -277,64 +244,27 @@ pub struct BannerProps {
 
 /// `Banner`: inline semantic status banner with optional title, actions and dismiss.
 pub fn banner(c: &Ctx, props: BannerProps, dismiss: Option<Act>, actions: Vec<El>) -> El {
-    let role = match props.severity {
-        "success" => "status.success",
-        "warning" => "status.warning",
-        "error" => "status.error",
-        _ => "accent",
-    };
-    let default_icon = match props.severity {
-        "success" => "checkmark.circle",
-        "warning" => "exclamationmark.triangle",
-        "error" => "xmark.circle.fill",
-        _ => "info.circle",
-    };
-    let tint = c.color(role);
-    let mut bg = tint;
-    bg.a = 0.12;
-    let mut border = tint;
-    border.a = 0.28;
-    let icon_name = props.icon.unwrap_or(default_icon);
-    let mut text_col = div().flex().flex_col().flex_1().min_w_0().gap(px(2.0));
-    if let Some(title) = props.title.filter(|t| !t.is_empty()) {
-        text_col = text_col.child(
-            div()
-                .text_size(px(13.5))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(c.color("text.primary"))
-                .child(title),
-        );
-    }
-    text_col = text_col.child(
-        div()
-            .text_size(px(13.0))
-            .text_color(c.color("text.secondary"))
-            .child(props.content.clone()),
-    );
-    let mut row = div()
-        .flex()
-        .flex_row()
-        .items_center()
-        .w_full()
-        .gap(px(12.0))
-        .px(px(14.0))
-        .py(px(10.0))
-        .rounded(px(10.0))
-        .bg(bg)
-        .border_1()
-        .border_color(border)
-        .child(icons::icon(icon_name, 16.0, tint))
-        .child(text_col);
-    if !actions.is_empty() {
-        row = row.child(
-            div()
-                .flex()
-                .flex_row()
-                .flex_none()
-                .items_center()
-                .gap(px(8.0))
-                .children(actions),
-        );
+    let has_actions = !actions.is_empty();
+    let dismissible = dismiss.is_some();
+    let ir = ir_banner(BannerSpec {
+        severity: BannerSeverity::parse(props.severity),
+        title: props.title,
+        content: props.content.clone(),
+        icon: props.icon,
+        has_actions,
+        dismissible,
+    });
+    let mut renderer = GpuiRenderer::new(c);
+    if has_actions {
+        let actions_row = div()
+            .flex()
+            .flex_row()
+            .flex_none()
+            .items_center()
+            .gap(px(8.0))
+            .children(actions)
+            .into_any_element();
+        renderer = renderer.slot_one("actions", actions_row);
     }
     if let Some(on_dismiss) = dismiss {
         let close_label = props.dismiss_label.unwrap_or_else(|| props.content.clone());
@@ -369,10 +299,11 @@ pub fn banner(c: &Ctx, props: BannerProps, dismiss: Option<Act>, actions: Vec<El
             .on_click(move |_, _, cx| {
                 cx.stop_propagation();
                 run(cx);
-            });
-        row = row.child(close_btn);
+            })
+            .into_any_element();
+        renderer = renderer.slot_one("dismiss", close_btn);
     }
-    row.into_any_element()
+    renderer.render(&ir)
 }
 
 /// `Disclosure`: collapsible header + content body.
@@ -425,23 +356,23 @@ pub fn disclosure(
             ..Actions::default()
         },
     });
-    let hover = c.color("hover.overlay");
+    let ir = ir_disclosure(DisclosureSpec {
+        label: label.clone(),
+        icon,
+        expanded,
+    });
+    let root_box = as_box(&ir);
+    let header_box = root_box.and_then(|b| b.children.first()).and_then(as_box);
+    let body_box = root_box.and_then(|b| b.children.get(1)).and_then(as_box);
     let chevron = if expanded {
         "chevron.down"
     } else {
         "chevron.right"
     };
-    let header = div()
+    let header = header_box
+        .map(|b| apply_box(c, div(), b))
+        .unwrap_or_else(div)
         .id(c.element_id(id))
-        .flex()
-        .flex_row()
-        .items_center()
-        .w_full()
-        .gap(px(8.0))
-        .px(px(6.0))
-        .py(px(6.0))
-        .rounded(px(6.0))
-        .hover(move |s| s.bg(hover))
         .child(icons::icon(chevron, 12.0, c.color("icon.secondary")))
         .children(icon.map(|ic| icons::icon(ic, 15.0, c.color("icon.primary"))))
         .child(
@@ -456,18 +387,16 @@ pub fn disclosure(
             cx.stop_propagation();
             toggle(cx);
         });
-    let mut col = div().flex().flex_col().w_full().gap(px(4.0)).child(header);
+    let mut col = root_box
+        .map(|b| apply_box(c, div(), b))
+        .unwrap_or_else(div)
+        .child(header);
     if expanded {
-        col = col.child(
-            div()
-                .flex()
-                .flex_col()
-                .w_full()
-                .pl(px(20.0))
-                .pt(px(4.0))
-                .gap(px(8.0))
-                .children(children()),
-        );
+        let body = body_box
+            .map(|b| apply_box(c, div(), b))
+            .unwrap_or_else(div)
+            .children(children());
+        col = col.child(body);
     }
     col.into_any_element()
 }
@@ -538,73 +467,50 @@ pub fn number_input(c: &Ctx, id: &'static str, props: NumberInputProps, model: M
             ..Actions::default()
         },
     });
-    let hover = c.color("hover.overlay");
     let can_dec = enabled && min.is_none_or(|lo| current > lo);
     let can_inc = enabled && max.is_none_or(|hi| current < hi);
+    let ir = ir_number_input(NumberInputSpec {
+        label: props.label.clone(),
+        label_hidden: true,
+        formatted: formatted.clone(),
+        can_decrement: can_dec,
+        can_increment: can_inc,
+        enabled,
+    });
+    let group_box = as_box(&ir);
+    let dec_box = group_box.and_then(|b| b.children.first()).and_then(as_box);
+    let readout_node = group_box.and_then(|b| b.children.get(1));
+    let inc_box = group_box.and_then(|b| b.children.get(2)).and_then(as_box);
     let dec_commit = Rc::clone(&commit);
     let inc_commit = Rc::clone(&commit);
-    let dec_btn = div()
+    let dec_btn = dec_box
+        .map(|b| apply_box(c, div(), b))
+        .unwrap_or_else(div)
         .id(c.element_id(&format!("{id}.dec")))
-        .flex()
-        .flex_none()
-        .items_center()
-        .justify_center()
-        .size(px(28.0))
-        .rounded(px(6.0))
-        .border_1()
-        .border_color(c.color("control.border"))
-        .bg(c.color("surface.panel"))
         .when(can_dec, |el| {
-            el.hover(move |s| s.bg(hover)).on_click(move |_, _, cx| {
+            el.on_click(move |_, _, cx| {
                 cx.stop_propagation();
                 dec_commit(current - step);
             })
         })
-        .when(!can_dec, |el| el.opacity(0.45))
         .child(icons::icon("minus", 12.0, c.color("icon.primary")));
-    let inc_btn = div()
+    let inc_btn = inc_box
+        .map(|b| apply_box(c, div(), b))
+        .unwrap_or_else(div)
         .id(c.element_id(&format!("{id}.inc")))
-        .flex()
-        .flex_none()
-        .items_center()
-        .justify_center()
-        .size(px(28.0))
-        .rounded(px(6.0))
-        .border_1()
-        .border_color(c.color("control.border"))
-        .bg(c.color("surface.panel"))
         .when(can_inc, |el| {
-            el.hover(move |s| s.bg(hover)).on_click(move |_, _, cx| {
+            el.on_click(move |_, _, cx| {
                 cx.stop_propagation();
                 inc_commit(current + step);
             })
         })
-        .when(!can_inc, |el| el.opacity(0.45))
         .child(icons::icon("plus", 12.0, c.color("icon.primary")));
-    let readout = div()
-        .flex()
-        .items_center()
-        .justify_end()
-        .min_w(px(72.0))
-        .h(px(28.0))
-        .px(px(10.0))
-        .rounded(px(6.0))
-        .border_1()
-        .border_color(c.color("control.border"))
-        .bg(c.color("surface.raised"))
-        .text_size(px(13.0))
-        .text_color(if enabled {
-            c.color("text.primary")
-        } else {
-            c.color("disabled.foreground")
-        })
-        .child(formatted);
-    let controls_row = div()
-        .flex()
-        .flex_row()
-        .flex_none()
-        .items_center()
-        .gap(px(4.0))
+    let readout = readout_node
+        .map(|n| GpuiRenderer::new(c).render(n))
+        .unwrap_or_else(|| div().child(formatted).into_any_element());
+    let controls_row = group_box
+        .map(|b| apply_box(c, div(), b))
+        .unwrap_or_else(div)
         .child(dec_btn)
         .child(readout)
         .child(inc_btn);
@@ -670,43 +576,15 @@ pub fn alert(
             )
         })
         .collect();
-    let mut card = div()
-        .id("bern-alert")
-        .occlude()
-        .flex()
-        .flex_col()
-        .gap(px(12.0))
-        .w(px(380.0_f32.min((window_width - 32.0).max(220.0))))
-        .p(px(20.0))
-        .rounded(px(14.0))
-        .border_1()
-        .border_color(c.slot("dialog", "open", "border"))
-        .bg(c.slot("dialog", "open", "background"))
-        .text_color(c.slot("dialog", "open", "foreground"))
-        .shadow_lg()
-        .child(
-            div()
-                .text_size(px(16.0))
-                .font_weight(FontWeight::SEMIBOLD)
-                .child(title),
-        );
-    if let Some(msg) = message.filter(|m| !m.is_empty()) {
-        card = card.child(
-            div()
-                .text_size(px(13.0))
-                .text_color(c.color("text.secondary"))
-                .child(msg),
-        );
-    }
-    card = card.child(
-        div()
-            .flex()
-            .flex_row()
-            .justify_end()
-            .gap(px(8.0))
-            .pt(px(6.0))
-            .children(buttons),
-    );
+    let card_ir = ir_alert(AlertSpec {
+        title,
+        message,
+        width: 380.0_f32.min((window_width - 32.0).max(220.0)),
+    });
+    let card_inner = GpuiRenderer::new(c)
+        .slot("actions", buttons)
+        .render(&card_ir);
+    let card = div().id("bern-alert").occlude().child(card_inner);
     let c_dismiss = c.clone();
     let mut scrim = div()
         .id("bern-alert-scrim")
@@ -846,71 +724,51 @@ pub fn date_picker(c: &Ctx, id: &'static str, props: DatePickerProps, model: Mod
             ..Actions::default()
         },
     });
-    let hover = c.color("hover.overlay");
+    let formatted = format_iso_date(current);
+    let ir = ir_date_picker(DatePickerSpec {
+        label: props.label.clone(),
+        label_hidden: true,
+        formatted: formatted.clone(),
+        enabled,
+    });
+    let group_box = as_box(&ir);
+    let dec_box = group_box.and_then(|b| b.children.first()).and_then(as_box);
+    let readout_node = group_box.and_then(|b| b.children.get(1));
+    let inc_box = group_box.and_then(|b| b.children.get(2)).and_then(as_box);
     let c_dec = c.clone();
     let m_dec = model.clone();
-    let dec = div()
+    let dec = dec_box
+        .map(|b| apply_box(c, div(), b))
+        .unwrap_or_else(div)
         .id(c.element_id(&format!("{id}.prev")))
-        .flex()
-        .flex_none()
-        .items_center()
-        .justify_center()
-        .size(px(28.0))
-        .rounded(px(6.0))
-        .border_1()
-        .border_color(c.color("control.border"))
-        .bg(c.color("surface.panel"))
         .child(icons::icon("chevron.left", 12.0, c.color("icon.primary")))
         .when(enabled, |el| {
-            el.hover(move |s| s.bg(hover)).on_click(move |_, _, cx| {
+            el.on_click(move |_, _, cx| {
                 cx.stop_propagation();
                 let next = clamp(shift_date(current, -1));
                 m_dec.set(&c_dec, date_value(next));
             })
-        })
-        .when(!enabled, |el| el.opacity(0.45));
+        });
     let c_inc = c.clone();
     let m_inc = model.clone();
-    let inc = div()
+    let inc = inc_box
+        .map(|b| apply_box(c, div(), b))
+        .unwrap_or_else(div)
         .id(c.element_id(&format!("{id}.next")))
-        .flex()
-        .flex_none()
-        .items_center()
-        .justify_center()
-        .size(px(28.0))
-        .rounded(px(6.0))
-        .border_1()
-        .border_color(c.color("control.border"))
-        .bg(c.color("surface.panel"))
         .child(icons::icon("chevron.right", 12.0, c.color("icon.primary")))
         .when(enabled, |el| {
-            el.hover(move |s| s.bg(hover)).on_click(move |_, _, cx| {
+            el.on_click(move |_, _, cx| {
                 cx.stop_propagation();
                 let next = clamp(shift_date(current, 1));
                 m_inc.set(&c_inc, date_value(next));
             })
-        })
-        .when(!enabled, |el| el.opacity(0.45));
-    let readout = div()
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap(px(6.0))
-        .h(px(28.0))
-        .px(px(10.0))
-        .rounded(px(6.0))
-        .border_1()
-        .border_color(c.color("control.border"))
-        .bg(c.color("surface.raised"))
-        .text_size(px(13.0))
-        .text_color(c.color("text.primary"))
-        .child(icons::icon("calendar", 13.0, c.color("icon.secondary")))
-        .child(format_iso_date(current));
-    let controls_row = div()
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap(px(4.0))
+        });
+    let readout = readout_node
+        .map(|n| GpuiRenderer::new(c).render(n))
+        .unwrap_or_else(|| div().child(formatted).into_any_element());
+    let controls_row = group_box
+        .map(|b| apply_box(c, div(), b))
+        .unwrap_or_else(div)
         .child(dec)
         .child(readout)
         .child(inc);
@@ -1009,74 +867,55 @@ pub fn time_picker(c: &Ctx, id: &'static str, props: TimePickerProps, model: Mod
             ..Actions::default()
         },
     });
-    let hover = c.color("hover.overlay");
+    let formatted = format_time_minutes(current);
+    let ir = ir_time_picker(TimePickerSpec {
+        label: props.label.clone(),
+        label_hidden: true,
+        formatted: formatted.clone(),
+        enabled,
+    });
+    let group_box = as_box(&ir);
+    let dec_box = group_box.and_then(|b| b.children.first()).and_then(as_box);
+    let readout_node = group_box.and_then(|b| b.children.get(1));
+    let inc_box = group_box.and_then(|b| b.children.get(2)).and_then(as_box);
     let c_dec = c.clone();
     let m_dec = model.clone();
-    let dec = div()
+    let dec = dec_box
+        .map(|b| apply_box(c, div(), b))
+        .unwrap_or_else(div)
         .id(c.element_id(&format!("{id}.dec")))
-        .flex()
-        .flex_none()
-        .items_center()
-        .justify_center()
-        .size(px(28.0))
-        .rounded(px(6.0))
-        .border_1()
-        .border_color(c.color("control.border"))
-        .bg(c.color("surface.panel"))
         .child(icons::icon("minus", 12.0, c.color("icon.primary")))
         .when(enabled, |el| {
-            el.hover(move |s| s.bg(hover)).on_click(move |_, _, cx| {
+            el.on_click(move |_, _, cx| {
                 cx.stop_propagation();
                 m_dec.set(
                     &c_dec,
                     Value::Float(clamp_time_minutes(current - step, lo, hi, step)),
                 );
             })
-        })
-        .when(!enabled, |el| el.opacity(0.45));
+        });
     let c_inc = c.clone();
     let m_inc = model.clone();
-    let inc = div()
+    let inc = inc_box
+        .map(|b| apply_box(c, div(), b))
+        .unwrap_or_else(div)
         .id(c.element_id(&format!("{id}.inc")))
-        .flex()
-        .flex_none()
-        .items_center()
-        .justify_center()
-        .size(px(28.0))
-        .rounded(px(6.0))
-        .border_1()
-        .border_color(c.color("control.border"))
-        .bg(c.color("surface.panel"))
         .child(icons::icon("plus", 12.0, c.color("icon.primary")))
         .when(enabled, |el| {
-            el.hover(move |s| s.bg(hover)).on_click(move |_, _, cx| {
+            el.on_click(move |_, _, cx| {
                 cx.stop_propagation();
                 m_inc.set(
                     &c_inc,
                     Value::Float(clamp_time_minutes(current + step, lo, hi, step)),
                 );
             })
-        })
-        .when(!enabled, |el| el.opacity(0.45));
-    let readout = div()
-        .flex()
-        .items_center()
-        .justify_center()
-        .min_w(px(68.0))
-        .h(px(28.0))
-        .px(px(10.0))
-        .rounded(px(6.0))
-        .border_1()
-        .border_color(c.color("control.border"))
-        .bg(c.color("surface.raised"))
-        .text_size(px(13.0))
-        .text_color(c.color("text.primary"))
-        .child(format_time_minutes(current));
-    let controls_row = div()
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap(px(4.0))
+        });
+    let readout = readout_node
+        .map(|n| GpuiRenderer::new(c).render(n))
+        .unwrap_or_else(|| div().child(formatted).into_any_element());
+    let controls_row = group_box
+        .map(|b| apply_box(c, div(), b))
+        .unwrap_or_else(div)
         .child(dec)
         .child(readout)
         .child(inc);
@@ -1108,97 +947,23 @@ pub fn empty_state(
     icon: Option<&'static str>,
     actions: Vec<El>,
 ) -> El {
-    let mut col = div()
-        .flex()
-        .flex_col()
-        .items_center()
-        .justify_center()
-        .w_full()
-        .p(px(24.0))
-        .gap(px(10.0));
-    if let Some(name) = icon {
-        col = col.child(icons::icon(name, 36.0, c.color("icon.secondary")));
-    }
-    col = col.child(
-        div()
-            .text_size(px(16.0))
-            .font_weight(FontWeight::SEMIBOLD)
-            .text_color(c.color("text.primary"))
-            .child(title),
-    );
-    if let Some(msg) = message.filter(|m| !m.is_empty()) {
-        col = col.child(
-            div()
-                .max_w(px(360.0))
-                .text_size(px(13.0))
-                .text_color(c.color("text.secondary"))
-                .child(msg),
-        );
-    }
-    if !actions.is_empty() {
-        col = col.child(
-            div()
-                .flex()
-                .flex_row()
-                .items_center()
-                .justify_center()
-                .gap(px(8.0))
-                .pt(px(4.0))
-                .children(actions),
-        );
-    }
-    col.into_any_element()
+    let ir = ir_empty_state(EmptyStateSpec {
+        title,
+        message,
+        icon,
+        has_actions: !actions.is_empty(),
+    });
+    GpuiRenderer::new(c).slot("actions", actions).render(&ir)
 }
 
 /// `Badge`: compact semantic status capsule.
 pub fn badge(c: &Ctx, content: String, tone: &'static str, icon: Option<&'static str>) -> El {
-    let (fg, base, neutral) = match tone {
-        "accent" => (c.color("accent"), c.color("accent"), false),
-        "success" => (c.color("status.success"), c.color("status.success"), false),
-        "warning" => (c.color("status.warning"), c.color("status.warning"), false),
-        "error" => (c.color("status.error"), c.color("status.error"), false),
-        _ => (c.color("text.secondary"), c.color("text.primary"), true),
-    };
-    let mut bg = base;
-    bg.a = if neutral { 0.08 } else { 0.14 };
-    let mut border = base;
-    border.a = if neutral { 0.16 } else { 0.28 };
-    let mut pill = div()
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap(px(4.0))
-        .px(px(8.0))
-        .py(px(2.0))
-        .rounded_full()
-        .border_1()
-        .border_color(border)
-        .bg(bg)
-        .text_size(px(11.5))
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(fg);
-    if let Some(name) = icon {
-        pill = pill.child(icons::icon(name, 11.0, fg));
-    }
-    pill.child(content).into_any_element()
-}
-
-fn avatar_initials(raw: &str) -> String {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return "?".into();
-    }
-    let words: Vec<&str> = trimmed.split_whitespace().collect();
-    if words.len() >= 2
-        && let (Some(a), Some(b)) = (words[0].chars().next(), words[1].chars().next())
-    {
-        return format!("{a}{b}").to_uppercase();
-    }
-    let chars: Vec<char> = trimmed.chars().take(2).collect();
-    if chars.len() == 2 && chars[0].is_ascii() && chars[1].is_ascii() {
-        return format!("{}{}", chars[0], chars[1]).to_uppercase();
-    }
-    chars[0].to_uppercase().to_string()
+    let ir = ir_badge(BadgeSpec {
+        content,
+        tone: BadgeTone::parse(tone),
+        icon,
+    });
+    GpuiRenderer::new(c).render(&ir)
 }
 
 pub struct AvatarProps {
@@ -1217,67 +982,58 @@ pub fn avatar(c: &Ctx, props: AvatarProps) -> El {
     } else {
         side * 0.5
     };
-    const PALETTE: [(f32, f32, f32); 6] = [
-        (0.23, 0.51, 0.96),
-        (0.06, 0.73, 0.51),
-        (0.96, 0.62, 0.04),
-        (0.55, 0.36, 0.96),
-        (0.93, 0.28, 0.60),
-        (0.08, 0.72, 0.65),
-    ];
-    let mut hash: u64 = 14695981039346656037;
-    for b in props.label.as_bytes() {
-        hash ^= u64::from(*b);
-        hash = hash.wrapping_mul(1099511628211);
+    let image_el: Option<El> = if let Some(res) = props.resource {
+        Some(
+            div()
+                .absolute()
+                .inset_0()
+                .child(crate::content::image(
+                    c,
+                    res,
+                    None,
+                    Some(side),
+                    Some(side),
+                    Some(radius),
+                    crate::content::Fit::Cover,
+                    false,
+                    None,
+                    None,
+                    None,
+                    false,
+                ))
+                .into_any_element(),
+        )
+    } else {
+        props.url.filter(|u| !u.is_empty()).map(|url| {
+            div()
+                .absolute()
+                .inset_0()
+                .child(crate::content::image_url(
+                    c,
+                    url,
+                    Some(side),
+                    Some(side),
+                    Some(radius),
+                    crate::content::Fit::Cover,
+                    false,
+                    None,
+                    None,
+                    false,
+                ))
+                .into_any_element()
+        })
+    };
+    let ir = ir_avatar(AvatarSpec {
+        label: props.label,
+        size: side,
+        rounded: props.rounded,
+        has_image: image_el.is_some(),
+    });
+    let mut renderer = GpuiRenderer::new(c);
+    if let Some(img) = image_el {
+        renderer = renderer.slot_one("image", img);
     }
-    let (r, g, b) = PALETTE[(hash as usize) % PALETTE.len()];
-    let fg = gpui::Rgba { r, g, b, a: 1.0 };
-    let bg = gpui::Rgba { r, g, b, a: 0.22 };
-    let mut frame = div()
-        .relative()
-        .flex()
-        .items_center()
-        .justify_center()
-        .flex_none()
-        .w(px(side))
-        .h(px(side))
-        .rounded(px(radius))
-        .overflow_hidden()
-        .bg(bg)
-        .text_size(px((side * 0.38).max(10.0)))
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(fg)
-        .child(avatar_initials(&props.label));
-    if let Some(res) = props.resource {
-        frame = frame.child(div().absolute().inset_0().child(crate::content::image(
-            c,
-            res,
-            None,
-            Some(side),
-            Some(side),
-            Some(radius),
-            crate::content::Fit::Cover,
-            false,
-            None,
-            None,
-            None,
-            false,
-        )));
-    } else if let Some(url) = props.url.filter(|u| !u.is_empty()) {
-        frame = frame.child(div().absolute().inset_0().child(crate::content::image_url(
-            c,
-            url,
-            Some(side),
-            Some(side),
-            Some(radius),
-            crate::content::Fit::Cover,
-            false,
-            None,
-            None,
-            false,
-        )));
-    }
-    frame.into_any_element()
+    renderer.render(&ir)
 }
 
 pub struct TreeViewProps {
@@ -1499,7 +1255,6 @@ pub fn tree_view(
     });
 
     let hover = c.color("hover.overlay");
-    let selected_bg = c.color("selection.background");
     let selected_text = selected_val.as_ref().map(crate::value::key_text);
     let mut rows_els: Vec<El> = Vec::with_capacity(flat.len());
     for entry in flat {
@@ -1539,18 +1294,16 @@ pub fn tree_view(
         let select = Rc::clone(&select_key);
         let row_act = action.clone();
         let c_act = c.clone();
-        let mut row_div = div()
+        let row_ir = ir_tree_row(TreeRowSpec {
+            depth: entry.depth,
+            has_children: entry.has_children,
+            expanded: entry.open,
+            selected: is_selected,
+        });
+        let row_div = as_box(&row_ir)
+            .map(|b| apply_box(c, div(), b))
+            .unwrap_or_else(div)
             .id(c.element_id(&format!("{id}.row.{}", entry.key_text)))
-            .flex()
-            .flex_row()
-            .items_center()
-            .w_full()
-            .min_h(px(30.0))
-            .pl(px(8.0 + entry.depth as f32 * 18.0))
-            .pr(px(8.0))
-            .py(px(4.0))
-            .gap(px(6.0))
-            .rounded(px(6.0))
             .child(chevron)
             .child(div().flex_1().min_w(px(0.0)).child(content))
             .on_mouse_down(MouseButton::Left, move |event: &MouseDownEvent, _, cx| {
@@ -1562,11 +1315,6 @@ pub fn tree_view(
                     act(&c_act);
                 }
             });
-        row_div = if is_selected {
-            row_div.bg(selected_bg)
-        } else {
-            row_div.hover(move |s| s.bg(hover))
-        };
         rows_els.push(row_div.into_any_element());
     }
     div()
@@ -1684,23 +1432,24 @@ pub fn split_pane(c: &Ctx, key: &'static str, props: SplitPaneProps, first: El, 
         (offset / total).clamp(lo, hi)
     };
 
-    let sep = c.color("separator");
-    let accent = c.color("accent");
-    let handle = div()
+    let sp_ir = ir_split_pane(SplitPaneSpec {
+        axis: if vertical {
+            Axis::Vertical
+        } else {
+            Axis::Horizontal
+        },
+        ratio: current as f32,
+        min_first: props.min_first.max(0.0),
+        min_second: props.min_second.max(0.0),
+    });
+    let sp_box = as_box(&sp_ir);
+    let handle_box = sp_box.and_then(|b| b.children.get(1)).and_then(as_box);
+    let rule_node = handle_box.and_then(|b| b.children.first());
+    let handle = handle_box
+        .map(|b| apply_box(c, div(), b))
+        .unwrap_or_else(div)
         .id(c.element_id(&format!("{key}.handle")))
-        .flex()
-        .flex_none()
-        .items_center()
-        .justify_center()
-        .when(vertical, |el| el.w_full().h(px(8.0)))
-        .when(!vertical, |el| el.h_full().w(px(8.0)))
-        .child(
-            div()
-                .bg(sep)
-                .when(vertical, |el| el.w_full().h(px(1.0)))
-                .when(!vertical, |el| el.h_full().w(px(1.0))),
-        )
-        .hover(move |s| s.bg(gpui::Rgba { a: 0.14, ..accent }))
+        .children(rule_node.map(|n| GpuiRenderer::new(c).render(n)))
         .on_mouse_down(MouseButton::Left, move |_, _, cx| {
             cx.stop_propagation();
             drag_down.set(true);
@@ -1841,7 +1590,6 @@ pub fn reorderable(
             .map(|(_, from, over)| (*from, *over))
     });
     let hover = c.color("hover.overlay");
-    let accent = c.color("accent");
     let mut rows_els: Vec<El> = Vec::with_capacity(count);
     for (idx, item) in items.into_iter().enumerate() {
         let kt = crate::value::key_text(&crate::value::at(item.clone(), &[props.key_field]));
@@ -1889,25 +1637,15 @@ pub fn reorderable(
         let drag_move_key = list_key.clone();
         let drag_up_key = list_key.clone();
         let commit_drop = Rc::clone(&commit_move);
+        let row_ir = ir_reorder_row(ReorderRowSpec {
+            is_source,
+            is_target,
+        });
         rows_els.push(
-            div()
+            as_box(&row_ir)
+                .map(|b| apply_box(c, div(), b))
+                .unwrap_or_else(div)
                 .id(c.element_id(&format!("{id}.row.{kt}")))
-                .flex()
-                .flex_row()
-                .items_center()
-                .w_full()
-                .px(px(10.0))
-                .py(px(6.0))
-                .gap(px(8.0))
-                .rounded(px(8.0))
-                .border_1()
-                .border_color(if is_target {
-                    accent
-                } else {
-                    c.color("control.border")
-                })
-                .bg(c.color("surface.panel"))
-                .when(is_source, |el| el.opacity(0.6))
                 .on_mouse_down(MouseButton::Left, move |_, _, _| {
                     REORDER_DRAG.with(|drag| {
                         *drag.borrow_mut() = Some((drag_down_key.clone(), idx, idx));
@@ -2019,38 +1757,19 @@ pub fn bottom_sheet(
         "medium" => (window_height * 0.55).max(180.0),
         _ => (window_height * 0.88).max(240.0),
     };
-    let mut sheet = div()
+    let sheet_ir = ir_bottom_sheet(BottomSheetSpec {
+        width: 640.0_f32.min(window_width.max(240.0)),
+        max_height: max_h,
+        drag_indicator: props.drag_indicator,
+    });
+    let sheet_inner = GpuiRenderer::new(c)
+        .slot("content", children)
+        .render(&sheet_ir);
+    let sheet = div()
         .id("bern-bottom-sheet")
         .occlude()
-        .flex()
-        .flex_col()
-        .gap(px(10.0))
-        .w(px(640.0_f32.min(window_width.max(240.0))))
-        .max_h(px(max_h))
-        .px(px(18.0))
-        .pt(px(10.0))
-        .pb(px(20.0))
-        .rounded_t(px(18.0))
-        .border_t_1()
-        .border_l_1()
-        .border_r_1()
-        .border_color(c.slot("dialog", "open", "border"))
-        .bg(c.slot("dialog", "open", "background"))
-        .text_color(c.slot("dialog", "open", "foreground"))
-        .shadow_lg()
-        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
-    if props.drag_indicator {
-        sheet = sheet.child(
-            div().flex().justify_center().w_full().pb(px(4.0)).child(
-                div()
-                    .w(px(36.0))
-                    .h(px(4.0))
-                    .rounded_full()
-                    .bg(c.color("control.border")),
-            ),
-        );
-    }
-    sheet = sheet.children(children);
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .child(sheet_inner);
 
     let c_dismiss = c.clone();
     let mut scrim = div()
@@ -2100,19 +1819,6 @@ pub fn refreshable(
             ..Actions::default()
         },
     });
-    let mut col = div().flex().flex_col().w_full().min_w(px(0.0));
-    if refreshing {
-        col = col.child(
-            div()
-                .flex()
-                .flex_row()
-                .items_center()
-                .justify_center()
-                .w_full()
-                .py(px(6.0))
-                .gap(px(6.0))
-                .child(icons::icon("arrow.clockwise", 14.0, c.color("accent"))),
-        );
-    }
-    col.child(child).into_any_element()
+    let ir = ir_refreshable(RefreshableSpec { refreshing });
+    GpuiRenderer::new(c).slot_one("body", child).render(&ir)
 }

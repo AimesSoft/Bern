@@ -594,9 +594,6 @@ fn control_bar(c: &Ctx, id: &'static str, player: &str) -> El {
 
     let fg = gpui::rgba(0xffffffff);
     let muted_fg = gpui::rgba(0xffffffb8);
-    let accent = c.color("accent");
-    let track_bg = gpui::rgba(0xffffff3d);
-    let pill_bg = gpui::rgba(0x141418cc);
     let hover_bg = gpui::rgba(0xffffff22);
 
     let play_icon = if playing { "pause.fill" } else { "play.fill" };
@@ -612,13 +609,27 @@ fn control_bar(c: &Ctx, id: &'static str, player: &str) -> El {
     let seek_cb = Rc::clone(&do_seek);
     let duration_ms = (duration * 1000.0).max(0.0);
 
+    let scrubber_ir =
+        bern_surface::controls::media_scrubber(bern_surface::controls::MediaScrubberSpec {
+            fraction: progress as f32,
+            enabled: seekable,
+            tint: Some("accent"),
+        });
+    let resolved_scrubber = match &scrubber_ir {
+        bern_surface::SurfaceNode::Track(track) => {
+            crate::surface::ResolvedTrack::from_node(c, track)
+        }
+        _ => unreachable!("media_scrubber always lowers to TrackNode"),
+    };
+    let (scrubber_rail, scrubber_thumb) = resolved_scrubber.build_visual(false);
+
     let seek_track = div()
         .id(c.element_id(&format!("{id}.seek_track")))
         .relative()
         .flex()
         .items_center()
         .flex_1()
-        .h(crate::units::px(22.0))
+        .h(crate::units::px(resolved_scrubber.hit_extent))
         .cursor_pointer()
         .child(
             gpui::canvas(
@@ -632,16 +643,8 @@ fn control_bar(c: &Ctx, id: &'static str, player: &str) -> El {
             .absolute()
             .size_full(),
         )
-        .child(
-            div()
-                .relative()
-                .w_full()
-                .h(crate::units::px(4.0))
-                .rounded(crate::units::px(2.0))
-                .bg(track_bg)
-                .overflow_hidden()
-                .child(div().h_full().w(gpui::relative(progress as f32)).bg(accent)),
-        )
+        .child(scrubber_rail)
+        .children(scrubber_thumb)
         .on_mouse_down(MouseButton::Left, move |event, _, cx| {
             cx.stop_propagation();
             if !seekable || duration_ms <= 0.0 {
@@ -656,21 +659,14 @@ fn control_bar(c: &Ctx, id: &'static str, player: &str) -> El {
             }
         });
 
-    div()
+    let bar_ir = bern_surface::controls::media_bar(bern_surface::controls::MediaBarSpec);
+    crate::surface::as_box(&bar_ir)
+        .map(|b| crate::surface::apply_box(c, div(), b))
+        .unwrap_or_else(div)
         .absolute()
         .bottom(crate::units::px(12.0))
         .left(crate::units::px(12.0))
         .right(crate::units::px(12.0))
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap(crate::units::px(10.0))
-        .px(crate::units::px(12.0))
-        .py(crate::units::px(8.0))
-        .rounded(crate::units::px(10.0))
-        .bg(pill_bg)
-        .border_1()
-        .border_color(gpui::rgba(0xffffff1f))
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .child(
             div()

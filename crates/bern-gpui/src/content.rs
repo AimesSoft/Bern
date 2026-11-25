@@ -5,8 +5,7 @@ use crate::El;
 use crate::ctx::Ctx;
 use crate::units::px;
 use gpui::{
-    FontWeight, IntoElement, ObjectFit, ParentElement, PathBuilder, Styled, StyledImage, canvas,
-    div, img, point, relative,
+    FontWeight, IntoElement, ObjectFit, ParentElement, Styled, StyledImage, div, img, point,
 };
 
 /// `Text.style`, after the Web specification's type scale.
@@ -73,21 +72,27 @@ impl TextStyle {
     }
 
     fn scale(self) -> (f32, f32, FontWeight) {
-        match self {
-            TextStyle::LargeTitle => (28.0, 34.0, FontWeight::BOLD),
-            TextStyle::Title => (24.0, 32.0, FontWeight::SEMIBOLD),
-            TextStyle::Title2 => (20.0, 28.0, FontWeight::SEMIBOLD),
-            TextStyle::Title3 => (17.0, 24.0, FontWeight::SEMIBOLD),
-            TextStyle::Headline => (14.0, 20.0, FontWeight::SEMIBOLD),
-            TextStyle::Subheadline => (13.0, 18.0, FontWeight::NORMAL),
-            TextStyle::Body => (14.0, 20.0, FontWeight::NORMAL),
-            TextStyle::Callout => (13.0, 20.0, FontWeight::NORMAL),
-            TextStyle::Footnote => (12.0, 16.0, FontWeight::NORMAL),
-            TextStyle::Caption => (12.0, 16.0, FontWeight::MEDIUM),
-            TextStyle::Caption2 => (11.0, 16.0, FontWeight::MEDIUM),
-            TextStyle::Control => (13.5, 20.0, FontWeight::MEDIUM),
-            TextStyle::Code => (13.0, 20.0, FontWeight::NORMAL),
-        }
+        let kind = match self {
+            TextStyle::LargeTitle => bern_surface::controls::TextStyleKind::LargeTitle,
+            TextStyle::Title => bern_surface::controls::TextStyleKind::Title,
+            TextStyle::Title2 => bern_surface::controls::TextStyleKind::Title2,
+            TextStyle::Title3 => bern_surface::controls::TextStyleKind::Title3,
+            TextStyle::Headline => bern_surface::controls::TextStyleKind::Headline,
+            TextStyle::Subheadline => bern_surface::controls::TextStyleKind::Subheadline,
+            TextStyle::Body => bern_surface::controls::TextStyleKind::Body,
+            TextStyle::Callout => bern_surface::controls::TextStyleKind::Callout,
+            TextStyle::Footnote => bern_surface::controls::TextStyleKind::Footnote,
+            TextStyle::Caption => bern_surface::controls::TextStyleKind::Caption,
+            TextStyle::Caption2 => bern_surface::controls::TextStyleKind::Caption2,
+            TextStyle::Control => bern_surface::controls::TextStyleKind::Control,
+            TextStyle::Code => bern_surface::controls::TextStyleKind::Code,
+        };
+        let t = bern_surface::controls::text_scale(kind);
+        (
+            t.size,
+            t.line_height.unwrap_or((t.size * 1.4).round()),
+            FontWeight(f32::from(t.weight)),
+        )
     }
 }
 
@@ -1038,66 +1043,23 @@ pub enum Fit {
 
 /// `Progress(style: ring)`: `value` of `total` as an arc in the accent from
 /// the top, clockwise, with round ends, `width` across and `stroke` thick;
-/// at nothing yet, a dot at the top. It lies over what it rings and takes
-/// no input. The round ends are discs: the path's stroke has flat ends, and
-/// an arc cannot close on itself, so a whole ring stops just short.
+/// lowered through `bern-surface::controls::progress_ring`.
 pub fn progress_ring(c: &Ctx, value: f64, total: f64, width: f32, stroke: f32) -> El {
     let fraction = if total > 0.0 {
         (value / total).clamp(0.0, 1.0) as f32
     } else {
         0.0
     };
-    let color = c.color("accent");
-    canvas(
-        |_, _, _| {},
-        move |bounds, _, window, _| {
-            let shown = fraction.clamp(0.0001, 0.9999);
-            let center = bounds.center();
-            let radius = (bounds.size.width.min(bounds.size.height) - px(stroke)) / 2.0;
-            let angle = shown * std::f32::consts::TAU;
-            let start = point(center.x, center.y - radius);
-            let end = point(
-                center.x + radius * angle.sin(),
-                center.y - radius * angle.cos(),
-            );
-            let mut arc = PathBuilder::stroke(px(stroke));
-            arc.move_to(start);
-            arc.arc_to(point(radius, radius), px(0.0), shown > 0.5, true, end);
-            if let Ok(path) = arc.build() {
-                window.paint_path(path, color);
-            }
-            let cap = px(stroke / 2.0);
-            for at in [start, end] {
-                let mut disc = PathBuilder::fill();
-                disc.move_to(point(at.x - cap, at.y));
-                disc.arc_to(
-                    point(cap, cap),
-                    px(0.0),
-                    false,
-                    true,
-                    point(at.x + cap, at.y),
-                );
-                disc.arc_to(
-                    point(cap, cap),
-                    px(0.0),
-                    false,
-                    true,
-                    point(at.x - cap, at.y),
-                );
-                disc.close();
-                if let Ok(path) = disc.build() {
-                    window.paint_path(path, color);
-                }
-            }
-        },
-    )
-    .flex_none()
-    .size(px(width))
-    .into_any_element()
+    let ir = bern_surface::controls::progress_ring(bern_surface::controls::ProgressRingSpec {
+        fraction,
+        diameter: width,
+        stroke_width: stroke,
+    });
+    crate::surface::GpuiRenderer::new(c).render(&ir)
 }
 
 /// `Progress`: a bar filled by `value` of `total`, or an indeterminate one
-/// without; the label above it.
+/// without; the label above it, lowered through `bern-surface::controls::progress`.
 pub fn progress(c: &Ctx, value: Option<(f64, f64)>, label: Option<String>) -> El {
     let fraction = value
         .map(|(value, total)| {
@@ -1107,34 +1069,10 @@ pub fn progress(c: &Ctx, value: Option<(f64, f64)>, label: Option<String>) -> El
                 0.0
             }
         })
-        .unwrap_or(0.3);
-    let track = div()
-        .w_full()
-        .h(px(4.0))
-        .rounded(px(2.0))
-        .bg(c.color("separator"))
-        .child(
-            div()
-                .h_full()
-                .w(relative(fraction as f32))
-                .rounded(px(2.0))
-                .bg(c.color("accent")),
-        );
-    let (size, line, _) = TextStyle::Caption.metrics();
-    div()
-        .flex()
-        .flex_col()
-        .gap(px(6.0))
-        .w_full()
-        .children(label.map(|label| {
-            div()
-                .text_size(px(size))
-                .line_height(px(line))
-                .text_color(c.color("text.secondary"))
-                .child(label)
-        }))
-        .child(track)
-        .into_any_element()
+        .unwrap_or(0.3) as f32;
+    let ir =
+        bern_surface::controls::progress(bern_surface::controls::ProgressSpec { fraction, label });
+    crate::surface::GpuiRenderer::new(c).render(&ir)
 }
 
 #[cfg(test)]

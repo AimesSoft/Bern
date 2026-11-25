@@ -7,8 +7,17 @@ use crate::ctx::{Act, Ctx, Field, Model};
 use crate::look::{self, Colors, ControlStyle, Look, Shape};
 use crate::protocol::Value;
 use crate::session::{Actions, Control};
+use crate::surface::{GpuiRenderer, apply_box, as_box};
 use crate::units::px;
 use crate::{El, icons};
+use bern_surface::controls::{
+    ButtonShape, CheckboxSpec, ChipOptionSpec, DropAreaSpec, InputKind as SurfaceInputKind,
+    PickerChipsSpec, PickerSegmentedSpec, SegmentOptionSpec, SwitchSpec, TextInputSpec,
+    ToggleButtonSpec, checkbox as ir_checkbox, drop_area as ir_drop_area,
+    picker_chips as ir_picker_chips, picker_segmented as ir_picker_segmented, switch as ir_switch,
+    text_input as ir_text_input, toggle_button as ir_toggle_button,
+};
+use bern_surface::{ColorValue, Rgba8};
 use gpui::{
     App, AppContext, Entity, ExternalPaths, FontWeight, InteractiveElement, IntoElement,
     ParentElement, PathPromptOptions, RenderOnce, SharedString, StatefulInteractiveElement, Styled,
@@ -1050,67 +1059,52 @@ pub fn switch(c: &Ctx, id: &'static str, label: String, model: Model, props: Swi
         register_shortcut(c, props.shortcut.as_deref(), &activate);
     }
     if style == SwitchStyle::Button {
-        let (height, padding, text) = look::metrics(None, props.shape);
-        let height = props.height.unwrap_or(height);
-        let corner = match props.shape {
-            Shape::Default => 8.0,
-            _ => height / 2.0,
+        let surface_shape = match props.shape {
+            Shape::Default => ButtonShape::Default,
+            Shape::Capsule => ButtonShape::Capsule,
+            Shape::Chip => ButtonShape::Chip,
         };
-        let colors = Colors::recipe(
-            c,
-            "button.standard",
-            if enabled { "rest" } else { "disabled" },
-            true,
-        );
-        let colors = if on {
-            Colors {
-                background: c.color("pressed.overlay"),
-                foreground: c.color("accent.text"),
-                ..colors
-            }
+        let ir = ir_toggle_button(ToggleButtonSpec {
+            label: label.clone(),
+            label_hidden: props.label_hidden,
+            icon: props.icon,
+            checked: on,
+            enabled,
+            shape: surface_shape,
+            height: props.height,
+        });
+        let fg = if on {
+            c.color("accent.text")
         } else {
-            colors
+            c.slot(
+                "button.standard",
+                if enabled { "rest" } else { "disabled" },
+                "foreground",
+            )
         };
-        let foreground = colors.foreground;
-        let element = div()
+        let metrics = bern_surface::controls::button_metrics(None, surface_shape, props.height);
+        let element = as_box(&ir)
+            .map(|b| apply_box(c, div(), b))
+            .unwrap_or_else(div)
             .id(c.element_id(id))
-            .flex()
-            .flex_row()
-            .flex_none()
-            .items_center()
-            .justify_center()
-            .gap(px(6.0))
-            .h(px(height))
-            .px(px(padding))
-            .rounded(px(corner))
-            .text_size(px(text))
-            .font_weight(FontWeight::MEDIUM)
             .children(
                 props
                     .icon
-                    .map(|icon| icons::icon(icon, text + 2.5, foreground)),
+                    .map(|icon| icons::icon(icon, metrics.icon_size, fg)),
             )
             .when(!props.label_hidden || props.icon.is_none(), |element| {
                 element.child(label)
             });
-        let element = look::paint(element, colors);
         if !enabled {
             return element.into_any_element();
         }
-        let hover = c.color("hover.overlay");
         return element
-            .hover(move |style| style.bg(hover))
             .on_click(move |_, _, cx| {
                 cx.stop_propagation();
                 toggle(!on)
             })
             .into_any_element();
     }
-    let state = match (enabled, on) {
-        (false, _) => "disabled",
-        (true, true) => "on",
-        (true, false) => "off",
-    };
     let text = div()
         .text_size(px(14.0))
         .line_height(px(20.0))
@@ -1119,7 +1113,7 @@ pub fn switch(c: &Ctx, id: &'static str, label: String, model: Model, props: Swi
         } else {
             c.color("disabled.foreground")
         })
-        .child(label);
+        .child(label.clone());
     let element = div()
         .id(c.element_id(id))
         .flex()
@@ -1129,34 +1123,23 @@ pub fn switch(c: &Ctx, id: &'static str, label: String, model: Model, props: Swi
         .min_h(px(28.0));
     let element = match style {
         SwitchStyle::Switch => {
-            let thumb_color = if on && enabled {
-                props
-                    .look
-                    .and_then(|s| s.foreground)
-                    .map(|fg| crate::layout::color(c, fg))
-                    .unwrap_or_else(|| c.slot("switch", state, "thumb"))
-            } else {
-                c.slot("switch", state, "thumb")
-            };
-            let track = div()
-                .flex()
-                .flex_none()
-                .items_center()
-                .w(px(36.0))
-                .h(px(20.0))
-                .p(px(2.0))
-                .rounded_full()
-                .border_1()
-                .border_color(c.slot("switch", state, "border"))
-                .bg(c.slot("switch", state, "track"))
-                .map(|track| {
-                    if on {
-                        track.justify_end()
-                    } else {
-                        track.justify_start()
-                    }
-                })
-                .child(div().size(px(14.0)).rounded_full().bg(thumb_color));
+            let knob_on_color = props.look.and_then(|s| s.foreground).map(|fg| {
+                let resolved = crate::layout::color(c, fg);
+                ColorValue::Rgba(Rgba8::new(
+                    (resolved.r.clamp(0.0, 1.0) * 255.0).round() as u8,
+                    (resolved.g.clamp(0.0, 1.0) * 255.0).round() as u8,
+                    (resolved.b.clamp(0.0, 1.0) * 255.0).round() as u8,
+                    (resolved.a.clamp(0.0, 1.0) * 255.0).round() as u8,
+                ))
+            });
+            let ir = ir_switch(SwitchSpec {
+                label,
+                label_hidden: true,
+                checked: on,
+                enabled,
+                knob_on_color,
+            });
+            let track = GpuiRenderer::new(c).render(&ir);
             if props.label_hidden {
                 element.child(track)
             } else {
@@ -1164,26 +1147,13 @@ pub fn switch(c: &Ctx, id: &'static str, label: String, model: Model, props: Swi
             }
         }
         SwitchStyle::Checkbox => {
-            let accent = c.color("accent");
-            let mark = div()
-                .flex()
-                .flex_none()
-                .items_center()
-                .justify_center()
-                .size(px(16.0))
-                .rounded(px(4.0))
-                .border_1()
-                .border_color(if on {
-                    accent
-                } else {
-                    c.color("control.border")
-                })
-                .bg(if on {
-                    accent
-                } else {
-                    c.color("surface.raised")
-                })
-                .children(on.then(|| icons::icon("checkmark", 12.0, c.color("on_accent"))));
+            let ir = ir_checkbox(CheckboxSpec {
+                label,
+                label_hidden: true,
+                checked: on,
+                enabled,
+            });
+            let mark = GpuiRenderer::new(c).render(&ir);
             element
                 .child(mark)
                 .when(!props.label_hidden, |element| element.child(text))
@@ -1269,113 +1239,81 @@ pub fn picker(
     });
     let field = match style {
         PickerStyle::Segmented => {
+            let ir = ir_picker_segmented(PickerSegmentedSpec {
+                label: label.clone(),
+                label_hidden: true,
+                options: options
+                    .iter()
+                    .map(|(value, text)| SegmentOptionSpec {
+                        label: text.clone(),
+                        selected: *value == current,
+                    })
+                    .collect(),
+                capsule,
+                height,
+                enabled,
+            });
+            let group_box = as_box(&ir).expect("picker_segmented lowers to BoxNode");
             let segments = options
                 .into_iter()
+                .zip(group_box.children.iter())
                 .enumerate()
-                .map(|(index, (value, text))| {
+                .map(|(index, ((value, text), seg_node))| {
                     let selected = value == current;
-                    let state = if selected { "selected" } else { "rest" };
-                    let segment = div()
+                    let segment = as_box(seg_node)
+                        .map(|b| apply_box(c, div(), b))
+                        .unwrap_or_else(div)
                         .id(c.element_id(&format!("{id}.{index}")))
-                        .flex_1()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .h(px(height
-                            .map(|height| (height - 6.0).max(16.0))
-                            .unwrap_or(28.0)))
-                        .px(px(10.0))
-                        .rounded(px(if capsule { 999.0 } else { 6.0 }))
-                        .text_size(px(13.0))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(c.slot("segmented", state, "foreground"))
-                        .bg(c.slot("segmented", state, "background"))
                         .child(text);
-                    let segment = if selected {
-                        segment
-                            .border_1()
-                            .border_color(c.slot("segmented", "selected", "border"))
-                    } else {
-                        segment
-                    };
                     if !enabled || selected {
                         return segment;
                     }
-                    let hover = c.slot("segmented", "hover", "background");
                     let choose = Rc::clone(&choose);
-                    segment
-                        .hover(move |style| style.bg(hover))
-                        .on_click(move |_, _, cx| {
-                            cx.stop_propagation();
-                            choose(value.clone())
-                        })
+                    segment.on_click(move |_, _, cx| {
+                        cx.stop_propagation();
+                        choose(value.clone())
+                    })
                 });
             c.grow()
-                .apply(
-                    div()
-                        .flex()
-                        .flex_row()
-                        .gap(px(2.0))
-                        .p(px(2.0))
-                        .rounded(px(if capsule { 999.0 } else { 8.0 }))
-                        .border_1()
-                        .border_color(c.slot("segmented", "rest", "border"))
-                        .bg(c.slot("segmented", "rest", "track")),
-                )
+                .apply(apply_box(c, div(), group_box))
                 .children(segments)
                 .into_any_element()
         }
         PickerStyle::Chips => {
-            let accent = c.color("accent");
-            let on_accent = c.color("on_accent");
-            let border = c.color("control.border");
-            let secondary = c.color("text.secondary");
-            let hover = c.color("hover.overlay");
+            let ir = ir_picker_chips(PickerChipsSpec {
+                label: label.clone(),
+                label_hidden: true,
+                options: options
+                    .iter()
+                    .map(|(value, text)| ChipOptionSpec {
+                        label: text.clone(),
+                        selected: *value == current,
+                    })
+                    .collect(),
+                enabled,
+            });
+            let wrap_box = as_box(&ir).expect("picker_chips lowers to BoxNode");
             let chips = options
                 .into_iter()
+                .zip(wrap_box.children.iter())
                 .enumerate()
-                .map(|(index, (value, text))| {
+                .map(|(index, ((value, text), chip_node))| {
                     let selected = value == current;
-                    let chip = div()
+                    let chip = as_box(chip_node)
+                        .map(|b| apply_box(c, div(), b))
+                        .unwrap_or_else(div)
                         .id(c.element_id(&format!("{id}.chip.{index}")))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .h(px(30.0))
-                        .px(px(12.0))
-                        .rounded_full()
-                        .border_1()
-                        .border_color(if selected { accent } else { border })
-                        .bg(if selected {
-                            accent
-                        } else {
-                            gpui::Rgba {
-                                r: 0.0,
-                                g: 0.0,
-                                b: 0.0,
-                                a: 0.0,
-                            }
-                        })
-                        .text_size(px(13.0))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(if selected { on_accent } else { secondary })
                         .child(text);
                     if !enabled || selected {
                         return chip;
                     }
                     let choose = Rc::clone(&choose);
-                    chip.hover(move |style| style.bg(hover))
-                        .on_click(move |_, _, cx| {
-                            cx.stop_propagation();
-                            choose(value.clone())
-                        })
+                    chip.on_click(move |_, _, cx| {
+                        cx.stop_propagation();
+                        choose(value.clone())
+                    })
                 });
-            div()
-                .flex()
-                .flex_row()
-                .flex_wrap()
-                .items_center()
-                .gap(px(8.0))
+            apply_box(c, div(), wrap_box)
                 .children(chips)
                 .into_any_element()
         }
@@ -1554,13 +1492,13 @@ struct FieldState {
 /// is laid out, where GPUI gives it the window.
 #[derive(IntoElement)]
 struct TextField {
+    c: Ctx,
     key: SharedString,
     props: InputProps,
     value: String,
     controlled: bool,
     enabled: bool,
     hooks: Hooks,
-    colors: [gpui::Rgba; 3],
 }
 
 /// Run a field's hooks for `event`; focus changes are noted by `key`, a
@@ -1687,36 +1625,40 @@ impl RenderOnce for TextField {
                 Textarea::new(&editor).into_any_element()
             }
         };
-        let [background, foreground, border] = self.colors;
-        let multiline = props.kind == InputKind::Multiline;
         let search = props.kind == InputKind::Search;
-        let height = props.height.unwrap_or(if search { 32.0 } else { 36.0 });
-        let field = div()
+        let surface_kind = match props.kind {
+            InputKind::Text => SurfaceInputKind::Text,
+            InputKind::Secure => SurfaceInputKind::Secure,
+            InputKind::Multiline => SurfaceInputKind::Multiline,
+            InputKind::Search => SurfaceInputKind::Search,
+        };
+        let ir = ir_text_input(TextInputSpec {
+            label: props.label.clone(),
+            label_hidden: true,
+            kind: surface_kind,
+            height: props.height,
+            font_size: props.font_size,
+            bare: props.bare,
+            enabled: self.enabled,
+            has_text,
+        });
+        let foreground = self.c.slot(
+            "field",
+            if self.enabled { "rest" } else { "disabled" },
+            "foreground",
+        );
+        let field = as_box(&ir)
+            .map(|b| apply_box(&self.c, div(), b))
+            .unwrap_or_else(div)
             // The field takes the presses in it: what lies under it does
             // not get them too.
             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_mouse_up(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(6.0))
-            .w_full()
-            .min_h(px(height))
-            .when(multiline, |field| {
-                field.h(px(88.0)).items_start().py(px(8.0))
-            })
-            .px(px(10.0))
-            .rounded(px(if search { height.min(36.0) / 2.0 } else { 8.0 }))
-            .when(!props.bare, |field| {
-                field.border_1().border_color(border).bg(background)
-            })
-            .text_color(foreground)
-            .text_size(px(props.font_size.unwrap_or(14.0)))
             .when(search, |field| {
                 field.child(icons::icon(
                     "magnifyingglass",
                     14.0,
-                    self.colors[1].opacity(0.6),
+                    self.c.color("icon.secondary"),
                 ))
             })
             .child(div().flex_1().child(editor))
@@ -1739,11 +1681,6 @@ impl RenderOnce for TextField {
                         }),
                 )
             });
-        let field = if self.enabled {
-            field
-        } else {
-            field.opacity(0.6)
-        };
         if props.label_hidden {
             return field.into_any_element();
         }
@@ -1825,13 +1762,8 @@ pub fn text_input(c: &Ctx, id: &str, props: InputProps, field: Field, submit: Op
             ..Actions::default()
         },
     });
-    let state = if enabled { "rest" } else { "disabled" };
-    let colors = [
-        c.slot("field", state, "background"),
-        c.slot("field", state, "foreground"),
-        c.slot("field", state, "border"),
-    ];
     let element = TextField {
+        c: c.clone(),
         key: c.key(id).into(),
         props,
         value,
@@ -1841,7 +1773,6 @@ pub fn text_input(c: &Ctx, id: &str, props: InputProps, field: Field, submit: Op
             change: enabled.then_some(change),
             submit: if enabled { submit } else { None },
         },
-        colors,
     };
     c.grow()
         .apply(div().flex().flex_col().child(element))
@@ -1883,13 +1814,8 @@ pub fn text_input_controlled(c: &Ctx, id: &str, props: InputProps, model: Model)
             ..Actions::default()
         },
     });
-    let state = if enabled { "rest" } else { "disabled" };
-    let colors = [
-        c.slot("field", state, "background"),
-        c.slot("field", state, "foreground"),
-        c.slot("field", state, "border"),
-    ];
     let element = TextField {
+        c: c.clone(),
         key: c.key(id).into(),
         props,
         value,
@@ -1899,7 +1825,6 @@ pub fn text_input_controlled(c: &Ctx, id: &str, props: InputProps, model: Model)
             change: enabled.then_some(change),
             submit: None,
         },
-        colors,
     };
     c.grow()
         .apply(div().flex_col().flex().child(element))
@@ -1949,14 +1874,20 @@ pub fn drop_area(
             ..Actions::default()
         },
     });
+    let ir = ir_drop_area(DropAreaSpec { active: false });
     let hover = c.color("hover.overlay");
     let ctx = c.clone();
     let moved = c.clone();
-    let element = div()
+    let element = as_box(&ir)
+        .map(|b| {
+            crate::surface::apply_visual(
+                c,
+                crate::surface::apply_layout(div(), &b.layout),
+                &b.style,
+            )
+        })
+        .unwrap_or_else(div)
         .id(c.element_id(id))
-        .flex()
-        .flex_col()
-        .rounded(px(8.0))
         .drag_over::<ExternalPaths>(move |style, _, _, _| style.bg(hover))
         // `over` follows a file held above the content.
         .when_some(over, |element, over| {

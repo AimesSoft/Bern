@@ -15,7 +15,7 @@ use crate::units::px;
 use crate::{El, icons};
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    FontWeight, InteractiveElement, IntoElement, KeyDownEvent, MouseButton, ParentElement,
+    InteractiveElement, IntoElement, KeyDownEvent, MouseButton, ParentElement,
     StatefulInteractiveElement, Styled, div,
 };
 use std::cell::RefCell;
@@ -118,41 +118,31 @@ pub fn table(
         },
     });
 
-    let border = c.color("separator");
-    let header_bg = c.color("surface.panel");
-    let hover_bg = c.slot("row", "hover", "background");
-    let sel_bg = c.color("selection.background").opacity(0.18);
-    let text_primary = c.color("text.primary");
     let text_secondary = c.color("text.secondary");
+    let table_ir = bern_surface::controls::table(bern_surface::controls::TableSpec);
+    let table_box = crate::surface::as_box(&table_ir);
+    let header_box = table_box
+        .and_then(|b| b.children.first())
+        .and_then(crate::surface::as_box);
 
     // Header row.
-    let mut header = div()
-        .flex()
-        .flex_row()
-        .items_center()
-        .w_full()
-        .min_h(px(32.0))
-        .bg(header_bg)
-        .border_b_1()
-        .border_color(border);
+    let mut header = header_box
+        .map(|b| crate::surface::apply_box(c, div(), b))
+        .unwrap_or_else(div);
 
     for (col_idx, col) in columns.iter().enumerate() {
-        let col_cell = div()
+        let col_ir =
+            bern_surface::controls::table_column_header(bern_surface::controls::TableColumnSpec {
+                title: col.title.clone(),
+                width: col.width,
+                sorted: col.sorted,
+                descending: col.descending,
+                sortable: enabled && col.sort.is_some(),
+            });
+        let col_cell = crate::surface::as_box(&col_ir)
+            .map(|b| crate::surface::apply_box(c, div(), b))
+            .unwrap_or_else(div)
             .id(c.element_id(&format!("{id}.col.{col_idx}")))
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(4.0))
-            .px(px(10.0))
-            .h(px(32.0))
-            .text_size(px(12.0))
-            .font_weight(FontWeight::SEMIBOLD)
-            .text_color(text_secondary)
-            .overflow_hidden()
-            .map(|el| match col.width {
-                Some(w) => el.w(px(w)).flex_none(),
-                None => el.flex_1().min_w(px(60.0)),
-            })
             .child(div().truncate().child(col.title.clone()))
             .when(col.sorted, |el| {
                 let arrow = if col.descending {
@@ -165,13 +155,10 @@ pub fn table(
         let col_cell = if enabled && let Some(sort) = &col.sort {
             let sort = Rc::clone(sort);
             let ctx = c.clone();
-            col_cell
-                .cursor_pointer()
-                .hover(move |s| s.bg(hover_bg))
-                .on_click(move |_, _, cx| {
-                    cx.stop_propagation();
-                    sort(&ctx);
-                })
+            col_cell.on_click(move |_, _, cx| {
+                cx.stop_propagation();
+                sort(&ctx);
+            })
         } else {
             col_cell
         };
@@ -189,21 +176,14 @@ pub fn table(
         let row_ctx = c
             .with_key(row.key_text.clone())
             .with_local(var_name, row.item.clone());
-
-        let mut row_el = div()
-            .id(c.element_id(&format!("{id}.row.{}", row.key_text)))
-            .flex()
-            .flex_row()
-            .items_center()
-            .w_full()
-            .min_h(px(34.0))
-            .border_b_1()
-            .border_color(border.opacity(0.5))
-            .text_color(text_primary)
-            .when(is_selected, |el| el.bg(sel_bg))
-            .when(!is_selected && enabled, |el| {
-                el.hover(move |s| s.bg(hover_bg))
-            });
+        let row_ir = bern_surface::controls::table_row(bern_surface::controls::TableRowSpec {
+            selected: is_selected,
+            enabled,
+        });
+        let mut row_el = crate::surface::as_box(&row_ir)
+            .map(|b| crate::surface::apply_box(c, div(), b))
+            .unwrap_or_else(div)
+            .id(c.element_id(&format!("{id}.row.{}", row.key_text)));
 
         for col in &columns {
             let cell_el = (col.cell)(&row_ctx);
@@ -302,16 +282,11 @@ pub fn table(
 
     let primary_enter = primary.clone();
     let c_enter = c.clone();
-    let container = div()
+    let container = table_box
+        .map(|b| crate::surface::apply_box(c, div(), b))
+        .unwrap_or_else(div)
         .id(c.element_id(id))
         .relative()
-        .flex()
-        .flex_col()
-        .w_full()
-        .rounded(px(8.0))
-        .border_1()
-        .border_color(border)
-        .overflow_hidden()
         .on_key_down(move |event: &KeyDownEvent, _, _| {
             if enabled
                 && event.keystroke.key == "enter"

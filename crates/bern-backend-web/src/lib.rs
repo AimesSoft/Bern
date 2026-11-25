@@ -556,7 +556,13 @@ impl Target for WebBrowser {
                     }
                 ),
             ),
-            GeneratedFile::text("bern.css", format!("{STYLES}\n{FEATURE_STYLES}")),
+            GeneratedFile::text(
+                "bern.css",
+                format!(
+                    "{STYLES}\n{FEATURE_STYLES}\n{}",
+                    bern_surface::web::stylesheet()
+                ),
+            ),
             GeneratedFile::text("theme.css", theme::stylesheet(app)),
             GeneratedFile::text("THIRD_PARTY_NOTICES.txt", icons::NOTICES),
             GeneratedFile::text(
@@ -1044,7 +1050,13 @@ impl Target for WebBrowser {
             GeneratedFile::text("index.html", index),
             GeneratedFile::text("runtime/bern.js", RUNTIME),
             GeneratedFile::text("runtime/features.js", features_js),
-            GeneratedFile::text("styles/bern.css", format!("{STYLES}\n{FEATURE_STYLES}")),
+            GeneratedFile::text(
+                "styles/bern.css",
+                format!(
+                    "{STYLES}\n{FEATURE_STYLES}\n{}",
+                    bern_surface::web::stylesheet()
+                ),
+            ),
             GeneratedFile::text("styles/theme.css", theme::stylesheet(app)),
             GeneratedFile::text("THIRD_PARTY_NOTICES.txt", icons::NOTICES),
         ];

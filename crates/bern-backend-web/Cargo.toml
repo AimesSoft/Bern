@@ -13,6 +13,7 @@ bern-protocol.workspace = true
 bern-target-api.workspace = true
 bern-media.workspace = true
 bern-theme.workspace = true
+bern-surface.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]

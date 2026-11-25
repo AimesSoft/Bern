@@ -38,8 +38,9 @@ UI controls, the generated app CLI, the local JSON/IPC control channel, WebUI se
 ## 4. Platform fidelity & native-first theming
 
 - **Native controls by default**: on system targets (SwiftUI, WinUI 3, GTK 4, Compose), generated code uses standard platform containers, controls, typography, IME, accessibility, and system light/dark colors. Self-drawn UI is reserved for backends without a system design language (Web, GPUI) or explicit `Canvas` / `style!` declarations.
+- **Shared self-drawn IR (`bern-surface`)**: Web and GPUI (as well as future canvas/GPU renderers) share a platform-independent box-model and paint IR (`bern-surface`) layered over `bern-theme` snapshots. Every self-drawn control lowers once into canonical layout, spacing, translucent surface tints, borders, shadows, typography, and interaction states, then renders onto real Web DOM/CSS (preserving native IME, scrolling, and ARIA) or GPUI's Taffy/GPU pipeline — while native OS targets stay exclusively on platform controls.
 - **Explicit target selection**: omitting `ui` selects the platform default. If the default backend is unavailable or missing a required capability, builds fail loudly rather than silently falling back to another UI stack.
-- **Zero-setup light and dark mode**: every control and theme token adapts to system appearance automatically. Native targets consume OS semantic colors; Web and GPUI consume snapshots derived by `bern-theme` with checked contrast ratios.
+- **Zero-setup light and dark mode**: every control and theme token adapts to system appearance automatically. Native targets consume OS semantic colors; Web and GPUI consume `bern-surface` palettes derived from `bern-theme` snapshots with checked contrast ratios.
 
 ## 5. Static guarantees & diagnostics
 

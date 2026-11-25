@@ -2820,22 +2820,22 @@ test("a slider holds where a mouse hovers along its track and clears it when it 
   const scope = new B.Scope();
   B.within(scope, () => B.Slider(host, {}, { id: "seek", label: () => "Seek", field, hover, min: 0, max: 10, labelHidden: true }));
   const input = host.children[0].children[0];
-  // A 16 pixel thumb's center travels 200 of the track's 216 pixels.
-  input.rect = { left: 100, top: 0, width: 216, height: 20 };
+  // A 7 pixel vertical pill thumb's center travels 200 of the track's 207 pixels.
+  input.rect = { left: 100, top: 0, width: 207, height: 20 };
   const move = (clientX, pointerType = "mouse") => input.dispatch("pointermove", { clientX, pointerType });
-  input.dispatch("pointerenter", { clientX: 108, pointerType: "mouse" });
-  move(208);
-  move(208);
+  input.dispatch("pointerenter", { clientX: 103.5, pointerType: "mouse" });
+  move(203.5);
+  move(203.5);
   move(400, "pen");
   move(50);
   assert.deepEqual(writes, [0, 0.5, 1, 0], "the same place is written once");
-  move(158, "touch");
+  move(153.5, "touch");
   assert.deepEqual(writes, [0, 0.5, 1, 0], "a touch does not hover");
   input.dispatch("pointerleave", { pointerType: "mouse" });
   input.dispatch("pointerleave", { pointerType: "mouse" });
   assert.deepEqual(writes, [0, 0.5, 1, 0, null]);
   input.style.direction = "rtl";
-  move(158);
+  move(153.5);
   assert.equal(shown.peek(), 0.75, "a right-to-left track starts at its right");
   assert.deepEqual(values, [], "hovering never sets the value");
   assert.equal(Number(input.value), 5);
@@ -3396,10 +3396,10 @@ test("player controls: hold shortcuts, placement, tooltip keys, switch knob, bol
   assert.equal(sliderTrack.classes.has("bern-slider-track-vertical"), true);
   const input = sliderTrack.children[1];
   assert.equal(input.classes.has("bern-slider-vertical"), true);
-  input.getBoundingClientRect = () => ({ left: 0, top: 100, width: 28, height: 116 });
-  input.dispatch("pointermove", { pointerType: "mouse", clientX: 14, clientY: 108 });
+  input.getBoundingClientRect = () => ({ left: 0, top: 100, width: 28, height: 107 });
+  input.dispatch("pointermove", { pointerType: "mouse", clientX: 14, clientY: 103.5 });
   assert.equal(hover.peek(), 1);
-  input.dispatch("pointermove", { pointerType: "mouse", clientX: 14, clientY: 208 });
+  input.dispatch("pointermove", { pointerType: "mouse", clientX: 14, clientY: 203.5 });
   assert.equal(hover.peek(), 0);
   input.dispatch("pointerleave", { pointerType: "mouse" });
   assert.equal(hover.peek(), null);

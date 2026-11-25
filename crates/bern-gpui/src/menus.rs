@@ -300,7 +300,6 @@ pub(crate) fn entry_list(
     entries: Vec<MenuEntry>,
     hide_disabled: bool,
 ) -> gpui::Div {
-    let hover = c.slot("menu", "hover", "background");
     let check_color = c.slot("menu", "selected", "check");
     let error = c.color("status.error");
     let disabled = c.color("disabled.foreground");
@@ -333,6 +332,16 @@ pub(crate) fn entry_list(
                         enabled,
                         press,
                     } => {
+                        let ir = bern_surface::controls::menu_item(
+                            bern_surface::controls::MenuItemSpec {
+                                label: label.clone(),
+                                icon,
+                                checked,
+                                reserve_check_column: any_checked,
+                                destructive,
+                                enabled,
+                            },
+                        );
                         let color = match (enabled, destructive) {
                             (false, _) => disabled,
                             (true, true) => error,
@@ -340,17 +349,10 @@ pub(crate) fn entry_list(
                         };
                         let mark_color = if enabled { check_color } else { disabled };
                         let close = target.to_string();
-                        div()
+                        crate::surface::as_box(&ir)
+                            .map(|b| crate::surface::apply_box(c, div(), b))
+                            .unwrap_or_else(div)
                             .id(c.element_id(id))
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .gap(px(8.0))
-                            .h(px(32.0))
-                            .px(px(10.0))
-                            .rounded(px(6.0))
-                            .text_size(px(14.0))
-                            .text_color(color)
                             .when(any_checked, |row| {
                                 row.child(
                                     div().size(px(14.0)).flex_none().when(
@@ -364,12 +366,11 @@ pub(crate) fn entry_list(
                             .children(icon.map(|icon| icons::icon(icon, 16.0, color)))
                             .child(label)
                             .when(enabled, |row| {
-                                row.hover(move |style| style.bg(hover))
-                                    .on_click(move |_, _, cx| {
-                                        cx.stop_propagation();
-                                        crate::overlay::set_open(&close, false);
-                                        press(cx);
-                                    })
+                                row.on_click(move |_, _, cx| {
+                                    cx.stop_propagation();
+                                    crate::overlay::set_open(&close, false);
+                                    press(cx);
+                                })
                             })
                             .into_any_element()
                     }
@@ -379,20 +380,9 @@ pub(crate) fn entry_list(
 
 /// `ControlGroup`: related controls side by side on one capsule surface.
 pub fn control_group(c: &Ctx, height: Option<f32>, children: Vec<El>) -> El {
-    let element = div()
-        .flex()
-        .flex_row()
-        .flex_none()
-        .items_center()
-        .gap(px(2.0))
-        .p(px(2.0))
-        .rounded_full()
-        .border_1()
-        .border_color(c.slot("segmented", "rest", "border"))
-        .bg(c.slot("segmented", "rest", "track"))
-        .children(children);
-    match height {
-        Some(height) => element.h(px(height)).into_any_element(),
-        None => element.into_any_element(),
-    }
+    let ir =
+        bern_surface::controls::control_group(bern_surface::controls::ControlGroupSpec { height });
+    crate::surface::GpuiRenderer::new(c)
+        .slot("content", children)
+        .render(&ir)
 }
