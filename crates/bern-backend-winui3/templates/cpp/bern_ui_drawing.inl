@@ -711,7 +711,8 @@ private:
         size_t used = 0;
         std::function<void(xaml::DependencyObject const&)> visit = [&](xaml::DependencyObject const& node) {
             auto element = node.try_as<xaml::FrameworkElement>();
-            if (!element || element.Visibility() != xaml::Visibility::Visible || element.Opacity() <= 0) return;
+            bool maskOnly = element && RoleOf(element) == L"bern-shadow-mask";
+            if (!element || element.Visibility() != xaml::Visibility::Visible || (!maskOnly && element.Opacity() <= 0)) return;
             auto block = element.try_as<controls::TextBlock>();
             auto image = block ? nullptr : element.try_as<controls::Image>();
             auto shape = block || image ? nullptr : element.try_as<xaml::Shapes::Shape>();
