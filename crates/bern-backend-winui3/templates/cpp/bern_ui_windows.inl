@@ -164,6 +164,8 @@ inline void Win::Report() {
         fullscreen.Set(full);
     }
 #endif
+    bool zoomed = IsZoomed(hwnd) != 0;
+    if (maximized.Peek() != zoomed) maximized.Set(zoomed);
     auto facts = CurrentFacts();
     bern_window_facts(Host::handle, static_cast<uint32_t>(kind), generation, command ? 0 : 1, facts.visibility, facts.size, facts.x, facts.y,
         facts.width, facts.height, facts.focused ? 1 : 0, facts.actions);

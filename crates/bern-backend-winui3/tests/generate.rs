@@ -3019,3 +3019,133 @@ fn title_bar_rows_and_overlay_headers_align_with_caption_buttons() {
         assert!(src.contains(part), "missing `{part}`");
     }
 }
+
+#[test]
+fn shadowed_trailing_window_buttons_keep_title_bar_row_and_shadow_masks() {
+    let protocol = r#"
+#[bern::protocol(namespace = "caption_shadow", version = 1)]
+pub mod caption_shadow {
+    use bern::prelude::*;
+
+    #[state]
+    pub struct State {
+        pub title: String,
+    }
+
+    #[commands]
+    pub trait Commands {}
+}
+"#;
+    let ui = r#"
+use bern::prelude::*;
+use caption_shadow_protocol::caption_shadow;
+
+style! {
+    Stack.ambient { shadow: shadow(10, y: 2, opacity: 0.45) }
+    Stack.key { shadow: shadow(3.5, y: 0.8, opacity: 0.9) }
+}
+
+#[component]
+pub fn main_view(app: caption_shadow::Client) -> impl View {
+    ui! {
+        Row(align: top) {
+            Spacer
+            Stack(variant: ambient) {
+                Stack(variant: key) {
+                    WindowButtons(edge: trailing)
+                }
+            }
+        }
+    }
+}
+
+#[component]
+pub fn app(app: caption_shadow::Client, windows: AppWindows) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Main" }, initial: open) {
+                main_view(app: app)
+            }
+        }
+    }
+}
+"#;
+    let root = workspace();
+    let dir = root.join("target/bern-test/winui3-window-buttons-shadow-src");
+    let output = root.join("target/bern-test/winui3-window-buttons-shadow");
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&output);
+    for (package, source) in [
+        ("caption-shadow-protocol", protocol),
+        ("caption-shadow-ui", ui),
+        ("caption-shadow-core", ""),
+    ] {
+        std::fs::create_dir_all(dir.join(package).join("src")).unwrap();
+        std::fs::write(
+            dir.join(package).join("Cargo.toml"),
+            format!("[package]\nname = \"{package}\"\n"),
+        )
+        .unwrap();
+        std::fs::write(dir.join(package).join("src/lib.rs"), source).unwrap();
+    }
+    std::fs::write(
+        dir.join("Bern.toml"),
+        "[app]\nid = \"caption_shadow\"\nbundle_id = \"dev.bern.captionshadow\"\nversion = \"0.1.0\"\nname = { \"en\" = \"CaptionShadow\" }\n[languages]\nsupported = [\"en\"]\ndefault = \"en\"\n[protocol]\npackage = \"caption-shadow-protocol\"\nsource = \"caption-shadow-protocol/src/lib.rs\"\n[engine]\npackage = \"caption-shadow-core\"\ntype = \"caption_shadow_core::Engine\"\n[ui]\npackage = \"caption-shadow-ui\"\nsources = [\"caption-shadow-ui/src/lib.rs\"]\nroot = \"app\"\n[targets.windows]\nplatform = \"windows\"\n",
+    )
+    .unwrap();
+    let config = bern_compiler::config::load(&dir.join("Bern.toml")).unwrap();
+    let compiled = bern_compiler::compile(&config).unwrap();
+    let target = windows_target(&config);
+    let problems = WinUi3Windows.check(&compiled.app, &target);
+    assert!(problems.is_empty(), "{problems:?}");
+    let context = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: output.clone(),
+        target,
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    let files = WinUi3Windows.generate(&compiled.app, &context).unwrap();
+    for file in &files {
+        let path = output.join(&file.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, &file.contents).unwrap();
+    }
+    let generated = std::fs::read_to_string(output.join("app/app_ui.inl")).unwrap();
+    assert!(
+        generated.contains(".titleBar = true"),
+        "expected Row wrapping shadowed WindowButtons to set titleBar = true:\n{generated}"
+    );
+    assert!(
+        generated.contains("B::WindowButtons(p, c);"),
+        "expected B::WindowButtons call:\n{generated}"
+    );
+    let widgets = include_str!("../templates/cpp/bern_ui_widgets.inl");
+    let drawing = include_str!("../templates/cpp/bern_ui_drawing.inl");
+    let windows = include_str!("../templates/cpp/bern_ui_windows.inl");
+    for (src, part) in [
+        (widgets, "SetRole(glyphs, L\"bern-shadow-mask\")"),
+        (widgets, "L\"\\uE921\""),
+        (widgets, "L\"\\uE922\""),
+        (widgets, "L\"\\uE923\""),
+        (widgets, "L\"\\uE8BB\""),
+        (widgets, "win->maximized.Get()"),
+        (drawing, "RoleOf(element) == L\"bern-shadow-mask\""),
+        (
+            windows,
+            "if (maximized.Peek() != zoomed) maximized.Set(zoomed);",
+        ),
+    ] {
+        assert!(src.contains(part), "missing `{part}`");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&output);
+}

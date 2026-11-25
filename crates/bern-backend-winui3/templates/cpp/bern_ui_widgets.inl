@@ -6038,21 +6038,65 @@ inline void ContextMenuOn(Ctx const& ctx, xaml::UIElement const& element, std::v
 }
 
 /// Trailing caption-button room in a top bar that sits under the title bar.
+/// Carries invisible glyph masks aligned to the native caption buttons so an
+/// enclosing shadowed `Stack` casts matching shadows underneath them while
+/// leaving the system buttons untouched.
 inline void WindowButtons(Parent const& p, Ctx const& ctx) {
-    controls::Border room;
-    room.Height(1);
+    controls::Grid room;
     room.IsHitTestVisible(false);
+    xaml::Automation::AutomationProperties::SetAccessibilityView(room, xaml::Automation::Peers::AccessibilityView::Raw);
     if (Win* win = ctx.win) {
-        Reactive::Run([room, win] {
+        controls::Grid glyphs;
+        glyphs.IsHitTestVisible(false);
+        // Sub-LSB opacity keeps XAML text surface realization active for
+        // `GetAlphaMask()` while quantizing to zero visible foreground pixels.
+        glyphs.Opacity(0.0001);
+        SetRole(glyphs, L"bern-shadow-mask");
+        media::FontFamily font(bern::OnWindows11() ? L"Segoe Fluent Icons" : L"Segoe MDL2 Assets");
+        auto white = media::SolidColorBrush(winrt::Windows::UI::Color{255, 255, 255, 255});
+        auto makeGlyph = [&](wchar_t const* text, int col) {
+            glyphs.ColumnDefinitions().Append(Column(Star()));
+            controls::TextBlock glyph;
+            glyph.Text(text);
+            glyph.FontFamily(font);
+            glyph.FontSize(10.0);
+            glyph.Foreground(white);
+            glyph.HorizontalAlignment(xaml::HorizontalAlignment::Center);
+            glyph.VerticalAlignment(xaml::VerticalAlignment::Center);
+            glyph.IsHitTestVisible(false);
+            xaml::Automation::AutomationProperties::SetAccessibilityView(glyph, xaml::Automation::Peers::AccessibilityView::Raw);
+            controls::Grid::SetColumn(glyph, col);
+            glyphs.Children().Append(glyph);
+            return glyph;
+        };
+        auto minGlyph = makeGlyph(L"\uE921", 0);
+        auto zoomGlyph = makeGlyph(L"\uE922", 1);
+        makeGlyph(L"\uE8BB", 2);
+        room.Children().Append(glyphs);
+        Reactive::Run([room, glyphs, minGlyph, zoomGlyph, win] {
             bool shown = !win->fullscreen.Get() && !win->owner;
             double inset = shown ? win->rightInset.Get() : 0.0;
 #if !BERN_WINUI
             if (shown && inset <= 0) inset = 138.0;
 #endif
+            double h = shown ? CaptionHeight(win) : 0.0;
             room.Width((std::max)(0.0, inset));
+            room.Height((std::max)(0.0, h));
             room.Visibility(inset > 0 ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
+            zoomGlyph.Text(win->maximized.Get() ? L"\uE923" : L"\uE922");
+            if (win->hwnd) {
+                LONG_PTR style = GetWindowLongPtrW(win->hwnd, GWL_STYLE);
+                bool hasMin = (style & WS_MINIMIZEBOX) != 0;
+                bool hasMax = (style & WS_MAXIMIZEBOX) != 0;
+                auto cols = glyphs.ColumnDefinitions();
+                cols.GetAt(0).Width(hasMin ? Star() : xaml::GridLength{0, xaml::GridUnitType::Pixel});
+                cols.GetAt(1).Width(hasMax ? Star() : xaml::GridLength{0, xaml::GridUnitType::Pixel});
+                minGlyph.Visibility(hasMin ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
+                zoomGlyph.Visibility(hasMax ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
+            }
         });
     } else {
+        room.Height(1);
         room.Visibility(xaml::Visibility::Collapsed);
     }
     p.Add(room);

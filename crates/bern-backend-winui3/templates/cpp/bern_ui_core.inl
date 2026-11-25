@@ -1689,6 +1689,9 @@ struct Win {
     Cell<double> rightInset{0.0};
     /// Native caption-button strip height in DIPs (32 Standard, 48 Tall).
     Cell<double> captionHeight{kTitleBarButtonHeight};
+    /// Whether the window is currently maximized (switches caption shadow mask
+    /// between Maximize and Restore).
+    Cell<bool> maximized{false};
 #if BERN_WINUI
     std::vector<winrt::Windows::Graphics::RectInt32> passthroughRects;
     bool passthroughQueued = false;

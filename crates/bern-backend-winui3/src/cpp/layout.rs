@@ -6,12 +6,14 @@ use bern_ir::{Element, Prop};
 
 impl Generator<'_> {
     /// Whether `node` carries a trailing `WindowButtons` directly in this row
-    /// (or within conditional branches of the row), marking it as a Windows
-    /// title-bar row aligned with the system caption buttons.
+    /// (or within conditional branches or `Stack` wrappers), marking it as a
+    /// Windows title-bar row aligned with the system caption buttons.
     fn has_trailing_window_buttons(node: &bern_ir::Node) -> bool {
         match node {
             bern_ir::Node::Element(el) => {
-                el.kind == "WindowButtons" && el.keyword("edge") == Some("trailing")
+                (el.kind == "WindowButtons" && el.keyword("edge") == Some("trailing"))
+                    || (el.kind == "Stack"
+                        && el.children.iter().any(Self::has_trailing_window_buttons))
             }
             bern_ir::Node::If(branch) => {
                 branch
