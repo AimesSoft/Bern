@@ -261,6 +261,8 @@ struct Inner {
     enabled: bool,
     /// The form the content is in, whose row metrics its sections take.
     form: crate::form::FormProps,
+    /// Inside a grouped `Section`, which already supplies row insets.
+    section_row: bool,
     /// The path of the navigation the content is in, which its links push
     /// onto.
     nav: Option<Field>,
@@ -373,6 +375,7 @@ impl Ctx {
             keys: Vec::new(),
             enabled: true,
             form: crate::form::FormProps::default(),
+            section_row: false,
             nav: None,
             sidebar: None,
             toolbar: false,
@@ -617,9 +620,21 @@ impl Ctx {
         self.0.form
     }
 
+    /// Whether rows built in this context already receive grouped `Section` insets.
+    pub fn in_section(&self, inside: bool) -> Self {
+        self.with(|inner| inner.section_row = inside)
+    }
+
+    pub(crate) fn in_section_row(&self) -> bool {
+        self.0.section_row
+    }
+
     /// The context inside a `Navigation` whose path is `path`.
     pub fn in_navigation(&self, path: Field) -> Self {
-        self.with(|inner| inner.nav = Some(path))
+        self.with(|inner| {
+            inner.nav = Some(path);
+            inner.section_row = false;
+        })
     }
 
     pub(crate) fn nav(&self) -> Option<Field> {
@@ -697,6 +712,7 @@ impl Ctx {
         let covered = cover_compact && crate::value::truthy(&self.window("compact"));
         self.with(|inner| {
             inner.modal = true;
+            inner.section_row = false;
             inner.inner = if covered {
                 [0.0; 4]
             } else {

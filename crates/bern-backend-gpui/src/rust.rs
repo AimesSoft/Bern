@@ -4391,15 +4391,18 @@ pub fn app() -> b::AppDef {{
                     column(&element.children)
                 )
             }
-            "Section" => format!(
-                "b::section(c, {}, {}, b::SectionProps {{ plain: {}, padding_x: {}, padding_y: {} }}, {})",
-                optional_text("title"),
-                optional_text("footer"),
-                element.keyword("style") == Some("plain"),
-                self.optional_length(element, "padding_x"),
-                self.optional_length(element, "padding_y"),
-                column(&element.children)
-            ),
+            "Section" => {
+                let plain = element.keyword("style") == Some("plain");
+                format!(
+                    "b::section(c, {}, {}, b::SectionProps {{ plain: {plain}, padding_x: {}, padding_y: {} }}, {{ let c = &c.in_section({}); {} }})",
+                    optional_text("title"),
+                    optional_text("footer"),
+                    self.optional_length(element, "padding_x"),
+                    self.optional_length(element, "padding_y"),
+                    !plain,
+                    column(&element.children)
+                )
+            }
             "Tabs" => self.tabs(element, "c")?,
             "Menu" => format!(
                 "b::menu(c, {}, {}, b::MenuProps {{ icon: {}, icon_only: {}, shape: {}, height: {}, hide_disabled: {}, bold: {}, placement: {} }}, {})",
