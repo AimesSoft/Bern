@@ -438,6 +438,44 @@ inline bool Handle(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam, LRESUL
     return false;
 }
 
+/// Active topmost native HWND for `overlay`, or null when absent, hidden, or
+/// not in the topmost band.
+inline HWND OverlayHwnd(std::string const& overlay) {
+    if (overlay.empty()) return nullptr;
+    auto raw = bern_overlay_window(reinterpret_cast<uint8_t const*>(overlay.data()), overlay.size());
+    if (!raw) return nullptr;
+    HWND hwnd = reinterpret_cast<HWND>(raw);
+    if (!IsWindow(hwnd) || !IsWindowVisible(hwnd)) return nullptr;
+    if ((GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) == 0) return nullptr;
+    return hwnd;
+}
+
+/// Keep a topmost utility window anchored to an overlay immediately below that
+/// overlay in Win32's single topmost band (mirroring macOS where the overlay
+/// uses `NSStatusWindowLevel` above `.floating` utility windows).
+inline void ClampBelowOverlay(Win const& win, WINDOWPOS* pos) {
+    if (!pos || (pos->flags & SWP_NOZORDER) != 0) return;
+    auto const& def = win.Def();
+    if (!def.utility || def.overlay.empty()) return;
+    HWND overlayHwnd = OverlayHwnd(def.overlay);
+    if (!overlayHwnd || overlayHwnd == win.hwnd) return;
+    if ((GetWindowLongPtrW(win.hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) == 0) return;
+    if (pos->hwndInsertAfter == HWND_TOP || pos->hwndInsertAfter == HWND_TOPMOST || pos->hwndInsertAfter == nullptr) {
+        pos->hwndInsertAfter = overlayHwnd;
+    }
+}
+
+/// Place an already-topmost utility window directly below its anchored overlay
+/// without stealing focus.
+inline void KeepBelowOverlay(Win const& win) {
+    auto const& def = win.Def();
+    if (!def.utility || def.overlay.empty() || !win.hwnd) return;
+    HWND overlayHwnd = OverlayHwnd(def.overlay);
+    if (!overlayHwnd || overlayHwnd == win.hwnd) return;
+    if ((GetWindowLongPtrW(win.hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) == 0) return;
+    SetWindowPos(win.hwnd, overlayHwnd, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
 #if BERN_WINUI
 /// The procedures of WinUI windows before Bern subclassed them.
 inline std::unordered_map<HWND, WNDPROC> originals;
@@ -462,9 +500,10 @@ inline LRESULT CALLBACK Subclass(HWND hwnd, UINT message, WPARAM wparam, LPARAM 
     }
     if (message == WM_NCDESTROY) originals.erase(hwnd);
     if (message == WM_WINDOWPOSCHANGING && lparam) {
-        if (auto win = OfHwnd(hwnd); win && win->fullscreenTransition != Win::FullscreenTransition::None) {
+        if (auto win = OfHwnd(hwnd)) {
             auto* pos = reinterpret_cast<WINDOWPOS*>(lparam);
-            if ((pos->flags & SWP_NOSIZE) == 0) {
+            ClampBelowOverlay(*win, pos);
+            if (win->fullscreenTransition != Win::FullscreenTransition::None && (pos->flags & SWP_NOSIZE) == 0) {
                 if (win->fullscreenTransition == Win::FullscreenTransition::EnteringFromMaximized) {
                     int monW = win->fullscreenMonitorRect.right - win->fullscreenMonitorRect.left;
                     int monH = win->fullscreenMonitorRect.bottom - win->fullscreenMonitorRect.top;
@@ -613,6 +652,9 @@ inline LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wparam, LPARA
     auto win = OfHwnd(hwnd);
     if (win) {
         switch (message) {
+        case WM_WINDOWPOSCHANGING:
+            if (lparam) ClampBelowOverlay(*win, reinterpret_cast<WINDOWPOS*>(lparam));
+            break;
         case WM_SIZE:
             if (win->island) SetWindowPos(win->island, nullptr, 0, 0, LOWORD(lparam), HIWORD(lparam), SWP_SHOWWINDOW | SWP_NOZORDER | SWP_NOACTIVATE);
             PlaceDragBar(*win);
@@ -1944,6 +1986,7 @@ inline void RestoreTitleBar(Win& win) {
                 if (def.utility) {
                     presenter.IsAlwaysOnTop(true);
                     presenter.IsResizable(def.minWidth.has_value() || def.minHeight.has_value());
+                    KeepBelowOverlay(win);
                 }
             }
         } catch (winrt::hresult_error const&) {
@@ -2298,14 +2341,52 @@ inline bool PlaceBesideOverlay(Win& win) {
     GetMonitorInfoW(MonitorFromRect(&owner, MONITOR_DEFAULTTONEAREST), &monitor);
     RECT work = monitor.rcWork;
     LONG gap = static_cast<LONG>(std::lround(8.0 * win.Scale()));
-    LONG x = owner.right + gap;
-    if (x + width > work.right && owner.left - gap - width >= work.left) {
+    LONG maxX = (std::max)(work.left, work.right - width);
+    LONG maxY = (std::max)(work.top, work.bottom - height);
+    auto clampX = [&](LONG v) { return (std::clamp)(v, work.left, maxX); };
+    auto clampY = [&](LONG v) { return (std::clamp)(v, work.top, maxY); };
+    LONG centerX = clampX((owner.left + owner.right - width) / 2);
+    LONG centerY = clampY((owner.top + owner.bottom - height) / 2);
+    LONG x = 0, y = 0;
+    if (owner.right + gap + width <= work.right) {
+        x = owner.right + gap;
+        y = centerY;
+    } else if (owner.left - gap - width >= work.left) {
         x = owner.left - gap - width;
+        y = centerY;
+    } else if (owner.top - gap - height >= work.top) {
+        x = centerX;
+        y = owner.top - gap - height;
+    } else if (owner.bottom + gap + height <= work.bottom) {
+        x = centerX;
+        y = owner.bottom + gap;
+    } else {
+        std::pair<LONG, LONG> const candidates[4] = {
+            {clampX(owner.right + gap), centerY},
+            {clampX(owner.left - gap - width), centerY},
+            {centerX, clampY(owner.top - gap - height)},
+            {centerX, clampY(owner.bottom + gap)},
+        };
+        auto overlap = [&](LONG cx, LONG cy) -> long long {
+            LONG ix = (std::min)(cx + width, owner.right) - (std::max)(cx, owner.left);
+            LONG iy = (std::min)(cy + height, owner.bottom) - (std::max)(cy, owner.top);
+            return (ix > 0 && iy > 0) ? static_cast<long long>(ix) * static_cast<long long>(iy) : 0LL;
+        };
+        long long best = overlap(candidates[0].first, candidates[0].second);
+        x = candidates[0].first;
+        y = candidates[0].second;
+        for (int i = 1; i < 4; ++i) {
+            long long score = overlap(candidates[i].first, candidates[i].second);
+            if (score < best) {
+                best = score;
+                x = candidates[i].first;
+                y = candidates[i].second;
+            }
+        }
     }
-    x = (std::clamp)(x, work.left, (std::max)(work.left, work.right - width));
-    LONG y = (owner.top + owner.bottom - height) / 2;
-    y = (std::clamp)(y, work.top, (std::max)(work.top, work.bottom - height));
-    SetWindowPos(win.hwnd, HWND_TOPMOST, static_cast<int>(x), static_cast<int>(y), 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+    HWND insertAfter = OverlayHwnd(def.overlay);
+    if (!insertAfter || insertAfter == win.hwnd) insertAfter = HWND_TOPMOST;
+    SetWindowPos(win.hwnd, insertAfter, static_cast<int>(x), static_cast<int>(y), 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
     return true;
 }
 
@@ -2488,6 +2569,7 @@ inline std::string Open(std::string const& kindId) {
     UpdateWindow(win->hwnd);
     SetForegroundWindow(win->hwnd);
 #endif
+    KeepBelowOverlay(*win);
     win->ScheduleReport();
     Snapshot::Schedule();
     return win->id;
@@ -2505,6 +2587,7 @@ inline void Show(Win& win) {
     ShowWindow(win.hwnd, SW_SHOW);
 #endif
     SetForegroundWindow(win.hwnd);
+    KeepBelowOverlay(win);
 }
 
 /// End the application: its windows close without their close checks, as

@@ -3054,6 +3054,28 @@ inline void ColorPicker(Parent const& p, Ctx const& ctx, ColorPickerProps props)
     });
 
     controls::Flyout flyout;
+#if BERN_WINUI
+    // Render the color picker in an unconstrained native popup window so compact
+    // utility windows never clip its spectrum, sliders, or channel inputs.
+    flyout.ShouldConstrainToRootBounds(false);
+    auto applyFlyoutTheme = [flyout, ctx] {
+        bool dark = ctx.appearance.empty() ? (ctx.win && ctx.win->root && IsDark(ctx.win->root)) : ctx.appearance == "dark";
+        auto look = xaml::Markup::XamlReader::Load(LR"(<Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" TargetType="FlyoutPresenter" />)").as<xaml::Style>();
+        if (!ctx.appearance.empty()) {
+            if (auto themed = PresenterTheme(L"FlyoutPresenter", dark ? "dark" : "light")) look.BasedOn(themed);
+        } else if (auto base = Styles::Named(L"DefaultFlyoutPresenterStyle")) {
+            look.BasedOn(base);
+        }
+        look.Setters().Append(xaml::Setter(xaml::FrameworkElement::RequestedThemeProperty(), winrt::box_value(dark ? xaml::ElementTheme::Dark : xaml::ElementTheme::Light)));
+        flyout.FlyoutPresenterStyle(look);
+    };
+    applyFlyoutTheme();
+    if (ctx.win && ctx.win->root && ctx.appearance.empty()) {
+        auto root = ctx.win->root;
+        auto token = root.ActualThemeChanged([applyFlyoutTheme](auto&&, auto&&) { applyFlyoutTheme(); });
+        Reactive::OnCleanup([root, token] { root.ActualThemeChanged(token); });
+    }
+#endif
     flyout.Content(picker);
     flyout.Opening([picker, updating, peek, asRgb, toColor](auto&&, auto&&) {
         *updating = true;

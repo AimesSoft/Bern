@@ -100,6 +100,7 @@ void bern_buffer_free(BernBuffer buffer);
 void bern_platform_language(uint8_t const* tag, size_t len);
 void bern_platform_install(void* context, int32_t (*request)(void*, uint8_t const*, size_t, uint8_t const*, size_t, uint8_t const*, size_t));
 uint8_t bern_overlay_rect(uint8_t const* id, size_t len, double* x, double* y, double* w, double* h);
+intptr_t bern_overlay_window(uint8_t const* id, size_t len);
 /// The system opened the application with the file at `url` (UTF-8), of a
 /// kind `[[app.opens]]` declares.
 void bern_files_opened(uint8_t const* url, size_t len);

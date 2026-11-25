@@ -326,14 +326,37 @@ extension BernHost {
         let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let size = window.frame.size
         let gap: CGFloat = 8
-        var x = owner.maxX + gap
-        if x + size.width > visible.maxX && owner.minX - gap - size.width >= visible.minX {
-            x = owner.minX - gap - size.width
+        let maxX = max(visible.minX, visible.maxX - size.width)
+        let maxY = max(visible.minY, visible.maxY - size.height)
+        let clampX: (CGFloat) -> CGFloat = { min(max($0, visible.minX), maxX) }
+        let clampY: (CGFloat) -> CGFloat = { min(max($0, visible.minY), maxY) }
+        let centerX = clampX(owner.midX - size.width / 2)
+        let centerY = clampY(owner.midY - size.height / 2)
+        let origin: NSPoint
+        if owner.maxX + gap + size.width <= visible.maxX {
+            origin = NSPoint(x: owner.maxX + gap, y: centerY)
+        } else if owner.minX - gap - size.width >= visible.minX {
+            origin = NSPoint(x: owner.minX - gap - size.width, y: centerY)
+        } else if owner.maxY + gap + size.height <= visible.maxY {
+            origin = NSPoint(x: centerX, y: owner.maxY + gap)
+        } else if owner.minY - gap - size.height >= visible.minY {
+            origin = NSPoint(x: centerX, y: owner.minY - gap - size.height)
+        } else {
+            let candidates = [
+                NSPoint(x: clampX(owner.maxX + gap), y: centerY),
+                NSPoint(x: clampX(owner.minX - gap - size.width), y: centerY),
+                NSPoint(x: centerX, y: clampY(owner.maxY + gap)),
+                NSPoint(x: centerX, y: clampY(owner.minY - gap - size.height)),
+            ]
+            origin = candidates.min { a, b in
+                let areaA = NSRect(origin: a, size: size).intersection(owner)
+                let areaB = NSRect(origin: b, size: size).intersection(owner)
+                let scoreA = areaA.isNull ? 0 : areaA.width * areaA.height
+                let scoreB = areaB.isNull ? 0 : areaB.width * areaB.height
+                return scoreA < scoreB
+            } ?? NSPoint(x: clampX(owner.maxX + gap), y: centerY)
         }
-        x = min(max(x, visible.minX), max(visible.minX, visible.maxX - size.width))
-        var y = owner.midY - size.height / 2
-        y = min(max(y, visible.minY), max(visible.minY, visible.maxY - size.height))
-        window.setFrameOrigin(NSPoint(x: x, y: y))
+        window.setFrameOrigin(origin)
     }
 
     func syncOverlay(_ overlayID: String) {
