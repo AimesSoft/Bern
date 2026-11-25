@@ -1617,6 +1617,9 @@ inline BlurLayer Blur(xaml::UIElement const& element, double radius, double corn
     auto brush = compositor.CreateEffectFactory(winrt::make<GaussianBlurEffect>(float((std::max)(0.0, radius))), {L"Blur.Deviation"}).CreateBrush();
     brush.SetSourceParameter(L"backdrop", compositor.CreateBackdropBrush());
     auto sprite = compositor.CreateSpriteVisual();
+#if BERN_WINUI
+    sprite.IsHitTestVisible(false);
+#endif
     sprite.Brush(brush);
     sprite.IsVisible(radius > 0.01);
     auto shape = compositor.CreateRoundedRectangleGeometry();
@@ -1730,6 +1733,9 @@ inline void Glow(Win& win, xaml::UIElement const& element, double radius, double
     for (auto const& [offset, alpha] : stops)
         glow->brush.ColorStops().Append(compositor.CreateColorGradientStop(offset, winrt::Windows::UI::Color{uint8_t(std::lround(alpha * 255)), 255, 255, 255}));
     glow->sprite = compositor.CreateSpriteVisual();
+#if BERN_WINUI
+    glow->sprite.IsHitTestVisible(false);
+#endif
     glow->sprite.Brush(glow->brush);
     glow->sprite.Opacity(0);
     auto shape = compositor.CreateRoundedRectangleGeometry();

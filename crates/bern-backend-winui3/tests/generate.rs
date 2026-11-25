@@ -3364,3 +3364,100 @@ pub fn app(app: caption_shadow::Client, windows: AppWindows) -> impl View {
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&output);
 }
+
+#[test]
+fn idle_cursor_uses_native_cursor_shield_and_disables_decorative_sprite_hit_testing() {
+    let core = include_str!("../templates/cpp/bern_ui_core.inl");
+    let windows = include_str!("../templates/cpp/bern_ui_windows.inl");
+    let structure = include_str!("../templates/cpp/bern_ui_structure.inl");
+    let drawing = include_str!("../templates/cpp/bern_ui_drawing.inl");
+    let scene = include_str!("../templates/cpp/bern_ui_scene.inl");
+    let motion = include_str!("../templates/cpp/bern_ui_motion.inl");
+    for (src, part) in [
+        (core, "HWND cursorShield = nullptr;"),
+        (core, "POINT cursorShieldOrigin{};"),
+        (
+            windows,
+            "inline wchar_t const* const kCursorShieldClass = L\"BernCursorShield\";",
+        ),
+        (windows, "inline LRESULT CALLBACK CursorShieldProc("),
+        (windows, "SetCursor(nullptr);"),
+        (
+            windows,
+            "WS_EX_LAYERED | WS_EX_NOREDIRECTIONBITMAP | WS_EX_NOACTIVATE",
+        ),
+        (windows, "DestroyWindow(win->cursorShield);"),
+        (structure, "sprite.IsHitTestVisible(false);"),
+        (drawing, "cast.sprite.IsHitTestVisible(false);"),
+        (scene, "sprite.IsHitTestVisible(false);"),
+        (motion, "sprite.IsHitTestVisible(false);"),
+        (motion, "glow->sprite.IsHitTestVisible(false);"),
+    ] {
+        assert!(src.contains(part), "missing `{part}`");
+    }
+}
+
+#[test]
+fn idle_enabled_ignores_unchanged_reactive_recomputations() {
+    let windows = include_str!("../templates/cpp/bern_ui_windows.inl");
+    for part in [
+        "auto initialized = std::make_shared<bool>(false);",
+        "if (*initialized && *on == now) return 0;",
+        "*initialized = true;",
+    ] {
+        assert!(windows.contains(part), "missing `{part}`");
+    }
+}
+
+#[test]
+fn title_bar_passthrough_stays_within_top_covering_layer_and_clear_of_caption_buttons() {
+    let core = include_str!("../templates/cpp/bern_ui_core.inl");
+    let widgets = include_str!("../templates/cpp/bern_ui_widgets.inl");
+    let windows = include_str!("../templates/cpp/bern_ui_windows.inl");
+    for (src, part) in [
+        (core, "struct CoveringLayer"),
+        (core, "winrt::weak_ref<xaml::UIElement> root;"),
+        (
+            widgets,
+            "win->coverings.push_back(Win::CoveringLayer{token, ctx.appearance, winrt::make_weak(xaml::UIElement(layers))});",
+        ),
+        (
+            windows,
+            "inline xaml::UIElement TopCoveringRoot(Win const& win)",
+        ),
+        (
+            windows,
+            "if (auto control = node.try_as<controls::Control>(); control && !control.IsEnabled()) return;",
+        ),
+        (
+            windows,
+            "int32_t maxXPx = (std::max)(leftInsetPx, clientWidthPx - rightInsetPx);",
+        ),
+        (
+            windows,
+            "int32_t maxYPx = static_cast<int32_t>(std::ceil(barH * scale));",
+        ),
+        (windows, "if (auto top = TopCoveringRoot(win)) walk(top);"),
+    ] {
+        assert!(src.contains(part), "missing `{part}`");
+    }
+}
+
+#[test]
+fn maximized_fullscreen_toggle_suppresses_intermediate_normal_rect() {
+    let core = include_str!("../templates/cpp/bern_ui_core.inl");
+    let windows = include_str!("../templates/cpp/bern_ui_windows.inl");
+    for (src, part) in [
+        (
+            core,
+            "enum class FullscreenTransition { None, EnteringFromMaximized, LeavingToMaximized };",
+        ),
+        (windows, "if (message == WM_WINDOWPOSCHANGING && lparam)"),
+        (windows, "DWMWA_TRANSITIONS_FORCEDISABLED"),
+        (windows, "DwmFlush();"),
+        (windows, "wp.rcNormalPosition = win->fullscreenNormalRect;"),
+        (windows, "wp.showCmd = SW_SHOWMAXIMIZED;"),
+    ] {
+        assert!(src.contains(part), "missing `{part}`");
+    }
+}

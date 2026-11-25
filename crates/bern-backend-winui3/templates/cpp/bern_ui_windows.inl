@@ -410,13 +410,19 @@ inline bool Handle(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam, LRESUL
         if (win->movingOrSizing) {
             win->movingOrSizing = false;
             bern::CompositorClock::Release();
+#if BERN_WINUI
+            SyncIdleCursor(*win);
+#endif
         }
         win->presenterDirty = true;
         win->ScheduleReport();
         return false;
+    case WM_SIZE:
+#if BERN_WINUI
+        if (win->cursorShield && IsWindowVisible(win->cursorShield)) SyncIdleCursor(*win);
+#endif
     case WM_STYLECHANGED:
     case WM_DISPLAYCHANGE:
-    case WM_SIZE:
     case WM_SHOWWINDOW:
         win->presenterDirty = true;
         if (!win->movingOrSizing || !win->waits.empty()) win->ScheduleReport();
@@ -455,6 +461,26 @@ inline LRESULT CALLBACK Subclass(HWND hwnd, UINT message, WPARAM wparam, LPARAM 
         ReplyMessage(0);
     }
     if (message == WM_NCDESTROY) originals.erase(hwnd);
+    if (message == WM_WINDOWPOSCHANGING && lparam) {
+        if (auto win = OfHwnd(hwnd); win && win->fullscreenTransition != Win::FullscreenTransition::None) {
+            auto* pos = reinterpret_cast<WINDOWPOS*>(lparam);
+            if ((pos->flags & SWP_NOSIZE) == 0) {
+                if (win->fullscreenTransition == Win::FullscreenTransition::EnteringFromMaximized) {
+                    int monW = win->fullscreenMonitorRect.right - win->fullscreenMonitorRect.left;
+                    int monH = win->fullscreenMonitorRect.bottom - win->fullscreenMonitorRect.top;
+                    if (monW > 0 && monH > 0 && (pos->cx < monW || pos->cy < monH)) {
+                        pos->flags |= SWP_NOSIZE | SWP_NOMOVE;
+                    }
+                } else if (win->fullscreenTransition == Win::FullscreenTransition::LeavingToMaximized) {
+                    int workW = win->fullscreenWorkRect.right - win->fullscreenWorkRect.left;
+                    int workH = win->fullscreenWorkRect.bottom - win->fullscreenWorkRect.top;
+                    if (!IsZoomed(hwnd) && workW > 0 && workH > 0 && (pos->cx < workW || pos->cy < workH)) {
+                        pos->flags |= SWP_NOSIZE | SWP_NOMOVE;
+                    }
+                }
+            }
+        }
+    }
     if (message == WM_NCACTIVATE && wparam == FALSE) {
         if (auto win = OfHwnd(hwnd); win && win->imePopupHwnd && IsWindowVisible(win->imePopupHwnd)
             && (GetActiveWindow() == win->imePopupHwnd || GetForegroundWindow() == win->imePopupHwnd)) {
@@ -972,52 +998,177 @@ inline void SizeBeforeLayout(Win& win, double width, double height) {
 }
 
 #if BERN_WINUI
-/// Give XAML a transparent native cursor. A null ProtectedCursor inherits
-/// the default, and a root override loses to a closer element's cursor.
-inline winrt::Microsoft::UI::Input::InputCursor TransparentCursor() {
-    namespace input = winrt::Microsoft::UI::Input;
-    auto factory = winrt::get_activation_factory<input::InputCursor, input::IInputCursorStaticsInterop>();
-    std::array<BYTE, 32 * 32 / 8> andMask, xorMask{};
-    andMask.fill(0xff);
-    auto handle = CreateCursor(GetModuleHandleW(nullptr), 0, 0, 32, 32, andMask.data(), xorMask.data());
-    if (!handle) winrt::throw_last_error();
-    input::InputCursor cursor{nullptr};
-    auto result = factory->CreateFromHCursor(handle, reinterpret_cast<input::IInputCursor**>(winrt::put_abi(cursor)));
-    // The interop copies the cursor; the Win32 handle is ours to destroy.
-    DestroyCursor(handle);
-    winrt::check_hresult(result);
-    return cursor;
+inline constexpr double kImmersiveDragHeight = 32;
+inline wchar_t const* const kCursorShieldClass = L"BernCursorShield";
+
+inline void HideCursorShield(Win& win, bool refreshAtPointer) {
+    if (!win.cursorShield || !IsWindowVisible(win.cursorShield)) return;
+    ShowWindow(win.cursorShield, SW_HIDE);
+    if (refreshAtPointer && win.hwnd) {
+        POINT pt{};
+        RECT wr{};
+        if (GetCursorPos(&pt) && GetWindowRect(win.hwnd, &wr) && PtInRect(&wr, pt)) {
+            SetCursor(LoadCursorW(nullptr, IDC_ARROW));
+            SetCursorPos(pt.x, pt.y);
+        }
+    }
+}
+
+/// Invisible Win32 child surface (`WS_EX_NOREDIRECTIONBITMAP`) shown only
+/// while an immersive window is idle. Windows App SDK 2.x resets XAML
+/// `ProtectedCursor` / `InputPointerSource::Cursor` back to `IDC_ARROW` on
+/// layout/visual commits (`microsoft-ui-xaml#11543`, `#11204`); handling
+/// `WM_SETCURSOR -> SetCursor(nullptr)` on a native child HWND keeps the OS
+/// cursor genuinely hidden without flicker while forwarding clicks, wheel
+/// turns and motion straight back to WinUI.
+inline LRESULT CALLBACK CursorShieldProc(HWND shield, UINT message, WPARAM wparam, LPARAM lparam) {
+    HWND parent = GetParent(shield);
+    auto win = parent ? OfHwnd(parent) : nullptr;
+    switch (message) {
+    case WM_MOUSEACTIVATE:
+        return MA_NOACTIVATE;
+    case WM_SETCURSOR:
+        SetCursor(nullptr);
+        return TRUE;
+    case WM_MOUSEMOVE: {
+        TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, shield, 0};
+        TrackMouseEvent(&tme);
+        POINT now{};
+        if (win && GetCursorPos(&now) && (now.x != win->cursorShieldOrigin.x || now.y != win->cursorShieldOrigin.y)) {
+            HideCursorShield(*win, false);
+            SetCursor(LoadCursorW(nullptr, IDC_ARROW));
+            POINT client = now;
+            if (win->hwnd && ScreenToClient(win->hwnd, &client)) {
+                double scale = win->Scale();
+                if (scale > 0) {
+                    win->mouse = Win::Mouse::At;
+                    win->mousePoint = {static_cast<float>(client.x / scale), static_cast<float>(client.y / scale)};
+                }
+            }
+            if (win->idleRest) win->idleRest();
+        }
+        return 0;
+    }
+    case WM_MOUSELEAVE: {
+        POINT now{};
+        RECT sr{};
+        if (win && GetCursorPos(&now) && GetWindowRect(shield, &sr) && !PtInRect(&sr, now)) {
+            HideCursorShield(*win, false);
+            RECT wr{};
+            if (!win->hwnd || !GetWindowRect(win->hwnd, &wr) || !PtInRect(&wr, now)) {
+                win->mouse = Win::Mouse::Outside;
+            }
+            if (win->idleRest) win->idleRest();
+        }
+        return 0;
+    }
+    case WM_LBUTTONDOWN:
+    case WM_RBUTTONDOWN:
+    case WM_MBUTTONDOWN:
+    case WM_XBUTTONDOWN: {
+        if (win) HideCursorShield(*win, false);
+        else ShowWindow(shield, SW_HIDE);
+        SetCursor(LoadCursorW(nullptr, IDC_ARROW));
+        DWORD vk = VK_LBUTTON, downFlag = MOUSEEVENTF_LEFTDOWN, upFlag = MOUSEEVENTF_LEFTUP, data = 0;
+        if (message == WM_RBUTTONDOWN) {
+            vk = VK_RBUTTON;
+            downFlag = MOUSEEVENTF_RIGHTDOWN;
+            upFlag = MOUSEEVENTF_RIGHTUP;
+        } else if (message == WM_MBUTTONDOWN) {
+            vk = VK_MBUTTON;
+            downFlag = MOUSEEVENTF_MIDDLEDOWN;
+            upFlag = MOUSEEVENTF_MIDDLEUP;
+        } else if (message == WM_XBUTTONDOWN) {
+            WORD xbtn = GET_XBUTTON_WPARAM(wparam);
+            vk = (xbtn == XBUTTON2) ? VK_XBUTTON2 : VK_XBUTTON1;
+            downFlag = MOUSEEVENTF_XDOWN;
+            upFlag = MOUSEEVENTF_XUP;
+            data = xbtn;
+        }
+        INPUT seq[2]{};
+        seq[0].type = INPUT_MOUSE;
+        seq[1].type = INPUT_MOUSE;
+        seq[0].mi.mouseData = data;
+        seq[1].mi.mouseData = data;
+        if (GetAsyncKeyState(vk) & 0x8000) {
+            // Physical button is still held: release the hidden shield's press
+            // and press through to the WinUI surface underneath until release.
+            seq[0].mi.dwFlags = upFlag;
+            seq[1].mi.dwFlags = downFlag;
+        } else {
+            seq[0].mi.dwFlags = downFlag;
+            seq[1].mi.dwFlags = upFlag;
+        }
+        SendInput(2, seq, sizeof(INPUT));
+        return 0;
+    }
+    case WM_MOUSEWHEEL:
+    case WM_MOUSEHWHEEL: {
+        if (win) HideCursorShield(*win, false);
+        else ShowWindow(shield, SW_HIDE);
+        SetCursor(LoadCursorW(nullptr, IDC_ARROW));
+        HWND target = GetFocus();
+        if (!target || (parent && GetAncestor(target, GA_ROOT) != parent)) target = parent;
+        if (target) PostMessageW(target, message, wparam, lparam);
+        if (win && win->idleRest) win->idleRest();
+        return 0;
+    }
+    }
+    return DefWindowProcW(shield, message, wparam, lparam);
+}
+
+inline void RegisterCursorShieldOnce() {
+    static bool registered = false;
+    if (registered) return;
+    registered = true;
+    WNDCLASSEXW cls{sizeof(cls)};
+    cls.lpfnWndProc = CursorShieldProc;
+    cls.hInstance = GetModuleHandleW(nullptr);
+    cls.lpszClassName = kCursorShieldClass;
+    RegisterClassExW(&cls);
 }
 
 inline void SyncIdleCursor(Win& win) {
-    xaml::IUIElementProtected target{nullptr};
-    if (!win.closed && !win.owner && win.focused && !win.movingOrSizing && win.immersive.Peek() && win.idle.Peek()
-        && win.mouse == Win::Mouse::At && win.root.XamlRoot() && !(GetAsyncKeyState(VK_LBUTTON) & 0x8000)
-        && !(GetAsyncKeyState(VK_RBUTTON) & 0x8000) && !(GetAsyncKeyState(VK_MBUTTON) & 0x8000)) {
-        auto hits = media::VisualTreeHelper::FindElementsInHostCoordinates(win.mousePoint, win.root).First();
-        if (hits.HasCurrent()) {
-            // XAML chooses the closest hit-testable FrameworkElement's cursor.
-            for (xaml::DependencyObject node = hits.Current(); node; node = media::VisualTreeHelper::GetParent(node)) {
-                auto element = node.try_as<xaml::FrameworkElement>();
-                if (element && element.IsHitTestVisible()) {
-                    target = element.as<xaml::IUIElementProtected>();
-                    break;
-                }
-            }
+    bool hide = !win.closed && !win.owner && win.focused && !win.movingOrSizing && win.immersive.Peek() && win.idle.Peek()
+        && win.mouse != Win::Mouse::Outside && win.hwnd && win.root && win.root.XamlRoot()
+        && !(GetAsyncKeyState(VK_LBUTTON) & 0x8000) && !(GetAsyncKeyState(VK_RBUTTON) & 0x8000)
+        && !(GetAsyncKeyState(VK_MBUTTON) & 0x8000) && !(GetAsyncKeyState(VK_XBUTTON1) & 0x8000)
+        && !(GetAsyncKeyState(VK_XBUTTON2) & 0x8000);
+    if (hide) {
+        try {
+            if (media::VisualTreeHelper::GetOpenPopupsForXamlRoot(win.root.XamlRoot()).Size() > 0) hide = false;
+        } catch (winrt::hresult_error const&) {
         }
     }
-    if (target == win.idleCursorTarget) return;
-    if (win.idleCursorTarget) {
-        win.idleCursorTarget.ProtectedCursor(win.previousCursor);
-        win.idleCursorTarget = nullptr;
-        win.previousCursor = nullptr;
+    if (!hide) {
+        HideCursorShield(win, true);
+        return;
     }
-    if (target) {
-        if (!win.idleCursor) win.idleCursor = TransparentCursor();
-        auto previous = target.ProtectedCursor();
-        target.ProtectedCursor(win.idleCursor);
-        win.idleCursorTarget = target;
-        win.previousCursor = previous;
+    RECT client{};
+    if (!GetClientRect(win.hwnd, &client)) return;
+    int topInset = (!win.fullscreen.Peek() && win.chromeHidden) ? static_cast<int>(std::lround(kImmersiveDragHeight * win.Scale())) : 0;
+    int width = (std::max)(0, static_cast<int>(client.right - client.left));
+    int height = (std::max)(0, static_cast<int>(client.bottom - client.top - topInset));
+    if (width <= 0 || height <= 0) {
+        HideCursorShield(win, true);
+        return;
+    }
+    if (!win.cursorShield) {
+        RegisterCursorShieldOnce();
+        win.cursorShield = CreateWindowExW(WS_EX_LAYERED | WS_EX_NOREDIRECTIONBITMAP | WS_EX_NOACTIVATE, kCursorShieldClass, L"",
+            WS_CHILD, 0, topInset, width, height, win.hwnd, nullptr, GetModuleHandleW(nullptr), nullptr);
+        if (!win.cursorShield) return;
+        SetLayeredWindowAttributes(win.cursorShield, 0, 255, LWA_ALPHA);
+    }
+    bool wasVisible = IsWindowVisible(win.cursorShield) != 0;
+    if (!wasVisible) GetCursorPos(&win.cursorShieldOrigin);
+    SetWindowPos(win.cursorShield, HWND_TOP, 0, topInset, width, height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    if (!wasVisible) {
+        POINT pt = win.cursorShieldOrigin;
+        RECT sr{};
+        if (GetForegroundWindow() == win.hwnd && GetWindowRect(win.cursorShield, &sr) && PtInRect(&sr, pt)) {
+            SetCursorPos(pt.x, pt.y);
+        }
     }
 }
 #else
@@ -1178,6 +1329,9 @@ inline void TrackIdle(std::shared_ptr<Win> const& win, double seconds, std::func
         auto at = args.GetCurrentPoint(content).Position();
         if (at.X >= 0 && at.Y >= 0 && at.X < content.ActualWidth() && at.Y < content.ActualHeight()) return;
         win->mouse = Win::Mouse::Outside;
+#if BERN_WINUI
+        SyncIdleCursor(*win);
+#endif
         rest();
     })), true);
     root.AddHandler(xaml::UIElement::KeyDownEvent(), winrt::box_value(xaml::Input::KeyEventHandler([rest, weak](auto&&, xaml::Input::KeyRoutedEventArgs const& args) {
@@ -1217,17 +1371,22 @@ inline void TrackIdle(std::shared_ptr<Win> const& win, double seconds, std::func
     })), true);
     win->idleRest = rest;
     if (enabled) {
-        // Switched on again, the count starts over.
-        Reactive::Run([enabled, on, rest] {
+        // Switched on again, the count starts over; unrelated updates on the
+        // same reactive cell must not wake the window while the value holds.
+        auto initialized = std::make_shared<bool>(false);
+        Reactive::Run([enabled, on, initialized, rest] {
             bool now = enabled();
             Reactive::Untrack([&] {
+                if (*initialized && *on == now) return 0;
+                *initialized = true;
                 *on = now;
                 rest();
                 return 0;
             });
         });
+    } else {
+        rest();
     }
-    rest();
 }
 
 #if BERN_WINUI
@@ -1240,6 +1399,19 @@ inline void ShowTitleBarContent(controls::TitleBar const& bar, bool shown) {
     bar.Opacity(shown ? 1.0 : 0.0);
     bar.IsHitTestVisible(shown);
     bar.IsPaneToggleButtonVisible(shown && bar.Resources().HasKey(winrt::box_value(L"bern.paneToggle")));
+}
+
+/// The topmost visible covering layer's root element, if any.
+inline xaml::UIElement TopCoveringRoot(Win const& win) {
+    for (auto it = win.coverings.rbegin(); it != win.coverings.rend(); ++it) {
+        auto elem = it->root.get();
+        if (!elem) continue;
+        auto fe = elem.try_as<xaml::FrameworkElement>();
+        if (fe && (!fe.IsLoaded() || fe.Visibility() != xaml::Visibility::Visible || fe.Opacity() <= 0.01 || !fe.IsHitTestVisible())) continue;
+        if (auto control = elem.try_as<controls::Control>(); control && !control.IsEnabled()) continue;
+        return elem;
+    }
+    return nullptr;
 }
 
 /// Keep interactive controls overlapping the top title-bar strip clickable
@@ -1259,13 +1431,23 @@ inline void SyncTitleBarPassthrough(Win& win) {
             return;
         }
         double scale = win.root.XamlRoot().RasterizationScale();
-        if (scale <= 0) return;
+        double rootW = win.root.ActualWidth();
+        if (scale <= 0 || rootW <= 0) return;
         double barH = win.titleBar.ActualHeight();
         if (barH <= 0) barH = 48.0;
-        double limitY = barH + 8.0;
+        // Never allow passthrough rects to overlap the native caption buttons
+        // or extend below the title-bar strip.
+        auto appBar = win.window.AppWindow().TitleBar();
+        int32_t leftInsetPx = (std::max)(0, appBar.LeftInset());
+        int32_t rightInsetPx = appBar.RightInset();
+        if (rightInsetPx <= 0) rightInsetPx = static_cast<int32_t>(std::ceil((std::max)(0.0, win.rightInset.Peek()) * scale));
+        int32_t clientWidthPx = static_cast<int32_t>(std::floor(rootW * scale));
+        int32_t maxXPx = (std::max)(leftInsetPx, clientWidthPx - rightInsetPx);
+        int32_t maxYPx = static_cast<int32_t>(std::ceil(barH * scale));
         std::vector<winrt::Windows::Graphics::RectInt32> rects;
         std::function<void(xaml::DependencyObject const&)> walk = [&](xaml::DependencyObject const& node) {
             if (!node) return;
+            if (auto control = node.try_as<controls::Control>(); control && !control.IsEnabled()) return;
             auto fe = node.try_as<xaml::FrameworkElement>();
             if (fe && (fe.Visibility() != xaml::Visibility::Visible || fe.Opacity() <= 0.01 || !fe.IsHitTestVisible())) return;
             if (fe) {
@@ -1273,7 +1455,8 @@ inline void SyncTitleBarPassthrough(Win& win) {
                 if (w > 0 && h > 0) {
                     bool interactive = fe.try_as<controls::Primitives::ButtonBase>() || fe.try_as<controls::AutoSuggestBox>()
                         || fe.try_as<controls::TextBox>() || fe.try_as<controls::PasswordBox>() || fe.try_as<controls::ComboBox>()
-                        || fe.try_as<controls::Primitives::RangeBase>();
+                        || fe.try_as<controls::Primitives::RangeBase>() || fe.try_as<controls::ToggleSwitch>()
+                        || fe.try_as<controls::SelectorBar>() || fe.try_as<controls::SelectorBarItem>();
                     if (interactive) {
                         // Skip full-window canvas buttons (such as a video tap
                         // surface) so empty top-bar space remains draggable,
@@ -1282,13 +1465,14 @@ inline void SyncTitleBarPassthrough(Win& win) {
                             try {
                                 auto box = fe.TransformToVisual(win.root)
                                                .TransformBounds({0, 0, static_cast<float>(w), static_cast<float>(h)});
-                                if (box.Y < limitY && box.Y + box.Height > 0 && box.Width > 0 && box.Height > 0) {
-                                    rects.push_back(winrt::Windows::Graphics::RectInt32{
-                                        static_cast<int32_t>(std::floor(box.X * scale)),
-                                        static_cast<int32_t>(std::floor(box.Y * scale)),
-                                        static_cast<int32_t>(std::ceil(box.Width * scale)),
-                                        static_cast<int32_t>(std::ceil(box.Height * scale)),
-                                    });
+                                if (box.Y < barH && box.Y + box.Height > 0 && box.Width > 0 && box.Height > 0) {
+                                    int32_t x0 = (std::max)(leftInsetPx, static_cast<int32_t>(std::floor(box.X * scale)));
+                                    int32_t x1 = (std::min)(maxXPx, static_cast<int32_t>(std::ceil((box.X + box.Width) * scale)));
+                                    int32_t y0 = (std::max)(static_cast<int32_t>(0), static_cast<int32_t>(std::floor(box.Y * scale)));
+                                    int32_t y1 = (std::min)(maxYPx, static_cast<int32_t>(std::ceil((box.Y + box.Height) * scale)));
+                                    if (x1 > x0 && y1 > y0) {
+                                        rects.push_back(winrt::Windows::Graphics::RectInt32{x0, y0, x1 - x0, y1 - y0});
+                                    }
                                     return;
                                 }
                             } catch (winrt::hresult_error const&) {
@@ -1300,7 +1484,9 @@ inline void SyncTitleBarPassthrough(Win& win) {
             int32_t count = media::VisualTreeHelper::GetChildrenCount(node);
             for (int32_t i = 0; i < count; ++i) walk(media::VisualTreeHelper::GetChild(node, i));
         };
-        walk(win.host);
+        // Only inspect the topmost covering layer so controls belonging to
+        // occluded pages shifted under the title bar cannot steal caption hits.
+        if (auto top = TopCoveringRoot(win)) walk(top);
         if (rects != win.passthroughRects) {
             win.passthroughRects = rects;
             if (rects.empty()) source.ClearRegionRects(winrt::Microsoft::UI::Input::NonClientRegionKind::Passthrough);
@@ -1337,7 +1523,7 @@ inline void ShowCaptionTheme(Win& win) {
     if (!win.window || win.owner) return;
     std::string mode = win.appearanceMode;
     if (win.covering.Peek() > 0) {
-        if (!win.coverings.empty() && !win.coverings.back().second.empty()) mode = win.coverings.back().second;
+        if (!win.coverings.empty() && !win.coverings.back().appearance.empty()) mode = win.coverings.back().appearance;
     } else if (std::string under = UnifiedLook(win); !under.empty()) {
         mode = under;
     }
@@ -1368,16 +1554,12 @@ inline void ShowCaptionTheme(Win& win) {
 #else
 inline void ShowCaptionTheme(Win& win) {
     if (!win.captionButtons) return;
-    std::string mode = !win.coverings.empty() ? win.coverings.back().second : "";
+    std::string mode = !win.coverings.empty() ? win.coverings.back().appearance : "";
     win.captionButtons.RequestedTheme(mode == "dark" ? xaml::ElementTheme::Dark : mode == "light" ? xaml::ElementTheme::Light : xaml::ElementTheme::Default);
 }
 #endif
 
 #if BERN_WINUI
-/// The height of the strip that moves a window whose bar is hidden: the
-/// title bar's standard height.
-inline constexpr double kImmersiveDragHeight = 32;
-
 /// Clear the custom caption and passthrough regions registered while the
 /// title bar was hidden.
 inline void ClearImmersiveDrag(Win& win) {
@@ -1416,7 +1598,9 @@ inline void FitImmersiveDrag(Win& win) {
         };
         winrt::Windows::Foundation::Rect strip{0, 0, static_cast<float>(width), static_cast<float>(kImmersiveDragHeight)};
         std::vector<winrt::Windows::Graphics::RectInt32> through;
-        for (auto const& hit : media::VisualTreeHelper::FindElementsInHostCoordinates(strip, win.root)) {
+        xaml::UIElement searchRoot = win.covering.Peek() > 0 ? TopCoveringRoot(win) : xaml::UIElement(win.root);
+        if (searchRoot)
+        for (auto const& hit : media::VisualTreeHelper::FindElementsInHostCoordinates(strip, searchRoot)) {
             auto control = hit.try_as<controls::Control>();
             if (!control || !control.IsEnabled()) continue;
             bool interactive = control.try_as<controls::Primitives::ButtonBase>() || control.try_as<controls::AutoSuggestBox>()
@@ -1424,13 +1608,18 @@ inline void FitImmersiveDrag(Win& win) {
                 || control.try_as<controls::Primitives::RangeBase>() || control.try_as<controls::ToggleSwitch>()
                 || control.try_as<controls::SelectorBar>() || control.try_as<controls::SelectorBarItem>();
             if (!interactive) continue;
-            // Elements leaving, or under one that takes no pointer, do not count.
+            // Elements leaving, disabled via an ancestor, or under one that takes no pointer do not count.
             bool reachable = true;
-            for (xaml::DependencyObject node = control; node && node != win.root; node = media::VisualTreeHelper::GetParent(node))
+            for (xaml::DependencyObject node = control; node && node != win.root; node = media::VisualTreeHelper::GetParent(node)) {
+                if (auto parentControl = node.try_as<controls::Control>(); parentControl && !parentControl.IsEnabled()) {
+                    reachable = false;
+                    break;
+                }
                 if (auto element = node.try_as<xaml::UIElement>(); element && (!element.IsHitTestVisible() || element.Visibility() != xaml::Visibility::Visible || element.Opacity() <= 0.01)) {
                     reachable = false;
                     break;
                 }
+            }
             if (!reachable) continue;
             auto bounds = control.TransformToVisual(win.root).TransformBounds(
                 winrt::Windows::Foundation::Rect{0, 0, static_cast<float>(control.ActualWidth()), static_cast<float>(control.ActualHeight())});
@@ -2345,6 +2534,10 @@ inline void Ended(std::shared_ptr<Win> const& win) {
     win->closed = true;
 #if BERN_WINUI
     SyncIdleCursor(*win);
+    if (win->cursorShield) {
+        DestroyWindow(win->cursorShield);
+        win->cursorShield = nullptr;
+    }
 #endif
     if (win->movingOrSizing) {
         win->movingOrSizing = false;
@@ -2630,7 +2823,50 @@ inline void ToggleFullscreen(Ctx const& ctx, std::string const& kind) {
         if (!win->window || win->owner) continue;
         auto app = win->window.AppWindow();
         using winrt::Microsoft::UI::Windowing::AppWindowPresenterKind;
+        HWND hwnd = win->hwnd;
+        // Suppress DWM window transition animations while switching a maximized
+        // window to or from FullScreen so WinAppSDK's internal restore/maximize
+        // steps do not flash a small window or play a shrink-then-expand zoom.
+        struct FullscreenTransitionGuard {
+            Win& win;
+            HWND hwnd;
+            bool disabledTransitions = false;
+            FullscreenTransitionGuard(Win& w, HWND h, Win::FullscreenTransition mode) : win(w), hwnd(h) {
+                if (mode != Win::FullscreenTransition::None && hwnd) {
+                    win.fullscreenTransition = mode;
+                    BOOL disable = TRUE;
+                    if (SUCCEEDED(DwmSetWindowAttribute(hwnd, DWMWA_TRANSITIONS_FORCEDISABLED, &disable, sizeof(disable)))) {
+                        disabledTransitions = true;
+                    }
+                }
+            }
+            ~FullscreenTransitionGuard() {
+                win.fullscreenTransition = Win::FullscreenTransition::None;
+                if (disabledTransitions && hwnd) {
+                    DwmFlush();
+                    BOOL disable = FALSE;
+                    DwmSetWindowAttribute(hwnd, DWMWA_TRANSITIONS_FORCEDISABLED, &disable, sizeof(disable));
+                }
+            }
+        };
         if (app.Presenter().Kind() != AppWindowPresenterKind::FullScreen) {
+            bool wasMaximized = hwnd && IsZoomed(hwnd) != 0;
+            win->fullscreenWasMaximized = wasMaximized;
+            win->hasFullscreenNormalRect = false;
+            if (wasMaximized) {
+                WINDOWPLACEMENT wp{sizeof(wp)};
+                if (GetWindowPlacement(hwnd, &wp)) {
+                    win->fullscreenNormalRect = wp.rcNormalPosition;
+                    win->hasFullscreenNormalRect = true;
+                }
+                MONITORINFO mi{sizeof(mi)};
+                if (GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi)) {
+                    win->fullscreenMonitorRect = mi.rcMonitor;
+                    win->fullscreenWorkRect = mi.rcWork;
+                }
+            }
+            FullscreenTransitionGuard guard(*win, hwnd,
+                wasMaximized ? Win::FullscreenTransition::EnteringFromMaximized : Win::FullscreenTransition::None);
             // Work around WinUI 3 reserving a 1px top border row above the
             // XAML bridge in FullScreen while ExtendsContentIntoTitleBar is
             // enabled (`microsoft-ui-xaml#12138`, also `WindowsAppSDK#6981`).
@@ -2640,17 +2876,45 @@ inline void ToggleFullscreen(Ctx const& ctx, std::string const& kind) {
             try {
                 app.SetPresenter(AppWindowPresenterKind::FullScreen);
             } catch (...) {
+                win->fullscreenWasMaximized = false;
+                win->hasFullscreenNormalRect = false;
                 WindowManager::RestoreTitleBar(*win);
                 throw;
             }
             if (app.Presenter().Kind() != AppWindowPresenterKind::FullScreen) {
+                win->fullscreenWasMaximized = false;
+                win->hasFullscreenNormalRect = false;
                 WindowManager::RestoreTitleBar(*win);
             }
         } else {
+            bool returnMaximized = win->fullscreenWasMaximized && hwnd != nullptr;
+            if (returnMaximized) {
+                MONITORINFO mi{sizeof(mi)};
+                if (GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi)) {
+                    win->fullscreenMonitorRect = mi.rcMonitor;
+                    win->fullscreenWorkRect = mi.rcWork;
+                }
+            }
+            FullscreenTransitionGuard guard(*win, hwnd,
+                returnMaximized ? Win::FullscreenTransition::LeavingToMaximized : Win::FullscreenTransition::None);
             app.SetPresenter(AppWindowPresenterKind::Overlapped);
+            if (returnMaximized) {
+                if (!IsZoomed(hwnd)) ShowWindow(hwnd, SW_MAXIMIZE);
+                if (IsZoomed(hwnd) && win->hasFullscreenNormalRect) {
+                    WINDOWPLACEMENT wp{sizeof(wp)};
+                    if (GetWindowPlacement(hwnd, &wp)) {
+                        wp.rcNormalPosition = win->fullscreenNormalRect;
+                        wp.showCmd = SW_SHOWMAXIMIZED;
+                        SetWindowPlacement(hwnd, &wp);
+                    }
+                }
+            }
+            win->fullscreenWasMaximized = false;
+            win->hasFullscreenNormalRect = false;
             WindowManager::RestoreTitleBar(*win);
         }
         win->fullscreen.Set(app.Presenter().Kind() == AppWindowPresenterKind::FullScreen);
+        WindowManager::SyncIdleCursor(*win);
 #else
         // The system XAML has no presenters: a window without a frame over
         // its monitor, then back where it was.
