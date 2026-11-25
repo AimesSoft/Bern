@@ -1144,6 +1144,7 @@ inline void NavLink(Parent const& p, Ctx const& ctx, char const* id, Get route, 
     button.Content(inside);
     button.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
     button.HorizontalContentAlignment(xaml::HorizontalAlignment::Stretch);
+    SetRole(button, L"bern-fill-width");
     if (p.isList) {
         button.Padding(xaml::Thickness{16, 12, 16, 12});
         button.MinHeight(56);

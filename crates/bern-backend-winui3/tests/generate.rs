@@ -3461,3 +3461,20 @@ fn maximized_fullscreen_toggle_suppresses_intermediate_normal_rect() {
         assert!(src.contains(part), "missing `{part}`");
     }
 }
+
+#[test]
+fn nav_link_marks_fill_width_so_columns_keep_it_stretched() {
+    let structure = include_str!("../templates/cpp/bern_ui_structure.inl");
+    let start = structure
+        .find("inline void NavLink(")
+        .expect("missing WinUI 3 NavLink implementation");
+    let body = &structure[start..];
+    let end = body
+        .find("\n/// A tab of `Tabs`.")
+        .expect("missing end of NavLink implementation");
+    let nav_link = &body[..end];
+    assert!(
+        nav_link.contains("SetRole(button, L\"bern-fill-width\");"),
+        "NavLink must mark bern-fill-width:\n{nav_link}"
+    );
+}
