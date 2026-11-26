@@ -138,6 +138,15 @@ struct RailInfo {
     controls::Panel element{nullptr};
 };
 
+namespace B {
+struct Paint;
+struct SceneRoom;
+struct ScrollInfo;
+struct SidebarRegistry;
+struct StaggerClock;
+struct TabsRegistry;
+}
+
 /// Native Windows caption-button metrics in DIPs (Standard title bar).
 inline constexpr double kTitleBarButtonWidth = 46.0;
 inline constexpr double kTitleBarButtonHeight = 32.0;
@@ -157,6 +166,10 @@ struct Ctx {
     std::optional<Cell<bool>> shown;
     /// `appearance:` of the part this content is in, for its popups.
     std::string appearance;
+    /// Base shadows inherited from enclosing surfaceless `Stack` containers.
+    std::vector<std::array<double, 3>> shadows;
+    /// Base foreground inherited from enclosing styled `Stack` containers.
+    std::shared_ptr<B::Paint const> foreground;
     std::shared_ptr<B::SidebarRegistry> sidebar;
     std::shared_ptr<B::TabsRegistry> tabs;
     std::shared_ptr<RailInfo const> rail;

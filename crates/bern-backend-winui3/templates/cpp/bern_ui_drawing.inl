@@ -20,6 +20,209 @@ inline winrt::com_ptr<ID2D1Factory1> const& Factory() {
     return factory;
 }
 
+inline winrt::com_ptr<IDWriteFactory> const& TextFactory() {
+    static winrt::com_ptr<IDWriteFactory> factory = [] {
+        winrt::com_ptr<IDWriteFactory> made;
+        DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(made.put()));
+        return made;
+    }();
+    return factory;
+}
+
+inline wchar_t const* IconFontFamily() {
+    static wchar_t const* family = []() -> wchar_t const* {
+        auto dwrite = TextFactory();
+        winrt::com_ptr<IDWriteFontCollection> fonts;
+        if (dwrite && SUCCEEDED(dwrite->GetSystemFontCollection(fonts.put()))) {
+            UINT32 index = 0;
+            BOOL exists = FALSE;
+            if (SUCCEEDED(fonts->FindFamilyName(L"Segoe Fluent Icons", &index, &exists)) && exists)
+                return L"Segoe Fluent Icons";
+        }
+        return L"Segoe MDL2 Assets";
+    }();
+    return family;
+}
+
+inline winrt::com_ptr<ID2D1PathGeometry> BuildSvgPathGeometry(wchar_t const* d, double scale, double offsetX, double offsetY) {
+    if (!d || !*d || !Factory()) return nullptr;
+    winrt::com_ptr<ID2D1PathGeometry> geometry;
+    if (FAILED(Factory()->CreatePathGeometry(geometry.put()))) return nullptr;
+    winrt::com_ptr<ID2D1GeometrySink> sink;
+    if (FAILED(geometry->Open(sink.put()))) return nullptr;
+    sink->SetFillMode(D2D1_FILL_MODE_ALTERNATE);
+
+    auto pt = [scale, offsetX, offsetY](double x, double y) -> D2D1_POINT_2F {
+        return D2D1::Point2F(static_cast<float>(offsetX + x * scale), static_cast<float>(offsetY + y * scale));
+    };
+    auto skipWsComma = [](wchar_t const*& p) {
+        while (*p == L' ' || *p == L'\t' || *p == L'\n' || *p == L'\r' || *p == L',') ++p;
+    };
+    auto hasNumber = [&](wchar_t const* p) {
+        skipWsComma(p);
+        return *p == L'+' || *p == L'-' || *p == L'.' || (*p >= L'0' && *p <= L'9');
+    };
+    auto nextNumber = [&](wchar_t const*& p, double& out) -> bool {
+        skipWsComma(p);
+        wchar_t const* s = p;
+        double sign = 1.0;
+        if (*s == L'-') { sign = -1.0; ++s; }
+        else if (*s == L'+') { ++s; }
+        double val = 0.0;
+        bool anyDigit = false;
+        while (*s >= L'0' && *s <= L'9') {
+            val = val * 10.0 + (*s - L'0');
+            ++s;
+            anyDigit = true;
+        }
+        if (*s == L'.') {
+            ++s;
+            double frac = 0.1;
+            while (*s >= L'0' && *s <= L'9') {
+                val += (*s - L'0') * frac;
+                frac *= 0.1;
+                ++s;
+                anyDigit = true;
+            }
+        }
+        if (!anyDigit) return false;
+        if (*s == L'e' || *s == L'E') {
+            wchar_t const* e = s + 1;
+            int expSign = 1;
+            if (*e == L'-') { expSign = -1; ++e; }
+            else if (*e == L'+') { ++e; }
+            int expVal = 0;
+            bool expDigits = false;
+            while (*e >= L'0' && *e <= L'9') {
+                expVal = expVal * 10 + (*e - L'0');
+                ++e;
+                expDigits = true;
+            }
+            if (expDigits) {
+                val *= std::pow(10.0, expSign * expVal);
+                s = e;
+            }
+        }
+        out = sign * val;
+        p = s;
+        return true;
+    };
+
+    wchar_t const* p = d;
+    wchar_t cmd = 0;
+    double curX = 0, curY = 0, subX = 0, subY = 0;
+    double lastCtrlX = 0, lastCtrlY = 0, lastQuadX = 0, lastQuadY = 0;
+    bool inFigure = false, hasCubic = false, hasQuad = false;
+
+    while (*p) {
+        skipWsComma(p);
+        if (!*p) break;
+        if ((*p >= L'A' && *p <= L'Z') || (*p >= L'a' && *p <= L'z')) {
+            cmd = *p++;
+        } else if (!cmd || !hasNumber(p)) {
+            break;
+        }
+        bool rel = (cmd >= L'a' && cmd <= L'z');
+        wchar_t op = rel ? static_cast<wchar_t>(cmd - L'a' + L'A') : cmd;
+        if (op == L'Z') {
+            if (inFigure) {
+                sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+                inFigure = false;
+            }
+            curX = subX;
+            curY = subY;
+            hasCubic = false;
+            hasQuad = false;
+            cmd = 0;
+            continue;
+        }
+        double a = 0, b = 0, c = 0, e = 0, f = 0, g = 0;
+        if (op == L'M') {
+            if (!nextNumber(p, a) || !nextNumber(p, b)) break;
+            if (rel) { a += curX; b += curY; }
+            if (inFigure) sink->EndFigure(D2D1_FIGURE_END_OPEN);
+            sink->BeginFigure(pt(a, b), D2D1_FIGURE_BEGIN_FILLED);
+            inFigure = true;
+            curX = subX = a;
+            curY = subY = b;
+            hasCubic = false;
+            hasQuad = false;
+            cmd = rel ? L'l' : L'L';
+        } else if (op == L'L') {
+            if (!nextNumber(p, a) || !nextNumber(p, b)) break;
+            if (rel) { a += curX; b += curY; }
+            if (inFigure) sink->AddLine(pt(a, b));
+            curX = a;
+            curY = b;
+            hasCubic = false;
+            hasQuad = false;
+        } else if (op == L'H') {
+            if (!nextNumber(p, a)) break;
+            if (rel) a += curX;
+            if (inFigure) sink->AddLine(pt(a, curY));
+            curX = a;
+            hasCubic = false;
+            hasQuad = false;
+        } else if (op == L'V') {
+            if (!nextNumber(p, b)) break;
+            if (rel) b += curY;
+            if (inFigure) sink->AddLine(pt(curX, b));
+            curY = b;
+            hasCubic = false;
+            hasQuad = false;
+        } else if (op == L'C') {
+            if (!nextNumber(p, a) || !nextNumber(p, b) || !nextNumber(p, c) || !nextNumber(p, e) || !nextNumber(p, f) || !nextNumber(p, g)) break;
+            if (rel) { a += curX; b += curY; c += curX; e += curY; f += curX; g += curY; }
+            if (inFigure) sink->AddBezier(D2D1::BezierSegment(pt(a, b), pt(c, e), pt(f, g)));
+            lastCtrlX = c;
+            lastCtrlY = e;
+            curX = f;
+            curY = g;
+            hasCubic = true;
+            hasQuad = false;
+        } else if (op == L'S') {
+            if (!nextNumber(p, c) || !nextNumber(p, e) || !nextNumber(p, f) || !nextNumber(p, g)) break;
+            if (rel) { c += curX; e += curY; f += curX; g += curY; }
+            double x1 = hasCubic ? (2.0 * curX - lastCtrlX) : curX;
+            double y1 = hasCubic ? (2.0 * curY - lastCtrlY) : curY;
+            if (inFigure) sink->AddBezier(D2D1::BezierSegment(pt(x1, y1), pt(c, e), pt(f, g)));
+            lastCtrlX = c;
+            lastCtrlY = e;
+            curX = f;
+            curY = g;
+            hasCubic = true;
+            hasQuad = false;
+        } else if (op == L'Q') {
+            if (!nextNumber(p, a) || !nextNumber(p, b) || !nextNumber(p, c) || !nextNumber(p, e)) break;
+            if (rel) { a += curX; b += curY; c += curX; e += curY; }
+            if (inFigure) sink->AddQuadraticBezier(D2D1::QuadraticBezierSegment(pt(a, b), pt(c, e)));
+            lastQuadX = a;
+            lastQuadY = b;
+            curX = c;
+            curY = e;
+            hasQuad = true;
+            hasCubic = false;
+        } else if (op == L'T') {
+            if (!nextNumber(p, c) || !nextNumber(p, e)) break;
+            if (rel) { c += curX; e += curY; }
+            double x1 = hasQuad ? (2.0 * curX - lastQuadX) : curX;
+            double y1 = hasQuad ? (2.0 * curY - lastQuadY) : curY;
+            if (inFigure) sink->AddQuadraticBezier(D2D1::QuadraticBezierSegment(pt(x1, y1), pt(c, e)));
+            lastQuadX = x1;
+            lastQuadY = y1;
+            curX = c;
+            curY = e;
+            hasQuad = true;
+            hasCubic = false;
+        } else {
+            return nullptr;
+        }
+    }
+    if (inFigure) sink->EndFigure(D2D1_FIGURE_END_OPEN);
+    if (FAILED(sink->Close())) return nullptr;
+    return geometry;
+}
+
 inline winrt::com_ptr<IWICImagingFactory> const& Imaging() {
     static winrt::com_ptr<IWICImagingFactory> factory = [] {
         winrt::com_ptr<IWICImagingFactory> made;
@@ -596,6 +799,230 @@ struct ShadowImage {
 /// shape in it casts the shadow from its own shape (a Composition drop
 /// shadow from its alpha mask) onto `host`, a canvas behind the content,
 /// following the content's layout.
+/// A glyph or Fluent path with all inherited and button shadows baked into
+/// one DPI-aware bitmap so icon and shadow share the exact same frame and
+/// transform without asynchronous mask lag or flicker.
+struct ShadowedIconState : std::enable_shared_from_this<ShadowedIconState> {
+    controls::Canvas root;
+    controls::Image image;
+    media::Imaging::WriteableBitmap bitmap{nullptr};
+    Win* win = nullptr;
+    std::string appearance;
+    std::string name;
+    double size = 16;
+    double pad = 0;
+    std::vector<std::array<double, 3>> shadows;
+    Paint foreground{"icon.primary"};
+    uint32_t lastArgb = 0;
+    int32_t lastScale100 = 0;
+    bool drawn = false;
+    winrt::weak_ref<xaml::XamlRoot> subscribedRoot;
+    winrt::event_token rootChangedToken{};
+
+    struct Holder : winrt::implements<Holder, IInspectable> {
+        std::shared_ptr<ShadowedIconState> state;
+    };
+
+    struct CachedPixels {
+        UINT width = 0;
+        UINT height = 0;
+        std::vector<uint8_t> bytes;
+    };
+
+    static std::unordered_map<std::string, CachedPixels>& Cache() {
+        static auto* cache = new std::unordered_map<std::string, CachedPixels>();
+        return *cache;
+    }
+
+    static std::shared_ptr<ShadowedIconState> Create(Ctx const& ctx, char const* iconName, double iconSize,
+        std::vector<std::array<double, 3>> shadowLayers, std::optional<Paint> fg = std::nullopt) {
+        if (!iconName || (!bern::IconPath(iconName) && !bern::IconGlyph(iconName))) return nullptr;
+        auto state = std::make_shared<ShadowedIconState>();
+        state->win = ctx.win;
+        state->appearance = ctx.appearance;
+        state->name = iconName;
+        state->size = (std::max)(1.0, iconSize);
+        state->shadows = std::move(shadowLayers);
+        if (fg && fg->Given()) state->foreground = *fg;
+        else if (ctx.foreground && ctx.foreground->Given()) state->foreground = *ctx.foreground;
+        for (auto const& [radius, y, opacity] : state->shadows) {
+            if (opacity <= 0) continue;
+            double reach = std::ceil((std::max)(0.0, radius) * 2.0 + std::abs(y)) + 2.0;
+            state->pad = (std::max)(state->pad, reach);
+        }
+        double total = state->size + state->pad * 2.0;
+        state->root.Width(state->size);
+        state->root.Height(state->size);
+        state->root.IsHitTestVisible(false);
+        SetRole(state->root, L"bern-self-shadowed");
+        state->image.Width(total);
+        state->image.Height(total);
+        state->image.Stretch(media::Stretch::Fill);
+        state->image.IsHitTestVisible(false);
+        controls::Canvas::SetLeft(state->image, -state->pad);
+        controls::Canvas::SetTop(state->image, -state->pad);
+        state->root.Children().Append(state->image);
+
+        if (!state->Redraw()) return nullptr;
+
+        auto holder = winrt::make_self<Holder>();
+        holder->state = state;
+        state->root.Resources().Insert(winrt::box_value(L"bern.shadowed_icon"), holder.as<IInspectable>());
+
+        std::weak_ptr<ShadowedIconState> weak = state;
+        state->root.Loaded([weak](auto&&, auto&&) {
+            if (auto self = weak.lock()) {
+                self->AttachRootObserver();
+                self->Redraw();
+            }
+        });
+        state->root.Unloaded([weak](auto&&, auto&&) {
+            if (auto self = weak.lock()) self->DetachRootObserver();
+        });
+        state->root.ActualThemeChanged([weak](auto&&, auto&&) {
+            if (auto self = weak.lock()) self->Redraw();
+        });
+        Reactive::Run([weak] {
+            themeTick.Get();
+            if (auto self = weak.lock()) self->Redraw();
+        });
+        return state;
+    }
+
+    void SetForeground(Paint const& next) {
+        if (!next.Given()) return;
+        bool sameRole = (!next.role && !foreground.role) || (next.role && foreground.role && std::string_view(next.role) == foreground.role);
+        if (sameRole && next.fixed == foreground.fixed && next.light == foreground.light && next.dark == foreground.dark) return;
+        foreground = next;
+        Redraw();
+    }
+
+    bool Redraw() {
+        bool dark = root.IsLoaded()
+            ? IsDark(root)
+            : (!appearance.empty() ? appearance == "dark" : (win && win->root && IsDark(win->root)));
+        double scale = root.IsLoaded()
+            ? ScaleOf(root)
+            : (win && win->root ? ScaleOf(win->root) : 1.0);
+        scale = (std::max)(0.5, scale);
+        auto color = ColorOf(win, dark, foreground);
+        uint32_t argb = (static_cast<uint32_t>(color.A) << 24) | (static_cast<uint32_t>(color.R) << 16)
+            | (static_cast<uint32_t>(color.G) << 8) | static_cast<uint32_t>(color.B);
+        int32_t scale100 = static_cast<int32_t>(std::lround(scale * 100.0));
+        if (drawn && argb == lastArgb && scale100 == lastScale100) return true;
+
+        std::string key = name + "|" + std::to_string(std::lround(size * 100.0)) + "|" + std::to_string(scale100) + "|" + std::to_string(argb);
+        for (auto const& [radius, y, opacity] : shadows) {
+            key += "|" + std::to_string(std::lround(radius * 100.0)) + "," + std::to_string(std::lround(y * 100.0))
+                + "," + std::to_string(std::lround(opacity * 1000.0));
+        }
+
+        auto& cache = Cache();
+        if (auto found = cache.find(key); found != cache.end()) {
+            auto const& cached = found->second;
+            if (!bitmap || static_cast<UINT>(bitmap.PixelWidth()) != cached.width || static_cast<UINT>(bitmap.PixelHeight()) != cached.height)
+                bitmap = media::Imaging::WriteableBitmap(static_cast<int32_t>(cached.width), static_cast<int32_t>(cached.height));
+            auto buffer = bitmap.PixelBuffer();
+            if (cached.bytes.size() == buffer.Length()) {
+                std::memcpy(buffer.data(), cached.bytes.data(), cached.bytes.size());
+                bitmap.Invalidate();
+                image.Source(bitmap);
+                lastArgb = argb;
+                lastScale100 = scale100;
+                drawn = true;
+                return true;
+            }
+        }
+
+        double total = size + pad * 2.0;
+        Draw::Surface surface;
+        if (!surface.Begin(total, total, scale) || !surface.context) return false;
+        winrt::com_ptr<ID2D1Bitmap1> glyph;
+        auto props = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET,
+            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED),
+            static_cast<float>(96 * scale), static_cast<float>(96 * scale));
+        if (FAILED(surface.context->CreateBitmap(D2D1::SizeU(surface.width, surface.height), nullptr, 0, props, glyph.put()))) return false;
+        winrt::com_ptr<ID2D1Image> target;
+        surface.context->GetTarget(target.put());
+        surface.context->SetTarget(glyph.get());
+        surface.context->Clear(D2D1::ColorF(0, 0, 0, 0));
+        winrt::com_ptr<ID2D1SolidColorBrush> brush;
+        if (FAILED(surface.context->CreateSolidColorBrush(Draw::ColorF(color), brush.put()))) return false;
+        if (auto path = bern::IconPath(name.c_str())) {
+            auto geom = Draw::BuildSvgPathGeometry(path, size / 20.0, pad, pad);
+            if (!geom) return false;
+            surface.context->FillGeometry(geom.get(), brush.get());
+        } else {
+            auto glyphText = bern::IconGlyph(name.c_str());
+            auto dwrite = Draw::TextFactory();
+            if (!glyphText || !*glyphText || !dwrite) return false;
+            winrt::com_ptr<IDWriteTextFormat> format;
+            if (FAILED(dwrite->CreateTextFormat(Draw::IconFontFamily(), nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+                    DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, static_cast<float>(size), L"", format.put())))
+                return false;
+            format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+            format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+            format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+            surface.context->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+            auto box = D2D1::RectF(static_cast<float>(pad), static_cast<float>(pad),
+                static_cast<float>(pad + size), static_cast<float>(pad + size));
+            surface.context->DrawText(glyphText, static_cast<UINT32>(std::wcslen(glyphText)),
+                format.get(), box, brush.get(), D2D1_DRAW_TEXT_OPTIONS_NONE);
+        }
+        surface.context->SetTarget(target.get());
+        for (auto const& [radius, y, opacity] : shadows) {
+            if (opacity <= 0) continue;
+            if (radius <= 0) {
+                surface.context->DrawImage(glyph.get(), D2D1::Point2F(0.0f, static_cast<float>(y)));
+                continue;
+            }
+            winrt::com_ptr<ID2D1Effect> shadow;
+            if (SUCCEEDED(surface.context->CreateEffect(CLSID_D2D1Shadow, shadow.put()))) {
+                shadow->SetInput(0, glyph.get());
+                shadow->SetValue(D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION, static_cast<float>(radius / 3.0));
+                shadow->SetValue(D2D1_SHADOW_PROP_COLOR, D2D1::Vector4F(0, 0, 0, static_cast<float>((std::clamp)(opacity, 0.0, 1.0))));
+                surface.context->DrawImage(shadow.get(), D2D1::Point2F(0.0f, static_cast<float>(y)));
+            }
+        }
+        surface.context->DrawImage(glyph.get());
+        auto previous = bitmap;
+        if (!surface.End(bitmap)) return false;
+        if (bitmap != previous) image.Source(bitmap);
+        if (cache.size() >= 256) cache.clear();
+        auto buffer = bitmap.PixelBuffer();
+        CachedPixels entry;
+        entry.width = surface.width;
+        entry.height = surface.height;
+        entry.bytes.assign(buffer.data(), buffer.data() + buffer.Length());
+        cache.emplace(std::move(key), std::move(entry));
+        lastArgb = argb;
+        lastScale100 = scale100;
+        drawn = true;
+        return true;
+    }
+
+private:
+    void AttachRootObserver() {
+        auto current = root.XamlRoot();
+        if (!current) return;
+        if (auto prev = subscribedRoot.get(); prev == current && rootChangedToken.value) return;
+        DetachRootObserver();
+        subscribedRoot = winrt::make_weak(current);
+        std::weak_ptr<ShadowedIconState> weak = shared_from_this();
+        rootChangedToken = current.Changed([weak](auto&&, auto&&) {
+            if (auto self = weak.lock()) self->Redraw();
+        });
+    }
+
+    void DetachRootObserver() {
+        if (rootChangedToken.value) {
+            if (auto prev = subscribedRoot.get()) prev.Changed(rootChangedToken);
+            rootChangedToken = {};
+        }
+        subscribedRoot = nullptr;
+    }
+};
+
 struct ContentShadow : std::enable_shared_from_this<ContentShadow> {
     controls::Canvas host;
     double radius = 0, y = 0, opacity = 0;
@@ -711,6 +1138,7 @@ private:
         size_t used = 0;
         std::function<void(xaml::DependencyObject const&)> visit = [&](xaml::DependencyObject const& node) {
             auto element = node.try_as<xaml::FrameworkElement>();
+            if (element && RoleOf(element) == L"bern-self-shadowed") return;
             bool maskOnly = element && RoleOf(element) == L"bern-shadow-mask";
             if (!element || element.Visibility() != xaml::Visibility::Visible || (!maskOnly && element.Opacity() <= 0)) return;
             auto block = element.try_as<controls::TextBlock>();
@@ -764,4 +1192,13 @@ private:
     }
 };
 
+}
+
+namespace Icons {
+inline xaml::FrameworkElement Shadowed(Ctx const& ctx, char const* name, double size,
+    std::vector<std::array<double, 3>> shadows, std::optional<B::Paint> foreground = std::nullopt) {
+    if (auto made = B::ShadowedIconState::Create(ctx, name, size, std::move(shadows), std::move(foreground)))
+        return made->root;
+    return Icon(name, size);
+}
 }

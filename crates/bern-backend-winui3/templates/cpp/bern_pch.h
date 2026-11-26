@@ -20,6 +20,7 @@
 #include <d2d1_3.h>
 #include <d2d1effects_2.h>
 #include <d3d11.h>
+#include <dwrite.h>
 #include <dwmapi.h>
 #include <dxgi1_6.h>
 #include <shlwapi.h>
@@ -47,6 +48,7 @@
 // chains of media engines.
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "d3d11.lib")
+#pragma comment(lib, "dwrite.lib")
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "dxguid.lib")
 // Drawings and the average color of pictures: Direct2D on WIC bitmaps.
