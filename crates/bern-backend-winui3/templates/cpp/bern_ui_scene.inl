@@ -674,6 +674,8 @@ inline void Modal(Parent const&, Ctx const& ctx, ModalProps props, Build const& 
     // SwiftUI card, not at its leading edge.
     auto modalCtx = ctx;
     modalCtx.inTitleBar = false;
+    modalCtx.shadows.clear();
+    modalCtx.foreground.reset();
     children(Parent::Aligned(content, xaml::HorizontalAlignment::Center, std::nullopt), modalCtx);
     // The declared size, within the window's edges, or the whole window.
     bool cover = props.cover;

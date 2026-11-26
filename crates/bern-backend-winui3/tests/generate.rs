@@ -3522,3 +3522,55 @@ fn stack_content_shadow_stays_in_root_region_and_behind_conditional_children() {
         assert!(widgets.contains(part), "missing `{part}`");
     }
 }
+
+#[test]
+fn shadowed_icons_composite_atomically_and_button_shadows_start_settled() {
+    let pch = include_str!("../templates/cpp/bern_pch.h");
+    let core = include_str!("../templates/cpp/bern_ui_core.inl");
+    let drawing = include_str!("../templates/cpp/bern_ui_drawing.inl");
+    let widgets = include_str!("../templates/cpp/bern_ui_widgets.inl");
+    let features = include_str!("../templates/cpp/bern_ui_features.inl");
+    let scene = include_str!("../templates/cpp/bern_ui_scene.inl");
+
+    for (src, part) in [
+        (pch, "#include <dwrite.h>"),
+        (pch, "#pragma comment(lib, \"dwrite.lib\")"),
+        (core, "std::vector<std::array<double, 3>> shadows;"),
+        (core, "std::shared_ptr<B::Paint const> foreground;"),
+        (drawing, "struct ShadowedIconState"),
+        (drawing, "BuildSvgPathGeometry("),
+        (drawing, "SetRole(state->root, L\"bern-self-shadowed\");"),
+        (
+            drawing,
+            "if (element && RoleOf(element) == L\"bern-self-shadowed\") return;",
+        ),
+        (
+            drawing,
+            "namespace Icons {\ninline xaml::FrameworkElement Shadowed(",
+        ),
+        (
+            widgets,
+            "LayerSet(shown, \"state\", 0, 0, 1, 1, targetOpacity);",
+        ),
+        (widgets, "wrapper.Unloaded([cast, disposed]"),
+        (widgets, "childCtx.shadows.push_back(*style->base.shadow);"),
+        (
+            widgets,
+            "auto wrapper = (ownSelfShadow && selfShadowedIcon) ? Wrap(button) : Shadowed(",
+        ),
+        (
+            features,
+            "inner.shadows.clear();\n    inner.foreground.reset();",
+        ),
+        (
+            features,
+            "Icons::Shadowed(ctx, props.icon, size, ctx.shadows,",
+        ),
+        (
+            scene,
+            "modalCtx.shadows.clear();\n    modalCtx.foreground.reset();",
+        ),
+    ] {
+        assert!(src.contains(part), "missing `{part}`");
+    }
+}

@@ -1662,6 +1662,8 @@ inline std::shared_ptr<Popover> MakePopover(Ctx const& ctx, Build content, bool 
     auto popover = std::make_shared<Popover>();
     auto inner = ctx;
     inner.inTitleBar = false;
+    inner.shadows.clear();
+    inner.foreground.reset();
     if (windowTheme) inner.appearance.clear();
     if (auto inherited = PresenterTheme(L"FlyoutPresenter", inner.appearance)) popover->flyout.FlyoutPresenterStyle(inherited);
     // Without a color of its own the bubble uses a theme-pinned WinUI 3
@@ -1794,7 +1796,10 @@ inline void PopoverButton(Parent const& p, Ctx const& ctx, PopoverButtonProps pr
         // or Windows title-bar caption-button geometry when sitting beside the
         // window's caption buttons, with no background until pointed at.
         double size = props.iconSize.value_or(ctx.inTitleBar ? kTitleBarIconSize : 16);
-        button.Content(Icons::Icon(props.icon, size));
+        xaml::FrameworkElement glyph = ctx.shadows.empty()
+            ? xaml::FrameworkElement(Icons::Icon(props.icon, size))
+            : Icons::Shadowed(ctx, props.icon, size, ctx.shadows, ctx.foreground ? *ctx.foreground : Paint{"icon.primary"});
+        button.Content(glyph);
         Styles::MakeSubtle(button);
         auto square = [button](double d) {
             double side = (std::max)(0.0, d);

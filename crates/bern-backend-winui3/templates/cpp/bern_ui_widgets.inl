@@ -1000,17 +1000,27 @@ struct LabelProps {
     bool iconOnly = false;
 };
 
+inline Paint IconForeground(Ctx const& ctx, char const* color, std::optional<Paint> const& styleFg = std::nullopt, bool accent = false) {
+    if (color) return Paint{color};
+    if (styleFg && styleFg->Given()) return *styleFg;
+    if (ctx.foreground && ctx.foreground->Given()) return *ctx.foreground;
+    return Paint{accent ? "on_accent" : "icon.primary"};
+}
+
 inline void Label(Parent const& p, Ctx const& ctx, LabelProps props) {
     auto title = Bound(ctx, props.title);
     if (props.iconOnly && props.icon) {
-        auto icon = Icons::Icon(props.icon, props.fontSize.value_or(16));
+        bool shadowed = !ctx.shadows.empty();
+        xaml::FrameworkElement icon = shadowed
+            ? Icons::Shadowed(ctx, props.icon, props.fontSize.value_or(16), ctx.shadows, IconForeground(ctx, props.color))
+            : xaml::FrameworkElement(Icons::Icon(props.icon, props.fontSize.value_or(16)));
         if (title)
             Reactive::Run([icon, title] {
                 auto name = title();
                 xaml::Automation::AutomationProperties::SetName(icon, name);
                 controls::ToolTipService::SetToolTip(icon, winrt::box_value(name));
             });
-        Place(p, Colored(icon, props.color));
+        Place(p, shadowed ? icon : Colored(icon, props.color));
         return;
     }
     // The icon scales with the text, as a symbol in a label does, and
@@ -1024,7 +1034,10 @@ inline void Label(Parent const& p, Ctx const& ctx, LabelProps props) {
     row.Orientation(controls::Orientation::Horizontal);
     row.Spacing((std::clamp)(std::round(size * 0.6), 4.0, 12.0));
     if (props.icon) {
-        auto icon = Icons::Icon(props.icon, std::round(size * 1.15));
+        double iconSize = std::round(size * 1.15);
+        xaml::FrameworkElement icon = ctx.shadows.empty()
+            ? xaml::FrameworkElement(Icons::Icon(props.icon, iconSize))
+            : Icons::Shadowed(ctx, props.icon, iconSize, ctx.shadows, IconForeground(ctx, props.color));
         icon.VerticalAlignment(xaml::VerticalAlignment::Center);
         row.Children().Append(icon);
     }
@@ -1509,7 +1522,8 @@ inline ButtonRun RunOf(Ctx const& ctx, std::optional<Field> pick, char const* fi
 /// Show `style!`'s look on a button: its lightweight resources, corner,
 /// padding and size; its scale, offset, opacity and shadow on `moving`.
 inline void StyleButton(controls::Button const& button, xaml::UIElement const& moving, StyleDef const* style, std::shared_ptr<ShadowImage> shadow = nullptr,
-    std::shared_ptr<ContentShadow> cast = nullptr) {
+    std::shared_ptr<ContentShadow> cast = nullptr, std::shared_ptr<ShadowedIconState> selfShadowedIcon = nullptr,
+    Paint defaultIconForeground = Paint{"icon.primary"}) {
     if (!style) return;
     if (style->draws) {
         auto resources = ButtonResources(*style, L"Button");
@@ -1528,31 +1542,43 @@ inline void StyleButton(controls::Button const& button, xaml::UIElement const& m
         if (!style->padding) button.Padding(xaml::Thickness{inline_, 0, inline_, 0});
     }
     auto state = std::make_shared<StyleState>();
-    auto changed = [weak = winrt::make_weak(moving), style, state, shadow, cast] {
+    auto initialized = std::make_shared<bool>(false);
+    auto changed = [weak = winrt::make_weak(moving), style, state, shadow, cast, selfShadowedIcon, defaultIconForeground, initialized] {
         auto element = weak.get();
         if (!element) return;
         MoveTo(element, *style, *state);
-        if (shadow || cast) {
+        if (shadow || cast || selfShadowedIcon) {
             bool quiet = false, system = false;
             auto look = Merged(*style, state->selected, state->hover, state->pressed, state->focus, state->disabled, quiet, system);
-            static Motion const fade{0.25, 1};
-            if (look.shadow) {
-                auto [radius, y, opacity] = *look.shadow;
-                if (cast) {
-                    cast->SetActive(true);
-                    cast->Set(radius, y, opacity);
+            if (selfShadowedIcon) selfShadowedIcon->SetForeground(look.foreground ? *look.foreground : defaultIconForeground);
+            if (shadow || cast) {
+                static Motion const fade{0.25, 1};
+                if (look.shadow) {
+                    auto [radius, y, opacity] = *look.shadow;
+                    if (cast) {
+                        cast->SetActive(true);
+                        cast->Set(radius, y, opacity);
+                    }
+                    if (shadow && (radius != shadow->radius || y != shadow->y || opacity != shadow->opacity)) {
+                        shadow->radius = radius;
+                        shadow->y = y;
+                        shadow->opacity = opacity;
+                        shadow->Draw();
+                    }
+                } else if (cast) {
+                    cast->SetActive(false);
                 }
-                if (shadow && (radius != shadow->radius || y != shadow->y || opacity != shadow->opacity)) {
-                    shadow->radius = radius;
-                    shadow->y = y;
-                    shadow->opacity = opacity;
-                    shadow->Draw();
+                xaml::UIElement shown = shadow ? xaml::UIElement(shadow->image) : xaml::UIElement(cast->host);
+                double targetOpacity = look.shadow ? 1 : 0;
+                if (!*initialized) {
+                    *initialized = true;
+                    LayerSet(shown, "state", 0, 0, 1, 1, targetOpacity);
+                } else {
+                    LayerTo(shown, "state", 0, 0, 1, 1, targetOpacity, &fade);
                 }
-            } else if (cast) {
-                cast->SetActive(false);
+            } else {
+                *initialized = true;
             }
-            xaml::UIElement shown = shadow ? xaml::UIElement(shadow->image) : xaml::UIElement(cast->host);
-            LayerTo(shown, "state", 0, 0, 1, 1, look.shadow ? 1 : 0, &fade);
         }
     };
     TrackState(button, state, changed);
@@ -1581,7 +1607,15 @@ inline controls::Grid Shadowed(controls::Button const& button, StyleDef const* s
         LayersOf(cast->host)->Get("state")->opacity->Set(0);
         wrapper.Children().InsertAt(0, cast->host);
         cast->Follow(button);
-        Reactive::OnCleanup([cast] { cast->Detach(); });
+        auto disposed = std::make_shared<bool>(false);
+        wrapper.Unloaded([cast, disposed](auto&&, auto&&) {
+            if (*disposed) cast->Detach();
+        });
+        Reactive::OnCleanup([cast, disposed, weak = winrt::make_weak(wrapper)] {
+            *disposed = true;
+            auto grid = weak.get();
+            if (!grid || !grid.IsLoaded()) cast->Detach();
+        });
         return wrapper;
     }
     shadow = std::make_shared<ShadowImage>();
@@ -1872,15 +1906,26 @@ inline xaml::FrameworkElement IconGlyph(Ctx const& ctx, IconButtonProps const& p
 inline void IconButton(Parent const& p, Ctx const& ctx, IconButtonProps props) {
     controls::Button button;
     if (!props.iconSize && ctx.inTitleBar) props.iconSize = kTitleBarIconSize;
-    xaml::FrameworkElement glyph = (props.iconProgress || props.badgeIcon)
-        ? IconGlyph(ctx, props)
-        : xaml::FrameworkElement(Icons::Icon(props.icon, props.iconSize.value_or(16)));
-    button.Content(Colored(glyph, props.color));
     std::string_view prominence = props.prominence ? props.prominence : "";
     bool sized = props.shape && props.shape->height.Given();
     bool accent = prominence == "prominent";
     bool plain = prominence == "plain";
     bool drawsSurface = props.style && (props.style->base.background || props.style->base.border || props.style->base.fill);
+    bool ownSelfShadow = props.style && Surfaceless(*props.style) && props.style->base.shadow.has_value()
+        && !(props.style->hover && props.style->hover->shadow) && !(props.style->pressed && props.style->pressed->shadow)
+        && !(props.style->selected && props.style->selected->shadow);
+    auto shadows = ctx.shadows;
+    if (ownSelfShadow) shadows.push_back(*props.style->base.shadow);
+    auto baseFg = IconForeground(ctx, props.color, props.style ? props.style->base.foreground : std::nullopt, accent);
+    std::shared_ptr<ShadowedIconState> selfShadowedIcon;
+    if (!shadows.empty() && !props.iconProgress && !props.badgeIcon)
+        selfShadowedIcon = ShadowedIconState::Create(ctx, props.icon, props.iconSize.value_or(16), std::move(shadows), baseFg);
+    xaml::FrameworkElement glyph = selfShadowedIcon
+        ? xaml::FrameworkElement(selfShadowedIcon->root)
+        : (props.iconProgress || props.badgeIcon)
+        ? IconGlyph(ctx, props)
+        : xaml::FrameworkElement(Icons::Icon(props.icon, props.iconSize.value_or(16)));
+    button.Content(selfShadowedIcon ? glyph : Colored(glyph, props.color));
     if (accent) {
         if (auto style = Styles::Named(L"AccentButtonStyle")) button.Style(style);
     } else if (plain || !drawsSurface) {
@@ -1929,8 +1974,8 @@ inline void IconButton(Parent const& p, Ctx const& ctx, IconButtonProps props) {
     if (props.style) {
         std::shared_ptr<ShadowImage> shadow;
         std::shared_ptr<ContentShadow> cast;
-        auto wrapper = Shadowed(button, props.style, shadow, cast);
-        StyleButton(button, wrapper, props.style, shadow, cast);
+        auto wrapper = (ownSelfShadow && selfShadowedIcon) ? Wrap(button) : Shadowed(button, props.style, shadow, cast);
+        StyleButton(button, wrapper, props.style, shadow, cast, selfShadowedIcon, baseFg);
         // The style's size is the square's, not a text button's padding.
         if (!sized && props.style->size && !props.style->padding) button.Padding(xaml::Thickness{0, 0, 0, 0});
         shown = wrapper;
@@ -4651,6 +4696,14 @@ inline void Layers(Parent const& p, Ctx const& ctx, LayersProps props, Build con
     }
     auto childCtx = ctx;
     if (overlayPage) childCtx.page = overlayPage;
+    if (auto style = props.style) {
+        if (style->base.foreground) childCtx.foreground = std::make_shared<Paint>(*style->base.foreground);
+        if (!Surfaceless(*style)) {
+            childCtx.shadows.clear();
+        } else if (style->base.shadow) {
+            childCtx.shadows.push_back(*style->base.shadow);
+        }
+    }
     children(Parent::Aligned(layers, h, v), childCtx);
     if (!props.underBars && ctx.win) {
         bool hasUnder = false, hasRegular = false;
