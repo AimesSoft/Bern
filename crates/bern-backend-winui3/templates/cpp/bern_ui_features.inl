@@ -1950,11 +1950,13 @@ struct ToastProps {
 };
 
 /// A short notice that shows when it appears or `key` changes and hides
-/// itself after `duration` seconds, read out politely: the system's
-/// InfoBar where it stands.
+/// itself after `duration` seconds, read out politely: a floating frosted
+/// acrylic capsule where it stands.
 inline void Toast(Parent const& p, Ctx const& ctx, ToastProps props) {
     controls::Grid place;
     place.HorizontalAlignment(xaml::HorizontalAlignment::Center);
+    place.Margin(xaml::Thickness{12, 0, 12, 16});
+    place.IsHitTestVisible(false);
     p.Add(place);
     auto shown = std::make_shared<xaml::UIElement>(nullptr);
     auto hide = [shown, place] {
@@ -1986,53 +1988,59 @@ inline void Toast(Parent const& p, Ctx const& ctx, ToastProps props) {
                 uint32_t index;
                 if (place.Children().IndexOf(*shown, index)) place.Children().RemoveAt(index);
             }
-#if BERN_WINUI
-            // The system's notice bar.
-            controls::InfoBar notice;
-            notice.Severity(controls::InfoBarSeverity::Informational);
-            notice.IsClosable(false);
-            if (!icon.empty() && bern::IconPath(icon)) {
-                notice.IsIconVisible(false);
-                controls::StackPanel row;
-                row.Orientation(controls::Orientation::Horizontal);
-                row.Spacing(12);
-                row.Margin(xaml::Thickness{0, 12, 16, 12});
-                auto glyph = Icons::Icon(icon, 16);
-                glyph.VerticalAlignment(xaml::VerticalAlignment::Center);
-                row.Children().Append(glyph);
-                controls::TextBlock label;
-                label.Text(text);
-                label.TextWrapping(xaml::TextWrapping::Wrap);
-                label.VerticalAlignment(xaml::VerticalAlignment::Center);
-                row.Children().Append(label);
-                notice.Content(row);
-            } else {
-                notice.Message(text);
-                if (!icon.empty()) notice.IconSource(Icons::Source(icon));
-            }
-            notice.IsOpen(true);
-#else
-            // The system XAML has no InfoBar: a bar of its shape.
             controls::Border notice;
-            notice.CornerRadius(xaml::CornerRadius{4, 4, 4, 4});
-            notice.Padding(xaml::Thickness{12, 10, 12, 10});
+            notice.CornerRadius(xaml::CornerRadius{20, 20, 20, 20});
+            notice.Padding(xaml::Thickness{16, 10, 16, 10});
             notice.BorderThickness(xaml::Thickness{1, 1, 1, 1});
-            if (auto style = Styles::Themed(L"Border", {{L"Background", L"SystemControlBackgroundChromeMediumLowBrush"}, {L"BorderBrush", Keys::Divider}}))
+            notice.IsHitTestVisible(false);
+            if (!ctx.appearance.empty())
+                notice.RequestedTheme(ctx.appearance == "dark" ? xaml::ElementTheme::Dark : xaml::ElementTheme::Light);
+            if (auto style = Styles::Themed(L"Border", {
+                    {L"Background", kWinUI ? L"AcrylicInAppFillColorDefaultBrush" : L"SystemControlAcrylicElementBrush"},
+                    {L"BorderBrush", kWinUI ? L"SurfaceStrokeColorFlyoutBrush" : L"SystemControlTransientBorderBrush"},
+                }))
                 notice.Style(style);
             controls::StackPanel row;
             row.Orientation(controls::Orientation::Horizontal);
-            row.Spacing(10);
-            if (!icon.empty()) row.Children().Append(Icons::Icon(icon));
+            row.Spacing(8);
+            row.VerticalAlignment(xaml::VerticalAlignment::Center);
+            if (!icon.empty()) {
+                auto glyph = Icons::Icon(icon, 16);
+                glyph.VerticalAlignment(xaml::VerticalAlignment::Center);
+                row.Children().Append(glyph);
+            }
             controls::TextBlock label;
+            if (auto textStyle = Styles::TextStyle("body")) label.Style(textStyle);
             label.Text(text);
             label.TextWrapping(xaml::TextWrapping::Wrap);
             label.VerticalAlignment(xaml::VerticalAlignment::Center);
             row.Children().Append(label);
             notice.Child(row);
-#endif
             xaml::Automation::AutomationProperties::SetLiveSetting(notice, xaml::Automation::Peers::AutomationLiveSetting::Polite);
             xaml::Automation::AutomationProperties::SetName(notice, text);
             auto wrapper = Wrap(notice);
+            wrapper.IsHitTestVisible(false);
+            auto shadow = std::make_shared<ShadowImage>();
+            shadow->radius = 12;
+            shadow->y = 4;
+            shadow->opacity = 0.16;
+            shadow->corner = 20;
+            shadow->image.IsHitTestVisible(false);
+            shadow->image.Stretch(media::Stretch::Fill);
+            wrapper.Children().InsertAt(0, shadow->image);
+            notice.SizeChanged([shadow, weak = winrt::make_weak(notice)](auto&&, xaml::SizeChangedEventArgs const& args) {
+                auto border = weak.get();
+                if (!border) return;
+                double w = args.NewSize().Width;
+                double h = args.NewSize().Height;
+                double r = (std::min)(w, h) * 0.5;
+                border.CornerRadius(xaml::CornerRadius{r, r, r, r});
+                shadow->width = w;
+                shadow->height = h;
+                shadow->corner = r;
+                shadow->scale = ScaleOf(border);
+                shadow->Draw();
+            });
             place.Children().Append(wrapper);
             *shown = wrapper;
             LayerSet(wrapper, "enter", 0, 24, 1, 1, 0);
