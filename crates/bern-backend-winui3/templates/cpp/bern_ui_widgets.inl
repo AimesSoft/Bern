@@ -5747,30 +5747,15 @@ inline std::shared_ptr<Scope> LaterScope() {
     return scope;
 }
 
-/// Pictures read lately, by file or resource, so that a page showing them
-/// again shows them at once; at most 64 MB are kept, the least lately
-/// used going first.
+/// Pictures read lately, by file, resource or url, so that a page showing
+/// them again shows them at once; at most 64 MiB are kept across front ends,
+/// thread-safely, the least lately used going first.
 namespace Recent {
-inline std::vector<std::pair<std::wstring, std::shared_ptr<std::vector<uint8_t>>>> kept;
-inline size_t size = 0;
 inline std::shared_ptr<std::vector<uint8_t>> Find(std::wstring const& key) {
-    for (size_t at = 0; at < kept.size(); ++at)
-        if (kept[at].first == key) {
-            auto found = kept[at];
-            kept.erase(kept.begin() + static_cast<ptrdiff_t>(at));
-            kept.push_back(found);
-            return found.second;
-        }
-    return nullptr;
+    return bern::pictures::MemoryFind(key);
 }
 inline void Keep(std::wstring const& key, std::shared_ptr<std::vector<uint8_t>> const& bytes) {
-    if (bytes->empty() || bytes->size() > (8u << 20) || Find(key)) return;
-    kept.emplace_back(key, bytes);
-    size += bytes->size();
-    while (size > (24u << 20) && !kept.empty()) {
-        size -= kept.front().second->size();
-        kept.erase(kept.begin());
-    }
+    bern::pictures::MemoryKeep(key, bytes);
 }
 }
 
@@ -5831,6 +5816,7 @@ inline void ShowRead(controls::Grid const& frame, Ctx const& ctx, std::wstring k
 /// unless that has ended meanwhile. A view that leaves stops trying, and
 /// one that appears starts over.
 inline winrt::fire_and_forget ShowDownloaded(winrt::weak_ref<controls::Grid> weak, Ctx ctx, std::wstring key, std::string url, PictureProps picture, TextFn name, std::shared_ptr<Scope> owner) {
+    if (app && !app->catalog.bundleId.empty()) bern::pictures::SetBundleId(app->catalog.bundleId);
     auto waiter = std::make_shared<bern::pictures::Waiter>();
     winrt::apartment_context ui;
     auto holder = weak.get();
@@ -5847,8 +5833,11 @@ inline winrt::fire_and_forget ShowDownloaded(winrt::weak_ref<controls::Grid> wea
         frame.Children().Clear();
         co_return;
     }
-    auto bytes = std::make_shared<std::vector<uint8_t>>(buffer.data(), buffer.data() + buffer.Length());
-    Recent::Keep(key, bytes);
+    auto bytes = Recent::Find(key);
+    if (!bytes) {
+        bytes = std::make_shared<std::vector<uint8_t>>(buffer.data(), buffer.data() + buffer.Length());
+        Recent::Keep(key, bytes);
+    }
     owner->Run([&] { ShowPicture(frame, ctx, bytes, picture, name, owner); });
 }
 
@@ -5983,6 +5972,7 @@ inline void Image(Parent const& p, Ctx const& ctx, ImageProps props) {
                     std::string served = *next;
                     ShowRead(frame, ctx, L"served:" + std::wstring(Wide(served)), [served] { return Host::ServedBytes(served); }, served, picture, name);
                 } else {
+                    if (app && !app->catalog.bundleId.empty()) bern::pictures::SetBundleId(app->catalog.bundleId);
                     std::wstring key = L"url:" + std::wstring(Wide(*next));
                     if (auto bytes = Recent::Find(key)) ShowPicture(frame, ctx, bytes, picture, name, LaterScope());
                     else {

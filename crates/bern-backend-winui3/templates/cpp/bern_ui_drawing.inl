@@ -328,6 +328,7 @@ inline bool Decodable(uint8_t const* bytes, size_t size) {
 /// The bytes at an http(s) address once they come, for as long as `waiter`
 /// waits; nothing after that.
 inline winrt::Windows::Foundation::IAsyncOperation<winrt::Windows::Storage::Streams::IBuffer> Download(std::string url, std::shared_ptr<bern::pictures::Waiter> waiter) {
+    if (app && !app->catalog.bundleId.empty()) bern::pictures::SetBundleId(app->catalog.bundleId);
     co_return co_await bern::pictures::Until(std::move(url), std::move(waiter), [](auto const& bytes) { return Decodable(bytes.data(), bytes.Length()); });
 }
 
@@ -354,7 +355,16 @@ inline std::map<std::string, std::shared_ptr<Entry>>& Entries() {
 inline winrt::fire_and_forget Load(std::string url, std::shared_ptr<Entry> entry) {
     winrt::apartment_context ui;
     try {
+        if (app && !app->catalog.bundleId.empty()) bern::pictures::SetBundleId(app->catalog.bundleId);
+        if (auto cached = bern::pictures::MemoryFind(bern::pictures::UrlKey(url)); cached && !cached->empty()) {
+            co_await winrt::resume_background();
+            auto color = Average(cached->data(), cached->size());
+            co_await ui;
+            if (color) entry->average.Set(color);
+            co_return;
+        }
         auto buffer = co_await Read(url);
+        if (!buffer || buffer.Length() == 0) co_return;
         co_await winrt::resume_background();
         auto color = Average(buffer.data(), buffer.Length());
         co_await ui;
