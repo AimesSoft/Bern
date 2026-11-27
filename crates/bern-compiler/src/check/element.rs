@@ -162,6 +162,15 @@ impl Checker<'_> {
                 self.error(span, "`hold_after` on `Shortcut` must be greater than 0");
             }
         }
+        if parts.kind == "Hover"
+            && let Some(ir::Prop::Number { value }) = parts.props.get("delay")
+            && (!value.is_finite() || *value < 0.0)
+        {
+            let span = element
+                .prop("delay")
+                .map_or(element.span, |prop| prop.value.span());
+            self.error(span, "`delay` on `Hover` must be a finite number >= 0");
+        }
         if parts.kind == "TreeView"
             && let Some(Type::Record { name: rec_name }) = parts.item_ty.as_ref()
             && let Some(def) = self.types.record_def(rec_name)

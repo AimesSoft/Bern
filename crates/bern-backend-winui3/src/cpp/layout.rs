@@ -42,6 +42,37 @@ impl Generator<'_> {
 
     /// `Column` and `Row`: a stack along their axis.
     pub(super) fn stack(&self, out: &mut Out, element: &Element) {
+        if let Some(each) = bern_ir::lazy_row_items(element)
+            && let (Some(items), Some(template), Some(Prop::Key { field, .. })) =
+                (each.expr("items"), &each.template, each.prop("key"))
+        {
+            let props = designated(&[
+                ("gap", self.len(element, "gap")),
+                ("padding", self.len(element, "padding")),
+                ("width", self.len(element, "width")),
+                ("height", self.len(element, "height")),
+                ("align", Self::keyword(element, "align")),
+                ("animate", Self::animate(element)),
+                ("paddingX", self.len(element, "padding_x")),
+                ("paddingY", self.len(element, "padding_y")),
+            ]);
+            let each_props = designated(&[
+                ("items", Some(self.getter(items))),
+                ("key", Some(field.to_string())),
+                ("variable", Some(string(&template.var))),
+                (
+                    "stagger",
+                    Self::number(each, "stagger").or_else(|| Self::number(element, "stagger")),
+                ),
+                ("reflow", Self::reflow(each)),
+            ]);
+            self.call(
+                out,
+                &format!("B::LazyRow(p, c, {props}, {each_props}, "),
+                &each.children,
+            );
+            return;
+        }
         let title_bar = element.kind == "Row"
             && element
                 .children

@@ -1802,6 +1802,56 @@ fn is_leading_words(node: &Node) -> bool {
     }
 }
 
+/// The `ForEach` of a row that, standing in a horizontal scroll view, builds
+/// only the items near what is in sight: a row marked `lazy: true` by
+/// [`lower_lists`], without `reflow`, whose visual content is a single keyed
+/// `ForEach` without `Spacer`.
+pub fn lazy_row_items(row: &Element) -> Option<&Element> {
+    if row.keyword("lazy") != Some("true") {
+        return None;
+    }
+    keyed_for_each_without_spacer(row)
+}
+
+fn keyed_for_each_without_spacer(row: &Element) -> Option<&Element> {
+    if row.kind != "Row" || row.prop("reflow").is_some() {
+        return None;
+    }
+    let mut content = row.content();
+    match (content.next(), content.next()) {
+        (Some(Node::Element(each)), None)
+            if each.kind == "ForEach"
+                && each.template.is_some()
+                && each.expr("items").is_some()
+                && matches!(each.prop("key"), Some(Prop::Key { .. }))
+                && !nodes_have_direct_spacer(&each.children) =>
+        {
+            Some(each)
+        }
+        _ => None,
+    }
+}
+
+fn nodes_have_direct_spacer(nodes: &[Node]) -> bool {
+    nodes.iter().any(|node| match node {
+        Node::Element(element) if element.kind == "Spacer" => true,
+        Node::If(node) => {
+            node.branches
+                .iter()
+                .any(|(_, body)| nodes_have_direct_spacer(body))
+                || nodes_have_direct_spacer(&node.otherwise)
+        }
+        Node::IfLet(node) => {
+            nodes_have_direct_spacer(&node.then) || nodes_have_direct_spacer(&node.otherwise)
+        }
+        Node::Match(node) => node
+            .arms
+            .iter()
+            .any(|arm| nodes_have_direct_spacer(&arm.body)),
+        _ => false,
+    })
+}
+
 /// The `ForEach` of a grid that, standing in a vertical scroll view, builds
 /// only the rows near what is in sight: a grid whose one child is a keyed
 /// `ForEach`, not laid out as masonry. Every target builds such a grid
@@ -1874,101 +1924,134 @@ pub fn lower_lists(app: &mut Application) {
     lower_bodies(&mut windows, &mut components);
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ScrollAxis {
+    None,
+    Vertical,
+    Horizontal,
+}
+
 /// [`lower_lists`] over the contents of the windows and the bodies of the
 /// components, by name.
 fn lower_bodies(windows: &mut [&mut Node], components: &mut [(&str, &mut Node)]) {
-    // Which components are only ever shown inside a vertical scroll view,
-    // found by going over the tree until nothing changes.
-    let mut scrolled: BTreeMap<String, bool> = components
+    // Which scroll axis (if any) each component is uniformly shown inside,
+    // found by going over the tree until nothing changes. `None` in the map
+    // value means not yet reached from any concrete call site.
+    let mut axes: BTreeMap<String, Option<ScrollAxis>> = components
         .iter()
-        .map(|(name, _)| (name.to_string(), true))
+        .map(|(name, _)| (name.to_string(), None))
         .collect();
     loop {
-        let mut calls: BTreeMap<String, bool> = BTreeMap::new();
-        let mut note = |name: &str, inside: bool| {
-            let entry = calls.entry(name.to_string()).or_insert(true);
-            *entry = *entry && inside;
+        let mut calls: BTreeMap<String, ScrollAxis> = BTreeMap::new();
+        let mut note = |name: &str, incoming: Option<ScrollAxis>| {
+            let Some(incoming) = incoming else {
+                return;
+            };
+            calls
+                .entry(name.to_string())
+                .and_modify(|existing| {
+                    if *existing != incoming {
+                        *existing = ScrollAxis::None;
+                    }
+                })
+                .or_insert(incoming);
         };
         for window in windows.iter() {
-            calls_in(window, false, &mut note);
+            calls_in(window, Some(ScrollAxis::None), &mut note);
         }
         for (name, body) in components.iter() {
-            calls_in(body, scrolled[*name], &mut note);
+            calls_in(body, axes[*name], &mut note);
         }
-        let next: BTreeMap<String, bool> = scrolled
+        let next: BTreeMap<String, Option<ScrollAxis>> = axes
             .keys()
-            .map(|name| (name.clone(), calls.get(name).copied().unwrap_or(false)))
+            .map(|name| {
+                (
+                    name.clone(),
+                    Some(calls.get(name).copied().unwrap_or(ScrollAxis::None)),
+                )
+            })
             .collect();
-        if next == scrolled {
+        if next == axes {
             break;
         }
-        scrolled = next;
+        axes = next;
     }
     for window in windows.iter_mut() {
-        lower_in(window, false);
+        lower_in(window, ScrollAxis::None);
     }
     for (name, body) in components.iter_mut() {
-        lower_in(body, scrolled[*name]);
+        lower_in(body, axes[*name].unwrap_or(ScrollAxis::None));
     }
 }
 
-/// Whether what an element contains scrolls with a vertical scroll view
-/// around it, given whether the element itself does.
-fn scrolls_inside(element: &Element, scrolling: bool) -> bool {
+/// The scroll axis of what `element` contains, given the enclosing `axis`.
+fn scroll_axis(element: &Element, axis: Option<ScrollAxis>) -> Option<ScrollAxis> {
     match element.kind.as_str() {
-        "ScrollView" => element.keyword("axis") != Some("horizontal"),
+        "ScrollView" => Some(if element.keyword("axis") == Some("horizontal") {
+            ScrollAxis::Horizontal
+        } else {
+            ScrollAxis::Vertical
+        }),
         // A layer or page of its own, shown apart from the scroll view.
         "Modal" | "Alert" | "PopoverButton" | "Menu" | "ContextMenu" | "Toolbar" | "SplitView"
         | "Sidebar" | "Detail" | "DetailFooter" | "Tabs" | "Tab" | "TabAccessory"
-        | "Navigation" | "Destination" | "Window" | "WindowSet" | "Form" | "Table" => false,
-        _ => scrolling,
+        | "Navigation" | "Destination" | "Window" | "WindowSet" | "Form" | "Table" => {
+            Some(ScrollAxis::None)
+        }
+        _ => axis,
     }
 }
 
-fn calls_in(node: &Node, scrolling: bool, note: &mut impl FnMut(&str, bool)) {
+fn calls_in(
+    node: &Node,
+    axis: Option<ScrollAxis>,
+    note: &mut impl FnMut(&str, Option<ScrollAxis>),
+) {
     match node {
         Node::Element(element) => {
-            let inside = scrolls_inside(element, scrolling);
+            let inside = scroll_axis(element, axis);
             for child in &element.children {
                 calls_in(child, inside, note);
             }
         }
-        Node::Component(call) => note(&call.component, scrolling),
+        Node::Component(call) => note(&call.component, axis),
         Node::If(node) => {
             for (_, body) in &node.branches {
-                body.iter()
-                    .for_each(|child| calls_in(child, scrolling, note));
+                body.iter().for_each(|child| calls_in(child, axis, note));
             }
             node.otherwise
                 .iter()
-                .for_each(|child| calls_in(child, scrolling, note));
+                .for_each(|child| calls_in(child, axis, note));
         }
         Node::IfLet(node) => {
             node.then
                 .iter()
                 .chain(&node.otherwise)
-                .for_each(|child| calls_in(child, scrolling, note));
+                .for_each(|child| calls_in(child, axis, note));
         }
         Node::Match(node) => {
             for arm in &node.arms {
                 arm.body
                     .iter()
-                    .for_each(|child| calls_in(child, scrolling, note));
+                    .for_each(|child| calls_in(child, axis, note));
             }
         }
     }
 }
 
-fn lower_in(node: &mut Node, scrolling: bool) {
+fn lower_in(node: &mut Node, axis: ScrollAxis) {
     match node {
         Node::Element(element) => {
-            let inside = scrolls_inside(element, scrolling);
+            let inside = scroll_axis(element, Some(axis)).unwrap_or(ScrollAxis::None);
             // What the rows hold first, so that the column a row's parts
             // are put in below is not taken for one of the app's.
             for child in &mut element.children {
                 lower_in(child, inside);
             }
-            if inside && element.kind == "Column" && element.prop("reflow").is_none() {
+            if inside == ScrollAxis::Vertical
+                && element.kind == "Column"
+                && element.prop("reflow").is_none()
+            {
                 let look = ListLook {
                     gap: element.prop("gap").cloned(),
                     align: element.keyword("align").unwrap_or("leading").to_string(),
@@ -1977,28 +2060,35 @@ fn lower_in(node: &mut Node, scrolling: bool) {
                 };
                 let mut count = 0;
                 lower_rows(&mut element.children, &look, &mut count);
+            } else if inside == ScrollAxis::Horizontal
+                && keyed_for_each_without_spacer(element).is_some()
+            {
+                element.props.insert(
+                    "lazy".into(),
+                    Prop::Keyword {
+                        value: "true".into(),
+                    },
+                );
             }
         }
         Node::Component(_) => {}
         Node::If(node) => {
             for (_, body) in &mut node.branches {
-                body.iter_mut().for_each(|child| lower_in(child, scrolling));
+                body.iter_mut().for_each(|child| lower_in(child, axis));
             }
             node.otherwise
                 .iter_mut()
-                .for_each(|child| lower_in(child, scrolling));
+                .for_each(|child| lower_in(child, axis));
         }
         Node::IfLet(node) => {
             node.then
                 .iter_mut()
                 .chain(&mut node.otherwise)
-                .for_each(|child| lower_in(child, scrolling));
+                .for_each(|child| lower_in(child, axis));
         }
         Node::Match(node) => {
             for arm in &mut node.arms {
-                arm.body
-                    .iter_mut()
-                    .for_each(|child| lower_in(child, scrolling));
+                arm.body.iter_mut().for_each(|child| lower_in(child, axis));
             }
         }
     }
@@ -2484,5 +2574,130 @@ mod tests {
             lazy_grid_items(&grid).is_some(),
             "pointer events stand beside the grid, not among its cells"
         );
+    }
+
+    #[test]
+    fn horizontal_row_of_keyed_foreach_is_marked_lazy_unless_blocked() {
+        let horiz = |children: Vec<Node>| {
+            with_props(
+                element("ScrollView", children),
+                &[(
+                    "axis",
+                    Prop::Keyword {
+                        value: "horizontal".into(),
+                    },
+                )],
+            )
+        };
+        let mut lazy_tree = horiz(vec![element(
+            "Row",
+            vec![keyed_rows(), element("Hover", vec![])],
+        )]);
+        let mut vertical_tree = element("ScrollView", vec![element("Row", vec![keyed_rows()])]);
+        let mut with_spacer = horiz(vec![element(
+            "Row",
+            vec![keyed_rows(), element("Spacer", vec![])],
+        )]);
+        let mut with_reflow = horiz(vec![with_props(
+            element("Row", vec![keyed_rows()]),
+            &[(
+                "reflow",
+                Prop::Keyword {
+                    value: "smooth".into(),
+                },
+            )],
+        )]);
+        let mut multi_children = horiz(vec![element(
+            "Row",
+            vec![element("Text", vec![]), keyed_rows()],
+        )]);
+        let mut each_with_spacer = keyed_rows();
+        if let Node::Element(each) = &mut each_with_spacer {
+            each.children.push(element("Spacer", vec![]));
+        }
+        let mut row_each_spacer = horiz(vec![element("Row", vec![each_with_spacer])]);
+
+        let vertical_before = vertical_tree.clone();
+        let spacer_before = with_spacer.clone();
+        let reflow_before = with_reflow.clone();
+        let multi_before = multi_children.clone();
+        let row_each_spacer_before = row_each_spacer.clone();
+
+        lower_bodies(
+            &mut [
+                &mut lazy_tree,
+                &mut vertical_tree,
+                &mut with_spacer,
+                &mut with_reflow,
+                &mut multi_children,
+                &mut row_each_spacer,
+            ],
+            &mut [],
+        );
+
+        let Node::Element(scroll) = &lazy_tree else {
+            unreachable!()
+        };
+        let Node::Element(row) = &scroll.children[0] else {
+            unreachable!()
+        };
+        assert_eq!(row.keyword("lazy"), Some("true"));
+        assert!(lazy_row_items(row).is_some());
+
+        assert_eq!(vertical_tree, vertical_before);
+        assert_eq!(with_spacer, spacer_before);
+        assert_eq!(with_reflow, reflow_before);
+        assert_eq!(multi_children, multi_before);
+        assert_eq!(row_each_spacer, row_each_spacer_before);
+    }
+
+    #[test]
+    fn cross_component_horizontal_scroll_requires_uniform_axis() {
+        let call = |name: &str| {
+            Node::Component(ComponentRef {
+                component: name.into(),
+                args: vec![],
+                source: SourceLocation::default(),
+            })
+        };
+        let mut horiz_window = with_props(
+            element("ScrollView", vec![call("cards")]),
+            &[(
+                "axis",
+                Prop::Keyword {
+                    value: "horizontal".into(),
+                },
+            )],
+        );
+        let mut mixed_window = element(
+            "Column",
+            vec![
+                element("ScrollView", vec![call("mixed")]),
+                with_props(
+                    element("ScrollView", vec![call("mixed")]),
+                    &[(
+                        "axis",
+                        Prop::Keyword {
+                            value: "horizontal".into(),
+                        },
+                    )],
+                ),
+            ],
+        );
+        let mut cards = element("Row", vec![keyed_rows()]);
+        let mut mixed = element("Row", vec![keyed_rows()]);
+        let mixed_before = mixed.clone();
+
+        lower_bodies(
+            &mut [&mut horiz_window, &mut mixed_window],
+            &mut [("cards", &mut cards), ("mixed", &mut mixed)],
+        );
+
+        let Node::Element(cards_row) = &cards else {
+            unreachable!()
+        };
+        assert_eq!(cards_row.keyword("lazy"), Some("true"));
+        assert!(lazy_row_items(cards_row).is_some());
+        assert_eq!(mixed, mixed_before);
     }
 }

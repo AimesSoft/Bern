@@ -99,6 +99,10 @@ impl MemoryCache {
         }
     }
 
+    fn contains(&self, url: &str) -> bool {
+        self.entries.contains_key(url)
+    }
+
     fn get(&mut self, url: &str) -> Option<Arc<Vec<u8>>> {
         let entry = self.entries.get_mut(url)?;
         self.clock += 1;
@@ -349,14 +353,54 @@ fn is_loopback(url: &str) -> bool {
     }
 }
 
-/// Executor-agnostic async semaphore bounding concurrent remote downloads.
+/// Download priority for a remote picture URL.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[allow(dead_code)]
+pub(crate) enum Priority {
+    Low = 0,
+    #[default]
+    Normal = 1,
+    High = 2,
+}
+
+static PRIORITIES: LazyLock<Mutex<HashMap<String, Priority>>> = LazyLock::new(Mutex::default);
+
+fn priority_of(url: &str) -> Option<Priority> {
+    PRIORITIES.lock().unwrap().get(url).copied()
+}
+
+pub(crate) fn set_priority(url: &str, priority: Priority) {
+    {
+        let mut priorities = PRIORITIES.lock().unwrap();
+        let entry = priorities.entry(url.to_string()).or_insert(priority);
+        if priority > *entry {
+            *entry = priority;
+        }
+    }
+    DOWNLOAD_SEMAPHORE.promote(url, priority);
+}
+
+pub(crate) fn is_memory_cached(url: &str) -> bool {
+    !is_loopback(url) && MEMORY_CACHE.lock().unwrap().contains(url)
+}
+
+/// Executor-agnostic async semaphore bounding concurrent remote downloads,
+/// waking the highest-priority waiter first (FIFO within the same priority).
 struct Semaphore {
     state: Mutex<SemaphoreState>,
 }
 
+struct SemaphoreWaiter {
+    url: String,
+    priority: Priority,
+    seq: u64,
+    tx: oneshot::Sender<()>,
+}
+
 struct SemaphoreState {
     available: usize,
-    waiters: VecDeque<oneshot::Sender<()>>,
+    seq: u64,
+    waiters: Vec<SemaphoreWaiter>,
 }
 
 struct Permit<'a> {
@@ -373,20 +417,42 @@ impl Semaphore {
         Self {
             state: Mutex::new(SemaphoreState {
                 available: limit,
-                waiters: VecDeque::new(),
+                seq: 0,
+                waiters: Vec::new(),
             }),
         }
     }
 
     fn wake_next(state: &mut SemaphoreState) {
-        while let Some(tx) = state.waiters.pop_front() {
-            if tx.send(()).is_ok() {
+        while !state.waiters.is_empty() {
+            let Some(idx) = state
+                .waiters
+                .iter()
+                .enumerate()
+                .max_by(|(_, a), (_, b)| {
+                    a.priority.cmp(&b.priority).then_with(|| b.seq.cmp(&a.seq))
+                })
+                .map(|(idx, _)| idx)
+            else {
+                break;
+            };
+            let waiter = state.waiters.swap_remove(idx);
+            if waiter.tx.send(()).is_ok() {
                 break;
             }
         }
     }
 
-    async fn acquire(&self) -> Permit<'_> {
+    fn promote(&self, url: &str, priority: Priority) {
+        let mut state = self.state.lock().unwrap();
+        for waiter in &mut state.waiters {
+            if waiter.url == url && priority > waiter.priority {
+                waiter.priority = priority;
+            }
+        }
+    }
+
+    async fn acquire(&self, url: &str, priority: Priority) -> Permit<'_> {
         let mut guard = AcquireGuard {
             sem: self,
             acquired: false,
@@ -399,8 +465,16 @@ impl Semaphore {
                     guard.acquired = true;
                     return Permit { sem: self };
                 }
+                let effective = priority_of(url).map_or(priority, |p| p.max(priority));
+                let seq = state.seq;
+                state.seq = state.seq.wrapping_add(1);
                 let (tx, rx) = oneshot::channel();
-                state.waiters.push_back(tx);
+                state.waiters.push(SemaphoreWaiter {
+                    url: url.to_string(),
+                    priority: effective,
+                    seq,
+                    tx,
+                });
                 rx
             };
             let _ = rx.await;
@@ -545,7 +619,8 @@ impl HttpClient for Patient {
 /// One try at `url`, on the client's runtime: its read timeout runs on
 /// that runtime's timers.
 async fn read(client: Arc<ReqwestClient>, url: String) -> Reading {
-    let _permit = DOWNLOAD_SEMAPHORE.acquire().await;
+    let priority = priority_of(&url).unwrap_or_default();
+    let _permit = DOWNLOAD_SEMAPHORE.acquire(&url, priority).await;
     let reading = reqwest_client::runtime().spawn(async move {
         let Ok(mut response) = client.get(&url, AsyncBody::empty(), true).await else {
             return Reading::Unreachable;
@@ -718,6 +793,7 @@ fn abandon_if_unused(url: &str, entry: &Arc<InFlight>) -> bool {
         .is_some_and(|current| Arc::ptr_eq(current, entry))
     {
         in_flight.remove(url);
+        PRIORITIES.lock().unwrap().remove(url);
     }
     true
 }
@@ -730,6 +806,7 @@ fn finish_in_flight(url: &str, entry: &Arc<InFlight>, result: FetchResult) {
             .is_some_and(|current| Arc::ptr_eq(current, entry))
         {
             in_flight.remove(url);
+            PRIORITIES.lock().unwrap().remove(url);
         }
     }
     let waiters = {
@@ -1360,5 +1437,49 @@ mod tests {
         drop(views);
         let peak = max_active.load(Ordering::SeqCst);
         assert!(peak <= MAX_CONCURRENT_REQUESTS, "peak={peak}");
+    }
+
+    #[test]
+    fn semaphore_wakes_highest_priority_and_supports_promotion() {
+        let sem: &'static Semaphore = Box::leak(Box::new(Semaphore::new(1)));
+        let hold = block_on(sem.acquire("http://example.com/hold", Priority::Normal));
+
+        let order = Arc::new(Mutex::new(Vec::<&'static str>::new()));
+        let spawn_waiter =
+            |label: &'static str, url: &'static str, prio: Priority, expected: usize| {
+                let order = order.clone();
+                let handle = spawn(move || {
+                    let _p = block_on(sem.acquire(url, prio));
+                    order.lock().unwrap().push(label);
+                });
+                while sem.state.lock().unwrap().waiters.len() < expected {
+                    sleep(Duration::from_millis(1));
+                }
+                handle
+            };
+
+        let h_low = spawn_waiter("low", "http://example.com/low", Priority::Low, 1);
+        let h_norm1 = spawn_waiter("norm1", "http://example.com/norm1", Priority::Normal, 2);
+        let h_promo = spawn_waiter("promo", "http://example.com/promo", Priority::Low, 3);
+        let h_high = spawn_waiter("high", "http://example.com/high", Priority::High, 4);
+
+        sem.promote("http://example.com/promo", Priority::High);
+        drop(hold);
+        for handle in [h_low, h_norm1, h_promo, h_high] {
+            handle.join().unwrap();
+        }
+        assert_eq!(
+            *order.lock().unwrap(),
+            vec!["promo", "high", "norm1", "low"]
+        );
+
+        let url = "https://example.com/mem-hit-test.png";
+        assert!(!is_memory_cached(url));
+        MEMORY_CACHE
+            .lock()
+            .unwrap()
+            .insert(url, Arc::new(faulty_server::PICTURE.to_vec()));
+        assert!(is_memory_cached(url));
+        assert!(!is_memory_cached("http://127.0.0.1:8080/loopback.png"));
     }
 }

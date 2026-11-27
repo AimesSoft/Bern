@@ -2340,9 +2340,19 @@ impl DecodeBox {
     }
 }
 
-/// Pictures from state already decoded, by URL and decoding size, the
-/// most recently shown last; at most `TEXTURE_CACHE_BYTES` of pixels.
-type TextureKey = (String, (u32, u32, bool));
+/// Pictures from state already decoded, by URL, decoding size and
+/// quantized static blur, the most recently shown last; at most
+/// `TEXTURE_CACHE_BYTES` of pixels.
+type TextureKey = (String, (u32, u32, bool), u32);
+
+fn texture_key(url: &str, wanted: DecodeBox, blur: f64) -> TextureKey {
+    let quantized = if blur >= 0.2 && blur.is_finite() {
+        (blur * 10.0).round() as u32
+    } else {
+        0
+    };
+    (url.to_string(), wanted.key(), quantized)
+}
 
 thread_local! {
     static TEXTURES: RefCell<std::collections::VecDeque<(TextureKey, gtk::gdk::Texture, usize)>> =
@@ -2377,9 +2387,111 @@ fn cache_texture(key: TextureKey, texture: &gtk::gdk::Texture) {
     });
 }
 
+/// 3-pass separable box blur approximating a Gaussian of `sigma` pixels
+/// over premultiplied RGBA `pixels`, clamping at image edges.
+fn blur_premultiplied_rgba(pixels: &mut [u8], width: usize, height: usize, sigma: f32) {
+    if sigma < 0.2 || width == 0 || height == 0 || pixels.len() != width * height * 4 {
+        return;
+    }
+    let mut lower = (4.0 * sigma * sigma + 1.0).sqrt().floor() as i64;
+    if lower % 2 == 0 {
+        lower -= 1;
+    }
+    let lower = lower.max(1) as usize;
+    let upper = lower + 2;
+    let lf = lower as f32;
+    let m = ((12.0 * sigma * sigma - 3.0 * lf * lf - 12.0 * lf - 9.0) / (-4.0 * lf - 4.0)).round()
+        as i64;
+    let boxes = [0i64, 1, 2].map(|i| if i < m { lower } else { upper });
+
+    let mut a: Vec<[f32; 4]> = pixels
+        .chunks_exact(4)
+        .map(|p| {
+            [
+                f32::from(p[0]),
+                f32::from(p[1]),
+                f32::from(p[2]),
+                f32::from(p[3]),
+            ]
+        })
+        .collect();
+    let mut b = vec![[0.0f32; 4]; a.len()];
+    let pass = |from: &[[f32; 4]],
+                to: &mut [[f32; 4]],
+                lines: usize,
+                len: usize,
+                along: usize,
+                across: usize,
+                bw: usize| {
+        let r = bw / 2;
+        let scale = 1.0 / bw as f32;
+        for line in 0..lines {
+            let base = line * across;
+            let mut sum = [0.0f32; 4];
+            for d in -(r as isize)..=(r as isize) {
+                let p = from[base + d.clamp(0, len as isize - 1) as usize * along];
+                for k in 0..4 {
+                    sum[k] += p[k];
+                }
+            }
+            for i in 0..len {
+                to[base + i * along] = sum.map(|v| v * scale);
+                let enter = from[base + (i + r + 1).min(len - 1) * along];
+                let leave = from[base + i.saturating_sub(r) * along];
+                for k in 0..4 {
+                    sum[k] += enter[k] - leave[k];
+                }
+            }
+        }
+    };
+    for bw in boxes {
+        if bw <= 1 {
+            continue;
+        }
+        pass(&a, &mut b, height, width, 1, width, bw);
+        pass(&b, &mut a, width, height, width, 1, bw);
+    }
+    for (src, dst) in a.iter().zip(pixels.chunks_exact_mut(4)) {
+        for k in 0..4 {
+            dst[k] = src[k].round().clamp(0.0, 255.0) as u8;
+        }
+    }
+}
+
+/// Convert a declared point blur radius to pixel sigma for a decoded
+/// `width` × `height` bitmap.
+pub(crate) fn blur_sigma(
+    blur: f64,
+    width: i32,
+    height: i32,
+    display_w: Option<f64>,
+    display_h: Option<f64>,
+) -> f32 {
+    if !blur.is_finite() || blur < 0.2 || width <= 0 || height <= 0 {
+        return 0.0;
+    }
+    let scale = match (display_w, display_h) {
+        (Some(dw), Some(dh)) if dw > 0.0 && dh > 0.0 => {
+            (f64::from(width) / dw).max(f64::from(height) / dh)
+        }
+        (Some(dw), _) if dw > 0.0 => f64::from(width) / dw,
+        (_, Some(dh)) if dh > 0.0 => f64::from(height) / dh,
+        _ => {
+            let longer = f64::from(width.max(height));
+            return (blur * (longer / 960.0)).clamp(1.0, (longer * 0.25).max(1.0)) as f32;
+        }
+    };
+    (blur * scale) as f32
+}
+
 /// Decode `bytes` at the size `wanted` asks for, upright, into a texture
-/// of premultiplied RGBA. Runs off the interface thread.
-fn decode_texture(bytes: &glib::Bytes, wanted: DecodeBox) -> Option<gtk::gdk::Texture> {
+/// of premultiplied RGBA (optionally blurred). Runs off the interface thread.
+fn decode_texture(
+    bytes: &glib::Bytes,
+    wanted: DecodeBox,
+    blur: f64,
+    display: (Option<f64>, Option<f64>),
+) -> Option<gtk::gdk::Texture> {
     let loader = gtk::gdk_pixbuf::PixbufLoader::new();
     loader.connect_size_prepared(move |loader, width, height| {
         if let Some((w, h)) = wanted.size_for(width, height) {
@@ -2390,7 +2502,15 @@ fn decode_texture(bytes: &glib::Bytes, wanted: DecodeBox) -> Option<gtk::gdk::Te
     let closed = loader.close();
     written.and(closed).ok()?;
     let pixbuf = loader.pixbuf()?;
-    premultiplied_texture(&pixbuf.apply_embedded_orientation().unwrap_or(pixbuf))
+    let upright = pixbuf.apply_embedded_orientation().unwrap_or(pixbuf);
+    let sigma = blur_sigma(
+        blur,
+        upright.width(),
+        upright.height(),
+        display.0,
+        display.1,
+    );
+    premultiplied_texture_blurred(&upright, sigma)
 }
 
 /// The picture of `pixbuf` as a texture of premultiplied RGBA, which the
@@ -2398,6 +2518,13 @@ fn decode_texture(bytes: &glib::Bytes, wanted: DecodeBox) -> Option<gtk::gdk::Te
 /// its three-byte RGB (gdk-pixbuf's JPEG), which GTK converts pixel by
 /// pixel on the interface thread when it uploads it.
 pub(crate) fn premultiplied_texture(pixbuf: &gtk::gdk_pixbuf::Pixbuf) -> Option<gtk::gdk::Texture> {
+    premultiplied_texture_blurred(pixbuf, 0.0)
+}
+
+pub(crate) fn premultiplied_texture_blurred(
+    pixbuf: &gtk::gdk_pixbuf::Pixbuf,
+    sigma: f32,
+) -> Option<gtk::gdk::Texture> {
     let (width, height) = (pixbuf.width(), pixbuf.height());
     let (channels, stride) = (pixbuf.n_channels() as usize, pixbuf.rowstride() as usize);
     let alpha = pixbuf.has_alpha();
@@ -2423,6 +2550,9 @@ pub(crate) fn premultiplied_texture(pixbuf: &gtk::gdk_pixbuf::Pixbuf) -> Option<
     if pixels.len() != width as usize * height as usize * 4 {
         return None;
     }
+    if sigma >= 0.2 {
+        blur_premultiplied_rgba(&mut pixels, width as usize, height as usize, sigma);
+    }
     Some(
         gtk::gdk::MemoryTexture::new(
             width,
@@ -2445,17 +2575,26 @@ pub(crate) async fn load_avatar_texture(url: &str, size: f64) -> Option<gtk::gdk
             height: Some(size),
             cover: true,
         },
+        0.0,
+        (None, None),
+        crate::pictures::Priority::Normal,
     )
     .await
 }
 
-async fn load_texture(url: &str, wanted: DecodeBox) -> Option<gtk::gdk::Texture> {
-    let key = (url.to_string(), wanted.key());
+async fn load_texture(
+    url: &str,
+    wanted: DecodeBox,
+    blur: f64,
+    display: (Option<f64>, Option<f64>),
+    priority: crate::pictures::Priority,
+) -> Option<gtk::gdk::Texture> {
+    let key = texture_key(url, wanted, blur);
     if let Some(texture) = cached_texture(&key) {
         return Some(texture);
     }
-    let texture = crate::pictures::picture(url, async |bytes| {
-        gio::spawn_blocking(move || decode_texture(&bytes, wanted))
+    let texture = crate::pictures::picture_with_priority(url, priority, async |bytes| {
+        gio::spawn_blocking(move || decode_texture(&bytes, wanted, blur, display))
             .await
             .ok()
             .flatten()
@@ -2480,6 +2619,8 @@ pub struct RuntimeImageProps {
     pub aspect: Option<f64>,
     pub decode_max: Option<f64>,
     pub saturation: Option<Num>,
+    pub placeholder: Option<Build>,
+    pub blur: f64,
 }
 
 /// A picture from a `MediaSource` in state: a file the user chose or an
@@ -2518,11 +2659,51 @@ pub fn RuntimeImage(p: &Parent, ctx: &Ctx, props: RuntimeImageProps) {
         )
     };
     let covers = props.width.is_none() && props.height.is_none() && props.aspect.is_none();
-    let placeholder = (!covers).then(|| {
+    let fixed_width = (props.animate.is_none())
+        .then(|| {
+            props
+                .width
+                .as_ref()
+                .map(|w| w.peek(ctx))
+                .filter(|w| *w > 0.0)
+        })
+        .flatten();
+    let fixed_height = (props.animate.is_none())
+        .then(|| {
+            props
+                .height
+                .as_ref()
+                .map(|h| h.peek(ctx))
+                .filter(|h| *h > 0.0)
+        })
+        .flatten();
+    let display_box = (fixed_width, fixed_height);
+    let priority = if covers || fixed_width.is_some_and(|w| w >= 180.0) {
+        crate::pictures::Priority::High
+    } else {
+        crate::pictures::Priority::Normal
+    };
+    let placeholder: Option<gtk::Widget> = if let Some(build) = &props.placeholder {
+        let holder = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        holder.set_can_target(false);
+        build(&Parent::of_box(&holder), ctx);
+        if let Some(first) = holder.first_child() {
+            if !first.compute_expand(gtk::Orientation::Horizontal) {
+                holder.set_halign(gtk::Align::Center);
+            }
+            if !first.compute_expand(gtk::Orientation::Vertical) {
+                holder.set_valign(gtk::Align::Center);
+            }
+        }
+        holder.set_visible(false);
+        Some(holder.upcast())
+    } else if !covers {
         let ph = crate::skeleton::SkeletonWidget::media_placeholder();
         ph.set_visible(false);
-        ph
-    });
+        Some(ph.upcast())
+    } else {
+        None
+    };
     let display: gtk::Widget = if let Some(ph) = &placeholder {
         let overlay = gtk::Overlay::new();
         overlay.set_child(Some(&picture));
@@ -2574,25 +2755,41 @@ pub fn RuntimeImage(p: &Parent, ctx: &Ctx, props: RuntimeImageProps) {
             resize();
         })
     };
+    let fade_tick: Rc<RefCell<Option<gtk::TickCallbackId>>> = Rc::default();
+    let cancel_fade = {
+        let fade_tick = Rc::clone(&fade_tick);
+        let picture = picture.clone();
+        move || {
+            if let Some(id) = fade_tick.borrow_mut().take() {
+                id.remove();
+            }
+            picture.set_opacity(1.0);
+        }
+    };
     let current: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
     let loading: Rc<RefCell<Option<glib::JoinHandle<()>>>> = Rc::default();
     let stop = {
         let loading = Rc::clone(&loading);
         let placeholder = placeholder.clone();
+        let cancel_fade = cancel_fade.clone();
         move || {
             if let Some(load) = loading.take() {
                 load.abort();
             }
+            cancel_fade();
             if let Some(ph) = &placeholder {
                 ph.set_visible(false);
             }
         }
     };
+    let blur = props.blur;
     let start = {
         let loading = Rc::clone(&loading);
         let stop = stop.clone();
         let present = Rc::clone(&present);
         let placeholder = placeholder.clone();
+        let picture = picture.clone();
+        let fade_tick = Rc::clone(&fade_tick);
         move |url: String| {
             stop();
             if let Some(ph) = &placeholder {
@@ -2601,13 +2798,56 @@ pub fn RuntimeImage(p: &Parent, ctx: &Ctx, props: RuntimeImageProps) {
             let present = Rc::clone(&present);
             let finished = Rc::clone(&loading);
             let placeholder = placeholder.clone();
+            let picture = picture.clone();
+            let fade_tick = Rc::clone(&fade_tick);
             let load = glib::spawn_future_local(async move {
-                let texture = load_texture(&url, decoded_at).await;
+                let texture = load_texture(&url, decoded_at, blur, display_box, priority).await;
                 finished.take();
                 if let Some(ph) = &placeholder {
                     ph.set_visible(false);
                 }
-                present(texture);
+                if let Some(id) = fade_tick.borrow_mut().take() {
+                    id.remove();
+                }
+                if let Some(texture) = texture {
+                    if crate::motion::reduced() {
+                        picture.set_opacity(1.0);
+                        present(Some(texture));
+                    } else {
+                        picture.set_opacity(0.0);
+                        present(Some(texture));
+                        let started = Cell::new(None::<i64>);
+                        let tick_slot = Rc::clone(&fade_tick);
+                        let id = picture.add_tick_callback(move |w, clock| {
+                            if crate::motion::reduced() {
+                                w.set_opacity(1.0);
+                                *tick_slot.borrow_mut() = None;
+                                return glib::ControlFlow::Break;
+                            }
+                            let now = clock.frame_time();
+                            let start = match started.get() {
+                                Some(s) => s,
+                                None => {
+                                    started.set(Some(now));
+                                    now
+                                }
+                            };
+                            let t = (((now - start).max(0) as f64) * 1e-6 / 0.25).clamp(0.0, 1.0);
+                            let eased = 1.0 - (1.0 - t).powi(3);
+                            w.set_opacity(eased);
+                            if t >= 1.0 {
+                                *tick_slot.borrow_mut() = None;
+                                glib::ControlFlow::Break
+                            } else {
+                                glib::ControlFlow::Continue
+                            }
+                        });
+                        *fade_tick.borrow_mut() = Some(id);
+                    }
+                } else {
+                    picture.set_opacity(1.0);
+                    present(None);
+                }
             });
             *loading.borrow_mut() = Some(load);
         }
@@ -2632,8 +2872,11 @@ pub fn RuntimeImage(p: &Parent, ctx: &Ctx, props: RuntimeImageProps) {
                 return;
             };
             // A view showing a picture read before shows it at once.
-            match cached_texture(&(url.clone(), decoded_at.key())) {
-                Some(texture) => present(Some(texture)),
+            match cached_texture(&texture_key(&url, decoded_at, blur)) {
+                Some(texture) => {
+                    cancel_fade();
+                    present(Some(texture));
+                }
                 None => begin(url),
             }
         });
@@ -2758,6 +3001,46 @@ mod tests {
         assert_eq!(
             crate::media::url_of(&source).as_deref(),
             Some("file:///a/film.mp4")
+        );
+    }
+
+    #[test]
+    fn preblur_smooths_step_keeps_uniform_and_keys_by_blur() {
+        let (w, h) = (32usize, 32usize);
+        let mut uniform = vec![0u8; w * h * 4];
+        for p in uniform.chunks_exact_mut(4) {
+            p.copy_from_slice(&[180, 90, 40, 255]);
+        }
+        blur_premultiplied_rgba(&mut uniform, w, h, 4.0);
+        for p in uniform.chunks_exact(4) {
+            assert_eq!(p, &[180, 90, 40, 255]);
+        }
+
+        let mut step = vec![0u8; w * h * 4];
+        for y in 0..h {
+            for x in 0..w {
+                let v = if x < w / 2 { 0 } else { 240 };
+                let idx = (y * w + x) * 4;
+                step[idx..idx + 4].copy_from_slice(&[v, v, v, 255]);
+            }
+        }
+        blur_premultiplied_rgba(&mut step, w, h, 3.0);
+        let left_edge = step[0];
+        let mid_left = step[((h / 2) * w + (w / 2 - 2)) * 4];
+        let mid_right = step[((h / 2) * w + (w / 2 + 1)) * 4];
+        let right_edge = step[(w - 1) * 4];
+        assert!(left_edge < mid_left && mid_left < mid_right && mid_right < right_edge);
+
+        let box_spec = DecodeBox {
+            width: Some(128.0),
+            height: Some(128.0),
+            cover: true,
+        };
+        assert_eq!(texture_key("u", box_spec, 0.0).2, 0);
+        assert_eq!(texture_key("u", box_spec, 12.34).2, 123);
+        assert_ne!(
+            texture_key("u", box_spec, 4.0),
+            texture_key("u", box_spec, 12.0)
         );
     }
 }

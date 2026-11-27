@@ -105,12 +105,16 @@ struct __declspec(uuid("B3F4C1E2-8A7D-4C5E-9F1B-2E4D6A8C0F31")) IBernComposition
     virtual HRESULT __stdcall GetNeedsBlendedFrame(BOOL* needed) = 0;
     virtual HRESULT __stdcall PresentBlendedTexture(::IUnknown* d3d11Texture) = 0;
 };
+struct __declspec(uuid("5b0d3235-4dba-4d44-865e-8f1d0e4fd04d")) IBernMemoryBufferByteAccess : ::IUnknown {
+    virtual HRESULT __stdcall GetBuffer(uint8_t** value, uint32_t* capacity) = 0;
+};
 
 #if BERN_WITH_WINUI
 // The WinUI 3 front end, on the Windows App Runtime 2 the system has.
 #include <winrt/Microsoft.UI.h>
 #include <winrt/Microsoft.UI.Composition.h>
 #include <winrt/Microsoft.UI.Composition.SystemBackdrops.h>
+#include <winrt/Microsoft.UI.Dispatching.h>
 #include <winrt/Microsoft.UI.Input.h>
 #include <winrt/Microsoft.UI.Input.InputCursor.Interop.h>
 #include <winrt/Microsoft.UI.Windowing.h>

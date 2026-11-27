@@ -1000,6 +1000,7 @@ pub fn avatar(c: &Ctx, props: AvatarProps) -> El {
                     None,
                     None,
                     false,
+                    None,
                 ))
                 .into_any_element(),
         )
@@ -1019,6 +1020,7 @@ pub fn avatar(c: &Ctx, props: AvatarProps) -> El {
                     None,
                     None,
                     false,
+                    None,
                 ))
                 .into_any_element()
         })

@@ -2,7 +2,7 @@
 
 # 内置组件属性表
 
-更新：2026-11-20。本表从 [bern-ir::spec](../../../crates/bern-ir/src/spec.rs) 的当前公共定义导出，共 88 个内置组件。**粗体属性必填**，其余可选；这些是声明规则，目标实现范围见[平台能力表](Platforms.md)，具体使用见[组件用法](UI.md)。
+更新：2026-11-20。本表从 [bern-ir::spec](../../../crates/bern-ir/src/spec.rs) 的当前公共定义导出，共 89 个内置组件。**粗体属性必填**，其余可选；这些是声明规则，目标实现范围见[平台能力表](Platforms.md)，具体使用见[组件用法](UI.md)。
 
 ## 属性类型
 
@@ -136,6 +136,7 @@
 | `DoubleTap` | 无 | 不含子节点；必须绑定动作；直接位于指针事件的宿主元素内，每个元素最多一个；双击或双击触摸时运行；在 `Button` 上与按钮自己的动作互斥，在其他元素上单击仍交给内容 |
 | `WheelUp` | 无 | 不含子节点；必须绑定动作；直接位于指针事件的宿主元素内，每个元素最多一个；滚轮或触控板在元素上向上滚动（让滚动视图回到顶部的方向）每一格运行一次，这段滚动由元素接住 |
 | `WheelDown` | 无 | 不含子节点；必须绑定动作；直接位于指针事件的宿主元素内，每个元素最多一个；滚轮或触控板在元素上向下滚动每一格运行一次，这段滚动由元素接住 |
+| `Hover` | `delay: Number` | 不含子节点；必须绑定动作；直接位于指针事件的宿主元素内，每个元素最多一个；指针停在元素上时立即或在 `delay` 秒（`>= 0`）后运行 |
 | `PreviewList` | **`items: Items`**<br>**`key: KeyField`**<br>**`item_height: Number`**<br>`gap: Number`<br>`more_height: Number` | 按可用高度创建能完整放下的前几项；有剩余时为 `+N` 留位，默认高度 22；不滚动，也不创建隐藏项。使用 `\|item\|` 行模板 |
 | `Text` | **`content: DisplayText`**<br>`style: large_title / title / title2 / title3 / headline / subheadline / body / callout / footnote / caption / caption2 / control / code`<br>`emphasis: primary / secondary / tertiary`<br>`color: accent / status.success / status.warning / status.error`<br>`mark: ColorRole`<br>`lines: Number`<br>`font_size: Length`<br>`line_height: Length`<br>`ruby: TextValue`<br>`markdown: Flag`<br>`selectable: Flag`<br>`bold: Bool`<br>`lit: Length`<br>`lit_path: TextValue`<br>`lit_clock: NumberValue`<br>`lit_since: NumberValue` | 不含子节点；无动作；`color` 与 `emphasis` 二选一；`selectable: true` 允许原生文本选择与复制 |
 | `Canvas` | `width: Length`<br>`height: Length`<br>`label: DisplayText`<br>`bleed: Flag` | 仅含 ["Shape", "Series", "Pattern"]；无动作 |
@@ -145,7 +146,7 @@
 | `Label` | **`title: DisplayText`**<br>**`icon: Icon`**<br>`style: large_title / title / title2 / title3 / headline / subheadline / body / callout / footnote / caption / caption2 / control / code`<br>`color: ColorRole`<br>`font_size: Number`<br>`display: title_and_icon / icon` | 不含子节点；无动作 |
 | `Svg` | **`source: SvgResource`**<br>`static_source: SvgResource`<br>**`width: Length`**<br>**`height: Length`**<br>`label: DisplayText`<br>`fit: contain / cover / fill`<br>`playing: Bool`<br>`speed: NumberValue`<br>`restart: NumberValue`<br>`interactive: Flag`<br>`data: DisplayText`<br>`external_links: Flag` | 不含子节点；无动作 |
 | `WebPage` | **`url: DisplayText`**<br>`cookies_file: DisplayText`<br>`cookie_domain: DisplayText`<br>`user_agent: DisplayText`<br>`content_mode: auto / mobile / desktop`<br>`close_on: DisplayText`<br>`label: DisplayText` | 不含子节点；动作可选（点击匹配 CSS 选择器 `close_on` 的元素时触发）；tvOS、watchOS 与 Wear OS 不支持 |
-| `Image` | **`source: ImageResource`**<br>`label: DisplayText`<br>`width: Length`<br>`height: Length`<br>`fit: contain / cover / fill`<br>`corner: Length`<br>`rendering: original / template`<br>`saturation: NumberValue`<br>`aspect: Number` | 不含子节点；无动作；`saturation` 取值 0（灰度）到 1（原色），可跟随状态并随 `animate` 动画过渡 |
+| `Image` | **`source: ImageResource`**<br>`label: DisplayText`<br>`width: Length`<br>`height: Length`<br>`fit: contain / cover / fill`<br>`corner: Length`<br>`rendering: original / template`<br>`saturation: NumberValue`<br>`aspect: Number` | 可选单个占位子节点（多个视图用 `Stack`、`Column` 或 `Row` 包裹）；无动作；`saturation` 取值 0（灰度）到 1（原色），可跟随状态并随 `animate` 动画过渡 |
 | `Progress` | `value: NumberValue`<br>`total: Number`<br>`label: DisplayText`<br>`style: bar / ring`<br>`width: Length`<br>`stroke_width: Number` | 不含子节点；无动作；`style: ring` 需要 `value`；`width` 与 `stroke_width` 只用于 `style: ring` |
 | `Button` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`shape: capsule / chip`<br>`height: Length`<br>`width: fill`<br>`role: normal / destructive / cancel`<br>`prominence: standard / prominent / plain`<br>`enabled: Bool`<br>`cursor: default / pointer`<br>`variant: StyleVariant`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`save: SaveFileField`<br>`suggested_name: DisplayText`<br>`files: FileKinds`<br>`default_focus: Flag`<br>`clears: TextField`<br>`paste: TextField` | 可含子内容；必须绑定动作；`pick` 打开单选或多选（`Vec<MediaSource>`）文件选择器，`save` 打开保存文件对话框（可配合 `suggested_name` 预填默认文件名），`paste` 先把剪贴板文字放进草稿再运行动作；三者最多选一个 |
 | `IconButton` | **`id: Id`**<br>**`icon: Icon`**<br>`font_size: Number`<br>`height: Length`<br>**`label: DisplayText`**<br>`prominence: standard / prominent / plain`<br>`color: ColorRole`<br>`enabled: Bool`<br>`variant: StyleVariant`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`save: SaveFileField`<br>`suggested_name: DisplayText`<br>`files: FileKinds`<br>`paste: TextField`<br>`default_focus: Flag`<br>`icon_progress: NumberValue`<br>`badge_icon: Icon`<br>`badge_visible: Bool` | 不含子节点；必须绑定动作；`pick`、`save` 与 `paste` 最多选一个 |
@@ -176,7 +177,7 @@
 | `Reorderable` | **`id: Id`**<br>**`label: DisplayText`**<br>**`items: Items`**<br>**`key: KeyField`**<br>**`move_from: IntField`**<br>**`move_to: IntField`**<br>`feature: Feature` | 使用 `\|item\|` 行模板；必须绑定动作；拖拽或上下移动时先把零基源/目标索引写入 `move_from`、`move_to`，再触发动作 |
 | `BottomSheet` | `detents: medium / large / both`<br>`drag_indicator: Flag` | 可含子节点；动作可选（关闭时触发）；挂载即弹出原生底部抽屉（通常放在 `if` 条件内） |
 | `Refreshable` | **`id: Id`**<br>`refreshing: Bool`<br>`feature: Feature` | 恰好一个子节点；必须绑定动作；支持下拉刷新（及 CLI `activate`），并在 `refreshing` 为真时显示原生刷新指示器 |
-| `NativeView` | **`id: Id`**<br>**`label: DisplayText`**<br>`swiftui: NativeFile`<br>`winui3: NativeFile`<br>`compose: NativeFile`<br>`gtk: NativeFile`<br>`gpui: NativeFile`<br>`web: NativeFile` | 仅含 ["NativeValue", "NativeText", "NativeDraft", "NativeAction", "NativeNumber", "NativeBool", "NativeInput", "Fallback", "DoubleTap", "ContextMenu", "WheelUp", "WheelDown"]；至少声明一个后端文件且至少声明一个 CLI 功能入口（`NativeAction` / `NativeNumber` / `NativeBool` / `NativeInput`），最多一个 `Fallback`；缺少当前后端文件时渲染 `Fallback`（若无则编译报错） |
+| `NativeView` | **`id: Id`**<br>**`label: DisplayText`**<br>`swiftui: NativeFile`<br>`winui3: NativeFile`<br>`compose: NativeFile`<br>`gtk: NativeFile`<br>`gpui: NativeFile`<br>`web: NativeFile` | 仅含 ["NativeValue", "NativeText", "NativeDraft", "NativeAction", "NativeNumber", "NativeBool", "NativeInput", "Fallback", "DoubleTap", "ContextMenu", "WheelUp", "WheelDown", "Hover"]；至少声明一个后端文件且至少声明一个 CLI 功能入口（`NativeAction` / `NativeNumber` / `NativeBool` / `NativeInput`），最多一个 `Fallback`；缺少当前后端文件时渲染 `Fallback`（若无则编译报错） |
 | `NativeValue` | **`name: NativeName`**<br>**`value: NativeScalar`** | 不含子节点；无动作；直接位于 ["NativeView"]；在生成的 `Props` 中暴露强类型只读字段 |
 | `NativeText` | **`name: NativeName`**<br>**`content: DisplayText`** | 不含子节点；无动作；直接位于 ["NativeView"]；把经过 `tr!` 校验的多语言文本传入 `Props` |
 | `NativeDraft` | **`name: NativeName`**<br>**`value: NativeDraftField`** | 不含子节点；无动作；直接位于 ["NativeView"]；在 `Props` 中暴露当前草稿值并在 `Actions` 中生成 `set_<name>` 写回回调 |
@@ -193,7 +194,7 @@
 
 `Text(style: code)` 用平台自己的等宽字体，比正文略小，用于代码、命令和文件内容：SwiftUI 的 `.monospaced` 设计，Compose 的 `FontFamily.Monospace`，Web 的 `ui-monospace` 一族，GTK 的 `monospace` 样式类，Windows 的 Cascadia Mono（没有时 Consolas）。`style!` 的 `text` 块可以像其他样式一样给它定字号与字重。
 
-**指针事件。** `DoubleTap`、`ContextMenu`、`WheelUp` 与 `WheelDown` 写成所作用元素的直接子节点，由它作宿主：`Button`、`Video`、`Slider`、`Image`、`Svg`、`Text`、`Label`、`Progress`、`Column`、`Row`、`Grid`、`Stack`、`Flow`、`ScaleBox` 或 `Positioned`。它们不是视图，不算元素显示的内容，所以 `Text`、`Slider` 这样的叶子元素也能用花括号带上它们；它们不能放在 `if` 或 `ForEach` 里。每个元素每种最多一个。它们是捷径：所做的事还要能经按钮、菜单或快捷键完成，键盘、遥控器与辅助技术不会双击、右键或滚动滚轮。
+**指针事件。** `DoubleTap`、`ContextMenu`、`WheelUp`、`WheelDown` 与 `Hover` 写成所作用元素的直接子节点，由它作宿主：`Button`、`NavLink`、`Video`、`NativeView`、`Slider`、`Image`、`Svg`、`Text`、`Label`、`Progress`、`Column`、`Row`、`Grid`、`Stack`、`Flow`、`ScaleBox` 或 `Positioned`。它们不是视图，不算元素显示的内容，所以 `Text`、`Slider` 这样的叶子元素也能用花括号带上它们；它们不能放在 `if` 或 `ForEach` 里。每个元素每种最多一个。它们是捷径：所做的事还要能经按钮、菜单或快捷键完成，键盘、遥控器与辅助技术不会双击、右键、悬停或滚动滚轮。
 
 `Svg` 在构建期将带动画与交互的 `.svg` 资源预编译为紧凑的 `BSVG` 场景，在全部目标平台由纯 Rust 原生播放，无需 WebView；指针交互通过根 `<svg>` 上的 `data-bern-click` / `data-bern-dblclick` 与可选 `data-bern-ready` 声明，`static_source`、`data` 与 `external_links` 仍为兼容既有源码而保留。不含动画或交互的静态 SVG 自动降级为 `Image`。见[动画 SVG](../Topics/Animated-SVG.md)。
 

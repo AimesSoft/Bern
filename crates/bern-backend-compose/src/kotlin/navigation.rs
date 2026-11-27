@@ -410,7 +410,8 @@ impl Generator<'_> {
         out.open(format!(
             "BernNavLink(onClick = {{ {path} = {path} + {route} }}, modifier = Modifier.testTag({target})) {{"
         ));
-        self.nodes(out, &element.children, &ctx.within(Scope::Column));
+        let content: Vec<_> = element.content().cloned().collect();
+        self.nodes(out, &content, &ctx.within(Scope::Column));
         out.close("}");
     }
 

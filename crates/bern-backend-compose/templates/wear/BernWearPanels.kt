@@ -140,12 +140,14 @@ fun BernPointerEvents(
     onDoubleTap: (() -> Unit)? = null,
     onWheelUp: (() -> Unit)? = null,
     onWheelDown: (() -> Unit)? = null,
+    onHover: (() -> Unit)? = null,
+    hoverDelay: Double = 0.0,
     menu: (@Composable (dismiss: () -> Unit) -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     val openMenu = { open = true }
-    BernPointerBox(modifier, onDoubleTap, if (menu != null) openMenu else null, onWheelUp, onWheelDown, content)
+    BernPointerBox(modifier, onDoubleTap, if (menu != null) openMenu else null, onWheelUp, onWheelDown, onHover, hoverDelay, content)
     if (open && menu != null) BernWearDialog(onDismiss = { open = false }) { menu { open = false } }
 }
 

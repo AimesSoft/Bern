@@ -78,8 +78,31 @@ impl Generator<'_> {
         let decode_max = bern_target_api::svg::decode_max_side(self.app, element)
             .map(|cap| format!("Some({cap:.1})"))
             .unwrap_or_else(|| "None".into());
+        let placeholder = if element.has_content()
+            && let Some(first) = element.content().next()
+        {
+            let mut sub = Out {
+                indent: out.indent + 1,
+                ..Out::default()
+            };
+            sub.open("Some(b::build(|p, c| {");
+            self.node(&mut sub, first);
+            sub.close("}))");
+            sub.lines.join("\n").trim_start().to_string()
+        } else {
+            "None".into()
+        };
+        let blur = if bern_target_api::svg::static_preblur(element) {
+            match element.prop("blur") {
+                Some(Prop::Number { value }) => super::float(*value),
+                Some(Prop::Expr { expr }) => format!("rt::as_f64(&{})", self.expr(expr)),
+                _ => "0.0".into(),
+            }
+        } else {
+            "0.0".into()
+        };
         let shared = format!(
-            "label: {}, width: {}, height: {}, fit: {}, animate: {}, corner: {}, template: {}, aspect: {}, decode_max: {decode_max}, saturation: {}",
+            "label: {}, width: {}, height: {}, fit: {}, animate: {}, corner: {}, template: {}, aspect: {}, decode_max: {decode_max}, saturation: {}, placeholder: {placeholder}, blur: {blur}",
             some(self.text_prop(element, "label")),
             some(self.num(element, "width")),
             some(self.num(element, "height")),

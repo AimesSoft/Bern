@@ -1341,6 +1341,8 @@ struct PointerEventsProps {
     std::vector<std::optional<MenuItemDef>> menu;
     Act wheelUp;
     Act wheelDown;
+    Act hover;
+    double hoverDelay = 0;
     /// The element is a native control (a slider): its parts are its own,
     /// and it may handle the pointer before its events do.
     bool own = false;
@@ -1374,11 +1376,13 @@ inline void PointerEvents(Parent const& p, Ctx const& ctx, PointerEventsProps pr
     Reactive::OnCleanup([live] { *live = false; });
     auto twice = Run(ctx, props.doubleTap);
     auto up = Run(ctx, props.wheelUp), down = Run(ctx, props.wheelDown);
+    auto hover = Run(ctx, props.hover);
+    double hoverDelay = props.hoverDelay;
     bool own = props.own;
     for (auto const& element : made) {
         // A XAML Panel with a null Background is transparent to hit-testing:
         // give it a transparent brush so empty areas of Stack/Column/Row/Grid
-        // still receive DoubleTap, ContextMenu and Wheel events.
+        // still receive DoubleTap, ContextMenu, Hover and Wheel events.
         if (auto panel = element.try_as<controls::Panel>(); panel && !panel.Background()) {
             panel.Background(media::SolidColorBrush(winrt::Windows::UI::Colors::Transparent()));
         }
@@ -1391,6 +1395,64 @@ inline void PointerEvents(Parent const& p, Ctx const& ctx, PointerEventsProps pr
                 twice();
             })), own);
         if (!props.menu.empty()) ContextMenuOn(ctx, element, props.menu);
+        if (hover) {
+            auto timer = std::make_shared<dispatching::DispatcherQueueTimer>(nullptr);
+            auto token = std::make_shared<winrt::event_token>();
+            auto inside = std::make_shared<bool>(false);
+            auto stopTimer = [timer, token, inside] {
+                *inside = false;
+                if (*timer) {
+                    timer->Stop();
+                    if (token->value) {
+                        timer->Tick(*token);
+                        *token = {};
+                    }
+                    *timer = nullptr;
+                }
+            };
+            Reactive::OnCleanup([live, stopTimer] {
+                *live = false;
+                stopTimer();
+            });
+            using PointerHandler = xaml::Input::PointerEventHandler;
+            element.AddHandler(xaml::UIElement::PointerEnteredEvent(), winrt::box_value(PointerHandler([live, hover, hoverDelay, timer, token, inside, stopTimer](IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const&) {
+                if (!*live) return;
+                if (auto ctrl = sender.try_as<controls::Control>(); ctrl && !ctrl.IsEnabled()) return;
+                if (*inside) return;
+                stopTimer();
+                *inside = true;
+                if (hoverDelay <= 0) {
+                    hover();
+                    return;
+                }
+                auto el = sender.try_as<xaml::UIElement>();
+                auto queue = el ? el.DispatcherQueue() : nullptr;
+                if (!queue) queue = dispatching::DispatcherQueue::GetForCurrentThread();
+                if (!queue) return;
+                auto t = queue.CreateTimer();
+                t.IsRepeating(false);
+                auto ms = static_cast<int64_t>((std::max)(1.0, std::round(hoverDelay * 1000.0)));
+                t.Interval(std::chrono::milliseconds(ms));
+                *timer = t;
+                *token = t.Tick([live, hover, timer, token](auto&&, auto&&) {
+                    if (*timer) {
+                        timer->Stop();
+                        if (token->value) {
+                            timer->Tick(*token);
+                            *token = {};
+                        }
+                        *timer = nullptr;
+                    }
+                    if (*live) hover();
+                });
+                t.Start();
+            })), true);
+            element.AddHandler(xaml::UIElement::PointerExitedEvent(), winrt::box_value(PointerHandler([stopTimer](auto&&, auto&&) { stopTimer(); })), true);
+            element.AddHandler(xaml::UIElement::PointerCanceledEvent(), winrt::box_value(PointerHandler([stopTimer](auto&&, auto&&) { stopTimer(); })), true);
+            if (auto fe = element.try_as<xaml::FrameworkElement>()) {
+                fe.Unloaded([stopTimer](auto&&, auto&&) { stopTimer(); });
+            }
+        }
         if (!up && !down) continue;
         auto rest = std::make_shared<int32_t>(0);
         auto takeWheel = [live, up, down, rest](int32_t delta) -> bool {
@@ -4886,6 +4948,10 @@ struct PictureProps {
     double scale = 1;
     /// Optional saturation (0..1) applied to the image's own pixels.
     std::shared_ptr<Cell<double>> saturation;
+    /// Static blur radius (>= 4) baked into the decoded bitmap.
+    double blur = 0.0;
+    /// Fade from 0 to 1 over 250ms when presented asynchronously.
+    bool fadeIn = false;
 };
 
 inline std::shared_ptr<Scope> LaterScope();
@@ -4929,11 +4995,44 @@ inline std::pair<double, double> ShownSize(PictureProps const& props, double wid
     return {0, 0};
 }
 
+struct PlaceholderScopeHolder : winrt::implements<PlaceholderScopeHolder, IInspectable> {
+    std::shared_ptr<Scope> scope;
+};
+
+inline void DisposePlaceholder(controls::Grid const& frame) {
+    auto key = winrt::box_value(L"bern.placeholder");
+    auto resources = frame.Resources();
+    if (resources.HasKey(key)) {
+        if (auto holder = winrt::get_self<PlaceholderScopeHolder>(resources.Lookup(key)); holder && holder->scope) {
+            holder->scope->Dispose();
+            holder->scope = nullptr;
+        }
+        resources.Remove(key);
+    }
+}
+
+inline void FadeInVisual(xaml::UIElement const& element) {
+    if (Reduced()) return;
+    try {
+        auto visual = xaml::Hosting::ElementCompositionPreview::GetElementVisual(element);
+        auto compositor = visual.Compositor();
+        auto anim = compositor.CreateScalarKeyFrameAnimation();
+        auto ease = compositor.CreateCubicBezierEasingFunction(float2{0.25f, 0.1f}, float2{0.25f, 1.0f});
+        anim.InsertKeyFrame(0.0f, 0.0f);
+        anim.InsertKeyFrame(1.0f, 1.0f, ease);
+        anim.Duration(std::chrono::milliseconds(250));
+        visual.StartAnimation(L"Opacity", anim);
+    } catch (winrt::hresult_error const&) {
+    }
+}
+
 /// Atomically swap `frame`'s content once the replacement element is ready so
 /// switching sources never flashes an empty frame in between.
-inline void ReplaceFrame(controls::Grid const& frame, xaml::UIElement const& next) {
+inline void ReplaceFrame(controls::Grid const& frame, xaml::UIElement const& next, bool fadeIn = false) {
+    DisposePlaceholder(frame);
     frame.Children().Clear();
     frame.Children().Append(next);
+    if (fadeIn) FadeInVisual(next);
 }
 
 inline controls::Image MakeSdrImage(PictureProps const& props, TextFn const& name) {
@@ -4983,9 +5082,75 @@ inline winrt::fire_and_forget LoadPicture(winrt::weak_ref<controls::Grid> weakFr
         if (!frame || (owner && owner->disposed)) co_return;
         auto image = MakeSdrImage(props, label);
         image.Source(bitmap);
-        ReplaceFrame(frame, image);
+        ReplaceFrame(frame, image, props.fadeIn);
     } catch (winrt::hresult_error const& error) {
         Report("image " + name + ": " + Utf8(error.message()));
+    }
+}
+
+/// 3-pass separable box blur directly on a downsampled premultiplied BGRA8 `SoftwareBitmap`.
+inline void BoxBlurBitmap(winrt::Windows::Graphics::Imaging::SoftwareBitmap const& bitmap, PictureProps const& shown) {
+    if (!bitmap || shown.blur < 4.0) return;
+    int32_t pw = bitmap.PixelWidth(), ph = bitmap.PixelHeight();
+    if (pw <= 1 || ph <= 1) return;
+    double sigma = 0.0;
+    if (shown.width && *shown.width > 0 && shown.height && *shown.height > 0)
+        sigma = shown.blur * (std::max)(pw / *shown.width, ph / *shown.height);
+    else if (shown.width && *shown.width > 0)
+        sigma = shown.blur * (pw / *shown.width);
+    else if (shown.height && *shown.height > 0)
+        sigma = shown.blur * (ph / *shown.height);
+    else {
+        double longer = static_cast<double>((std::max)(pw, ph));
+        sigma = (std::clamp)(shown.blur * (longer / 960.0), 1.0, (std::max)(1.0, longer * 0.25));
+    }
+    int radius = static_cast<int>((std::clamp)(std::lround(sigma), 1L, static_cast<long>((std::max)(1, (std::min)(pw, ph)))));
+    auto buffer = bitmap.LockBuffer(winrt::Windows::Graphics::Imaging::BitmapBufferAccessMode::ReadWrite);
+    auto plane = buffer.GetPlaneDescription(0);
+    auto ref = buffer.CreateReference();
+    auto access = ref.try_as<IBernMemoryBufferByteAccess>();
+    uint8_t* raw = nullptr;
+    uint32_t cap = 0;
+    if (!access || FAILED(access->GetBuffer(&raw, &cap)) || !raw) return;
+    size_t needed = static_cast<size_t>(plane.StartIndex) + static_cast<size_t>(ph - 1) * static_cast<size_t>(plane.Stride) + static_cast<size_t>(pw) * 4;
+    if (cap < needed) return;
+    uint8_t* base = raw + plane.StartIndex;
+    int32_t stride = plane.Stride;
+    std::vector<uint8_t> tmp(static_cast<size_t>(pw) * static_cast<size_t>(ph) * 4);
+    int32_t win = radius * 2 + 1;
+    for (int pass = 0; pass < 3; ++pass) {
+        for (int32_t y = 0; y < ph; ++y) {
+            uint8_t const* row = base + static_cast<size_t>(y) * stride;
+            uint8_t* dst = tmp.data() + static_cast<size_t>(y) * pw * 4;
+            int32_t acc[4]{};
+            for (int32_t k = -radius; k <= radius; ++k) {
+                int32_t sx = (std::clamp)(k, 0, pw - 1) * 4;
+                for (int c = 0; c < 4; ++c) acc[c] += row[sx + c];
+            }
+            for (int32_t x = 0; x < pw; ++x) {
+                for (int c = 0; c < 4; ++c) dst[x * 4 + c] = static_cast<uint8_t>((acc[c] + win / 2) / win);
+                int32_t rem = (std::clamp)(x - radius, 0, pw - 1) * 4;
+                int32_t add = (std::clamp)(x + radius + 1, 0, pw - 1) * 4;
+                for (int c = 0; c < 4; ++c) acc[c] += row[add + c] - row[rem + c];
+            }
+        }
+        for (int32_t x = 0; x < pw; ++x) {
+            int32_t acc[4]{};
+            for (int32_t k = -radius; k <= radius; ++k) {
+                int32_t sy = (std::clamp)(k, 0, ph - 1);
+                uint8_t const* p = tmp.data() + (static_cast<size_t>(sy) * pw + x) * 4;
+                for (int c = 0; c < 4; ++c) acc[c] += p[c];
+            }
+            for (int32_t y = 0; y < ph; ++y) {
+                uint8_t* dst = base + static_cast<size_t>(y) * stride + x * 4;
+                for (int c = 0; c < 4; ++c) dst[c] = static_cast<uint8_t>((acc[c] + win / 2) / win);
+                int32_t rem = (std::clamp)(y - radius, 0, ph - 1);
+                int32_t add = (std::clamp)(y + radius + 1, 0, ph - 1);
+                uint8_t const* pRem = tmp.data() + (static_cast<size_t>(rem) * pw + x) * 4;
+                uint8_t const* pAdd = tmp.data() + (static_cast<size_t>(add) * pw + x) * 4;
+                for (int c = 0; c < 4; ++c) acc[c] += pAdd[c] - pRem[c];
+            }
+        }
     }
 }
 
@@ -5015,8 +5180,10 @@ inline winrt::Windows::Foundation::IAsyncOperation<winrt::Windows::Graphics::Ima
             transform.InterpolationMode(imaging::BitmapInterpolationMode::Fant);
         }
     }
-    co_return co_await decoder.GetSoftwareBitmapAsync(imaging::BitmapPixelFormat::Bgra8, imaging::BitmapAlphaMode::Premultiplied, transform,
+    auto bitmap = co_await decoder.GetSoftwareBitmapAsync(imaging::BitmapPixelFormat::Bgra8, imaging::BitmapAlphaMode::Premultiplied, transform,
         imaging::ExifOrientationMode::RespectExifOrientation, imaging::ColorManagementMode::ColorManageToSRgb);
+    if (shown.blur >= 4.0) BoxBlurBitmap(bitmap, shown);
+    co_return bitmap;
 }
 
 /// Upload an already-decoded `SoftwareBitmap` on the UI thread and atomically
@@ -5045,7 +5212,7 @@ inline winrt::fire_and_forget PresentSoftwareBitmap(winrt::weak_ref<controls::Gr
             else bind();
             auto image = MakeSdrImage(props, label);
             image.Source(wb);
-            ReplaceFrame(frame, image);
+            ReplaceFrame(frame, image, props.fadeIn);
             co_return;
         }
         media::Imaging::SoftwareBitmapSource source;
@@ -5054,7 +5221,7 @@ inline winrt::fire_and_forget PresentSoftwareBitmap(winrt::weak_ref<controls::Gr
         if (!frame || (owner && owner->disposed)) co_return;
         auto image = MakeSdrImage(props, label);
         image.Source(source);
-        ReplaceFrame(frame, image);
+        ReplaceFrame(frame, image, props.fadeIn);
     } catch (winrt::hresult_error const& error) {
         Report("image " + name + ": " + Utf8(error.message()));
     }
@@ -5095,7 +5262,7 @@ inline void ShowSdr(controls::Grid const& frame, PictureProps const& props, std:
         return;
     }
     if (!owner) owner = LaterScope();
-    if (props.fixed || props.decodeMax || props.saturation) {
+    if (props.fixed || props.decodeMax || props.saturation || props.blur >= 4.0) {
         DecodePicture(winrt::make_weak(frame), std::move(bytes), props.source, props, DecodePropsFor(props), name, std::move(owner));
     } else {
         LoadPicture(winrt::make_weak(frame), std::move(bytes), props.source, props, name, std::move(owner));
@@ -5228,6 +5395,7 @@ struct View : std::enable_shared_from_this<View> {
     UINT chainWidth = 0, chainHeight = 0;
     /// Whether the swap chain shows the current bitmap at its size.
     bool rendered = false;
+    bool fadedIn = false;
     std::shared_ptr<Scope> owner;
 
     HWND Window() const { return win ? win->hwnd : nullptr; }
@@ -5389,8 +5557,13 @@ struct View : std::enable_shared_from_this<View> {
         HRESULT presented = SUCCEEDED(drawn) ? chain->Present(1, 0) : drawn;
         rendered = SUCCEEDED(presented);
         if (rendered && frame) {
+            DisposePlaceholder(frame);
             for (uint32_t i = frame.Children().Size(); i-- > 0;) {
                 if (frame.Children().GetAt(i) != panel) frame.Children().RemoveAt(i);
+            }
+            if (props.fadeIn && !fadedIn) {
+                fadedIn = true;
+                FadeInVisual(panel);
             }
         }
         if (presented == D2DERR_RECREATE_TARGET || presented == DXGI_ERROR_DEVICE_REMOVED || presented == DXGI_ERROR_DEVICE_RESET) {
@@ -5541,6 +5714,10 @@ struct ImageProps {
     std::optional<double> decodeMax;
     /// Color saturation from 0 (grayscale) to 1 (full color).
     Len saturation;
+    /// Optional single child built as a placeholder while loading.
+    Build placeholder = nullptr;
+    /// Static blur radius (>= 4) baked into the decoded bitmap.
+    double blur = 0.0;
 };
 
 /// A frame as wide as its container and `aspect` as tall.
@@ -5736,7 +5913,7 @@ inline std::wstring ResourcePath(std::string_view name) {
 inline void ShowPicture(controls::Grid const& frame, Ctx const& ctx, std::shared_ptr<std::vector<uint8_t>> bytes, PictureProps const& picture, TextFn name,
     std::shared_ptr<Scope> owner = nullptr) {
     uint32_t kind = bytes->empty() ? 0 : bern_picture_kind(bytes->data(), bytes->size());
-    if (kind != 0 && Hdr::GetGpu()) Hdr::Show(frame, ctx, bytes, picture, name, kind == 3, std::move(owner));
+    if (kind != 0 && picture.blur < 4.0 && Hdr::GetGpu()) Hdr::Show(frame, ctx, bytes, picture, name, kind == 3, std::move(owner));
     else ShowSdr(frame, picture, std::move(bytes), name, std::move(owner));
 }
 
@@ -5745,6 +5922,27 @@ inline std::shared_ptr<Scope> LaterScope() {
     auto scope = std::make_shared<Scope>();
     Reactive::OnCleanup([scope] { scope->Dispose(); });
     return scope;
+}
+
+inline void MountPlaceholder(controls::Grid const& frame, Ctx const& ctx, Build const& placeholder, bool covers) {
+    DisposePlaceholder(frame);
+    frame.Children().Clear();
+    if (placeholder) {
+        auto phScope = std::make_shared<Scope>();
+        auto holder = winrt::make_self<PlaceholderScopeHolder>();
+        holder->scope = phScope;
+        frame.Resources().Insert(winrt::box_value(L"bern.placeholder"), holder.as<IInspectable>());
+        phScope->Run([&] { placeholder(Parent::Of(frame), ctx); });
+        Reactive::OnCleanup([weak = winrt::make_weak(frame), phScope] {
+            phScope->Dispose();
+            if (auto f = weak.get()) f.Resources().Remove(winrt::box_value(L"bern.placeholder"));
+        });
+    } else if (!covers) {
+        auto shape = MakeSkeletonShape(0.07, true, 0.0, "rect");
+        shape.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+        shape.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+        frame.Children().Append(shape);
+    }
 }
 
 /// Pictures read lately, by file, resource or url, so that a page showing
@@ -5771,7 +5969,7 @@ inline winrt::fire_and_forget ShowLater(winrt::weak_ref<controls::Grid> weak, Ct
     co_await winrt::resume_background();
     auto bytes = std::make_shared<std::vector<uint8_t>>(read());
     uint32_t kind = bytes->empty() ? 0 : bern_picture_kind(bytes->data(), bytes->size());
-    bool decodeHere = kind == 0 && !bytes->empty() && (picture.fixed || picture.decodeMax || picture.saturation);
+    bool decodeHere = (kind == 0 || picture.blur >= 4.0) && !bytes->empty() && (picture.fixed || picture.decodeMax || picture.saturation || picture.blur >= 4.0);
     imaging::SoftwareBitmap pixels{nullptr};
     std::string decodeFailed;
     if (decodeHere) {
@@ -5804,19 +6002,28 @@ inline winrt::fire_and_forget ShowLater(winrt::weak_ref<controls::Grid> weak, Ct
 /// Show the picture `key` names: at once when it was read lately, else once
 /// it has been read.
 inline void ShowRead(controls::Grid const& frame, Ctx const& ctx, std::wstring key, std::function<std::vector<uint8_t>()> read, std::string label,
-    PictureProps const& picture, TextFn const& name) {
+    PictureProps const& picture, TextFn const& name, Build const& placeholder = nullptr) {
     if (auto bytes = Recent::Find(key)) {
-        ShowPicture(frame, ctx, bytes, picture, name, LaterScope());
+        PictureProps hit = picture;
+        hit.fadeIn = false;
+        ShowPicture(frame, ctx, bytes, hit, name, LaterScope());
         return;
     }
-    ShowLater(winrt::make_weak(frame), ctx, std::move(key), std::move(read), std::move(label), picture, name, LaterScope());
+    PictureProps next = picture;
+    if (placeholder) {
+        MountPlaceholder(frame, ctx, placeholder, true);
+        next.fadeIn = true;
+    }
+    ShowLater(winrt::make_weak(frame), ctx, std::move(key), std::move(read), std::move(label), next, name, LaterScope());
 }
 
 /// Download the picture at `url` and show it in the frame within `owner`,
 /// unless that has ended meanwhile. A view that leaves stops trying, and
 /// one that appears starts over.
-inline winrt::fire_and_forget ShowDownloaded(winrt::weak_ref<controls::Grid> weak, Ctx ctx, std::wstring key, std::string url, PictureProps picture, TextFn name, std::shared_ptr<Scope> owner) {
+inline winrt::fire_and_forget ShowDownloaded(winrt::weak_ref<controls::Grid> weak, Ctx ctx, std::wstring key, std::string url, PictureProps picture, TextFn name, std::shared_ptr<Scope> owner,
+    bern::pictures::Priority priority = bern::pictures::Priority::Normal, bool fadeIn = true) {
     if (app && !app->catalog.bundleId.empty()) bern::pictures::SetBundleId(app->catalog.bundleId);
+    picture.fadeIn = fadeIn;
     auto waiter = std::make_shared<bern::pictures::Waiter>();
     winrt::apartment_context ui;
     auto holder = weak.get();
@@ -5825,11 +6032,12 @@ inline winrt::fire_and_forget ShowDownloaded(winrt::weak_ref<controls::Grid> wea
     auto left = holder.Unloaded(winrt::auto_revoke, [waiter](auto&&, auto&&) { waiter->Left(); });
     holder = nullptr;
     owner->OnDispose([waiter] { waiter->End(); });
-    auto buffer = co_await Pictures::Download(url, waiter);
+    auto buffer = co_await Pictures::Download(url, waiter, priority);
     co_await ui;
     auto frame = weak.get();
     if (!frame || owner->disposed) co_return;
     if (!buffer) {
+        DisposePlaceholder(frame);
         frame.Children().Clear();
         co_return;
     }
@@ -5845,11 +6053,13 @@ inline winrt::fire_and_forget ShowDownloaded(winrt::weak_ref<controls::Grid> wea
 /// gives. With one side given, the other follows the picture's aspect
 /// ratio. Without a label it is decorative. HDR pictures are drawn in HDR
 /// where the display shows it.
-inline void Image(Parent const& p, Ctx const& ctx, ImageProps props) {
+inline void Image(Parent const& p, Ctx const& ctx, ImageProps props, Build placeholder = nullptr) {
+    if (placeholder && !props.placeholder) props.placeholder = std::move(placeholder);
     PictureProps picture;
     picture.source = props.source ? props.source : "";
     picture.label = props.label;
     picture.fit = props.fit;
+    picture.blur = props.blur;
     if (props.width.Given()) picture.width = Reactive::Untrack([&] { return props.width.Now(ctx); });
     if (props.height.Given()) picture.height = Reactive::Untrack([&] { return props.height.Now(ctx); });
     // A proportion of its own sets the side not given.
@@ -5935,26 +6145,31 @@ inline void Image(Parent const& p, Ctx const& ctx, ImageProps props) {
         frame.Loaded([dark](IInspectable const& sender, auto&&) mutable { dark.Set(IsDark(sender.as<xaml::FrameworkElement>())); });
         char const* light = props.source;
         char const* night = props.darkSource;
-        Reactive::Run([frame, ctx, dark, light, night, picture, name] {
+        auto ph = props.placeholder;
+        Reactive::Run([frame, ctx, dark, light, night, picture, name, ph] {
             int now = dark.Get();
             if (now < 0) return;
             Reactive::Untrack([&] {
                 PictureProps shown = picture;
                 shown.source = now ? night : light;
                 std::string source = shown.source;
-                ShowRead(frame, ctx, L"resource:" + std::wstring(Wide(source)), [source] { return ResourceBytes(source); }, source, shown, name);
+                ShowRead(frame, ctx, L"resource:" + std::wstring(Wide(source)), [source] { return ResourceBytes(source); }, source, shown, name, ph);
                 return 0;
             });
         });
     } else if (props.source) {
         std::string source = props.source;
-        ShowRead(frame, ctx, L"resource:" + std::wstring(Wide(source)), [source] { return ResourceBytes(source); }, source, picture, name);
+        ShowRead(frame, ctx, L"resource:" + std::wstring(Wide(source)), [source] { return ResourceBytes(source); }, source, picture, name, props.placeholder);
     } else if (props.url) {
         auto url = props.url;
         bool covers = props.covers;
+        auto ph = props.placeholder;
+        bern::pictures::Priority priority = (props.flies || props.covers || (picture.width && *picture.width >= 180.0))
+            ? bern::pictures::Priority::High
+            : bern::pictures::Priority::Normal;
         auto initialized = std::make_shared<bool>(false);
         auto shown = std::make_shared<std::optional<std::string>>();
-        Reactive::Run([frame, url, ctx, picture, name, initialized, shown, covers] {
+        Reactive::Run([frame, url, ctx, picture, name, initialized, shown, covers, ph, priority] {
             auto next = R::Url(url(ctx));
             if (*initialized && *shown == next) return;
             *initialized = true;
@@ -5962,28 +6177,26 @@ inline void Image(Parent const& p, Ctx const& ctx, ImageProps props) {
             Reactive::Untrack([&] {
                 frame.Visibility(next ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
                 if (!next) {
+                    DisposePlaceholder(frame);
                     frame.Children().Clear();
                     return 0;
                 }
                 if (auto path = Host::FilePath(*next)) {
                     std::wstring file = *path;
-                    ShowRead(frame, ctx, file, [file] { return FileBytes(file); }, *next, picture, name);
+                    ShowRead(frame, ctx, file, [file] { return FileBytes(file); }, *next, picture, name, ph);
                 } else if (Host::Serves(*next)) {
                     std::string served = *next;
-                    ShowRead(frame, ctx, L"served:" + std::wstring(Wide(served)), [served] { return Host::ServedBytes(served); }, served, picture, name);
+                    ShowRead(frame, ctx, L"served:" + std::wstring(Wide(served)), [served] { return Host::ServedBytes(served); }, served, picture, name, ph);
                 } else {
                     if (app && !app->catalog.bundleId.empty()) bern::pictures::SetBundleId(app->catalog.bundleId);
                     std::wstring key = L"url:" + std::wstring(Wide(*next));
-                    if (auto bytes = Recent::Find(key)) ShowPicture(frame, ctx, bytes, picture, name, LaterScope());
-                    else {
-                        frame.Children().Clear();
-                        if (!covers) {
-                            auto placeholder = MakeSkeletonShape(0.07, true, 0.0, "rect");
-                            placeholder.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
-                            placeholder.VerticalAlignment(xaml::VerticalAlignment::Stretch);
-                            frame.Children().Append(placeholder);
-                        }
-                        ShowDownloaded(winrt::make_weak(frame), ctx, std::move(key), *next, picture, name, LaterScope());
+                    if (auto bytes = Recent::Find(key)) {
+                        PictureProps hit = picture;
+                        hit.fadeIn = false;
+                        ShowPicture(frame, ctx, bytes, hit, name, LaterScope());
+                    } else {
+                        MountPlaceholder(frame, ctx, ph, covers);
+                        ShowDownloaded(winrt::make_weak(frame), ctx, std::move(key), *next, picture, name, LaterScope(), priority, true);
                     }
                 }
                 return 0;

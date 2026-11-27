@@ -34,6 +34,9 @@ function runtime(search = "") {
     get children() { return this.childNodes.filter((child) => child.nodeType === 1); }
     querySelectorAll(selector) {
       const all = this.children.flatMap((child) => [child, ...child.querySelectorAll(selector)]);
+      if (selector === ".bern-lazy-grid, .bern-lazy-row") {
+        return all.filter((child) => child.classes.has("bern-lazy-grid") || child.classes.has("bern-lazy-row"));
+      }
       return all.filter((child) => selector === "[data-bern-item]" && child.attributes["data-bern-item"] !== undefined);
     }
     closest(selector) {
@@ -49,6 +52,7 @@ function runtime(search = "") {
     }
     getBoundingClientRect() { return this.rect ?? { left: 0, top: 0, width: 100, height: 40 }; }
     getClientRects() { return [this.getBoundingClientRect()]; }
+    get firstChild() { return this.childNodes[0] ?? null; }
     get nextSibling() {
       const siblings = this.parentNode?.childNodes ?? [];
       return siblings[siblings.indexOf(this) + 1] ?? null;
@@ -56,7 +60,15 @@ function runtime(search = "") {
     before(...nodes) {
       const parent = this.parentNode;
       const placed = nodes.flatMap((node) => node.nodeType === 11 ? node.childNodes.splice(0) : [node]);
+      for (const node of placed) node.remove();
       parent.childNodes.splice(parent.childNodes.indexOf(this), 0, ...placed);
+      for (const node of placed) { node.parentNode = parent; node.parentElement = parent.nodeType === 1 ? parent : null; }
+    }
+    after(...nodes) {
+      const parent = this.parentNode;
+      const placed = nodes.flatMap((node) => node.nodeType === 11 ? node.childNodes.splice(0) : [node]);
+      for (const node of placed) node.remove();
+      parent.childNodes.splice(parent.childNodes.indexOf(this) + 1, 0, ...placed);
       for (const node of placed) { node.parentNode = parent; node.parentElement = parent.nodeType === 1 ? parent : null; }
     }
     contains(other) {
@@ -73,7 +85,12 @@ function runtime(search = "") {
         else { this.childNodes.push(child); child.parentNode = this; child.parentElement = this.nodeType === 1 ? this : null; }
       }
     }
-    prepend(child) { this.childNodes.unshift(child); child.parentElement = this; }
+    prepend(...children) {
+      const placed = children.flatMap((child) => child.nodeType === 11 ? child.childNodes.splice(0) : [child]);
+      for (const child of placed) child.remove();
+      this.childNodes.unshift(...placed);
+      for (const child of placed) { child.parentNode = this; child.parentElement = this.nodeType === 1 ? this : null; }
+    }
     replaceChildren(...children) {
       for (const child of [...this.childNodes]) child.remove();
       this.append(...children);
@@ -3413,4 +3430,191 @@ test("player controls: hold shortcuts, placement, tooltip keys, switch knob, bol
   assert.notEqual(pop.style.bottom, "auto");
 
   scope.dispose();
+});
+
+test("Image with placeholder fades in over 250ms on async load and reveals cached hits immediately", () => {
+  const env = runtime();
+  const { B, F, Element, queries } = env;
+  const root = new Element("root");
+  const scope = new B.Scope();
+  const url = B.cell("https://pictures.test/first.png");
+  B.within(scope, () => F.Image(root, {}, {
+    url: () => url.get(),
+    width: 120,
+    height: 80,
+  }, (p) => p.append(new Element("skeleton"))));
+  const wrap = root.children[0];
+  assert.equal(wrap.classes.has("bern-image-wrap"), true);
+  assert.equal(wrap.style.position, "relative");
+  const [slot, img] = wrap.children;
+  assert.equal(slot.hidden, false);
+  assert.equal(img.style.opacity, "0");
+
+  // Async load fades in over 250ms ease-out and hides placeholder.
+  img.dispatch("load");
+  assert.equal(img.style.transition, "opacity 250ms ease-out");
+  assert.equal(img.style.opacity, "1");
+  assert.equal(slot.hidden, true);
+
+  // Switching to an uncached URL restores placeholder and opacity 0.
+  url.set("https://pictures.test/second.png");
+  assert.equal(slot.hidden, false);
+  assert.equal(img.style.opacity, "0");
+  assert.equal(img.style.transition, "");
+
+  // Reduced motion skips the transition on load.
+  const reduce = queries.get("(prefers-reduced-motion: reduce)");
+  reduce.matches = true;
+  reduce.change({ matches: true });
+  img.dispatch("load");
+  assert.equal(img.style.transition, "");
+  assert.equal(img.style.opacity, "1");
+  assert.equal(slot.hidden, true);
+
+  // A second Image pointing at a previously loaded URL reveals synchronously at opacity 1 without transition.
+  const secondRoot = new Element("root");
+  B.within(scope, () => F.Image(secondRoot, {}, {
+    url: () => "https://pictures.test/first.png",
+    width: 120,
+    height: 80,
+  }, (p) => p.append(new Element("skeleton"))));
+  const [secondSlot, secondImg] = secondRoot.children[0].children;
+  assert.equal(secondSlot.hidden, true);
+  assert.equal(secondImg.style.opacity, "1");
+  assert.equal(secondImg.style.transition, "");
+
+  // Synchronous hit via complete && naturalWidth > 0 reveals immediately too.
+  const origCreate = env.document.createElement;
+  env.document.createElement = (tag) => {
+    const el = origCreate(tag);
+    if (tag === "img") {
+      Object.defineProperty(el, "src", {
+        set(v) {
+          this.attributes.src = v;
+          this.complete = true;
+          this.naturalWidth = 320;
+        },
+        get() { return this.attributes.src; },
+      });
+    }
+    return el;
+  };
+  const thirdRoot = new Element("root");
+  B.within(scope, () => F.Image(thirdRoot, {}, {
+    url: () => "https://pictures.test/cached.png",
+    width: 120,
+    height: 80,
+  }, (p) => p.append(new Element("skeleton"))));
+  const [thirdSlot, thirdImg] = thirdRoot.children[0].children;
+  assert.equal(thirdSlot.hidden, true);
+  assert.equal(thirdImg.style.opacity, "1");
+  assert.equal(thirdImg.style.transition, "");
+
+  scope.dispose();
+});
+
+test("PointerEvents Hover runs after delay for non-touch pointers and cancels on leave, cancel, or unmount", () => {
+  const { node, calls, timers, scope } = pointerFixture((calls) => ({
+    hover: () => calls.push("hovered"),
+    hoverDelay: 0.4,
+  }));
+
+  // Touch pointerenter is ignored.
+  node.dispatch("pointerenter", { pointerType: "touch" });
+  assert.equal(timers.length, 0);
+
+  // Mouse pointerenter schedules delay * 1000 and pointerleave cancels it.
+  node.dispatch("pointerenter", { pointerType: "mouse" });
+  assert.equal(timers.length, 1);
+  assert.equal(timers[0].delay, 400);
+  node.dispatch("pointerleave", { pointerType: "mouse" });
+  assert.equal(timers[0].cancelled, true);
+
+  // Re-entering and letting the timer fire triggers the action.
+  node.dispatch("pointerenter", { pointerType: "pen" });
+  assert.equal(timers.length, 2);
+  timers[1].callback();
+  assert.deepEqual(calls, ["hovered"]);
+
+  // pointercancel and unmount cancel pending timers.
+  node.dispatch("pointerenter", { pointerType: "mouse" });
+  assert.equal(timers.length, 3);
+  node.dispatch("pointercancel", { pointerType: "mouse" });
+  assert.equal(timers[2].cancelled, true);
+
+  node.dispatch("pointerenter", { pointerType: "mouse" });
+  assert.equal(timers.length, 4);
+  scope.dispose();
+  assert.equal(timers[3].cancelled, true);
+});
+
+test("LazyRow mounts only items within +/-1 horizontal viewport and updates as scrollLeft changes", () => {
+  const { B, Element, frames } = runtime();
+  const scroll = new Element("div");
+  scroll.classList.add("bern-scroll", "bern-scroll-horizontal");
+  scroll.rect = { left: 0, top: 0, width: 300, height: 120 };
+  scroll.scrollLeft = 0;
+  scroll.isConnected = true;
+
+  const items = B.cell(Array.from({ length: 30 }, (_, id) => ({ id })));
+  const active = new Set();
+  const scope = new B.Scope();
+  B.within(scope, () => B.LazyRow(scroll, {}, {
+    align: "top",
+    items: () => items.get(),
+    key: (one) => one.id,
+  }, (p) => { p.style.gap = "10px"; }, () => {}, (p, ctx, item) => {
+    const id = item().id;
+    active.add(id);
+    const card = new Element("div");
+    card.rect = { left: 0, top: 0, width: 100, height: 80 };
+    p.append(card);
+    B.onCleanup(() => active.delete(id));
+  }));
+
+  while (frames.length) frames.shift()();
+  const lazy = scroll.children[0];
+  assert.equal(lazy.classes.has("bern-lazy-row"), true);
+  const [leading, body, trailing] = lazy.children;
+  assert.equal(body.classes.has("bern-hstack"), true);
+  assert.equal(body.classes.has("bern-align-top"), true);
+
+  // At scrollLeft = 0, clientWidth = 300, item = 100 + 10 gap: +/-1 viewport covers [0, 600], so items 0..6.
+  const initialCount = active.size;
+  assert.ok(initialCount > 0 && initialCount < 15, `expected windowed mount, got ${initialCount}`);
+  assert.equal(leading.style.width, "0px");
+  assert.ok(parseFloat(trailing.style.width) > 0);
+
+  // Scroll to x = 1500: window is [1200, 2100] -> items around 11..19.
+  scroll.scrollLeft = 1500;
+  scroll.dispatch("scroll");
+  while (frames.length) frames.shift()();
+  assert.ok(!active.has(0), "off-screen leading items should unmount");
+  assert.ok(active.has(15), "center item at scrollLeft 1500 should be mounted");
+  assert.ok(parseFloat(leading.style.width) > 0);
+
+  // revealLazy finds LazyRow items too.
+  const found = B.revealLazy(scroll, 25);
+  assert.ok(found);
+  assert.ok(active.has(25));
+
+  // Outside a horizontal scroll view, every item is mounted.
+  const plainHost = new Element("div");
+  plainHost.isConnected = true;
+  const plainActive = new Set();
+  B.within(scope, () => B.LazyRow(plainHost, {}, {
+    items: () => Array.from({ length: 12 }, (_, id) => ({ id })),
+    key: (one) => one.id,
+  }, null, null, (p, ctx, item) => {
+    const id = item().id;
+    plainActive.add(id);
+    const card = new Element("div");
+    card.rect = { left: 0, top: 0, width: 80, height: 60 };
+    p.append(card);
+  }));
+  while (frames.length) frames.shift()();
+  assert.equal(plainActive.size, 12);
+
+  scope.dispose();
+  assert.equal(active.size, 0);
 });

@@ -708,10 +708,12 @@ fn node_richness(nodes: &[Node]) -> usize {
 fn project_element(element: &Element, ctx: &mut ProjectCtx<'_>) -> Vec<Node> {
     match element.kind.as_str() {
         // Non-visual, event, gesture, overlay, or side-effect elements vanish.
-        "ContextMenu" | "TableMenu" | "DoubleTap" | "WheelUp" | "WheelDown" | "Pinch" | "Swipe"
-        | "OnCommit" | "Drop" | "Shortcut" | "Watch" | "Timer" | "ScreenBrightness" | "Toast"
-        | "Modal" | "BottomSheet" | "Alert" | "AlertAction" | "MenuItem" | "PickerOption"
-        | "SearchItem" | "CommandMenu" | "CommandItem" | "QueryStatusHeader" => Vec::new(),
+        "ContextMenu" | "TableMenu" | "DoubleTap" | "WheelUp" | "WheelDown" | "Hover" | "Pinch"
+        | "Swipe" | "OnCommit" | "Drop" | "Shortcut" | "Watch" | "Timer" | "ScreenBrightness"
+        | "Toast" | "Modal" | "BottomSheet" | "Alert" | "AlertAction" | "MenuItem"
+        | "PickerOption" | "SearchItem" | "CommandMenu" | "CommandItem" | "QueryStatusHeader" => {
+            Vec::new()
+        }
 
         // Tooltip and Refreshable are transparent wrappers: project their child directly.
         "Tooltip" | "Refreshable" => project_nodes(&element.children, ctx),

@@ -5448,12 +5448,17 @@ struct BernPointerEvents: ViewModifier {
     let doubleTap: (@MainActor () -> Void)?
     let wheelUp: (@MainActor () -> Void)?
     let wheelDown: (@MainActor () -> Void)?
+    var hover: (@MainActor () -> Void)? = nil
+    var hoverDelay: Double = 0
     let shaped: Bool
     @Environment(\.isEnabled) private var enabled
+    #if os(macOS) || os(iOS)
+    @State private var hoverTask: Task<Void, Never>? = nil
+    #endif
 
-    func body(content: Content) -> some View {
-        content
-            .modifier(BernPointerShape(active: shaped && doubleTap != nil))
+    @ViewBuilder func body(content: Content) -> some View {
+        let base = content
+            .modifier(BernPointerShape(active: shaped && (doubleTap != nil || hover != nil)))
             .simultaneousGesture(
                 TapGesture(count: 2).onEnded { _ in
                     if enabled { doubleTap?() }
@@ -5461,6 +5466,41 @@ struct BernPointerEvents: ViewModifier {
                 including: doubleTap != nil && enabled ? .all : .none
             )
             .background(BernWheelSource(up: wheelUp, down: wheelDown, enabled: enabled))
+        #if os(macOS) || os(iOS)
+        if let hover {
+            base
+                .onHover { inside in
+                    hoverTask?.cancel()
+                    hoverTask = nil
+                    guard inside, enabled else { return }
+                    if hoverDelay <= 0 {
+                        hover()
+                    } else {
+                        let delay = hoverDelay
+                        hoverTask = Task { @MainActor in
+                            try? await Task.sleep(for: .seconds(delay))
+                            guard !Task.isCancelled, enabled else { return }
+                            hoverTask = nil
+                            hover()
+                        }
+                    }
+                }
+                .onChange(of: enabled) { _, isEnabled in
+                    if !isEnabled {
+                        hoverTask?.cancel()
+                        hoverTask = nil
+                    }
+                }
+                .onDisappear {
+                    hoverTask?.cancel()
+                    hoverTask = nil
+                }
+        } else {
+            base
+        }
+        #else
+        base
+        #endif
     }
 }
 

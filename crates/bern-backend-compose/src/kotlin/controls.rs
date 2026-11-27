@@ -67,6 +67,7 @@ impl Generator<'_> {
             .unwrap_or_default();
         let content: Vec<_> = element.content().cloned().collect();
         let wheel = self.wheel_modifier(element);
+        let hover = self.hover_modifier(element);
         let label = self.text_prop(element, "label").unwrap_or_default();
         let (action, file) = self.pressed(element);
         let enabled = self.enabled(element);
@@ -106,7 +107,7 @@ impl Generator<'_> {
                 _ => "",
             };
             out.open(format!(
-                "BernContentButton({label}, {enabled}, {style}, Modifier{start}{width}.testTag({target}){wheel}{}{prominent}{double_tap}, onClick = {{ {action} }}) {{",
+                "BernContentButton({label}, {enabled}, {style}, Modifier{start}{width}.testTag({target}){wheel}{hover}{}{prominent}{double_tap}, onClick = {{ {action} }}) {{",
                 self.shape_arg(element)
             ));
             self.nodes(out, &content, &ctx.within(Scope::Other));
@@ -159,7 +160,7 @@ impl Generator<'_> {
             ""
         };
         out.line(format!(
-            "BernButton({label}, {}, {prominence}, destructive = {}, enabled = {enabled}{style}{}{fill}, modifier = Modifier{start}{weight}.testTag({target}){wheel}{double_tap}) {{ {action} }}",
+            "BernButton({label}, {}, {prominence}, destructive = {}, enabled = {enabled}{style}{}{fill}, modifier = Modifier{start}{weight}.testTag({target}){wheel}{hover}{double_tap}) {{ {action} }}",
             Self::icon(element.icon("icon")),
             element.keyword("role") == Some("destructive"),
             self.shape_arg(element)

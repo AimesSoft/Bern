@@ -75,6 +75,7 @@ const FEATURES: &[&str] = &[
     feature::REVEAL,
     feature::POINTER_EVENTS,
     feature::WHEEL,
+    feature::HOVER,
     feature::SLIDER_HOVER,
     feature::PLAYER_STATE,
     feature::SCROLL_SNAP,

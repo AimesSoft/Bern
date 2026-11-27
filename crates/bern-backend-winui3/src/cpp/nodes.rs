@@ -93,6 +93,7 @@ impl Generator<'_> {
             .as_ref()
             .and(element.expr("hero_key"))
             .map(|key| self.getter(key));
+        let preblur = bern_target_api::svg::static_preblur(element);
         let fields = [
             ("appear", transition("appear")),
             ("disappear", transition("disappear")),
@@ -126,16 +127,25 @@ impl Generator<'_> {
                     .number("glow")
                     .and_then(|_| Self::number(element, "corner")),
             ),
-            ("blur", self.len(element, "blur")),
+            (
+                "blur",
+                (!preblur).then(|| self.len(element, "blur")).flatten(),
+            ),
             (
                 "blurCorner",
-                element
-                    .prop("blur")
-                    .and_then(|_| Self::number(element, "corner")),
+                (!preblur)
+                    .then(|| {
+                        element
+                            .prop("blur")
+                            .and_then(|_| Self::number(element, "corner"))
+                    })
+                    .flatten(),
             ),
             (
                 "blurMotion",
-                element.expr("blur").and_then(|_| Self::animate(element)),
+                (!preblur)
+                    .then(|| element.expr("blur").and_then(|_| Self::animate(element)))
+                    .flatten(),
             ),
             (
                 "opacity",
@@ -448,7 +458,7 @@ impl Generator<'_> {
             // The application builds the status item's menu when it opens.
             | "StatusItem"
             | "PickerOption" | "AlertAction" | "TableColumn" | "TableMenu" | "ContextMenu" | "DoubleTap" | "WheelUp"
-            | "WheelDown" | "OnCommit" => {
+            | "WheelDown" | "Hover" | "OnCommit" => {
                 // Realized by their parents.
             }
             other => out.line(format!("/* unsupported {other} */")),

@@ -148,6 +148,7 @@ Flow(gap: 10) {
 | `Image(aspect: 0.6666666667, fit: cover)` | 随容器宽度保持 2:3，避免加载前后画框跳动；比例必须为正 |
 | `Image(corner:)` | 裁切图片圆角，可绑定长度；也可以写 `style!` 的具名圆角，例如 `corner: poster` |
 | `Image(rendering: template)` | 按当前前景色渲染模板图片；原始彩色图片使用 original |
+| `Image(...) { placeholder }` | 可选单个占位子节点，在图片异步加载期间显示，就绪后平滑淡入；包含多个占位视图时请用 `Stack`、`Column` 或 `Row` 包裹 |
 | `Grid(row_gap:)` | 独立设置行距；省略时沿用 gap |
 | `Grid(min_width: 300, gap: 12, masonry: true)` | 瀑布流：高度不一的卡片各按自己的高度，放进目前最短的一列；GTK 与 Windows 按普通网格逐行排 |
 | `Row { Text(…) Spacer Switch(…) }` | 领头的文字占去 `Spacer` 的位置，在剩下的宽度里换行，开关保持自己的宽度，如系统设置的一行；SwiftUI 与 Compose 这样排 |
@@ -374,6 +375,17 @@ Video(id: screen, player: players.main, controls: none, label: tr! { "zh-Hans" =
 ```
 
 在 `Button` 上，指针按下后先等是否还有第二下，再执行按钮的动作或 `DoubleTap` 的动作之一。在其他元素上，单击仍交给里面的控件。
+
+### 悬停（Hover）
+
+`Hover` 在指针悬停于宿主元素（包括容器、`Image`、`Button`、`NavLink` 等指针事件宿主）上时执行动作。省略 `delay:` 时指针进入即触发；指定 `delay: 秒数`（有限且 `>= 0` 的数值）时，指针需在元素内停留满该时长才触发，提前离开则取消。不支持指针悬停的目标（如手表、电视）只给出非阻断提示，不会阻断构建：
+
+```rust
+Image(source: item.cover, aspect: 1.0, fit: cover, corner: 10) {
+    Skeleton(shape: rect, corner: 10, tone: media)
+    Hover(delay: 0.35) => app.prefetch_details(item.id)
+}
+```
 
 `Slider(hover: draft.at)` 在指针位于滑块上时写入指针沿轨道的位置，`min` 处为 0，`max` 处为 1，离开后为 `None`；它不改变值。配合播放器状态，可以在进度条上显示指针下的时间。
 

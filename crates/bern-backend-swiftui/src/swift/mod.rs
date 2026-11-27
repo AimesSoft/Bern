@@ -588,7 +588,7 @@ impl<'a> Generator<'a> {
             "Stack" => self.stack(out, element, ctx),
             "Svg" => self.svg(out, element),
             "WebPage" => self.web_page(out, element),
-            "Image" => self.image(out, element),
+            "Image" => self.image(out, element, ctx),
             "Skeleton" => self.skeleton_view(out, element),
             "Progress" => self.progress(out, element),
             // A spacer shrinks to nothing, as on the other targets, not to
@@ -637,7 +637,7 @@ impl<'a> Generator<'a> {
             "Detail" | "DetailFooter" | "Destination" | "Tab" | "Sidebar" | "SidebarItem"
             | "Toolbar" | "WindowSet" | "Window" | "Layout" | "MenuItem" | "AlertAction"
             | "MenuBar" | "StatusItem" | "TableColumn" | "TableMenu" | "ContextMenu"
-            | "DoubleTap" | "WheelUp" | "WheelDown" | "OnCommit" => {
+            | "DoubleTap" | "WheelUp" | "WheelDown" | "Hover" | "OnCommit" => {
                 // Realized by their parents.
             }
             other => out.line(format!("SwiftUI.EmptyView() // unsupported {other}")),

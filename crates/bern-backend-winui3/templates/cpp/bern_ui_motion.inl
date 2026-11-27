@@ -10,9 +10,11 @@
 
 #if BERN_WINUI
 namespace composition = winrt::Microsoft::UI::Composition;
+namespace dispatching = winrt::Microsoft::UI::Dispatching;
 using PointerKind = winrt::Microsoft::UI::Input::PointerDeviceType;
 #else
 namespace composition = winrt::Windows::UI::Composition;
+namespace dispatching = winrt::Windows::System;
 using PointerKind = winrt::Windows::Devices::Input::PointerDeviceType;
 #endif
 using float3 = winrt::Windows::Foundation::Numerics::float3;

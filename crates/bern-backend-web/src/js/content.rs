@@ -108,37 +108,45 @@ impl Generator<'_> {
                 format!("() => ({}).url", self.expr(expr))
             }
         });
-        out.line(format!(
-            "F.Image(p, ctx, {});",
-            Self::props(vec![
-                ("source", element.resource("source").map(string)),
-                ("darkSource", element.resource("dark_source").map(string)),
-                ("url", url),
-                ("label", self.text_prop(element, "label")),
-                ("width", self.length(element, "width")),
-                ("height", self.length(element, "height")),
-                ("fit", Self::keyword(element, "fit")),
-                ("animate", self.animate(element)),
-                ("corner", self.length(element, "corner")),
-                ("rendering", Self::keyword(element, "rendering")),
-                (
-                    "saturation",
-                    match element.prop("saturation") {
-                        Some(Prop::Expr { expr }) => Some(format!("() => ({})", self.expr(expr))),
-                        _ => element.number("saturation").map(number),
-                    },
-                ),
-                ("aspect", element.number("aspect").map(number)),
-                // Without a size it covers the room its container gives.
-                (
-                    "covers",
-                    ["width", "height", "aspect"]
-                        .iter()
-                        .all(|name| element.prop(name).is_none())
-                        .then(|| "true".to_string()),
-                ),
-            ])
-        ));
+        let props = Self::props(vec![
+            ("source", element.resource("source").map(string)),
+            ("darkSource", element.resource("dark_source").map(string)),
+            ("url", url),
+            ("label", self.text_prop(element, "label")),
+            ("width", self.length(element, "width")),
+            ("height", self.length(element, "height")),
+            ("fit", Self::keyword(element, "fit")),
+            ("animate", self.animate(element)),
+            ("corner", self.length(element, "corner")),
+            ("rendering", Self::keyword(element, "rendering")),
+            (
+                "saturation",
+                match element.prop("saturation") {
+                    Some(Prop::Expr { expr }) => Some(format!("() => ({})", self.expr(expr))),
+                    _ => element.number("saturation").map(number),
+                },
+            ),
+            ("aspect", element.number("aspect").map(number)),
+            // Without a size it covers the room its container gives.
+            (
+                "covers",
+                ["width", "height", "aspect"]
+                    .iter()
+                    .all(|name| element.prop(name).is_none())
+                    .then(|| "true".to_string()),
+            ),
+        ]);
+        if element.has_content() {
+            let placeholder: Vec<_> = element.content().take(1).cloned().collect();
+            self.children(
+                out,
+                &format!("F.Image(p, ctx, {props}, "),
+                &placeholder,
+                ");",
+            );
+        } else {
+            out.line(format!("F.Image(p, ctx, {props});"));
+        }
     }
 
     pub(super) fn video(&self, out: &mut Out, element: &Element) {

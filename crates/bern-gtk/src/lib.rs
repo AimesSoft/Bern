@@ -74,7 +74,7 @@ pub use gio;
 pub use glib;
 pub use gtk;
 pub use host::{dispatch, run};
-pub use lazy::LazyGrid;
+pub use lazy::{LazyGrid, LazyRow, LazyRowProps};
 pub use media::{MediaOp, Video, VideoProps, media, media_open, player_state};
 pub use motion::{Curve, Decor, Decorate, Edge, Num, Transition, TransitionKind, staggered};
 pub use palette::{SearchItem, SearchItemProps, SearchPalette};
@@ -284,4 +284,5 @@ fn on_a_display() {
     motion::tests::a_spinning_box_turns_stops_where_it_is_and_goes_on();
     motion::tests::a_glowing_box_lights_under_the_pointer_and_fades();
     lazy::tests::a_long_grid_builds_only_the_rows_near_the_view();
+    lazy::tests::a_long_row_builds_only_the_items_near_the_view();
 }

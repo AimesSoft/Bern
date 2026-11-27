@@ -99,7 +99,13 @@ impl Generator<'_> {
             .map(|gap| format!(", spacing: {gap}"))
             .unwrap_or_default();
         if element.kind == "Row" {
-            out.open(format!("BernRow(alignment: {alignment}{spacing}) {{"));
+            if bern_ir::lazy_row_items(element).is_some() {
+                out.open(format!(
+                    "SwiftUI.LazyHStack(alignment: {alignment}{spacing}) {{"
+                ));
+            } else {
+                out.open(format!("BernRow(alignment: {alignment}{spacing}) {{"));
+            }
             self.nodes(
                 out,
                 &element.children,

@@ -448,7 +448,9 @@ impl<'a> Generator<'a> {
                 }
                 // A radius that follows state moves with the element's
                 // `animate` spring.
-                if let Some(radius) = self.length(element, "blur") {
+                if let Some(radius) = self.length(element, "blur")
+                    && !bern_target_api::svg::static_preblur(element)
+                {
                     effects.push_str(&format!(".bernBlur({radius}, {corner})"));
                 }
                 if !bern_ir::spec::has_own_opacity(&element.kind)
@@ -801,7 +803,7 @@ impl<'a> Generator<'a> {
             "Rail" => self.rail(out, element, ctx),
             "Svg" => self.svg(out, element),
             "WebPage" => self.web_page(out, element),
-            "Image" => self.image(out, element),
+            "Image" => self.image(out, element, ctx),
             "Skeleton" => self.skeleton_view(out, element),
             "Spacer" => match ctx.scope {
                 Scope::Row => out.line("Spacer(Modifier.weight(1f).bernRowSpacer())"),
@@ -843,7 +845,7 @@ impl<'a> Generator<'a> {
             | "SidebarHeader"
             | "WindowSet" | "Window" | "Layout" | "MenuItem" | "AlertAction" | "TabAccessory"
             | "PickerOption" | "TableColumn" | "TableMenu" | "ContextMenu" | "DoubleTap"
-            | "WheelUp" | "WheelDown"
+            | "WheelUp" | "WheelDown" | "Hover"
             // Android has no menu bar for applications.
             | "MenuBar" | "CommandMenu" | "CommandItem"
             // Nor a status area.

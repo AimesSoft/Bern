@@ -1,8 +1,8 @@
 //! Pointer events an element declares beside its content: a double click
-//! (`DoubleTap`), the menu a secondary click opens (`ContextMenu`) and the
-//! notches of a wheel or trackpad (`WheelUp`, `WheelDown`). A `Button`
-//! keeps its own double click and menu; every other element takes them
-//! here, around what it shows.
+//! (`DoubleTap`), the menu a secondary click opens (`ContextMenu`), the
+//! notches of a wheel or trackpad (`WheelUp`, `WheelDown`) and pointer
+//! resting (`Hover`). A `Button` keeps its own double click and menu;
+//! every other element takes them here, around what it shows.
 
 use crate::El;
 use crate::ctx::{Act, Ctx, Press};
@@ -13,8 +13,15 @@ use gpui::{
     RenderOnce, ScrollDelta, ScrollEvent, ScrollSource, Stateful, StatefulInteractiveElement,
     Styled, TouchPhase, Window, div,
 };
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
+use std::time::Duration;
+
+thread_local! {
+    /// Generation tokens for active `Hover(delay:)` timers, keyed by element.
+    static HOVER_GENERATIONS: RefCell<HashMap<String, u64>> = RefCell::new(HashMap::new());
+}
 
 /// The actions of an element's pointer events.
 #[derive(Clone, Default)]
@@ -22,6 +29,7 @@ pub struct PointerEvents {
     pub double_tap: Option<Act>,
     pub wheel_up: Option<Act>,
     pub wheel_down: Option<Act>,
+    pub hover: Option<(Act, f64)>,
 }
 
 /// Points of precise (trackpad) scrolling that count as one notch.
@@ -83,6 +91,40 @@ pub fn pointer_events(
             } else {
                 wrapper
             }
+        }
+        None => wrapper,
+    };
+    let wrapper = match events.hover {
+        Some((action, delay)) => {
+            let hover_key = format!("{}/{}#hover", c.win().id, c.key(id));
+            let press = crate::controls::press(c, None, Some(action));
+            wrapper.on_hover(move |inside, _window, cx| {
+                let token = HOVER_GENERATIONS.with(|gens| {
+                    let mut gens = gens.borrow_mut();
+                    let entry = gens.entry(hover_key.clone()).or_insert(0);
+                    *entry = entry.wrapping_add(1);
+                    *entry
+                });
+                if !*inside {
+                    return;
+                }
+                if delay <= 0.0 || !delay.is_finite() {
+                    press(cx);
+                    return;
+                }
+                let dur = Duration::from_secs_f64(delay);
+                let hover_key = hover_key.clone();
+                let press = Rc::clone(&press);
+                cx.spawn(async move |cx| {
+                    cx.background_executor().timer(dur).await;
+                    let still_valid = HOVER_GENERATIONS
+                        .with(|gens| gens.borrow().get(&hover_key).copied() == Some(token));
+                    if still_valid {
+                        cx.update(|cx| press(cx));
+                    }
+                })
+                .detach();
+            })
         }
         None => wrapper,
     };

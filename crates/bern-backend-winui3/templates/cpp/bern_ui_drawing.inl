@@ -327,9 +327,14 @@ inline bool Decodable(uint8_t const* bytes, size_t size) {
 
 /// The bytes at an http(s) address once they come, for as long as `waiter`
 /// waits; nothing after that.
-inline winrt::Windows::Foundation::IAsyncOperation<winrt::Windows::Storage::Streams::IBuffer> Download(std::string url, std::shared_ptr<bern::pictures::Waiter> waiter) {
+inline winrt::Windows::Foundation::IAsyncOperation<winrt::Windows::Storage::Streams::IBuffer> Download(
+    std::string url, std::shared_ptr<bern::pictures::Waiter> waiter,
+    bern::pictures::Priority priority = bern::pictures::Priority::Normal) {
     if (app && !app->catalog.bundleId.empty()) bern::pictures::SetBundleId(app->catalog.bundleId);
-    co_return co_await bern::pictures::Until(std::move(url), std::move(waiter), [](auto const& bytes) { return Decodable(bytes.data(), bytes.Length()); });
+    co_return co_await bern::pictures::Until(
+        std::move(url), std::move(waiter),
+        [](auto const& bytes) { return Decodable(bytes.data(), bytes.Length()); },
+        priority);
 }
 
 /// Read a picture's bytes: a `file:` URL from disk, an http(s) one over

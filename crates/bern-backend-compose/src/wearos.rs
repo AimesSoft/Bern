@@ -38,6 +38,7 @@ impl Target for ComposeWearos {
                 .filter(|feature| {
                     ![
                         bern_target_api::feature::WHEEL,
+                        bern_target_api::feature::HOVER,
                         bern_target_api::feature::SLIDER_HOVER,
                     ]
                     .contains(feature)

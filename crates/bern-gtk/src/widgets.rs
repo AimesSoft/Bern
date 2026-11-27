@@ -3493,7 +3493,7 @@ pub fn Avatar(p: &Parent, ctx: &Ctx, props: AvatarProps) {
     }
     if let Some(source) = props.source {
         let path = std::path::PathBuf::from(crate::host::resources_dir()).join(source);
-        if let Some(texture) = read_picture(&path, None) {
+        if let Some(texture) = read_picture(&path, None, 0.0, (None, None)) {
             avatar.set_custom_image(Some(&texture));
         }
     } else if let Some(url_get) = props.url {
@@ -4589,6 +4589,10 @@ pub struct ImageProps {
     pub decode_max: Option<f64>,
     /// Color saturation from 0 (grayscale) to 1 (full color).
     pub saturation: Option<Num>,
+    /// Optional placeholder built while a picture loads.
+    pub placeholder: Option<Build>,
+    /// Static blur radius (>= 4) baked into the decoded bitmap.
+    pub blur: f64,
 }
 
 /// The content fit of `fit`.
@@ -4682,6 +4686,7 @@ pub(crate) fn framed(
 /// follows the picture's aspect ratio. Without a label it is decorative.
 #[allow(non_snake_case)]
 pub fn Image(p: &Parent, ctx: &Ctx, props: ImageProps) {
+    let _ = &props.placeholder;
     let resources = std::path::PathBuf::from(crate::host::resources_dir());
     let light = resources.join(props.source);
     let dark = props.dark.map(|dark| resources.join(dark));
@@ -4690,7 +4695,25 @@ pub fn Image(p: &Parent, ctx: &Ctx, props: ImageProps) {
         Some(dark) if crate::theme::is_dark() => dark.clone(),
         _ => light.clone(),
     };
-    let texture = read_picture(&path, None);
+    let fit = content_fit(props.fit);
+    let blur = props.blur;
+    let sides = (props.one_size || props.decode_max.is_some() || blur >= 0.2).then(|| {
+        let side = |num: &Option<Num>| match (num.as_ref().map(|n| n.peek(ctx)), props.decode_max) {
+            (Some(s), Some(m)) => Some(s.min(m)),
+            (Some(s), None) if props.one_size => Some(s),
+            (None, Some(m)) => Some(m),
+            _ => None,
+        };
+        (side(&props.width), side(&props.height))
+    });
+    let fixed_display = (
+        props.width.as_ref().map(|n| n.peek(ctx)),
+        props.height.as_ref().map(|n| n.peek(ctx)),
+    );
+    let initial_pixels = (blur >= 0.2)
+        .then(|| sides.and_then(|(w, h)| twice_pixels(&path, w, h, fit, 1.0)))
+        .flatten();
+    let texture = read_picture(&path, initial_pixels, blur, fixed_display);
     let (natural_width, natural_height) = texture
         .as_ref()
         .map(|paintable| (paintable.intrinsic_width(), paintable.intrinsic_height()))
@@ -4702,7 +4725,6 @@ pub fn Image(p: &Parent, ctx: &Ctx, props: ImageProps) {
         } else {
             1.0
         });
-    let fit = content_fit(props.fit);
     let picture: gtk::Widget = if props.template {
         let template = crate::picture::Template::new(fit);
         template.set_paintable(texture.as_ref());
@@ -4727,18 +4749,8 @@ pub fn Image(p: &Parent, ctx: &Ctx, props: ImageProps) {
         }
         None => picture.update_state(&[gtk::accessible::State::Hidden(true)]),
     }
-    if dark.is_some() || props.one_size || props.decode_max.is_some() {
-        let sides = (props.one_size || props.decode_max.is_some()).then(|| {
-            let side =
-                |num: &Option<Num>| match (num.as_ref().map(|n| n.peek(ctx)), props.decode_max) {
-                    (Some(s), Some(m)) => Some(s.min(m)),
-                    (Some(s), None) if props.one_size => Some(s),
-                    (None, Some(m)) => Some(m),
-                    _ => None,
-                };
-            (side(&props.width), side(&props.height))
-        });
-        follow_picture(&picture, path, light, dark, sides, fit);
+    if dark.is_some() || props.one_size || props.decode_max.is_some() || blur >= 0.2 {
+        follow_picture(&picture, path, light, dark, sides, fit, blur, fixed_display);
     }
     let (outer, _, _) = framed(
         ctx,
@@ -4759,7 +4771,29 @@ pub fn Image(p: &Parent, ctx: &Ctx, props: ImageProps) {
 /// The declared picture at `path`: in HDR where GTK presents it, upright,
 /// and with `pixels`, its longer side that many pixels, drawn down by
 /// gdk-pixbuf, which averages the pixels each one covers.
-fn read_picture(path: &std::path::Path, pixels: Option<i32>) -> Option<gtk::gdk::Paintable> {
+fn read_picture(
+    path: &std::path::Path,
+    pixels: Option<i32>,
+    blur: f64,
+    display: (Option<f64>, Option<f64>),
+) -> Option<gtk::gdk::Paintable> {
+    if blur >= 0.2 {
+        let pixbuf = match pixels {
+            Some(pixels) => gtk::gdk_pixbuf::Pixbuf::from_file_at_scale(path, pixels, pixels, true),
+            None => gtk::gdk_pixbuf::Pixbuf::from_file(path),
+        }
+        .ok()?;
+        let upright = pixbuf.apply_embedded_orientation().unwrap_or(pixbuf);
+        let sigma = crate::features::blur_sigma(
+            blur,
+            upright.width(),
+            upright.height(),
+            display.0,
+            display.1,
+        );
+        return crate::features::premultiplied_texture_blurred(&upright, sigma)
+            .map(|texture| texture.upcast());
+    }
     if let Some(texture) = crate::hdr::texture(path) {
         return Some(texture.upcast());
     }
@@ -4790,6 +4824,8 @@ fn follow_picture(
     dark: Option<std::path::PathBuf>,
     sides: Option<(Option<f64>, Option<f64>)>,
     fit: gtk::ContentFit,
+    blur: f64,
+    display: (Option<f64>, Option<f64>),
 ) {
     // Placed in a window, or on a display of another scale.
     let placed = crate::reactive::Version::new();
@@ -4823,7 +4859,7 @@ fn follow_picture(
         if *current.borrow() == next {
             return;
         }
-        let texture = read_picture(path, pixels);
+        let texture = read_picture(path, pixels, blur, display);
         current.replace(next);
         if let Some(template) = widget.downcast_ref::<crate::picture::Template>() {
             template.set_paintable(texture.as_ref());

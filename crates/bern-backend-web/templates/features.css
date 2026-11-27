@@ -28,6 +28,30 @@
   flex-shrink: 0;
 }
 
+.bern-image-wrap {
+  position: relative;
+  display: block;
+  flex: none;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.bern-image-wrap > .bern-image-placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.bern-image-wrap > .bern-image-placeholder[hidden] {
+  display: none;
+}
+
+.bern-image-wrap > .bern-image {
+  display: block;
+}
+
 .bern-canvas {
   position: relative;
   min-width: 0;

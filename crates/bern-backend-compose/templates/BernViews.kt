@@ -1679,6 +1679,8 @@ fun BernImage(
     covers: Boolean = false,
     maxSide: Dp? = null,
     saturation: Float? = null,
+    blur: Float = 0f,
+    placeholder: (@Composable () -> Unit)? = null,
 ) {
     val shown = if (dark != null && bernDark()) dark else name
     val url = remember(shown) { BernPictures.resource(shown) }
@@ -1687,7 +1689,7 @@ fun BernImage(
     } else {
         null
     }
-    BernImageURL(url, label, width, height, fit, corner, template, aspect, ratio, twice = oneSize, covers = covers, maxSide = maxSide, saturation = saturation)
+    BernImageURL(url, label, width, height, fit, corner, template, aspect, ratio, twice = oneSize, covers = covers, maxSide = maxSide, saturation = saturation, blur = blur, placeholder = placeholder)
 }
 
 /// The frame of a picture: its declared sizes, the other side by `ratio`
@@ -1968,12 +1970,14 @@ fun BernPointerEvents(
     onDoubleTap: (() -> Unit)? = null,
     onWheelUp: (() -> Unit)? = null,
     onWheelDown: (() -> Unit)? = null,
+    onHover: (() -> Unit)? = null,
+    hoverDelay: Double = 0.0,
     menu: (@Composable (dismiss: () -> Unit) -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     val openMenu = { open = true }
-    BernPointerBox(modifier, onDoubleTap, if (menu != null) openMenu else null, onWheelUp, onWheelDown) {
+    BernPointerBox(modifier, onDoubleTap, if (menu != null) openMenu else null, onWheelUp, onWheelDown, onHover, hoverDelay) {
         content()
         if (menu != null) DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             BernPopupContent { Column { menu { open = false } } }

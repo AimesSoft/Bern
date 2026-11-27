@@ -4099,12 +4099,229 @@ export function LazyGrid(p, ctx, { minWidth, items, key, align }, setup, outer, 
   });
 }
 
-/// The element of the item of `key` in a lazy grid of `scroll`, built and
-/// brought near the view for it.
+/// A `Row` whose items are one `ForEach`: in a horizontal scroll view only
+/// the items near what is in sight are built, one view's width before and
+/// after it; the items before and after stand as space of their width, the
+/// width of an item not yet built guessed from the first one built. Outside
+/// a horizontal scroll view every item is built. A built item keeps its DOM,
+/// controls and state while its key stays and it is near the view; `setup`
+/// binds the row's gap, `outer` its padding and lengths.
+export function LazyRow(p, ctx, { align, items, key }, setup, outer, item) {
+  const node = el("div", { class: "bern-lazy-row" });
+  const leading = el("div", { class: "bern-lazy-space" });
+  const body = el("div", { class: `bern-stack bern-hstack bern-align-${align ?? "center"}` });
+  const trailing = el("div", { class: "bern-lazy-space" });
+  node.append(leading, body, trailing);
+  p.append(node);
+  setup?.(body);
+  outer?.(node);
+  trackLayout(body, "row");
+  let list = [];
+  let keys = [];
+  /// Built items by key: their value cell, scope, markers and element.
+  let built = new Map();
+  /// Widths of built items by key; the guess for the rest.
+  const widths = new Map();
+  let guess = 0;
+  let gap = 0;
+  /// Where each item starts, and the whole width.
+  let starts = [0];
+  let total = 0;
+  const scroller = () => {
+    const found = node.parentElement?.closest(".bern-scroll");
+    return found?.classList.contains("bern-scroll-horizontal") ? found : null;
+  };
+  const measureGap = () => {
+    const style = getComputedStyle(body);
+    gap = parseFloat(style.columnGap || style.gap) || parseFloat(body.style.gap) || 0;
+  };
+  const layout = () => {
+    starts = new Array(keys.length + 1);
+    let at = 0;
+    for (let i = 0; i < keys.length; i++) {
+      starts[i] = at;
+      at += (widths.get(keys[i]) ?? guess) + gap;
+    }
+    starts[keys.length] = at;
+    total = keys.length ? at - gap : 0;
+  };
+  /// The first item whose trailing edge is past `x`.
+  const itemAt = (x) => {
+    let low = 0;
+    let high = starts.length - 1;
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      if (starts[mid + 1] - gap <= x) low = mid + 1;
+      else high = mid;
+    }
+    return low;
+  };
+  /// The items to build: those near the view, or all outside a horizontal scroll view.
+  const wanted = () => {
+    const count = keys.length;
+    const initial = [0, Math.min(count, 8)];
+    // Not on the page yet: a first screenful, until it is.
+    if (!node.isConnected) return initial;
+    const view = scroller();
+    if (!view) return [0, count];
+    if (!guess) return initial;
+    const viewWidth = view.clientWidth || view.getBoundingClientRect().width;
+    if (!viewWidth) return initial;
+    const offset = Math.max(0, (view.scrollLeft || 0) - (leading.offsetLeft || 0));
+    const from = itemAt(Math.max(0, offset - viewWidth));
+    const to = Math.min(count, itemAt(Math.max(0, offset + viewWidth * 2)) + 1);
+    return [Math.min(from, count), Math.max(to, Math.min(from, count))];
+  };
+  const resize = new ResizeObserver((entries) => {
+    let changed = false;
+    for (const entry of entries) {
+      const id = entry.target.bernLazyKey;
+      if (id === undefined || !built.has(id)) continue;
+      const width = entry.target.getBoundingClientRect().width;
+      if (widths.get(id) !== width) {
+        widths.set(id, width);
+        if (!guess && width) guess = width;
+        changed = true;
+      }
+    }
+    if (changed) schedule();
+  });
+  /// The widths of the items built, as they are laid out now.
+  const measureBuilt = () => {
+    for (const [id, entry] of built) {
+      const width = entry.element?.getBoundingClientRect().width ?? 0;
+      if (!width) continue;
+      widths.set(id, width);
+      if (!guess) guess = width;
+    }
+  };
+  const show = () => {
+    const prevGuess = guess;
+    measureGap();
+    measureBuilt();
+    layout();
+    const [from, to] = wanted();
+    const next = new Map();
+    untrack(() => {
+      for (let i = from; i < to; i++) {
+        const id = keys[i];
+        let entry = built.get(id);
+        if (entry) {
+          built.delete(id);
+        } else {
+          const value = cell(list[i]);
+          const owner = new Scope(null);
+          const fragment = document.createDocumentFragment();
+          const start = document.createComment("");
+          const end = document.createComment("");
+          fragment.append(start);
+          const itemKey = () => String(key(value.peek()));
+          within(owner, () => item(fragment, { ...ctx, key: itemKey, keys: [...(ctx.keys ?? []), itemKey] }, () => value.get()));
+          const element = [...fragment.childNodes].find((one) => one.nodeType === 1);
+          if (element) {
+            element.dataset.bernItem = "";
+            element.bernKey = key(list[i]);
+            element.bernLazyKey = id;
+            resize.observe(element);
+          }
+          fragment.append(end);
+          body.append(fragment);
+          entry = { value, owner, start, end, element };
+        }
+        next.set(id, entry);
+      }
+      // An item whose key is gone plays its `disappear` where it was; an
+      // item only scrolled out of range goes at once.
+      const present = new Set(keys);
+      for (const [id, stale] of built) {
+        if (stale.element) resize.unobserve(stale.element);
+        stale.owner.dispose();
+        for (const one of nodesBetween(stale.start, stale.end)) present.has(id) ? one.remove() : leave(one);
+      }
+      // Built items in the order of the list.
+      let anchor = null;
+      for (const entry of next.values()) {
+        const at = anchor ? anchor.nextSibling : body.firstChild;
+        if (at !== entry.start) {
+          if (anchor) anchor.after(...nodesBetween(entry.start, entry.end));
+          else body.prepend(...nodesBetween(entry.start, entry.end));
+        }
+        anchor = entry.end;
+      }
+    });
+    built = next;
+    if (!prevGuess) {
+      measureBuilt();
+      if (guess) {
+        layout();
+        schedule();
+      }
+    }
+    leading.style.width = `${Math.min(total, starts[from] ?? 0)}px`;
+    trailing.style.width = `${Math.max(0, total - (starts[to] ?? total) + (to < starts.length - 1 ? gap : 0))}px`;
+  };
+  let pending = 0;
+  const schedule = () => {
+    if (pending) return;
+    const run = () => {
+      pending = 0;
+      show();
+    };
+    pending = document.hidden ? setTimeout(run, 16) : requestAnimationFrame(run);
+  };
+  effect(() => {
+    list = items();
+    untrack(() => {
+      keys = list.map((one) => String(key(one)));
+      for (let i = 0; i < list.length; i++) built.get(keys[i])?.value.set(list[i]);
+      show();
+    });
+  });
+  let watched = null;
+  const watch = () => {
+    const view = scroller();
+    if (view === watched) return;
+    watched?.removeEventListener("scroll", schedule);
+    watched = view;
+    view?.addEventListener("scroll", schedule, { passive: true });
+    if (view) sized.observe(view);
+    schedule();
+  };
+  const sized = new ResizeObserver(() => {
+    watch();
+    schedule();
+  });
+  sized.observe(node);
+  watch();
+  /// Brings the item of `key` near the view and gives its element, for a
+  /// scroll view's `position` to scroll to.
+  node.bernReveal = (wantedKey) => {
+    const i = keys.indexOf(String(wantedKey));
+    const view = scroller();
+    if (i < 0 || !view) return null;
+    const itemLeft = starts[i] ?? 0;
+    view.scrollLeft = itemLeft + (leading.offsetLeft || 0);
+    show();
+    return built.get(keys[i])?.element ?? null;
+  };
+  onCleanup(() => {
+    if (pending) {
+      cancelAnimationFrame(pending);
+      clearTimeout(pending);
+    }
+    watched?.removeEventListener("scroll", schedule);
+    resize.disconnect();
+    sized.disconnect();
+    for (const entry of built.values()) entry.owner.dispose();
+  });
+}
+
+/// The element of the item of `key` in a lazy grid or lazy row of `scroll`,
+/// built and brought near the view for it.
 export function revealLazy(scroll, wantedKey) {
-  for (const grid of scroll.querySelectorAll(".bern-lazy-grid")) {
-    if (grid.closest(".bern-scroll") !== scroll) continue;
-    const found = grid.bernReveal?.(wantedKey);
+  for (const lazy of scroll.querySelectorAll(".bern-lazy-grid, .bern-lazy-row")) {
+    if (lazy.closest(".bern-scroll") !== scroll) continue;
+    const found = lazy.bernReveal?.(wantedKey);
     if (found) return found;
   }
   return null;

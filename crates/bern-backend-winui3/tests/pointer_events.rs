@@ -363,11 +363,59 @@ fn declarations_read_the_player_state_this_front_end_received() {
 }
 
 #[test]
+fn hover_with_delay_attaches_to_pointer_owners_and_nav_links() {
+    let mut hover = element("Hover", vec![]);
+    hover.action = Some(toggle(1));
+    hover
+        .props
+        .insert("delay".into(), Prop::Number { value: 0.35 });
+    let mut img = element("Image", vec![Node::Element(hover.clone())]);
+    img.props.insert(
+        "source".into(),
+        Prop::Resource {
+            name: "images/bern.png".into(),
+        },
+    );
+    let mut link = element("NavLink", vec![Node::Element(hover.clone())]);
+    link.props.insert(
+        "route".into(),
+        Prop::Expr {
+            expr: Expr {
+                ty: Type::Int,
+                kind: ExprKind::Literal {
+                    value: Value::Int(1),
+                },
+            },
+        },
+    );
+    let mut btn = element("Button", vec![Node::Element(hover)]);
+    btn.action = Some(toggle(2));
+
+    let code = generate(Node::Element(element(
+        "Column",
+        vec![Node::Element(img), Node::Element(link), Node::Element(btn)],
+    )));
+    assert!(!code.contains("unsupported"), "{code}");
+    assert_eq!(
+        code.matches(&format!(".hover = {}, .hoverDelay = 0.35", toggled(1)))
+            .count(),
+        3,
+        "{code}"
+    );
+    assert!(code.contains("B::NavLink("), "{code}");
+    assert!(code.contains("B::Button("), "{code}");
+    let runtime = include_str!("../templates/cpp/bern_ui_widgets.inl");
+    assert!(runtime.contains("DispatcherQueueTimer"), "{runtime}");
+    assert!(runtime.contains("IsRepeating(false)"), "{runtime}");
+}
+
+#[test]
 fn the_target_lists_the_pointer_and_player_features() {
     let features = bern_backend_winui3::WinUi3Windows.descriptor().features;
     for feature in [
         bern_target_api::feature::POINTER_EVENTS,
         bern_target_api::feature::WHEEL,
+        bern_target_api::feature::HOVER,
         bern_target_api::feature::SLIDER_HOVER,
         bern_target_api::feature::PLAYER_STATE,
     ] {

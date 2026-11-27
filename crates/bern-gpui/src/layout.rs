@@ -764,6 +764,9 @@ thread_local! {
     /// where its rows lay.
     static LAZY: std::cell::RefCell<std::collections::HashMap<String, Lazy>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
+    /// Horizontal rows that build only the items near the view, by target.
+    static LAZY_ROWS: std::cell::RefCell<std::collections::HashMap<String, LazyRow>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
 /// What a lazy grid knew in the last frame, in its own units.
@@ -788,9 +791,27 @@ struct Lazy {
     bounds: Option<gpui::Bounds<gpui::Pixels>>,
 }
 
-/// Where the item `key` of a lazy grid in the scroll view `scroll` would
-/// be in the window, built or not: for a scroll view's `position` to bring
-/// it near the view, where it is then built.
+/// What a lazy horizontal row knew in the last frame, in its own units.
+#[derive(Clone, Default)]
+struct LazyRow {
+    /// The part of the row in sight: its left and right.
+    sight: Option<(f32, f32)>,
+    /// Widths of built items by key; the guess for the rest.
+    widths: std::collections::HashMap<String, f32>,
+    guess: f32,
+    /// For a scroll view's `position`: the view, the items' keys, where
+    /// each item starts, and where the row lay in the window.
+    scroll: Option<std::rc::Rc<str>>,
+    keys: Vec<String>,
+    starts: Vec<f32>,
+    gap: f32,
+    pad: (f32, f32),
+    bounds: Option<gpui::Bounds<gpui::Pixels>>,
+}
+
+/// Where the item `key` of a lazy grid or lazy row in the scroll view `scroll`
+/// would be in the window, built or not: for a scroll view's `position` to
+/// bring it near the view, where it is then built.
 pub(crate) fn lazy_reach(
     scroll: &str,
     key: &crate::protocol::Value,
@@ -818,6 +839,196 @@ pub(crate) fn lazy_reach(
             ))
         })
     })
+    .or_else(|| {
+        LAZY_ROWS.with(|all| {
+            all.borrow().values().find_map(|row| {
+                if row.scroll.as_deref() != Some(scroll) {
+                    return None;
+                }
+                let bounds = row.bounds?;
+                let at = row.keys.iter().position(|one| *one == wanted)?;
+                let left = *row.starts.get(at)?;
+                let right = row.starts.get(at + 1).map_or(left, |next| next - row.gap);
+                Some(gpui::Bounds::new(
+                    bounds.origin
+                        + gpui::point(
+                            gpui::px((row.pad.0 + left) * scale),
+                            gpui::px(row.pad.1 * scale),
+                        ),
+                    gpui::size(
+                        gpui::px((right - left).max(0.0) * scale),
+                        (bounds.size.height - gpui::px(row.pad.1 * 2.0 * scale)).max(gpui::px(0.0)),
+                    ),
+                ))
+            })
+        })
+    })
+}
+
+/// A `Row` whose items are one `ForEach` inside a horizontal scroll view:
+/// builds only the items near what is in sight, one view's width before and
+/// after it, by what of it was in sight in the last frame; the items to the
+/// left and right stand as space of their width, caching measured item widths.
+pub fn lazy_row(
+    c: &Ctx,
+    id: &str,
+    props: Flex,
+    items: Vec<(crate::protocol::Value, bool)>,
+    key: impl Fn(&crate::protocol::Value) -> crate::protocol::Value,
+    row: impl Fn(&Ctx, &crate::protocol::Value, bool) -> Vec<El>,
+) -> El {
+    let target = format!("{}/{}", c.win().id, c.key(id));
+    let scale = crate::units::scale();
+    let pad = (
+        props.pad.x.unwrap_or(props.pad.all),
+        props.pad.y.unwrap_or(props.pad.all),
+    );
+    let gap = props.gap;
+    let keys: Vec<String> = items
+        .iter()
+        .map(|(item, _)| crate::value::key_text(&key(item)))
+        .collect();
+    let mut state = LAZY_ROWS
+        .with(|all| all.borrow().get(&target).cloned())
+        .unwrap_or_default();
+    let count = keys.len();
+    let mut starts = vec![0.0f32; count + 1];
+    let mut at = 0.0;
+    for (i, start) in starts.iter_mut().enumerate().take(count) {
+        *start = at;
+        let width = state.widths.get(&keys[i]).copied().unwrap_or(state.guess);
+        at += width + gap;
+    }
+    starts[count] = at;
+    let total = if count > 0 { at - gap } else { 0.0 };
+    // The first item whose trailing edge is past `x`.
+    let item_at = |x: f32| {
+        starts[1..]
+            .partition_point(|start| start - gap <= x)
+            .min(count)
+    };
+    let known = state.guess > 0.0;
+    let (from, to) = match state.sight {
+        Some((left, right)) if known => {
+            let page = (right - left).max(0.0);
+            let from = item_at((left - page).max(0.0));
+            (
+                from,
+                (item_at((right + page).max(0.0)) + 1).min(count).max(from),
+            )
+        }
+        _ => (0, count.min(12)),
+    };
+    state.scroll = c.scroll_of();
+    state.keys = keys.clone();
+    state.starts = starts.clone();
+    state.gap = gap;
+    state.pad = pad;
+    LAZY_ROWS.with(|all| all.borrow_mut().insert(target.clone(), state));
+    let cells = (from..to).map(|i| {
+        let measured = (target.clone(), keys[i].clone());
+        let (item, gone) = &items[i];
+        let mut cell = div().relative().flex().flex_row().flex_none().gap(px(gap));
+        cell = match props.align {
+            Align::Center => cell.items_center(),
+            Align::End | Align::Trailing | Align::Bottom => cell.items_end(),
+            Align::Baseline => cell.items_baseline(),
+            _ => cell.items_start(),
+        };
+        cell = cell.children(row(c, item, *gone));
+        if !*gone {
+            let probe = gpui::canvas(
+                move |bounds, _, _| {
+                    let width = f32::from(bounds.size.width) / scale;
+                    if width <= 0.0 {
+                        return;
+                    }
+                    let changed = LAZY_ROWS.with(|all| {
+                        let mut all = all.borrow_mut();
+                        let Some(lazy) = all.get_mut(&measured.0) else {
+                            return false;
+                        };
+                        if lazy.guess <= 0.0 {
+                            lazy.guess = width;
+                        }
+                        lazy.widths.insert(measured.1.clone(), width) != Some(width)
+                    });
+                    if changed {
+                        crate::host::redraw();
+                    }
+                },
+                |_, _, _, _| {},
+            )
+            .absolute()
+            .size_full();
+            cell = cell.child(probe);
+        }
+        cell
+    });
+    let span = (
+        starts[from],
+        if to > from {
+            starts[to] - gap
+        } else {
+            starts[from]
+        },
+    );
+    let seen = target.clone();
+    let probe = gpui::canvas(
+        move |bounds, window, _| {
+            let mask = window.content_mask().bounds;
+            let left = (f32::from(mask.origin.x) - f32::from(bounds.origin.x)) / scale - pad.0;
+            let right = left + f32::from(mask.size.width) / scale;
+            let moved = LAZY_ROWS.with(|all| {
+                let mut all = all.borrow_mut();
+                let Some(lazy) = all.get_mut(&seen) else {
+                    return false;
+                };
+                lazy.bounds = Some(bounds);
+                let before = lazy.sight.replace((left, right));
+                let page = (right - left).max(0.0);
+                let covered = (span.0 <= (left - page).max(0.0) + 0.5 || from == 0)
+                    && (span.1 >= (right + page).min(total) - 0.5 || to == count);
+                before.is_none() || !covered
+            });
+            if moved {
+                crate::host::redraw();
+            }
+        },
+        |_, _, _, _| {},
+    )
+    .absolute()
+    .size_full();
+    let mut body = div().flex().flex_row().flex_none().gap(px(gap));
+    body = match props.align {
+        Align::Center => body.items_center(),
+        Align::End | Align::Trailing | Align::Bottom => body.items_end(),
+        Align::Baseline => body.items_baseline(),
+        _ => body.items_start(),
+    };
+    let body = body.children(cells);
+    let after = if to < count {
+        total - starts[to] + if to > from { gap } else { 0.0 }
+    } else {
+        0.0
+    };
+    let element = div()
+        .relative()
+        .flex()
+        .flex_row()
+        .flex_none()
+        .child(div().flex_none().w(px(starts[from])))
+        .child(body)
+        .child(div().flex_none().w(px(after.max(0.0))))
+        .child(probe);
+    let element = if c.reveals() {
+        element.group(REVEAL)
+    } else {
+        element
+    };
+    let element = padded(element, props.pad);
+    let element = c.faded(c.grow().apply(element));
+    sized(element, props.width, props.height).into_any_element()
 }
 
 /// A `Grid` whose items are one `ForEach`: in a scroll view it builds only

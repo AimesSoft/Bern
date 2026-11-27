@@ -49,6 +49,7 @@ const FEATURES: &[&str] = &[
     feature::TAB_ACCESSORY,
     feature::REVEAL,
     feature::POINTER_EVENTS,
+    feature::HOVER,
     feature::WHEEL,
     feature::SLIDER_HOVER,
     feature::PLAYER_STATE,

@@ -1026,6 +1026,7 @@ fn the_target_lists_pointer_events_and_player_state() {
         for wanted in [
             feature::POINTER_EVENTS,
             feature::WHEEL,
+            feature::HOVER,
             feature::SLIDER_HOVER,
             feature::PLAYER_STATE,
         ] {
@@ -1033,6 +1034,7 @@ fn the_target_lists_pointer_events_and_player_state() {
         }
         assert!(target.descriptor().components.contains(&"WheelUp"));
         assert!(target.descriptor().components.contains(&"WheelDown"));
+        assert!(target.descriptor().components.contains(&"Hover"));
         assert!(target.descriptor().components.contains(&"ColorPicker"));
     }
 }
@@ -1876,5 +1878,178 @@ channels = ["ipc"]
             .package(&compiled.app, &mac_ctx, &bad_signing)
             .is_err()
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn hover_image_placeholder_and_lazy_row_generate_for_gpui() {
+    let protocol = r#"
+#[bern::protocol(namespace = "items", version = 1)]
+pub mod items {
+    use bern::prelude::*;
+
+    #[value]
+    pub enum Route {
+        Detail,
+    }
+
+    #[value]
+    pub struct Entry {
+        pub id: String,
+        pub cover: MediaSource,
+    }
+
+    #[state]
+    pub struct State {
+        pub entries: Vec<Entry>,
+        pub hovered: i64,
+    }
+
+    #[commands]
+    pub trait Commands {
+        fn on_hover(&mut self, n: i64) -> Result<(), CommandError>;
+    }
+}
+"#;
+    let ui = r#"
+use bern::prelude::*;
+use items_protocol::items::{self, Route};
+
+#[bern::session]
+pub struct Draft {
+    pub nav_path: Vec<Route>,
+}
+
+#[component]
+pub fn app(app: items::Client, windows: AppWindows, #[session] draft: Draft) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Items" }, initial: open) {
+                Navigation(path: draft.nav_path) {
+                    Column {
+                        NavLink(id: item_link, route: Route::Detail) {
+                            Text(content: tr! { "en" => "Item" })
+                            Hover(delay: 0.25) => app.on_hover(1)
+                        }
+                        ScrollView(axis: horizontal) {
+                            Row(gap: 12) {
+                                ForEach(items: app.entries, key: id) |entry| {
+                                    Image(source: entry.cover, width: 200, height: 120) {
+                                        Skeleton(width: 200, height: 120)
+                                        Hover(delay: 0.1) => app.on_hover(2)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Destination |route| {
+                        Text(content: tr! { "en" => "Detail" })
+                    }
+                }
+            }
+        }
+    }
+}
+"#;
+    let root = workspace();
+    let dir = std::env::temp_dir().join(format!("bern-gpui-hover-lazy-row-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    for (package, source) in [
+        ("items-protocol", protocol),
+        ("items-ui", ui),
+        ("items-core", ""),
+    ] {
+        std::fs::create_dir_all(dir.join(package).join("src")).unwrap();
+        std::fs::write(
+            dir.join(package).join("Cargo.toml"),
+            format!("[package]\nname = \"{package}\"\n"),
+        )
+        .unwrap();
+        std::fs::write(dir.join(package).join("src/lib.rs"), source).unwrap();
+    }
+    std::fs::write(
+        dir.join("Bern.toml"),
+        r#"
+[app]
+id = "items"
+bundle_id = "dev.bern.items"
+version = "0.1.0"
+name = { "en" = "Items" }
+
+[languages]
+supported = ["en"]
+default = "en"
+
+[protocol]
+package = "items-protocol"
+source = "items-protocol/src/lib.rs"
+
+[engine]
+package = "items-core"
+type = "items_core::Engine"
+
+[ui]
+package = "items-ui"
+sources = ["items-ui/src/lib.rs"]
+root = "app"
+
+[targets.macos]
+platform = "macos"
+ui = "gpui"
+"#,
+    )
+    .unwrap();
+    let config = bern_compiler::config::load(&dir.join("Bern.toml")).unwrap();
+    let compiled = bern_compiler::compile(&config).unwrap_or_else(|errors| {
+        panic!(
+            "{}",
+            errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    });
+    let styled = bern_target_api::style::for_platforms(&compiled.app, &["macos"]);
+    let target = config.targets[0].clone();
+    let problems = Gpui::MACOS.check(&styled, &target);
+    assert!(problems.is_empty(), "{problems:?}");
+    let files = Gpui::MACOS
+        .generate(
+            &styled,
+            &BuildContext {
+                project_dir: config.dir.clone(),
+                workspace_dir: root.clone(),
+                output_dir: dir.join("out"),
+                target,
+                protocol_package: config.protocol_package.name.clone(),
+                protocol_path: config.protocol_package.dir.clone(),
+                protocol_module: compiled.protocol_module.clone(),
+                engine_package: config.engine_package.name.clone(),
+                engine_path: config.engine_package.dir.clone(),
+                engine_type: config.engine_type.clone(),
+                modules: Vec::new(),
+                framework: Framework::Path(root.join("crates")),
+                release: false,
+            },
+        )
+        .unwrap();
+    let code = files
+        .iter()
+        .find(|f| f.path.ends_with("ui.rs"))
+        .map(|f| String::from_utf8_lossy(&f.contents).into_owned())
+        .unwrap();
+    assert!(
+        code.contains("hover: Some((b::act(|c: &b::Ctx| { b::dispatch(c, 0, vec![bern_ffi::protocol::Value::Int(1)]);  }), 0.25))"),
+        "{code}"
+    );
+    assert!(
+        code.contains("hover: Some((b::act(|c: &b::Ctx| { b::dispatch(c, 0, vec![bern_ffi::protocol::Value::Int(2)]);  }), 0.1))"),
+        "{code}"
+    );
+    assert!(code.contains("b::nav_link(c,"), "{code}");
+    assert!(code.contains("b::lazy_row(c,"), "{code}");
+    assert!(code.contains("b::image_url(c, rt::url("), "{code}");
+    assert!(code.contains("b::skeleton(c,"), "{code}");
     let _ = std::fs::remove_dir_all(&dir);
 }
