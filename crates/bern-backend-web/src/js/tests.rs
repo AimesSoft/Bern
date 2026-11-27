@@ -1101,11 +1101,207 @@ fn pointer_events_attach_to_any_owner_without_rendering() {
     for feature in [
         bern_target_api::feature::POINTER_EVENTS,
         bern_target_api::feature::WHEEL,
+        bern_target_api::feature::HOVER,
         bern_target_api::feature::SLIDER_HOVER,
         bern_target_api::feature::PLAYER_STATE,
     ] {
         assert!(crate::FEATURES.contains(&feature), "{feature}");
     }
+}
+
+#[test]
+fn image_placeholder_hover_and_lazy_row_generation() {
+    use bern_ir::{SessionOp, Template};
+    use bern_protocol::{FieldDef, RecordDef};
+
+    let mut app = app();
+    app.types.records.push(RecordDef {
+        name: "Card".into(),
+        fields: vec![FieldDef {
+            name: "id".into(),
+            ty: Type::Int,
+            doc: String::new(),
+            content: false,
+        }],
+    });
+    app.protocol.state.push(StateField {
+        name: "cards".into(),
+        ty: Type::List {
+            inner: Box::new(Type::Record {
+                name: "Card".into(),
+            }),
+        },
+        doc: String::new(),
+        content: false,
+        stream: false,
+        keyed: None,
+    });
+    app.sessions.push(SessionDef {
+        name: "ui".into(),
+        fields: vec![SessionFieldDef {
+            name: "hovered".into(),
+            ty: Type::Bool,
+            initial: Value::Bool(false),
+        }],
+    });
+    let hover_action = Action::Session {
+        field: FieldRef {
+            session: "ui".into(),
+            field: 0,
+            ty: Type::Bool,
+        },
+        op: SessionOp::Toggle,
+    };
+
+    // Image with placeholder + Hover renders only first visual child as 4th arg and extracts Hover.
+    let mut hover = element("Hover");
+    hover
+        .props
+        .insert("delay".into(), Prop::Number { value: 0.4 });
+    hover.action = Some(hover_action.clone());
+    let mut skeleton = element("Skeleton");
+    skeleton
+        .props
+        .insert("width".into(), Prop::Number { value: 120.0 });
+    let mut extra = element("Text");
+    extra.props.insert(
+        "content".into(),
+        dynamic_text(literal_expr(Value::Text("Ignored".into()), Type::Text)),
+    );
+    let mut image = element("Image");
+    image.props.insert(
+        "source".into(),
+        Prop::Resource {
+            name: "poster.png".into(),
+        },
+    );
+    image
+        .props
+        .insert("width".into(), Prop::Number { value: 120.0 });
+    image.children = vec![
+        Node::Element(hover.clone()),
+        Node::Element(skeleton),
+        Node::Element(extra),
+    ];
+
+    // NavLink with Hover ignores Hover inside children and attaches it via F.PointerEvents.
+    let mut nav_link = element("NavLink");
+    nav_link.id = Some("card_link".into());
+    nav_link.props.insert(
+        "route".into(),
+        Prop::Expr {
+            expr: literal_expr(Value::Text("/detail".into()), Type::Text),
+        },
+    );
+    let mut nav_text = element("Text");
+    nav_text.props.insert(
+        "content".into(),
+        dynamic_text(literal_expr(Value::Text("Detail".into()), Type::Text)),
+    );
+    nav_link.children = vec![Node::Element(nav_text), Node::Element(hover)];
+
+    // Row(lazy: true) with keyed ForEach generates B.LazyRow.
+    let mut item_text = element("Text");
+    item_text.props.insert(
+        "content".into(),
+        dynamic_text(Expr {
+            ty: Type::Text,
+            kind: ExprKind::Literal {
+                value: Value::Text("item".into()),
+            },
+        }),
+    );
+    let mut each = element("ForEach");
+    each.props.insert(
+        "items".into(),
+        Prop::Expr {
+            expr: Expr {
+                ty: Type::List {
+                    inner: Box::new(Type::Record {
+                        name: "Card".into(),
+                    }),
+                },
+                kind: ExprKind::Binding {
+                    binding: Binding::Engine {
+                        field: 0,
+                        path: Vec::new(),
+                    },
+                },
+            },
+        },
+    );
+    each.props.insert(
+        "key".into(),
+        Prop::Key {
+            field: 0,
+            name: "id".into(),
+        },
+    );
+    each.template = Some(Template {
+        var: "card".into(),
+        ty: Type::Record {
+            name: "Card".into(),
+        },
+    });
+    each.children = vec![Node::Element(item_text)];
+
+    let mut lazy_row = element("Row");
+    lazy_row.props.insert(
+        "lazy".into(),
+        Prop::Keyword {
+            value: "true".into(),
+        },
+    );
+    lazy_row
+        .props
+        .insert("gap".into(), Prop::Number { value: 12.0 });
+    lazy_row.props.insert(
+        "align".into(),
+        Prop::Keyword {
+            value: "top".into(),
+        },
+    );
+    lazy_row.children = vec![Node::Element(each)];
+
+    let mut out = Out::default();
+    Generator::new(&app).nodes(
+        &mut out,
+        &[
+            Node::Element(image),
+            Node::Element(nav_link),
+            Node::Element(lazy_row),
+        ],
+    );
+    let code = out.finish();
+    assert!(
+        code.contains("F.PointerEvents(p, ctx, { hover: () =>"),
+        "{code}"
+    );
+    assert!(code.contains("hoverDelay: 0.4"), "{code}");
+    assert!(
+        code.contains("F.Image(p, ctx, { source: \"poster.png\", width: 120 }, (p, ctx) => {"),
+        "{code}"
+    );
+    assert!(code.contains("B.Skeleton(p, ctx,"), "{code}");
+    assert!(
+        !code.contains("Ignored"),
+        "only first visual child is rendered:\n{code}"
+    );
+    assert!(
+        code.contains("B.NavLink(p, ctx, { id: \"card_link\""),
+        "{code}"
+    );
+    assert!(!code.contains("unsupported Hover"), "{code}");
+    assert!(
+        code.contains(
+            "B.LazyRow(p, ctx, { align: \"top\", items: () => E.cards.get(), key: (v) => v.id }"
+        ),
+        "{code}"
+    );
+    assert!(
+        code.contains("F.bindLength(p, \"gap\", 12, null);"),
+        "{code}"
+    );
 }
 
 #[test]

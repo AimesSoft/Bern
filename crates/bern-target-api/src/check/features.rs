@@ -92,6 +92,7 @@ const CHECKS: &[(&str, Check)] = &[
     (feature::REVEAL, reveal),
     (feature::POINTER_EVENTS, pointer_events),
     (feature::WHEEL, wheel),
+    (feature::HOVER, hover),
     (feature::SLIDER_HOVER, slider_hover),
     (feature::PLAYER_STATE, player_state),
     (feature::NATIVE_VIEW, native_view),
@@ -1662,6 +1663,19 @@ fn wheel(descriptor: &TargetDescriptor, app: &Application, diagnostics: &mut Vec
             Diagnostic::warning(format!(
                 "target `{}` has no wheel or trackpad scrolling: `{}` never runs there",
                 descriptor.id, event.kind
+            ))
+            .at(event.source.clone()),
+        );
+    }
+}
+
+fn hover(descriptor: &TargetDescriptor, app: &Application, diagnostics: &mut Vec<Diagnostic>) {
+    if let Some(event) = first_element(app, |element| element.kind == "Hover") {
+        // The element still shows; nothing on the target hovers over it.
+        diagnostics.push(
+            Diagnostic::warning(format!(
+                "target `{}` has no pointer hovering: `Hover` never runs there",
+                descriptor.id
             ))
             .at(event.source.clone()),
         );

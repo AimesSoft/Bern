@@ -884,6 +884,13 @@ impl Generator<'_> {
             return None;
         }
         let button = element.kind == "Button";
+        let hover_event = element.pointer_event("Hover");
+        let hover = hover_event.and_then(|event| self.action(event));
+        let hover_delay = hover
+            .as_ref()
+            .and_then(|_| hover_event?.number("delay"))
+            .filter(|delay| *delay > 0.0)
+            .map(super::float);
         let events = [
             (
                 "doubleTap",
@@ -903,6 +910,8 @@ impl Generator<'_> {
             ),
             ("wheelUp", self.child_action(element, "WheelUp")),
             ("wheelDown", self.child_action(element, "WheelDown")),
+            ("hover", hover),
+            ("hoverDelay", hover_delay),
         ];
         if events.iter().all(|(_, value)| value.is_none()) {
             return None;

@@ -414,8 +414,8 @@ impl Generator<'_> {
     }
 
     /// `BernPointerEvents(…)` for an element's `DoubleTap`, unless its
-    /// button arbitrates that itself, and its wheel turns where the system
-    /// has a wheel; none when it declares neither.
+    /// button arbitrates that itself, its wheel turns, and its hover
+    /// action where the system has a pointer; none when it declares none.
     pub(super) fn pointer_modifier(&self, element: &Element, double_tap: bool) -> Option<String> {
         let event = |kind: &str| {
             element
@@ -424,18 +424,25 @@ impl Generator<'_> {
                 .map(|action| format!("{{ {} }}", self.action(action)))
         };
         let double_tap = double_tap.then(|| event("DoubleTap")).flatten();
-        let wheel = matches!(self.platform, Platform::Macos | Platform::Ios);
-        let up = wheel.then(|| event("WheelUp")).flatten();
-        let down = wheel.then(|| event("WheelDown")).flatten();
-        if double_tap.is_none() && up.is_none() && down.is_none() {
+        let pointer = matches!(self.platform, Platform::Macos | Platform::Ios);
+        let up = pointer.then(|| event("WheelUp")).flatten();
+        let down = pointer.then(|| event("WheelDown")).flatten();
+        let hover = pointer.then(|| event("Hover")).flatten();
+        let hover_delay = hover
+            .as_ref()
+            .and_then(|_| element.pointer_event("Hover")?.number("delay"))
+            .unwrap_or(0.0);
+        if double_tap.is_none() && up.is_none() && down.is_none() && hover.is_none() {
             return None;
         }
         let closure = |closure: Option<String>| closure.unwrap_or_else(|| "nil".into());
         Some(format!(
-            "BernPointerEvents(doubleTap: {}, wheelUp: {}, wheelDown: {}, shaped: {})",
+            "BernPointerEvents(doubleTap: {}, wheelUp: {}, wheelDown: {}, hover: {}, hoverDelay: {}, shaped: {})",
             closure(double_tap),
             closure(up),
             closure(down),
+            closure(hover),
+            double(hover_delay),
             element.kind != "Button"
         ))
     }

@@ -5647,6 +5647,7 @@ fn pointer_events_attach_to_visual_elements() {
             ContextMenu { MenuItem(id: copy, label: app.title) => app.add(2) }
             WheelUp => app.add(3)
             WheelDown => app.add(4)
+            Hover(delay: 0.2) => app.add(10)
         }
         Text(content: app.title) { WheelUp => app.add(5) }
         Slider(id: level, label: app.title, value: draft.size, hover: draft.hover, min: 0, max: 1) {
@@ -5679,7 +5680,7 @@ fn pointer_events_attach_to_visual_elements() {
         vec![
             (
                 "Stack".to_string(),
-                vec!["DoubleTap", "ContextMenu", "WheelUp", "WheelDown"]
+                vec!["DoubleTap", "ContextMenu", "WheelUp", "WheelDown", "Hover"]
             ),
             ("Text".to_string(), vec!["WheelUp"]),
             ("Slider".to_string(), vec!["WheelUp", "WheelDown"]),
@@ -5713,7 +5714,11 @@ fn pointer_events_attach_to_visual_elements() {
         ),
         (
             r#"Text(content: app.title) { Spacer }"#,
-            "does not take children other than DoubleTap, ContextMenu, WheelUp, WheelDown",
+            "does not take children other than DoubleTap, ContextMenu, WheelUp, WheelDown, Hover",
+        ),
+        (
+            r#"Stack { Spacer Hover(delay: -0.1) => app.add(1) }"#,
+            "finite number >= 0",
         ),
         (
             r#"Stack { Spacer WheelUp => app.add(1) WheelUp => app.add(2) }"#,

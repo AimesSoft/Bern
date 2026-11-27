@@ -254,21 +254,36 @@ impl Generator<'_> {
                 .map(|event| self.action(event))
                 .unwrap_or_else(|| "None".into())
         };
+        let hover = element
+            .pointer_event("Hover")
+            .and_then(|event| {
+                let action = event.action.as_ref().map(|action| match event.clearing() {
+                    Some(clear) => format!(
+                        "b::act(|c| {{ {}; {}; }})",
+                        self.action_body(action),
+                        self.action_body(&clear)
+                    ),
+                    None => format!("b::act(|c| {})", self.action_body(action)),
+                })?;
+                let delay = event.number("delay").unwrap_or(0.0).max(0.0);
+                Some(format!("Some(({action}, {}))", float(delay)))
+            })
+            .unwrap_or_else(|| "None".into());
         let props = match element.kind.as_str() {
             "Button"
-                if ["WheelUp", "WheelDown"]
+                if ["WheelUp", "WheelDown", "Hover"]
                     .iter()
                     .any(|kind| element.pointer_event(kind).is_some()) =>
             {
                 format!(
-                    "b::PointerProps {{ double_tap: None, menu: vec![], wheel_up: {}, wheel_down: {}, capture_wheel: false }}",
+                    "b::PointerProps {{ double_tap: None, menu: vec![], wheel_up: {}, wheel_down: {}, hover: {hover}, capture_wheel: false }}",
                     event_action("WheelUp"),
                     event_action("WheelDown"),
                 )
             }
             "Button" => return self.element(out, element),
             kind if POINTER_OWNERS.contains(&kind) && element.has_pointer_events() => format!(
-                "b::PointerProps {{ double_tap: {}, menu: {}, wheel_up: {}, wheel_down: {}, capture_wheel: {} }}",
+                "b::PointerProps {{ double_tap: {}, menu: {}, wheel_up: {}, wheel_down: {}, hover: {hover}, capture_wheel: {} }}",
                 event_action("DoubleTap"),
                 self.context_menu(element),
                 event_action("WheelUp"),
@@ -397,7 +412,7 @@ impl Generator<'_> {
             | "MenuBar" | "CommandMenu" | "CommandItem"
             // The application builds the status item's menu.
             | "StatusItem"
-            | "Pattern" | "TabAccessory" | "PickerOption" | "AlertAction" | "TableColumn" | "TableMenu" | "ContextMenu" | "DoubleTap" | "WheelUp" | "WheelDown" | "OnCommit" => {
+            | "Pattern" | "TabAccessory" | "PickerOption" | "AlertAction" | "TableColumn" | "TableMenu" | "ContextMenu" | "DoubleTap" | "WheelUp" | "WheelDown" | "Hover" | "OnCommit" => {
                 // Realized by their parents.
             }
             other => out.line(format!("/* unsupported {other} */")),

@@ -127,6 +127,7 @@ const FEATURES_BUILT: &[&str] = &[
     bern_target_api::feature::REVEAL,
     bern_target_api::feature::POINTER_EVENTS,
     bern_target_api::feature::WHEEL,
+    bern_target_api::feature::HOVER,
     bern_target_api::feature::SLIDER_HOVER,
     bern_target_api::feature::PLAYER_STATE,
     bern_target_api::feature::BOUND_LENGTHS,

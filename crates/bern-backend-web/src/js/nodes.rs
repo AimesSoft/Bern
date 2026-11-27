@@ -345,6 +345,7 @@ impl Generator<'_> {
             | "SidebarFooter" | "WindowSet" | "Window" | "Layout" | "MenuItem" | "AlertAction"
             | "PickerOption"
             | "TableColumn" | "TableMenu" | "ContextMenu" | "DoubleTap" | "WheelUp" | "WheelDown"
+            | "Hover"
             // A page has no menu bar.
             | "MenuBar" | "CommandMenu" | "CommandItem"
             // Nor a status area.

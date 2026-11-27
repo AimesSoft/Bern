@@ -1145,8 +1145,9 @@ fn gallery_generates_without_warnings() {
         // The record in the about window turns.
         ".spin = [](Ctx const& c)",
         ".spinPeriod = 12",
-        // Its picture beneath, lit under the pointer inside its corner.
-        ".glow = 1.0, .glowOpacity = 0.3, .glowCorner = 12.0, .blur = B::Len(16.0), .blurCorner = 12.0",
+        // Its picture beneath, lit under the pointer inside its corner, with static preblur.
+        ".glow = 1.0, .glowOpacity = 0.3, .glowCorner = 12.0",
+        ".blur = 16.0",
         "R::Url(c.Engine(",
         "B::KeyShortcut(p, c, {.keys = \"escape\"",
         "B::DefaultFocus(c, ",
@@ -3572,5 +3573,164 @@ fn shadowed_icons_composite_atomically_and_button_shadows_start_settled() {
         ),
     ] {
         assert!(src.contains(part), "missing `{part}`");
+    }
+}
+
+#[test]
+fn image_placeholder_preblur_lazy_row_and_priority_generate_and_wire_runtime() {
+    use bern_ir::{Binding, Expr, ExprKind, Node, Prop, Template};
+    use bern_protocol::{FieldDef, RecordDef, Type, Value};
+
+    let root = workspace();
+    let config = bern_compiler::config::load(&root.join("examples/hello/Bern.toml")).unwrap();
+    let mut app = bern_compiler::compile(&config).unwrap().app;
+    let item_ty = Type::Record {
+        name: "Item".into(),
+    };
+    app.sessions.push(bern_ir::SessionDef {
+        name: "view".into(),
+        fields: vec![bern_ir::SessionFieldDef {
+            name: "items".into(),
+            ty: Type::list(item_ty.clone()),
+            initial: Value::List(vec![]),
+        }],
+    });
+    app.types.records.push(RecordDef {
+        name: "Item".into(),
+        fields: vec![FieldDef {
+            name: "id".into(),
+            ty: Type::Int,
+            doc: String::new(),
+            content: false,
+        }],
+    });
+    app.resources.push(bern_ir::ResourceDef {
+        name: "images/poster.png".into(),
+        declared: bern_ir::SourceLocation {
+            file: "generate.rs".into(),
+            line: 1,
+            column: 1,
+        },
+        picture: None,
+    });
+    let placeholder_skel = node(
+        "Skeleton",
+        vec![("width", number(120.0)), ("height", number(120.0))],
+        vec![],
+    );
+    let image_with_placeholder = node(
+        "Image",
+        vec![
+            (
+                "source",
+                Prop::Resource {
+                    name: "images/poster.png".into(),
+                },
+            ),
+            ("width", number(120.0)),
+            ("height", number(120.0)),
+        ],
+        vec![placeholder_skel],
+    );
+    let preblurred = node(
+        "Image",
+        vec![
+            (
+                "source",
+                Prop::Resource {
+                    name: "images/poster.png".into(),
+                },
+            ),
+            ("blur", number(24.0)),
+        ],
+        vec![],
+    );
+    let mut for_each = node(
+        "ForEach",
+        vec![],
+        vec![node("Text", vec![("content", words("row"))], vec![])],
+    );
+    if let Node::Element(ref mut el) = for_each {
+        el.props.insert(
+            "items".into(),
+            Prop::Expr {
+                expr: Expr {
+                    ty: Type::list(item_ty.clone()),
+                    kind: ExprKind::Binding {
+                        binding: Binding::Session {
+                            session: "view".into(),
+                            field: 0,
+                            path: vec![],
+                        },
+                    },
+                },
+            },
+        );
+        el.props.insert(
+            "key".into(),
+            Prop::Key {
+                field: 0,
+                name: "id".into(),
+            },
+        );
+        el.template = Some(Template {
+            var: "item".into(),
+            ty: item_ty,
+        });
+    }
+    let lazy_row = node(
+        "Row",
+        vec![("lazy", word("true")), ("gap", number(12.0))],
+        vec![for_each],
+    );
+    app.windows.windows[0].sessions.push("view".into());
+    app.windows.windows[0].content = node(
+        "Column",
+        vec![],
+        vec![image_with_placeholder, preblurred, lazy_row],
+    );
+    let ui = bern_backend_winui3::Generator::new(&app).interface();
+    assert!(!ui.contains("unsupported"), "{ui}");
+    assert!(
+        ui.contains("B::Image(p, c, {.source = \"images/poster.png\", .width = B::Len(120.0), .height = B::Len(120.0)}, [](Parent const& p, Ctx const& c) {"),
+        "{ui}"
+    );
+    assert!(
+        ui.contains("B::Skeleton(p, c, {.width = B::Len(120.0), .height = B::Len(120.0)"),
+        "{ui}"
+    );
+    assert!(
+        ui.contains("B::Image(p, c, {.source = \"images/poster.png\", .covers = true, .decodeMax = 67.0, .blur = 24.0});"),
+        "{ui}"
+    );
+    assert!(!ui.contains("B::Decorate(p, c, {.blur ="), "{ui}");
+    assert!(
+        ui.contains("B::LazyRow(p, c, {.gap = B::Len(12.0)}, {.items = "),
+        "{ui}"
+    );
+
+    let widgets = include_str!("../templates/cpp/bern_ui_widgets.inl");
+    let features = include_str!("../templates/cpp/bern_ui_features.inl");
+    let pictures = include_str!("../templates/cpp/bern_pictures.h");
+    for (src, needle) in [
+        (widgets, "Build placeholder = nullptr;"),
+        (widgets, "double blur = 0.0;"),
+        (widgets, "bool fadeIn = false;"),
+        (widgets, "FadeInVisual(next);"),
+        (widgets, "BoxBlurBitmap(bitmap, shown);"),
+        (widgets, "props.blur >= 4.0"),
+        (widgets, "PlaceholderScopeHolder"),
+        (widgets, "Priority::High"),
+        (features, "struct LazyRowPanel"),
+        (features, "inline void LazyRow("),
+        (features, "viewer.HorizontalOffset()"),
+        (features, "viewer.ViewportWidth()"),
+        (pictures, "enum class Priority : uint8_t"),
+        (pictures, "Low = 0,"),
+        (pictures, "Normal = 1,"),
+        (pictures, "High = 2,"),
+        (pictures, "PromoteGateWaitersLocked"),
+    ] {
+        assert!(src.contains(needle), "missing `{needle}`");
     }
 }

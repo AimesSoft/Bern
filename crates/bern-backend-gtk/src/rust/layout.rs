@@ -38,6 +38,36 @@ impl Generator<'_> {
     }
 
     pub(super) fn column_or_row(&self, out: &mut Out, element: &Element) {
+        if let Some(each) = bern_ir::lazy_row_items(element)
+            && let (Some(items), Some(template), Some(Prop::Key { field, .. })) =
+                (each.expr("items"), &each.template, each.prop("key"))
+        {
+            let props = format!(
+                "b::LazyRowProps {{ gap: {}, padding: {}, width: {}, height: {}, align: {}, animate: {} }}",
+                some(self.num(element, "gap")),
+                self.padding(element),
+                some(self.num(element, "width")),
+                some(self.num(element, "height")),
+                Self::keyword(element, "align"),
+                self.animate(element),
+            );
+            self.children(
+                out,
+                &format!(
+                    "b::LazyRow(p, c, {props}, {}, {field}, {}, {}, ",
+                    self.getter(items),
+                    string(&template.var),
+                    some(
+                        each.number("stagger")
+                            .or_else(|| element.number("stagger"))
+                            .map(float)
+                    ),
+                ),
+                &each.children,
+                ");",
+            );
+            return;
+        }
         self.container_children(
             out,
             &format!(

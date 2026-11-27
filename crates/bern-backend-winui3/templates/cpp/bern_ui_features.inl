@@ -592,6 +592,357 @@ inline void LazyGrid(Parent const& p, Ctx const& ctx, GridProps props, EachProps
     Place(p, panel);
 }
 
+/// A row of one `ForEach` in a horizontal scroll view that builds only the
+/// items near what is in sight (±1 viewport around `HorizontalOffset` and
+/// `ViewportWidth`) and caches measured widths by key.
+struct LazyRowPanel : controls::PanelT<LazyRowPanel> {
+    double spacing = 8;
+    xaml::Thickness padding{0, 0, 0, 0};
+    xaml::VerticalAlignment cross = xaml::VerticalAlignment::Center;
+    B::Motion const* reflow = nullptr;
+    Places places;
+
+    struct Item {
+        std::string key;
+        Cell<Value> value;
+        std::unique_ptr<Scope> owner;
+        controls::Grid host;
+        RowParent outer;
+        RowParent region;
+    };
+    std::vector<std::pair<controls::Grid, Rect>> leaving;
+    std::unordered_map<std::string, Rect> arranged;
+    std::vector<Value> values;
+    std::vector<std::string> keys;
+    std::unordered_map<std::string, std::shared_ptr<Item>> built;
+    std::unordered_map<std::string, float> widths;
+    float guess = 0;
+    bool laid = false;
+    bool scrolls = false;
+    std::optional<Rect> sight;
+    bool blind = true;
+    std::vector<float> starts{0.0f};
+    std::function<std::shared_ptr<Item>(size_t)> make;
+    std::function<void(std::shared_ptr<Item> const&)> drop;
+    bool posted = false;
+
+    float Horizontal() const { return static_cast<float>(padding.Left + padding.Right); }
+    float Vertical() const { return static_cast<float>(padding.Top + padding.Bottom); }
+    float Gap() const { return static_cast<float>(spacing); }
+
+    void Lay() {
+        size_t count = keys.size();
+        starts.assign(count + 1, 0.0f);
+        float gap = Gap();
+        float at = 0;
+        for (size_t i = 0; i < count; ++i) {
+            starts[i] = at;
+            auto found = widths.find(keys[i]);
+            float w = found != widths.end() ? found->second : guess;
+            at += w + gap;
+        }
+        starts[count] = at;
+    }
+
+    size_t ItemAt(float x) const {
+        size_t count = keys.size();
+        size_t low = 0, high = count;
+        float gap = Gap();
+        while (low < high) {
+            size_t mid = (low + high) / 2;
+            if (starts[mid + 1] - gap <= x) low = mid + 1;
+            else high = mid;
+        }
+        return low;
+    }
+
+    std::pair<size_t, size_t> Wanted() const {
+        size_t count = keys.size();
+        if (!scrolls) return {0, count};
+        size_t first = (std::min)(count, size_t{16});
+        if (!sight || !laid || guess <= 0) return {0, first};
+        float port = sight->Width;
+        if (port <= 0) return {0, first};
+        float left = sight->X - static_cast<float>(padding.Left);
+        size_t from = (std::min)(count, ItemAt((std::max)(0.0f, left - port)));
+        size_t to = (std::min)(count, ItemAt((std::max)(0.0f, left + port * 2)) + 1);
+        return {from, (std::max)(from, to)};
+    }
+
+    bool Current() const {
+        auto [from, to] = Wanted();
+        size_t end = (std::min)(keys.size(), to);
+        size_t start = (std::min)(end, from);
+        if (built.size() != end - start) return false;
+        for (size_t i = start; i < end; ++i)
+            if (!built.contains(keys[i])) return false;
+        return true;
+    }
+
+    void Update() {
+        posted = false;
+        if (!make) return;
+        auto [from, to] = Wanted();
+        std::unordered_map<std::string, std::shared_ptr<Item>> next;
+        for (size_t i = from; i < (std::min)(keys.size(), to); ++i) {
+            if (auto found = built.find(keys[i]); found != built.end()) {
+                next.emplace(keys[i], found->second);
+                built.erase(found);
+            } else if (auto item = make(i)) {
+                next.emplace(keys[i], item);
+            }
+        }
+        std::unordered_set<std::string> present(keys.begin(), keys.end());
+        for (auto& [key, item] : built) {
+            auto place = arranged.find(key);
+            if (!present.contains(key) && place != arranged.end()) {
+                item->owner->Dispose();
+                item->outer.Remove(item->region);
+                leaving.emplace_back(item->host, place->second);
+            } else {
+                drop(item);
+            }
+            if (place != arranged.end()) arranged.erase(place);
+        }
+        built = std::move(next);
+        std::erase_if(leaving, [this](auto const& gone) {
+            if (gone.first.Children().Size() > 0) return false;
+            uint32_t at = 0;
+            if (Children().IndexOf(gone.first, at)) Children().RemoveAt(at);
+            return true;
+        });
+        InvalidateMeasure();
+    }
+
+    void Later() {
+        if (posted) return;
+        posted = true;
+        Host::Post([weak = get_weak()] {
+            if (auto self = weak.get()) self->Update();
+        });
+    }
+
+    Size MeasureOverride(Size available) {
+        laid = true;
+        float availH = std::isinf(available.Height) ? INFINITY : (std::max)(0.0f, available.Height - Vertical());
+        float tallest = 0.0f;
+        for (auto& [key, item] : built) {
+            item->host.Measure(Size{INFINITY, availH});
+            auto desired = item->host.DesiredSize();
+            float w = desired.Width;
+            widths[key] = w;
+            if (guess <= 0 && w > 0) guess = w;
+            tallest = (std::max)(tallest, desired.Height);
+        }
+        for (auto& [host, place] : leaving) host.Measure(Size{place.Width, place.Height});
+        Lay();
+        bool left = std::any_of(leaving.begin(), leaving.end(), [](auto const& gone) { return gone.first.Children().Size() == 0; });
+        if (!Current() || left) Later();
+        float total = keys.empty() ? 0.0f : (std::max)(0.0f, starts.back() - Gap());
+        return Size{total + Horizontal(), tallest + Vertical()};
+    }
+
+    Size ArrangeOverride(Size final) {
+        float innerH = (std::max)(0.0f, final.Height - Vertical());
+        float gap = Gap();
+        std::vector<std::pair<xaml::UIElement, winrt::Windows::Foundation::Point>> now;
+        for (size_t i = 0; i < keys.size() && i + 1 < starts.size(); ++i) {
+            auto found = built.find(keys[i]);
+            if (found == built.end()) continue;
+            float w = (std::max)(0.0f, starts[i + 1] - gap - starts[i]);
+            float natH = found->second->host.DesiredSize().Height;
+            float itemH = (cross == xaml::VerticalAlignment::Stretch) ? innerH : (std::min)(natH, innerH);
+            float y = static_cast<float>(padding.Top);
+            if (cross == xaml::VerticalAlignment::Center) y += (std::max)(0.0f, innerH - itemH) / 2.0f;
+            else if (cross == xaml::VerticalAlignment::Bottom) y += (std::max)(0.0f, innerH - itemH);
+            Rect rect{static_cast<float>(padding.Left) + starts[i], y, w, (std::max)(0.0f, itemH)};
+            found->second->host.Arrange(rect);
+            arranged[keys[i]] = rect;
+            if (reflow) now.emplace_back(found->second->host, winrt::Windows::Foundation::Point{rect.X, rect.Y});
+        }
+        for (auto& [host, place] : leaving) host.Arrange(place);
+        if (reflow) places.Arranged(reflow, std::move(now));
+        return final;
+    }
+};
+
+/// `Row` whose items are one `ForEach`: in a horizontal scroll view it builds
+/// only the items near what is in sight (±1 viewport) and caches each item's
+/// width; elsewhere it builds them all.
+inline void LazyRow(Parent const& p, Ctx const& ctx, StackProps props, EachProps each, Build itemBuild) {
+    auto impl = winrt::make_self<LazyRowPanel>();
+    impl->reflow = each.reflow;
+    std::string_view align = props.align ? props.align : "";
+    impl->cross = align == "top" || align == "baseline" ? xaml::VerticalAlignment::Top
+        : align == "bottom" ? xaml::VerticalAlignment::Bottom
+        : align == "fill" ? xaml::VerticalAlignment::Stretch
+        : xaml::VerticalAlignment::Center;
+    controls::Panel panel = impl.as<controls::Panel>();
+    SetRole(panel, L"bern-row");
+    LazyRowPanel* row = impl.get();
+    KeepReflow(panel, [row](Motion const* motion) { row->reflow = motion; });
+    auto keep = winrt::make_weak(panel);
+    auto relayout = [keep] {
+        if (auto panel = keep.get()) panel.InvalidateMeasure();
+    };
+    BindLen(ctx, props.gap, props.animate, [row, relayout](double v) {
+        row->spacing = (std::max)(0.0, v);
+        relayout();
+    });
+    BindPadding(ctx, props.padding, props.paddingX, props.paddingY, props.animate, [row, relayout](double x, double y) {
+        row->padding = xaml::Thickness{x, y, x, y};
+        relayout();
+    });
+    BindLen(ctx, props.width, props.animate, [panel](double v) { panel.Width((std::max)(0.0, v)); });
+    BindLen(ctx, props.height, props.animate, [panel](double v) { panel.Height((std::max)(0.0, v)); });
+
+    auto rowsCtx = each.stagger ? Staggered(ctx, *each.stagger) : ctx;
+    auto animated = std::make_shared<bool>(false);
+    std::string name = each.variable;
+    auto scroll = ctx.scroll;
+    auto cross = impl->cross;
+    row->make = [row, itemBuild, rowsCtx, name, scroll, animated, cross](size_t i) {
+        auto id = row->keys[i];
+        controls::Grid host;
+        host.VerticalAlignment(cross);
+        auto outer = Parent::Aligned(host, std::nullopt, cross);
+        auto region = outer.Sub();
+        auto item = std::make_shared<LazyRowPanel::Item>(LazyRowPanel::Item{id, Cell<Value>(row->values[i]), std::make_unique<Scope>(), host, outer, region});
+        auto cell = item->value;
+        auto itemCtx = rowsCtx.WithKey([id] { return id; }).WithLocal(name, [cell] { return cell.Get(); });
+        Structure::Scope structural(*animated);
+        Reactive::Untrack([&] {
+            item->owner->Run([&] { itemBuild(item->region, itemCtx); });
+            return 0;
+        });
+        row->Children().Append(item->host);
+        if (scroll && scroll->tracksItems && item->host.Children().Size() > 0)
+            TrackScrollItem(scroll, *item->owner, id, item->host.Children().GetAt(0));
+        return item;
+    };
+    row->drop = [row](std::shared_ptr<LazyRowPanel::Item> const& item) {
+        item->owner->Dispose();
+        uint32_t at = 0;
+        if (row->Children().IndexOf(item->host, at)) row->Children().RemoveAt(at);
+    };
+
+    struct ScrollHook {
+        winrt::weak_ref<controls::ScrollViewer> viewer;
+        winrt::event_token viewed{};
+        winrt::event_token sized{};
+        std::shared_ptr<ScrollInfo> scroll;
+        uint64_t revealToken = 0;
+    };
+    auto hook = std::make_shared<ScrollHook>();
+    hook->scroll = (ctx.scroll && ctx.scroll->horizontal) ? ctx.scroll : nullptr;
+    auto look = [keep, row, hook] {
+        auto panel = keep.get();
+        auto viewer = hook->viewer.get();
+        if (!panel || !viewer || !row->scrolls) return;
+        auto port = static_cast<float>(viewer.ViewportWidth());
+        if (port <= 0) return;
+        try {
+            auto content = viewer.Content().as<xaml::UIElement>();
+            auto origin = panel.TransformToVisual(content).TransformPoint({0, 0});
+            row->sight = Rect{static_cast<float>(viewer.HorizontalOffset()) - origin.X, 0, port, static_cast<float>(panel.ActualHeight())};
+        } catch (winrt::hresult_error const&) {
+        }
+    };
+    auto attachViewer = [row, hook, look](controls::ScrollViewer const& viewer) {
+        if (!viewer || hook->viewer.get() == viewer) return;
+        if (auto old = hook->viewer.get()) {
+            if (hook->viewed.value) old.ViewChanged(hook->viewed);
+            if (hook->sized.value) old.SizeChanged(hook->sized);
+        }
+        hook->viewer = winrt::make_weak(viewer);
+        row->scrolls = true;
+        auto follow = [row, look](auto&&, auto&&) {
+            look();
+            if (!row->Current()) row->Later();
+        };
+        hook->viewed = viewer.ViewChanged(follow);
+        hook->sized = viewer.SizeChanged(follow);
+        look();
+        if (!row->Current()) row->Later();
+    };
+    if (hook->scroll) {
+        if (auto viewer = hook->scroll->viewer.get()) attachViewer(viewer);
+        hook->revealToken = hook->scroll->nextReveal++;
+        hook->scroll->reveal.emplace(hook->revealToken, [keep, row, weakViewer = hook->scroll->viewer](std::string const& key) -> xaml::UIElement {
+            auto panel = keep.get();
+            auto viewer = weakViewer.get();
+            if (!panel || !row->make || !viewer) return nullptr;
+            auto at = std::find(row->keys.begin(), row->keys.end(), key);
+            if (at == row->keys.end()) return nullptr;
+            size_t idx = static_cast<size_t>(at - row->keys.begin());
+            if (idx >= row->starts.size()) return nullptr;
+            float port = static_cast<float>(viewer.ViewportWidth());
+            float x = static_cast<float>(row->padding.Left) + row->starts[idx];
+            try {
+                auto content = viewer.Content().as<xaml::UIElement>();
+                auto origin = panel.TransformToVisual(content).TransformPoint({0, 0});
+                viewer.ChangeView(static_cast<double>(origin.X + x), nullptr, nullptr, true);
+            } catch (winrt::hresult_error const&) {
+            }
+            row->sight = Rect{x, 0, port, static_cast<float>(panel.ActualHeight())};
+            row->Update();
+            auto found = row->built.find(key);
+            if (found == row->built.end() || found->second->host.Children().Size() == 0) return nullptr;
+            return found->second->host.Children().GetAt(0);
+        });
+    }
+    auto loadedToken = panel.Loaded([keep, hook, attachViewer](auto&&, auto&&) {
+        if (hook->viewer.get()) return;
+        auto panel = keep.get();
+        if (!panel) return;
+        for (xaml::DependencyObject at = media::VisualTreeHelper::GetParent(panel); at; at = media::VisualTreeHelper::GetParent(at)) {
+            if (auto outer = at.try_as<controls::ScrollViewer>(); outer && outer.HorizontalScrollMode() != controls::ScrollMode::Disabled) {
+                attachViewer(outer);
+                break;
+            }
+        }
+    });
+    auto sighted = panel.EffectiveViewportChanged([row, look, hook](xaml::FrameworkElement const&, xaml::EffectiveViewportChangedEventArgs const& args) {
+        auto viewport = args.EffectiveViewport();
+        row->blind = viewport.Width < 0;
+        if (row->blind || hook->viewer.get()) look();
+        else row->sight = viewport;
+        if (row->scrolls && !row->Current()) row->Later();
+    });
+    Reactive::Run([row, items = each.items, key = each.key, ctx = rowsCtx, animated, first = std::make_shared<bool>(true)] {
+        auto list = R::AsList(items(ctx));
+        Reactive::Untrack([&] {
+            row->values.assign(list.begin(), list.end());
+            row->keys.clear();
+            for (auto const& item : list) row->keys.push_back(R::KeyText(R::At(item, {key})));
+            std::unordered_set<std::string> present(row->keys.begin(), row->keys.end());
+            std::erase_if(row->widths, [&present](auto const& entry) { return !present.contains(entry.first); });
+            for (size_t i = 0; i < list.size(); ++i)
+                if (auto found = row->built.find(row->keys[i]); found != row->built.end()) found->second->value.Set(list[i]);
+            *animated = !*first;
+            *first = false;
+            row->Lay();
+            row->Update();
+            *animated = false;
+            return 0;
+        });
+    });
+    Reactive::OnCleanup([impl, sighted, loadedToken, hook] {
+        impl->EffectiveViewportChanged(sighted);
+        impl->Loaded(loadedToken);
+        if (hook->scroll) hook->scroll->reveal.erase(hook->revealToken);
+        if (auto viewer = hook->viewer.get()) {
+            if (hook->viewed.value) viewer.ViewChanged(hook->viewed);
+            if (hook->sized.value) viewer.SizeChanged(hook->sized);
+        }
+        for (auto& [key, item] : impl->built) item->owner->Dispose();
+        impl->built.clear();
+        impl->make = nullptr;
+        impl->drop = nullptr;
+    });
+    Place(p, panel);
+}
+
 /// In-flight wheel target stored on an enclosing vertical `ScrollViewer` so
 /// consecutive wheel notches across sibling horizontal views accumulate smoothly.
 struct WheelTarget : winrt::implements<WheelTarget, IInspectable> {

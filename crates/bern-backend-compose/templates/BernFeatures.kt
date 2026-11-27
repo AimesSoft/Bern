@@ -95,12 +95,13 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.layout.onSizeChanged
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runInterruptible
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
@@ -116,6 +117,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -1049,9 +1051,70 @@ object BernPictures {
     private val rawBytes = object : LruCache<String, ByteArray>(RAW_CACHE_LIMIT) {
         override fun sizeOf(key: String, value: ByteArray) = value.size
     }
+    enum class Priority { LOW, NORMAL, HIGH }
+
+    private class PriorityGate(private var permits: Int) {
+        private class Waiter(val url: String, var priority: Priority, val cont: CancellableContinuation<Unit>, var acquired: Boolean = false)
+        private val lock = Any()
+        private val queues = Array(3) { ArrayDeque<Waiter>() }
+
+        suspend fun <T> withPermit(url: String, priority: Priority, block: suspend () -> T): T {
+            acquire(url, priority)
+            try { return block() } finally { release() }
+        }
+
+        private suspend fun acquire(url: String, priority: Priority) {
+            if (synchronized(lock) { if (permits > 0) { permits--; true } else false }) return
+            var waiter: Waiter? = null
+            try {
+                suspendCancellableCoroutine<Unit> { cont ->
+                    val w = Waiter(url, priority, cont)
+                    waiter = w
+                    val immediate = synchronized(lock) {
+                        if (permits > 0) { permits--; w.acquired = true; true } else { queues[priority.ordinal].addLast(w); false }
+                    }
+                    if (immediate) cont.resume(Unit)
+                    else cont.invokeOnCancellation { synchronized(lock) { queues[w.priority.ordinal].remove(w) } }
+                }
+            } catch (t: Throwable) {
+                if (waiter != null && synchronized(lock) { waiter!!.acquired }) release()
+                throw t
+            }
+        }
+
+        fun promote(url: String, priority: Priority) {
+            synchronized(lock) {
+                for (p in 0 until priority.ordinal) {
+                    val it = queues[p].iterator()
+                    while (it.hasNext()) {
+                        val w = it.next()
+                        if (w.url == url) { it.remove(); w.priority = priority; queues[priority.ordinal].addLast(w) }
+                    }
+                }
+            }
+        }
+
+        private fun release() {
+            val next = synchronized(lock) {
+                var picked: Waiter? = null
+                for (p in 2 downTo 0) {
+                    val q = queues[p]
+                    while (q.isNotEmpty()) {
+                        val w = q.removeFirst()
+                        if (w.cont.isActive) { w.acquired = true; picked = w; break }
+                    }
+                    if (picked != null) break
+                }
+                if (picked == null) permits++
+                picked
+            }
+            next?.cont?.resume(Unit)
+        }
+    }
+
     private val downloading = ConcurrentHashMap<String, Deferred<ByteArray?>>()
     private val downloadWaiters = ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicInteger>()
-    private val downloadSemaphore = Semaphore(DOWNLOAD_CONCURRENCY)
+    private val downloadGate = PriorityGate(DOWNLOAD_CONCURRENCY)
     /// Each picture's proportion once known; 0 for a file that cannot be read.
     private val ratios = ConcurrentHashMap<String, Float>()
     private val averages = mutableStateMapOf<String, Long>()
@@ -1104,20 +1167,33 @@ object BernPictures {
         return ratio.takeIf { it > 0f }
     }
 
+    /// Cache key for `url`, optionally keyed by quantized static pre-blur radius.
+    fun cacheKey(url: String, blur: Float = 0f): String =
+        if (blur > 0f) "$url#b=${blur.toInt()}" else url
+
     /// Where the double-sampled picture at `url` drawn `wide` × `tall` is kept.
-    fun twiceKey(url: String, wide: Int, tall: Int): String = "$url#$wide×$tall"
+    fun twiceKey(url: String, wide: Int, tall: Int, blur: Float = 0f): String =
+        if (blur > 0f) "$url#$wide×$tall#b=${blur.toInt()}" else "$url#$wide×$tall"
 
     /// The picture at `url` drawn `wide` × `tall` pixels (0 for a side that
     /// follows the other) as `fit` places it, double-sampled: read at twice
     /// the pixels it covers, which the GPU halves when it draws it. Squeezed
     /// down from a much larger picture by the GPU alone, its edges would
     /// break up. Each size is kept apart.
-    suspend fun twice(context: Context, url: String, wide: Int, tall: Int, fit: ContentScale): Picture? {
-        val key = twiceKey(url, wide, tall)
+    suspend fun twice(
+        context: Context,
+        url: String,
+        wide: Int,
+        tall: Int,
+        fit: ContentScale,
+        blur: Float = 0f,
+        priority: Priority = Priority.NORMAL,
+    ): Picture? {
+        val key = twiceKey(url, wide, tall, blur)
         kept.get(key)?.let { return it }
         listen(context, url)
         val app = context.applicationContext
-        val picture = loadPicture(app, url, wide, tall, keep = false, twice = fit) ?: return null
+        val picture = loadPicture(app, url, wide, tall, keep = false, twice = fit, blur = blur, priority = priority) ?: return null
         kept.put(key, picture)
         return picture
     }
@@ -1130,11 +1206,19 @@ object BernPictures {
     /// The picture at `url` to be drawn `wide` × `tall` pixels: the one kept
     /// when it is enough, else fetched once per URL and decoded locally at the
     /// needed sample size.
-    suspend fun read(context: Context, url: String, wide: Int, tall: Int): Picture? {
-        kept.get(url)?.takeIf { enough(it, wide, tall) }?.let { return it }
+    suspend fun read(
+        context: Context,
+        url: String,
+        wide: Int,
+        tall: Int,
+        blur: Float = 0f,
+        priority: Priority = Priority.NORMAL,
+    ): Picture? {
+        val key = cacheKey(url, blur)
+        kept.get(key)?.takeIf { enough(it, wide, tall) }?.let { return it }
         listen(context, url)
         val app = context.applicationContext
-        return loadPicture(app, url, wide, tall, keep = true)
+        return loadPicture(app, url, wide, tall, keep = true, blur = blur, priority = priority)
     }
 
     fun average(context: Context, url: String?): BernColor? {
@@ -1145,7 +1229,7 @@ object BernPictures {
             val app = context.applicationContext
             scope.launch {
                 val picture = kept.get(url)
-                    ?: loadPicture(app, url, 32, 32, keep = false)
+                    ?: loadPicture(app, url, 32, 32, keep = false, priority = Priority.LOW)
                     ?: return@launch
                 val average = mean(picture.bitmap.asAndroidBitmap())
                 withContext(Dispatchers.Main) { averages[url] = average }
@@ -1292,8 +1376,8 @@ object BernPictures {
     }
 
     /// Fetches raw encoded bytes for `url` (memory bytes cache -> disk cache
-    /// -> deduplicated network download gated by `downloadSemaphore`).
-    private suspend fun fetchBytes(app: Context, url: String): ByteArray? {
+    /// -> deduplicated network download gated by `downloadGate`).
+    private suspend fun fetchBytes(app: Context, url: String, priority: Priority = Priority.NORMAL): ByteArray? {
         rawBytes.get(url)?.let { return it }
         val scheme = Uri.parse(url).scheme?.lowercase()
         if (scheme != "http" && scheme != "https") {
@@ -1307,9 +1391,10 @@ object BernPictures {
             downloadWaiters.getOrPut(url) { java.util.concurrent.atomic.AtomicInteger(0) }.incrementAndGet()
             val existing = downloading[url]
             if (existing != null && !existing.isCancelled) {
+                downloadGate.promote(url, priority)
                 existing
             } else {
-                scope.async { loadNetworkBytes(app, url) }.also { created ->
+                scope.async { loadNetworkBytes(app, url, priority) }.also { created ->
                     downloading[url] = created
                     created.invokeOnCompletion {
                         synchronized(downloading) {
@@ -1332,7 +1417,7 @@ object BernPictures {
         }
     }
 
-    private suspend fun loadNetworkBytes(app: Context, url: String): ByteArray? {
+    private suspend fun loadNetworkBytes(app: Context, url: String, priority: Priority = Priority.NORMAL): ByteArray? {
         rawBytes.get(url)?.let { return it }
         readDiskCache(app, url)?.let { cached ->
             if (hasImageBounds(url, cached)) {
@@ -1342,7 +1427,7 @@ object BernPictures {
             invalidateBytes(app, url)
         }
         val fetched = BernPictureTries.until(url) {
-            downloadSemaphore.withPermit {
+            downloadGate.withPermit(url, priority) {
                 runInterruptible(Dispatchers.IO) {
                     when (val read = BernPictureTries.download(url)) {
                         is BernTry.Came -> {
@@ -1371,18 +1456,20 @@ object BernPictures {
         tall: Int,
         keep: Boolean,
         twice: ContentScale? = null,
+        blur: Float = 0f,
+        priority: Priority = Priority.NORMAL,
     ): Picture? {
         val uri = Uri.parse(url)
         val scheme = uri.scheme?.lowercase()
         if (scheme == "file" || scheme == "content") {
             return withContext(Dispatchers.IO) {
-                runCatching { decodeLocal(app, uri, url, scheme, wide, tall, keep, twice) }.getOrNull()
+                runCatching { decodeLocal(app, uri, url, scheme, wide, tall, keep, twice, blur) }.getOrNull()
             }
         }
         while (true) {
-            val bytes = fetchBytes(app, url) ?: return null
+            val bytes = fetchBytes(app, url, priority) ?: return null
             val picture = withContext(Dispatchers.Default) {
-                runCatching { decodeBytes(url, bytes, wide, tall, keep, twice) }.getOrNull()
+                runCatching { decodeBytes(url, bytes, wide, tall, keep, twice, blur) }.getOrNull()
             }
             if (picture != null) return picture
             invalidateBytes(app, url)
@@ -1449,12 +1536,60 @@ object BernPictures {
         return maxOf(1, kotlin.math.ceil(w * factor).toInt()) to maxOf(1, kotlin.math.ceil(h * factor).toInt())
     }
 
+    private fun boxBlur3Pass(bitmap: Bitmap, radius: Int) {
+        val w = bitmap.width
+        val h = bitmap.height
+        val pixels = IntArray(w * h)
+        val tmp = IntArray(w * h)
+        bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
+        val div = radius * 2 + 1
+        repeat(3) {
+            for (y in 0 until h) {
+                val row = y * w
+                var sa = 0; var sr = 0; var sg = 0; var sb = 0
+                for (i in -radius..radius) {
+                    val px = pixels[row + i.coerceIn(0, w - 1)]
+                    sa += (px ushr 24) and 0xFF; sr += (px ushr 16) and 0xFF
+                    sg += (px ushr 8) and 0xFF; sb += px and 0xFF
+                }
+                for (x in 0 until w) {
+                    tmp[row + x] = ((sa / div) shl 24) or ((sr / div) shl 16) or ((sg / div) shl 8) or (sb / div)
+                    val add = pixels[row + (x + radius + 1).coerceIn(0, w - 1)]
+                    val rem = pixels[row + (x - radius).coerceIn(0, w - 1)]
+                    sa += ((add ushr 24) and 0xFF) - ((rem ushr 24) and 0xFF)
+                    sr += ((add ushr 16) and 0xFF) - ((rem ushr 16) and 0xFF)
+                    sg += ((add ushr 8) and 0xFF) - ((rem ushr 8) and 0xFF)
+                    sb += (add and 0xFF) - (rem and 0xFF)
+                }
+            }
+            for (x in 0 until w) {
+                var sa = 0; var sr = 0; var sg = 0; var sb = 0
+                for (i in -radius..radius) {
+                    val px = tmp[i.coerceIn(0, h - 1) * w + x]
+                    sa += (px ushr 24) and 0xFF; sr += (px ushr 16) and 0xFF
+                    sg += (px ushr 8) and 0xFF; sb += px and 0xFF
+                }
+                for (y in 0 until h) {
+                    pixels[y * w + x] = ((sa / div) shl 24) or ((sr / div) shl 16) or ((sg / div) shl 8) or (sb / div)
+                    val add = tmp[(y + radius + 1).coerceIn(0, h - 1) * w + x]
+                    val rem = tmp[(y - radius).coerceIn(0, h - 1) * w + x]
+                    sa += ((add ushr 24) and 0xFF) - ((rem ushr 24) and 0xFF)
+                    sr += ((add ushr 16) and 0xFF) - ((rem ushr 16) and 0xFF)
+                    sg += ((add ushr 8) and 0xFF) - ((rem ushr 8) and 0xFF)
+                    sb += (add and 0xFF) - (rem and 0xFF)
+                }
+            }
+        }
+        bitmap.setPixels(pixels, 0, w, 0, 0, w, h)
+    }
+
     private fun decodeWith(
         url: String,
         wide: Int,
         tall: Int,
         keep: Boolean,
         twice: ContentScale?,
+        blur: Float = 0f,
         pixels: (BitmapFactory.Options) -> Bitmap?,
     ): Picture? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -1469,12 +1604,24 @@ object BernPictures {
         if (target != null && (bitmap.width > target.first || bitmap.height > target.second)) {
             bitmap = Bitmap.createScaledBitmap(bitmap, target.first, target.second, true)
         }
+        if (blur > 0f && bitmap.width > 1 && bitmap.height > 1) {
+            if (!bitmap.isMutable || bitmap.config != Bitmap.Config.ARGB_8888) {
+                val copy = bitmap.copy(Bitmap.Config.ARGB_8888, true)
+                if (copy != null) bitmap = copy
+            }
+            if (bitmap.isMutable && bitmap.config == Bitmap.Config.ARGB_8888) {
+                val radius = (blur * maxOf(bitmap.width, bitmap.height) / 240f).roundToInt()
+                    .coerceIn(1, maxOf(1, minOf(bitmap.width, bitmap.height) / 3))
+                boxBlur3Pass(bitmap, radius)
+            }
+        }
         // Hands it to the GPU before it is first drawn.
         bitmap.prepareToDraw()
         val picture = Picture(bitmap.asImageBitmap(), width, height, sample)
         if (keep) {
+            val key = cacheKey(url, blur)
             synchronized(kept) {
-                if (kept.get(url)?.let { it.sample < sample } != true) kept.put(url, picture)
+                if (kept.get(key)?.let { it.sample < sample } != true) kept.put(key, picture)
             }
         }
         return picture
@@ -1487,7 +1634,8 @@ object BernPictures {
         tall: Int,
         keep: Boolean,
         twice: ContentScale? = null,
-    ): Picture? = decodeWith(url, wide, tall, keep, twice) { options ->
+        blur: Float = 0f,
+    ): Picture? = decodeWith(url, wide, tall, keep, twice, blur) { options ->
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
     }
 
@@ -1500,7 +1648,8 @@ object BernPictures {
         tall: Int,
         keep: Boolean,
         twice: ContentScale? = null,
-    ): Picture? = decodeWith(url, wide, tall, keep, twice) { options ->
+        blur: Float = 0f,
+    ): Picture? = decodeWith(url, wide, tall, keep, twice, blur) { options ->
         if (scheme == "file") {
             BitmapFactory.decodeFile(uri.path, options)
         } else {
@@ -1528,6 +1677,8 @@ fun BernImageURL(
     covers: Boolean = false,
     maxSide: Dp? = null,
     saturation: Float? = null,
+    blur: Float = 0f,
+    placeholder: (@Composable () -> Unit)? = null,
 ) {
     // A frame that fills its container's width is read at the width it
     // was laid out at, unless `maxSide` already bounds what is needed.
@@ -1556,26 +1707,36 @@ fun BernImageURL(
     // Double-sampled (`twice`), it is read for the size it is drawn at.
     // Key state by `url` only so resizing the same URL keeps the previous
     // frame on screen until the newly sampled bitmap finishes decoding.
-    val key = if (doubleSample && url != null) BernPictures.twiceKey(url, wide, tall) else url
+    val key = if (url == null) null else if (doubleSample) BernPictures.twiceKey(url, wide, tall, blur) else BernPictures.cacheKey(url, blur)
     var picture by remember(url) { mutableStateOf(key?.let(BernPictures::cached)) }
+    val wasCached = remember(url) { picture != null }
+    val alpha = remember(url) { Animatable(if (wasCached) 1f else 0f) }
+    val reducedMotion = bernReduceMotion()
+    if (picture != null && !wasCached) {
+        LaunchedEffect(url, picture) {
+            if (reducedMotion) alpha.snapTo(1f)
+            else alpha.animateTo(1f, tween(250))
+        }
+    }
     var finished by remember(url) { mutableStateOf(picture != null) }
     val proportion = aspect ?: picture?.ratio ?: ratio ?: url?.let(BernPictures::known)
     val frame = bernPictureFrame(width, height, proportion, corner, covers)
     val modifier = if (fills) frame.onSizeChanged { laid = it.width } else frame
+    val priority = if (covers || (width != null && width >= 180.dp)) BernPictures.Priority.HIGH else BernPictures.Priority.NORMAL
     if (url != null) {
         val context = LocalContext.current
-        LaunchedEffect(url, wide, tall, doubleSample) {
+        LaunchedEffect(url, wide, tall, doubleSample, blur.toInt()) {
             if (fills && wide == 0) return@LaunchedEffect
             if (doubleSample) {
-                BernPictures.twice(context, url, wide, tall, fit)?.let { picture = it }
+                BernPictures.twice(context, url, wide, tall, fit, blur, priority)?.let { picture = it }
                 finished = true
                 return@LaunchedEffect
             }
-            if (picture?.let { BernPictures.enough(it, wide, tall) } == true) {
+            if (blur <= 0f && picture?.let { BernPictures.enough(it, wide, tall) } == true) {
                 finished = true
                 return@LaunchedEffect
             }
-            BernPictures.read(context, url, wide, tall)?.let { picture = it }
+            BernPictures.read(context, url, wide, tall, blur, priority)?.let { picture = it }
             finished = true
         }
     }
@@ -1591,15 +1752,20 @@ fun BernImageURL(
         Image(
             shown.bitmap,
             contentDescription = label,
-            modifier = modifier,
+            modifier = modifier.graphicsLayer { this.alpha = alpha.value },
             contentScale = fit,
             colorFilter = colorFilter,
         )
+    } else if (placeholder != null) {
+        Box(
+            modifier.semantics { if (label != null) contentDescription = label },
+            contentAlignment = Alignment.Center,
+        ) { placeholder() }
     } else if (!url.isNullOrEmpty() && !finished && !covers) {
-        val alpha = bernSkeletonAlpha(0.07f, true)
+        val skeletonAlpha = bernSkeletonAlpha(0.07f, true)
         Box(
             modifier
-                .background(LocalContentColor.current.copy(alpha = alpha))
+                .background(LocalContentColor.current.copy(alpha = skeletonAlpha))
                 .semantics { if (label != null) contentDescription = label }
         )
     } else {
@@ -2191,6 +2357,7 @@ fun BernScroll(
         LocalBernScroll provides state,
         LocalBernArrival provides arrival,
         LocalBernViewport provides if (horizontal) LocalBernViewport.current else seen,
+        LocalBernHorizontalViewport provides if (horizontal) seen else LocalBernHorizontalViewport.current,
         LocalBernScrollRoom provides if (horizontal) LocalBernScrollRoom.current else room,
     ) {
         Box(modifier.onGloballyPositioned { state.viewport = it.boundsInRoot(); seen.bounds = state.viewport }) {
@@ -2230,6 +2397,21 @@ class BernViewport {
 }
 
 val LocalBernViewport = compositionLocalOf<BernViewport?> { null }
+val LocalBernHorizontalViewport = compositionLocalOf<BernViewport?> { null }
+
+/// A horizontal scroll view: its content in a row that scrolls, the part
+/// in sight told to the lazy rows in it.
+@Composable
+fun BernScrollRow(modifier: Modifier, state: ScrollState, gap: Dp = 8.dp, content: @Composable RowScope.() -> Unit) {
+    val viewport = remember { BernViewport() }
+    CompositionLocalProvider(LocalBernHorizontalViewport provides viewport) {
+        BernRow(
+            modifier.onGloballyPositioned { viewport.bounds = it.boundsInRoot() }.horizontalScroll(state),
+            gap = gap,
+            content = content,
+        )
+    }
+}
 
 // @bern:wear-skip-start
 /// A vertical scroll view: its content in a column that scrolls, the part
@@ -2483,6 +2665,146 @@ fun <T> BernLazyGrid(
                 for (placeable in placeables) {
                     val across = align?.align(placeable.width, cell, layoutDirection) ?: 0
                     placeable.place(x + across, y)
+                }
+            }
+        }
+    }
+}
+
+private class BernLazyRowGeometry {
+    var coordinates: LayoutCoordinates? = null
+    var keys: List<Any> = emptyList()
+    var starts: IntArray = IntArray(1)
+    var spacing = 0
+    var height = 0
+}
+
+/// A row of keyed items that, in a horizontal scroll view, composes only the
+/// items near what is in sight: one view's width before and after it. Items
+/// out of sight take the width they had when last composed, or that of the
+/// first item composed; outside a horizontal scroll view every item is
+/// composed.
+@Composable
+fun <T> BernLazyRow(
+    items: List<T>,
+    key: (T) -> Any,
+    gap: Dp,
+    verticalAlignment: Alignment.Vertical = Alignment.CenterVertically,
+    modifier: Modifier = Modifier,
+    item: @Composable (T) -> Unit,
+) {
+    val viewport = LocalBernHorizontalViewport.current
+    val scroll = LocalBernScroll.current
+    var left by remember { mutableFloatStateOf(Float.NaN) }
+    val geometry = remember { BernLazyRowGeometry() }
+    val widths = remember { HashMap<Any, Int>() }
+    val heights = remember { HashMap<Any, Int>() }
+    val guess = remember { intArrayOf(0, 0, -1) }
+    val contents = remember { HashMap<Any, Pair<T, @Composable () -> Unit>>() }
+    DisposableEffect(scroll) {
+        val estimate: (Any) -> Rect? = estimate@{ wanted ->
+            val content = scroll?.content?.takeIf { it.isAttached } ?: return@estimate null
+            val row = geometry.coordinates?.takeIf { it.isAttached } ?: return@estimate null
+            val at = geometry.keys.indexOf(wanted).takeIf { it >= 0 } ?: return@estimate null
+            val origin = content.localPositionOf(row, Offset.Zero)
+            val x = geometry.starts.getOrElse(at) { 0 }.toFloat()
+            val width = (geometry.starts.getOrElse(at + 1) { 0 } - geometry.spacing - geometry.starts.getOrElse(at) { 0 }).coerceAtLeast(0)
+            Rect(Offset(origin.x + x, origin.y), androidx.compose.ui.geometry.Size(width.toFloat(), geometry.height.toFloat()))
+        }
+        scroll?.estimates?.add(estimate)
+        onDispose { scroll?.estimates?.remove(estimate) }
+    }
+    SubcomposeLayout(modifier.onGloballyPositioned {
+        geometry.coordinates = it
+        left = it.positionInRoot().x
+    }) { constraints ->
+        val spacing = gap.roundToPx()
+        val count = items.size
+        if (count == 0) {
+            geometry.keys = emptyList()
+            geometry.starts = IntArray(1)
+            geometry.spacing = spacing
+            geometry.height = 0
+            return@SubcomposeLayout layout(constraints.constrainWidth(0), constraints.constrainHeight(0)) {}
+        }
+        if (constraints.maxHeight != guess[2]) {
+            guess[2] = constraints.maxHeight
+            guess[0] = 0
+            guess[1] = 0
+            widths.clear()
+            heights.clear()
+        }
+        val keys = items.map(key)
+        val starts = IntArray(count + 1)
+        val lay = {
+            var at = 0
+            for (i in 0 until count) {
+                starts[i] = at
+                at += (widths[keys[i]] ?: guess[0]) + spacing
+            }
+            starts[count] = at
+        }
+        lay()
+        fun itemAt(x: Float): Int {
+            var low = 0
+            var high = count
+            while (low < high) {
+                val mid = (low + high) / 2
+                if (starts[mid + 1] - spacing <= x) low = mid + 1 else high = mid
+            }
+            return low
+        }
+        val view = viewport?.bounds
+        val (from, to) = when {
+            viewport == null -> 0 to count
+            left.isNaN() || guess[0] <= 0 || view == null || view.width <= 0f -> 0 to minOf(count, 16)
+            else -> {
+                val start = view.left - left - view.width
+                val end = view.right - left + view.width
+                val first = itemAt(maxOf(0f, start)).coerceAtMost(count)
+                first to maxOf(first, minOf(count, itemAt(maxOf(0f, end)) + 1))
+            }
+        }
+        val childConstraints = Constraints(
+            minWidth = 0,
+            maxWidth = Constraints.Infinity,
+            minHeight = 0,
+            maxHeight = constraints.maxHeight,
+        )
+        val composed = ArrayList<Pair<Int, List<Placeable>>>()
+        var composedHeight = guess[1]
+        for (i in from until to) {
+            val id = keys[i]
+            val value = items[i]
+            val content = contents[id]?.takeIf { it.first == value }?.second ?: run {
+                val made: @Composable () -> Unit = { item(value) }
+                contents[id] = value to made
+                made
+            }
+            val placeables = subcompose(id, content).map { it.measure(childConstraints) }
+            val w = placeables.maxOfOrNull { it.width } ?: 0
+            val h = placeables.maxOfOrNull { it.height } ?: 0
+            widths[id] = w
+            heights[id] = h
+            if (guess[0] == 0 && w > 0) guess[0] = w
+            if (guess[1] == 0 && h > 0) guess[1] = h
+            if (h > composedHeight) composedHeight = h
+            composed.add(i to placeables)
+        }
+        if (contents.size > count) contents.keys.retainAll(keys.toHashSet())
+        lay()
+        val totalWidth = constraints.constrainWidth(starts[count] - spacing)
+        val totalHeight = constraints.constrainHeight(composedHeight)
+        geometry.keys = keys
+        geometry.starts = starts
+        geometry.spacing = spacing
+        geometry.height = totalHeight
+        layout(totalWidth, totalHeight) {
+            for ((i, placeables) in composed) {
+                val x = starts[i]
+                for (placeable in placeables) {
+                    val y = verticalAlignment.align(placeable.height, totalHeight)
+                    placeable.placeRelative(x, y)
                 }
             }
         }
@@ -2969,17 +3291,66 @@ fun BernPointerBox(
     onMenu: (() -> Unit)?,
     onWheelUp: (() -> Unit)?,
     onWheelDown: (() -> Unit)?,
+    onHover: (() -> Unit)? = null,
+    hoverDelay: Double = 0.0,
     content: @Composable () -> Unit,
 ) {
     val events = modifier
         .then(if (onMenu != null) Modifier.bernMenuPress(onMenu) else Modifier)
         .bernDoubleTapThrough(onDoubleTap)
         .bernWheel(onWheelUp, onWheelDown)
+        .bernHover(onHover, hoverDelay)
     Layout(content, events) { measurables, constraints ->
         val placeables = measurables.map { it.measure(constraints) }
         val width = constraints.constrainWidth(placeables.maxOfOrNull { it.width } ?: 0)
         val height = constraints.constrainHeight(placeables.maxOfOrNull { it.height } ?: 0)
         layout(width, height) { placeables.forEach { it.place(0, 0) } }
+    }
+}
+
+/// Runs `onHover` when a mouse pointer rests over the element for
+/// `hoverDelay` seconds (immediately when 0). Leaving cancels any pending
+/// trigger; touch and pens do not hover it.
+@Composable
+fun Modifier.bernHover(onHover: (() -> Unit)?, hoverDelay: Double = 0.0): Modifier {
+    if (onHover == null) return this
+    val action by rememberUpdatedState(onHover)
+    val scope = rememberCoroutineScope()
+    var pending by remember { mutableStateOf<Job?>(null) }
+    DisposableEffect(hoverDelay) {
+        onDispose { pending?.cancel(); pending = null }
+    }
+    return pointerInput(hoverDelay) {
+        var inside = false
+        try {
+            awaitPointerEventScope {
+                while (true) {
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                    val mouse = event.changes.any { it.type == PointerType.Mouse }
+                    when (event.type) {
+                        PointerEventType.Enter -> if (mouse && !inside) {
+                            inside = true
+                            pending?.cancel()
+                            val delayMs = (hoverDelay * 1000.0).toLong().coerceAtLeast(0L)
+                            pending = scope.launch {
+                                delay(delayMs)
+                                pending = null
+                                action()
+                            }
+                        }
+                        PointerEventType.Exit -> {
+                            inside = false
+                            pending?.cancel()
+                            pending = null
+                        }
+                    }
+                }
+            }
+        } finally {
+            inside = false
+            pending?.cancel()
+            pending = null
+        }
     }
 }
 

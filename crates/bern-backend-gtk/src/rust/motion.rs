@@ -119,8 +119,11 @@ impl Generator<'_> {
                 float(corner)
             ));
         }
-        // A radius that follows state springs with the element's `animate`.
-        if let Some(radius) = self.num(element, "blur") {
+        // A radius that follows state springs with the element's `animate`,
+        // unless baked statically into a low-resolution preblurred image.
+        if !bern_target_api::svg::static_preblur(element)
+            && let Some(radius) = self.num(element, "blur")
+        {
             entries.push(format!(
                 "blur: Some(({radius}, {}, {}))",
                 float(corner),

@@ -736,6 +736,15 @@ pub fn label(
         .into_any_element()
 }
 
+fn render_placeholder(build: &dyn Fn() -> Vec<El>) -> El {
+    let mut items = build();
+    if items.len() == 1 {
+        items.pop().unwrap()
+    } else {
+        div().size_full().children(items).into_any_element()
+    }
+}
+
 /// `Image` of a declared resource; `dark` is the picture for the dark
 /// appearance, where the build drew one.
 #[allow(clippy::too_many_arguments)]
@@ -752,6 +761,7 @@ pub fn image(
     saturation: Option<f32>,
     spin: Option<(&str, crate::spin::Spin)>,
     covers: bool,
+    placeholder: Option<std::rc::Rc<dyn Fn() -> Vec<El>>>,
 ) -> El {
     let name = match dark {
         Some(dark) if c.theme().dark => dark,
@@ -797,6 +807,10 @@ pub fn image(
         Fit::Cover => ObjectFit::Cover,
         Fit::Fill => ObjectFit::Fill,
     });
+    let element = match placeholder {
+        Some(placeholder) => element.with_loading(move || render_placeholder(&*placeholder)),
+        None => element,
+    };
     let element = match width {
         Some(width) => element.w(px(width)),
         None => element,
@@ -829,6 +843,7 @@ pub fn image(
             corner,
             saturation: saturation.unwrap_or(1.0).clamp(0.0, 1.0),
         },
+        None,
     )
 }
 
@@ -844,7 +859,13 @@ struct Filtered<'a> {
 /// A picture placed: at its own size, or covering the room its container
 /// gives without asking for any, as a layer of a `Stack` under the rest.
 /// Blurred or desaturated, it keeps that place and draws itself filtered there.
-fn framed(c: &Ctx, element: gpui::Img, covers: bool, filtered: Filtered<'_>) -> El {
+fn framed(
+    c: &Ctx,
+    element: gpui::Img,
+    covers: bool,
+    filtered: Filtered<'_>,
+    opacity: Option<f32>,
+) -> El {
     let blur = c.blur();
     if blur > 0.05 || filtered.saturation < 0.999 {
         let corners = match filtered.corner {
@@ -862,12 +883,15 @@ fn framed(c: &Ctx, element: gpui::Img, covers: bool, filtered: Filtered<'_>) -> 
         );
         let element = element.opacity(0.0);
         return if covers {
-            div()
+            let box_el = div()
                 .absolute()
                 .inset_0()
                 .child(element.size_full())
-                .child(painted)
-                .into_any_element()
+                .child(painted);
+            match opacity {
+                Some(alpha) => box_el.opacity(alpha).into_any_element(),
+                None => box_el.into_any_element(),
+            }
         } else {
             let filled = c.grow();
             let element = crate::Grow {
@@ -877,19 +901,25 @@ fn framed(c: &Ctx, element: gpui::Img, covers: bool, filtered: Filtered<'_>) -> 
                 keep: false,
             }
             .apply(element.flex_none());
-            filled
-                .apply(
-                    div()
-                        .relative()
-                        .flex()
-                        .flex_col()
-                        .flex_none()
-                        .child(element)
-                        .child(painted),
-                )
-                .into_any_element()
+            let box_el = filled.apply(
+                div()
+                    .relative()
+                    .flex()
+                    .flex_col()
+                    .flex_none()
+                    .child(element)
+                    .child(painted),
+            );
+            match opacity {
+                Some(alpha) => box_el.opacity(alpha).into_any_element(),
+                None => box_el.into_any_element(),
+            }
         };
     }
+    let element = match opacity {
+        Some(alpha) => element.opacity(alpha),
+        None => element,
+    };
     if covers {
         element.absolute().inset_0().size_full().into_any_element()
     } else {
@@ -930,6 +960,57 @@ fn tinted(path: &std::path::Path, color: gpui::Rgba) -> Option<std::sync::Arc<gp
     Some(rendered)
 }
 
+struct FadeState {
+    sync_hit: bool,
+    ready_since: Option<std::time::Instant>,
+}
+
+#[derive(gpui::IntoElement)]
+struct FadeImage {
+    key: gpui::ElementId,
+    url: String,
+    resource: gpui::Resource,
+    reduced: bool,
+    build: Box<dyn FnOnce(Option<f32>) -> El>,
+}
+
+impl gpui::RenderOnce for FadeImage {
+    fn render(self, window: &mut gpui::Window, cx: &mut gpui::App) -> impl IntoElement {
+        const FADE_DURATION: f32 = 0.25;
+        let ready = matches!(
+            window.use_asset::<gpui::ImgResourceLoader>(&self.resource, cx),
+            Some(Ok(_))
+        );
+        let mem_hit = crate::pictures::is_memory_cached(&self.url);
+        let state = window.use_keyed_state(self.key, cx, |_, _| FadeState {
+            sync_hit: mem_hit || ready,
+            ready_since: None,
+        });
+        let opacity = if self.reduced || !ready {
+            None
+        } else {
+            let mut elapsed = None;
+            state.update(cx, |s, _| {
+                if s.sync_hit {
+                    return;
+                }
+                let since = *s.ready_since.get_or_insert_with(std::time::Instant::now);
+                elapsed = Some(since.elapsed().as_secs_f32());
+            });
+            elapsed.and_then(|secs| {
+                let t = secs / FADE_DURATION;
+                if t >= 1.0 {
+                    None
+                } else {
+                    window.request_animation_frame();
+                    Some(t.clamp(0.0, 1.0))
+                }
+            })
+        };
+        (self.build)(opacity)
+    }
+}
+
 /// `Image` of a picture from state: a file the user chose or an http(s)
 /// address; nothing while there is none.
 #[allow(clippy::too_many_arguments)]
@@ -944,29 +1025,61 @@ pub fn image_url(
     aspect: Option<f32>,
     saturation: Option<f32>,
     covers: bool,
+    placeholder: Option<std::rc::Rc<dyn Fn() -> Vec<El>>>,
 ) -> El {
     let sized = |element: gpui::Div| {
         let element = match width {
             Some(width) => element.w(px(width)),
             None => element,
         };
-        match height {
+        let element = match height {
             Some(height) => element.h(px(height)),
+            None => element,
+        };
+        let element = match corner {
+            Some(corner) => element.rounded(px(corner)).overflow_hidden(),
+            None => crate::look::round_corners(element, c.round()),
+        };
+        match aspect {
+            Some(aspect) if width.is_none() && height.is_none() => {
+                element.aspect_ratio(aspect).w_full().min_w(px(0.0))
+            }
+            Some(aspect) => element.aspect_ratio(aspect),
             None => element,
         }
     };
     if url.is_empty() {
-        return sized(div()).flex_none().into_any_element();
+        let empty = if covers {
+            div().absolute().inset_0().size_full()
+        } else {
+            c.grow().apply(sized(div()).flex_none())
+        };
+        return match placeholder {
+            Some(placeholder) => empty
+                .child(render_placeholder(&*placeholder))
+                .into_any_element(),
+            None => empty.into_any_element(),
+        };
     }
     let file = url::Url::parse(&url)
         .ok()
         .filter(|parsed| parsed.scheme() == "file")
         .and_then(|parsed| parsed.to_file_path().ok());
+    if file.is_none() {
+        let priority = if covers || width.is_some_and(|w| w >= 180.0) {
+            crate::pictures::Priority::High
+        } else {
+            crate::pictures::Priority::Normal
+        };
+        crate::pictures::set_priority(&url, priority);
+    }
     let tinted = file
         .as_ref()
         .filter(|_| template)
         .and_then(|path| tinted(path, c.color("text.primary")));
     let key = url.clone();
+    let remote_resource =
+        (tinted.is_none() && file.is_none()).then(|| gpui::Resource::Uri(url.clone().into()));
     let (source, picture): (gpui::ImageSource, crate::filters::Picture) = match (tinted, file) {
         (Some(rendered), _) => (
             rendered.clone().into(),
@@ -986,7 +1099,9 @@ pub fn image_url(
         Fit::Cover => ObjectFit::Cover,
         Fit::Fill => ObjectFit::Fill,
     });
-    let element = if !covers {
+    let element = if let Some(placeholder) = placeholder {
+        element.with_loading(move || render_placeholder(&*placeholder))
+    } else if !covers {
         let fg = c.color("text.primary");
         let reduced = crate::motion::reduced(c);
         let r = corner.unwrap_or(0.0);
@@ -1015,6 +1130,34 @@ pub fn image_url(
         Some(aspect) => element.aspect_ratio(aspect),
         None => element,
     };
+    let saturation = saturation.unwrap_or(1.0).clamp(0.0, 1.0);
+    if let Some(resource) = remote_resource {
+        let c_owned = c.clone();
+        let reduced = crate::motion::reduced(c);
+        let fade_key = gpui::ElementId::Name(format!("{}#fade#{url}", c.key("image")).into());
+        return FadeImage {
+            key: fade_key,
+            url,
+            resource,
+            reduced,
+            build: Box::new(move |opacity| {
+                framed(
+                    &c_owned,
+                    element,
+                    covers,
+                    Filtered {
+                        key: &key,
+                        picture,
+                        fit,
+                        corner,
+                        saturation,
+                    },
+                    opacity,
+                )
+            }),
+        }
+        .into_any_element();
+    }
     framed(
         c,
         element,
@@ -1024,8 +1167,9 @@ pub fn image_url(
             picture,
             fit,
             corner,
-            saturation: saturation.unwrap_or(1.0).clamp(0.0, 1.0),
+            saturation,
         },
+        None,
     )
 }
 

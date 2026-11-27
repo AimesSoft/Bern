@@ -1,6 +1,7 @@
 //! Pointer events of elements: double taps, context menus and wheel turns.
 
 use super::{Ctx, Generator, Out, Scope};
+use crate::names::double;
 use bern_ir::Element;
 
 impl Generator<'_> {
@@ -9,6 +10,29 @@ impl Generator<'_> {
     pub(super) fn event_action(&self, element: &Element, kind: &str) -> Option<String> {
         let action = element.pointer_event(kind)?.action.as_ref()?;
         Some(self.action(action))
+    }
+
+    /// The `(action, delay)` of the `Hover` event an element declares. A watch
+    /// has no pointer hovering.
+    pub(super) fn hover_event(&self, element: &Element) -> Option<(String, f64)> {
+        if self.watch {
+            return None;
+        }
+        let hover = element.pointer_event("Hover")?;
+        let action = hover.action.as_ref()?;
+        Some((self.action(action), hover.number("delay").unwrap_or(0.0)))
+    }
+
+    /// `.bernHover(…)` for the `Hover` event an element declares.
+    pub(super) fn hover_modifier(&self, element: &Element) -> String {
+        let Some((action, delay)) = self.hover_event(element) else {
+            return String::new();
+        };
+        if delay > 0.0 {
+            format!(".bernHover({{ {action} }}, {})", double(delay))
+        } else {
+            format!(".bernHover({{ {action} }})")
+        }
     }
 
     /// `.bernWheel(…)` for the wheel events an element declares. A watch
@@ -41,6 +65,12 @@ impl Generator<'_> {
             for (kind, name) in [("WheelUp", "onWheelUp"), ("WheelDown", "onWheelDown")] {
                 if let Some(action) = self.event_action(element, kind) {
                     args.push(format!("{name} = {{ {action} }}"));
+                }
+            }
+            if let Some((action, delay)) = self.hover_event(element) {
+                args.push(format!("onHover = {{ {action} }}"));
+                if delay > 0.0 {
+                    args.push(format!("hoverDelay = {}", double(delay)));
                 }
             }
         }

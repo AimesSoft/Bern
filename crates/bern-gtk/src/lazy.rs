@@ -8,11 +8,11 @@
 //! with `cells` every row as tall as the columns' width gives.
 
 use crate::features::ScrollScope;
-use crate::motion;
+use crate::motion::{self, Curve, Num};
 use crate::protocol::Value;
 use crate::reactive::{Cell, Scope, effect, on_cleanup, untrack};
 use crate::value::{as_list, at, key_text};
-use crate::widgets::{GridProps, pad, place};
+use crate::widgets::{GridProps, Padding, bind_size, pad, place, stack_cross};
 use crate::{Build, Ctx, Get, Parent};
 use gtk::glib;
 use gtk::prelude::*;
@@ -641,6 +641,555 @@ pub fn LazyGrid(
     place(p, &grid);
 }
 
+// MARK: - Horizontal lazy row
+
+type RowMake = Box<dyn Fn(&super::LazyRow, usize) -> Option<Built>>;
+
+mod row_imp {
+    use super::*;
+
+    pub struct LazyRow {
+        pub items: RefCell<Vec<Value>>,
+        pub keys: RefCell<Vec<String>>,
+        pub built: RefCell<HashMap<String, Built>>,
+        /// Cached horizontal widths of built items by key; `guess` for unbuilt items.
+        pub widths: RefCell<HashMap<String, i32>>,
+        pub guess: Plain<i32>,
+        pub height_guess: Plain<i32>,
+        pub gap: Plain<f64>,
+        pub cross: Plain<gtk::Align>,
+        pub starts: RefCell<Vec<i32>>,
+        pub laid: Plain<bool>,
+        pub view: RefCell<Option<gtk::ScrolledWindow>>,
+        pub view_signals: RefCell<
+            Option<(
+                gtk::Adjustment,
+                glib::SignalHandlerId,
+                glib::SignalHandlerId,
+            )>,
+        >,
+        pub make: RefCell<Option<RowMake>>,
+        pub posted: Plain<bool>,
+        pub updating: Plain<bool>,
+        pub places: RefCell<HashMap<String, (i32, i32, i32, i32)>>,
+        pub leaving: RefCell<Vec<Leaving>>,
+    }
+
+    impl Default for LazyRow {
+        fn default() -> Self {
+            Self {
+                items: RefCell::default(),
+                keys: RefCell::default(),
+                built: RefCell::default(),
+                widths: RefCell::default(),
+                guess: Plain::new(0),
+                height_guess: Plain::new(0),
+                gap: Plain::new(8.0),
+                cross: Plain::new(gtk::Align::Center),
+                starts: RefCell::new(vec![0]),
+                laid: Plain::new(false),
+                view: RefCell::new(None),
+                view_signals: RefCell::new(None),
+                make: RefCell::new(None),
+                posted: Plain::new(false),
+                updating: Plain::new(false),
+                places: RefCell::default(),
+                leaving: RefCell::default(),
+            }
+        }
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for LazyRow {
+        const NAME: &'static str = "BernLazyRow";
+        type Type = super::LazyRow;
+        type ParentType = gtk::Widget;
+    }
+
+    impl ObjectImpl for LazyRow {
+        fn dispose(&self) {
+            if let Some((adj, moved, paged)) = self.view_signals.borrow_mut().take() {
+                adj.disconnect(moved);
+                adj.disconnect(paged);
+            }
+            for (_, item) in self.built.borrow_mut().drain() {
+                item.owner.dispose();
+                item.holder.unparent();
+            }
+            for gone in self.leaving.borrow_mut().drain(..) {
+                gone.holder.unparent();
+            }
+            self.make.replace(None);
+        }
+    }
+
+    impl WidgetImpl for LazyRow {
+        fn request_mode(&self) -> gtk::SizeRequestMode {
+            gtk::SizeRequestMode::ConstantSize
+        }
+
+        fn measure(&self, orientation: gtk::Orientation, _for_size: i32) -> (i32, i32, i32, i32) {
+            if orientation == gtk::Orientation::Horizontal {
+                let total = self.obj().lay_out();
+                return (total, total, -1, -1);
+            }
+            let (mut min_h, mut nat_h) = (0, 0);
+            let widths = self.widths.borrow();
+            for (key, item) in self.built.borrow().iter() {
+                let w = widths.get(key).copied().unwrap_or(-1);
+                let (cmin, cnat, _, _) = item.holder.measure(gtk::Orientation::Vertical, w);
+                min_h = min_h.max(cmin);
+                nat_h = nat_h.max(cnat);
+            }
+            if nat_h > 0 {
+                self.height_guess.set(nat_h);
+            } else if !self.keys.borrow().is_empty() {
+                nat_h = self.height_guess.get();
+                min_h = min_h.max(nat_h);
+            }
+            (min_h, nat_h, -1, -1)
+        }
+
+        fn compute_expand(&self, hexpand: &mut bool, vexpand: &mut bool) {
+            *hexpand = false;
+            *vexpand = self
+                .built
+                .borrow()
+                .values()
+                .any(|item| item.holder.compute_expand(gtk::Orientation::Vertical));
+        }
+
+        fn size_allocate(&self, _width: i32, height: i32, _baseline: i32) {
+            let row = self.obj();
+            row.lay_out();
+            self.laid.set(true);
+            let gap = row.gap_px();
+            let keys = self.keys.borrow();
+            let built = self.built.borrow();
+            let starts = self.starts.borrow();
+            let cross = self.cross.get();
+            for (i, key) in keys.iter().enumerate() {
+                let Some(item) = built.get(key) else { continue };
+                if i + 1 >= starts.len() {
+                    continue;
+                }
+                let item_w = (starts[i + 1] - gap - starts[i]).max(0);
+                let (_, nat_h, _, _) = item.holder.measure(gtk::Orientation::Vertical, item_w);
+                let expands_v = item.holder.compute_expand(gtk::Orientation::Vertical);
+                let (y, item_h) = if expands_v || cross == gtk::Align::Fill {
+                    (0, height.max(0))
+                } else {
+                    let h = nat_h.min(height).max(0);
+                    let y = match cross {
+                        gtk::Align::Start => 0,
+                        gtk::Align::End => (height - h).max(0),
+                        _ => (height - h).max(0) / 2,
+                    };
+                    (y, h)
+                };
+                let at = gtk::gsk::Transform::new()
+                    .translate(&gtk::graphene::Point::new(starts[i] as f32, y as f32));
+                item.holder.allocate(item_w, item_h, -1, Some(at));
+                self.places
+                    .borrow_mut()
+                    .insert(key.clone(), (starts[i], y, item_w, item_h));
+            }
+            drop((keys, built, starts));
+            self.leaving.borrow_mut().retain(|gone| {
+                if gone.holder.first_child().is_none() {
+                    gone.holder.unparent();
+                    return false;
+                }
+                let (x, y, width, height) = gone.place;
+                gone.holder.measure(gtk::Orientation::Horizontal, -1);
+                let at = gtk::gsk::Transform::new()
+                    .translate(&gtk::graphene::Point::new(x as f32, y as f32));
+                gone.holder.allocate(width, height, -1, Some(at));
+                true
+            });
+            if !row.current() {
+                row.later();
+            }
+        }
+    }
+}
+
+glib::wrapper! {
+    pub struct LazyRow(ObjectSubclass<row_imp::LazyRow>)
+        @extends gtk::Widget,
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
+}
+
+impl LazyRow {
+    fn gap_px(&self) -> i32 {
+        self.imp().gap.get().max(0.0).round() as i32
+    }
+
+    fn attach_view(&self, view: &gtk::ScrolledWindow) {
+        let imp = self.imp();
+        if imp.view.borrow().as_ref() == Some(view) {
+            return;
+        }
+        if let Some((adj, moved, paged)) = imp.view_signals.borrow_mut().take() {
+            adj.disconnect(moved);
+            adj.disconnect(paged);
+        }
+        imp.view.replace(Some(view.clone()));
+        let adjustment = view.hadjustment();
+        let watched = self.downgrade();
+        let moved = adjustment.connect_value_changed(move |_| {
+            if let Some(row) = watched.upgrade()
+                && !row.current()
+            {
+                row.later();
+            }
+        });
+        let watched = self.downgrade();
+        let paged = adjustment.connect_page_size_notify(move |_| {
+            if let Some(row) = watched.upgrade() {
+                row.later();
+            }
+        });
+        imp.view_signals.replace(Some((adjustment, moved, paged)));
+    }
+
+    /// Measure built items' widths, update cached widths and compute each
+    /// item's horizontal start offset; returns total width.
+    fn lay_out(&self) -> i32 {
+        let imp = self.imp();
+        for (key, item) in imp.built.borrow().iter() {
+            let (_, natural, _, _) = item.holder.measure(gtk::Orientation::Horizontal, -1);
+            imp.widths.borrow_mut().insert(key.clone(), natural);
+            if imp.guess.get() <= 0 && natural > 0 {
+                imp.guess.set(natural);
+            }
+        }
+        let gap = self.gap_px();
+        let keys = imp.keys.borrow();
+        let widths = imp.widths.borrow();
+        let guess = imp.guess.get();
+        let mut starts = vec![0; keys.len() + 1];
+        let mut at = 0;
+        for (i, key) in keys.iter().enumerate() {
+            starts[i] = at;
+            let width = widths.get(key).copied().unwrap_or(guess);
+            at += width + gap;
+        }
+        starts[keys.len()] = at;
+        let count = keys.len();
+        drop((keys, widths));
+        imp.starts.replace(starts);
+        if count > 0 { (at - gap).max(0) } else { 0 }
+    }
+
+    /// The first item whose right edge is to the right of `x`.
+    fn item_at(&self, x: f64) -> usize {
+        let starts = self.imp().starts.borrow();
+        let gap = self.gap_px();
+        let (mut low, mut high) = (0, starts.len() - 1);
+        while low < high {
+            let mid = (low + high) / 2;
+            if f64::from(starts[mid + 1] - gap) <= x {
+                low = mid + 1;
+            } else {
+                high = mid;
+            }
+        }
+        low
+    }
+
+    /// The item range `[from, to)` to build: ±1 viewport around what is visible.
+    fn wanted(&self) -> (usize, usize) {
+        let imp = self.imp();
+        let count = imp.keys.borrow().len();
+        let Some(view) = imp.view.borrow().clone() else {
+            return (0, count);
+        };
+        let first = count.min(16);
+        let content = view
+            .child()
+            .and_then(|viewport| viewport.first_child().or(Some(viewport)));
+        let origin = content
+            .and_then(|content| self.compute_point(&content, &gtk::graphene::Point::new(0.0, 0.0)));
+        let (Some(origin), true, true) = (origin, imp.guess.get() > 0, imp.laid.get()) else {
+            return (0, first);
+        };
+        let adjustment = view.hadjustment();
+        let page = adjustment.page_size();
+        if page <= 0.0 {
+            return (0, first);
+        }
+        let left = adjustment.value() - f64::from(origin.x());
+        let from = self.item_at((left - page).max(0.0)).min(count);
+        let to = (self.item_at((left + page * 2.0).max(0.0)) + 1).min(count);
+        (from, to.max(from))
+    }
+
+    fn current(&self) -> bool {
+        let imp = self.imp();
+        let (from, to) = self.wanted();
+        let keys = imp.keys.borrow();
+        let end = keys.len().min(to);
+        let start = end.min(from);
+        let built = imp.built.borrow();
+        built.len() == end - start && keys[start..end].iter().all(|key| built.contains_key(key))
+    }
+
+    fn update(&self) {
+        let imp = self.imp();
+        if imp.updating.get() {
+            self.later();
+            return;
+        }
+        imp.posted.set(false);
+        if imp.make.borrow().is_none() {
+            return;
+        }
+        imp.updating.set(true);
+        let (from, to) = self.wanted();
+        let wanted: Vec<(usize, String)> = {
+            let keys = imp.keys.borrow();
+            let end = keys.len().min(to);
+            (end.min(from)..end).map(|i| (i, keys[i].clone())).collect()
+        };
+        let mut previous = imp.built.take();
+        let mut next = HashMap::new();
+        for (i, key) in wanted {
+            if let Some(item) = previous.remove(&key) {
+                next.insert(key, item);
+            } else if let Some(item) = imp.make.borrow().as_ref().and_then(|make| make(self, i)) {
+                next.insert(key, item);
+            }
+        }
+        let present: std::collections::HashSet<String> =
+            imp.keys.borrow().iter().cloned().collect();
+        for (key, item) in previous {
+            item.owner.dispose();
+            match imp.places.borrow_mut().remove(&key) {
+                Some(place) if !present.contains(&key) => {
+                    item.parent.clear();
+                    imp.leaving.borrow_mut().push(Leaving {
+                        holder: item.holder,
+                        place,
+                    });
+                }
+                _ => item.holder.unparent(),
+            }
+        }
+        imp.built.replace(next);
+        imp.updating.set(false);
+        self.queue_resize();
+    }
+
+    fn later(&self) {
+        let imp = self.imp();
+        if imp.posted.replace(true) {
+            return;
+        }
+        let row = self.downgrade();
+        glib::idle_add_local_once(move || {
+            if let Some(row) = row.upgrade() {
+                row.update();
+            }
+        });
+    }
+
+    fn reveal(&self, key: &str) -> Option<gtk::Widget> {
+        let imp = self.imp();
+        let view = imp.view.borrow().clone()?;
+        let at = imp.keys.borrow().iter().position(|one| one == key)?;
+        let start = *imp.starts.borrow().get(at)?;
+        let content = view
+            .child()
+            .and_then(|viewport| viewport.first_child().or(Some(viewport)))?;
+        let origin = self.compute_point(&content, &gtk::graphene::Point::new(0.0, 0.0))?;
+        view.hadjustment()
+            .set_value(f64::from(origin.x()) + f64::from(start));
+        self.update();
+        imp.built
+            .borrow()
+            .get(key)
+            .and_then(|item| item.holder.first_child())
+    }
+}
+
+#[derive(Default)]
+pub struct LazyRowProps {
+    pub gap: Option<Num>,
+    pub padding: Padding,
+    pub width: Option<Num>,
+    pub height: Option<Num>,
+    pub align: Option<&'static str>,
+    pub animate: Option<Curve>,
+}
+
+/// `Row` whose items are one `ForEach`: in a horizontal scroll view it
+/// builds only the items near what is in sight (±1 viewport) and caches
+/// measured widths; elsewhere it builds them all.
+#[allow(non_snake_case, clippy::too_many_arguments)]
+pub fn LazyRow(
+    p: &Parent,
+    ctx: &Ctx,
+    props: LazyRowProps,
+    items: Get,
+    key: usize,
+    var: &'static str,
+    stagger: Option<f64>,
+    item_build: Build,
+) {
+    let row: LazyRow = glib::Object::new();
+    let imp = row.imp();
+    let cross = stack_cross(props.align, false);
+    imp.cross.set(cross);
+    if let Some(gap) = &props.gap {
+        let weak = row.downgrade();
+        motion::bind_number(ctx, gap, props.animate, &row, move |value| {
+            if let Some(row) = weak.upgrade() {
+                row.imp().gap.set(value.max(0.0));
+                row.queue_resize();
+            }
+        });
+    }
+    pad(ctx, row.upcast_ref(), &props.padding, props.animate);
+    let scroll: Option<Rc<ScrollScope>> = ctx
+        .scroll()
+        .filter(|scope| scope.view.hscrollbar_policy() != gtk::PolicyType::Never)
+        .cloned();
+    if let Some(scope) = &scroll {
+        row.attach_view(&scope.view);
+        let revealing = row.downgrade();
+        let moving = Rc::downgrade(scope);
+        scope.add_reveal(Rc::new(move |wanted: &Value| {
+            let scope = moving.upgrade()?;
+            scope.by_code.set(true);
+            let found = revealing
+                .upgrade()
+                .and_then(|row| row.reveal(&key_text(wanted)));
+            scope.by_code.set(false);
+            found
+        }));
+    } else {
+        row.connect_map(|row| {
+            if row.imp().view.borrow().is_none()
+                && let Some(view) = row
+                    .ancestor(gtk::ScrolledWindow::static_type())
+                    .and_downcast::<gtk::ScrolledWindow>()
+                    .filter(|view| view.hscrollbar_policy() != gtk::PolicyType::Never)
+            {
+                row.attach_view(&view);
+                if !row.current() {
+                    row.later();
+                }
+            }
+        });
+    }
+    let entering = Rc::new(Plain::new(false));
+    let made = Rc::clone(&entering);
+    let items_ctx = ctx.clone();
+    imp.make
+        .replace(Some(Box::new(move |row: &LazyRow, i: usize| {
+            let imp = row.imp();
+            let item = imp.items.borrow().get(i)?.clone();
+            let id = imp.keys.borrow().get(i)?.clone();
+            let key_value = at(item.clone(), &[key]);
+            let value = Cell::new(item);
+            let owner = Scope::detached();
+            let holder = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            holder.set_parent(row);
+            let read = value.clone();
+            let shown_key = id.clone();
+            let item_ctx = items_ctx
+                .with_key(Rc::new(move || shown_key.clone()))
+                .with_local(var, Rc::new(move || read.get()));
+            let parent = Parent::of_aligned_box(&holder, cross).region();
+            let build = Rc::clone(&item_build);
+            let scroll = scroll.clone();
+            let entering = made.get();
+            untrack(|| {
+                owner.run(|| {
+                    motion::with_entering(entering, || build(&parent, &item_ctx));
+                    if let (Some(scroll), Some(first)) = (scroll, holder.first_child()) {
+                        scroll.add_item(key_value, &first);
+                    }
+                })
+            });
+            Some(Built {
+                value,
+                owner,
+                holder,
+                parent,
+            })
+        })));
+    let watched = row.downgrade();
+    let started = Plain::new(false);
+    let first_entering = motion::entering() || (stagger.is_some() && motion::appearing());
+    let outer_clock = motion::clock();
+    let ctx_eff = ctx.clone();
+    effect(move || {
+        let list = as_list(items(&ctx_eff));
+        let Some(row) = watched.upgrade() else {
+            return;
+        };
+        untrack(|| {
+            let imp = row.imp();
+            let keys: Vec<String> = list
+                .iter()
+                .map(|item| key_text(&at(item.clone(), &[key])))
+                .collect();
+            {
+                let built = imp.built.borrow();
+                for (item, id) in list.iter().zip(&keys) {
+                    if let Some(entry) = built.get(id) {
+                        entry.value.set(item.clone());
+                    }
+                }
+            }
+            let present: std::collections::HashSet<&str> =
+                keys.iter().map(String::as_str).collect();
+            imp.widths
+                .borrow_mut()
+                .retain(|k, _| present.contains(k.as_str()));
+            imp.items.replace(list);
+            imp.keys.replace(keys);
+            let now = started.replace(true) || first_entering;
+            let clock = match stagger {
+                Some(step) if now && !motion::reduced() => {
+                    Some(motion::with_entering(now, || motion::new_clock(step)))
+                }
+                _ => outer_clock.clone(),
+            };
+            entering.set(now);
+            motion::with_clock(clock, || {
+                row.lay_out();
+                row.update();
+            });
+            entering.set(false);
+        });
+    });
+    let ended = row.downgrade();
+    on_cleanup(move || {
+        if let Some(row) = ended.upgrade() {
+            let imp = row.imp();
+            if let Some((adj, moved, paged)) = imp.view_signals.borrow_mut().take() {
+                adj.disconnect(moved);
+                adj.disconnect(paged);
+            }
+            for (_, item) in imp.built.borrow_mut().drain() {
+                item.owner.dispose();
+                item.holder.unparent();
+            }
+            imp.make.replace(None);
+        }
+    });
+    let outer: gtk::Widget = if props.width.is_some() || props.height.is_some() {
+        crate::layout::Sized::wrap(&row).upcast()
+    } else {
+        row.upcast()
+    };
+    bind_size(ctx, &outer, &props.width, &props.height, props.animate);
+    place(p, &outer);
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -757,6 +1306,94 @@ pub(crate) mod tests {
         wait(0.4);
         assert_eq!(grid.imp().keys.borrow().len(), 4990);
         assert!(built(&grid).len() < 60);
+        scope.dispose();
+        window.destroy();
+    }
+
+    fn built_row(row: &LazyRow) -> Vec<usize> {
+        let imp = row.imp();
+        let keys = imp.keys.borrow();
+        let built = imp.built.borrow();
+        keys.iter()
+            .enumerate()
+            .filter(|(_, key)| built.contains_key(*key))
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    pub(crate) fn a_long_row_builds_only_the_items_near_the_view() {
+        let window = gtk::Window::new();
+        window.set_default_size(400, 200);
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        window.set_child(Some(&content));
+        let scope = Scope::detached();
+        let entry = |i: i64| Value::Record(vec![Value::Int(i)]);
+        let items = Cell::new(Value::List((0..2000).map(entry).collect()));
+        let read = items.clone();
+        let get: Get = Rc::new(move |_| read.get());
+        let item_build: Build = Rc::new(|p: &Parent, _: &Ctx| {
+            let label = gtk::Label::new(Some("card"));
+            label.set_size_request(100, 80);
+            place(p, &label);
+        });
+        let ctx = Ctx::detached("lazy-row", None);
+        let props = ScrollProps {
+            axis: Some("horizontal"),
+            snap: None,
+            position: None,
+            arrival_nudge: false,
+            hide_indicators: false,
+            mouse_indicators: false,
+            nudge_motion: (0.3, 1.0),
+            smooth: (0.3, 1.0),
+            open_at: None,
+            open_center: None,
+            anchor: None,
+            browsing: None,
+        };
+        let row_slot: Rc<RefCell<Option<LazyRow>>> = Rc::default();
+        let found = Rc::clone(&row_slot);
+        let children: Build = Rc::new(move |p: &Parent, c: &Ctx| {
+            LazyRow(
+                p,
+                c,
+                LazyRowProps::default(),
+                Rc::clone(&get),
+                0,
+                "entry",
+                None,
+                Rc::clone(&item_build),
+            );
+            *found.borrow_mut() = p
+                .widgets()
+                .last()
+                .and_then(|widget| widget.clone().downcast::<LazyRow>().ok());
+        });
+        scope.run(|| ScrollView(&Parent::of_box(&content), &ctx, props, children));
+        window.present();
+        wait(1.0);
+        let row = row_slot.borrow().clone().expect("the lazy row");
+        let first = built_row(&row);
+        assert!(
+            !first.is_empty() && first.len() < 30,
+            "items near the view only: {}",
+            first.len()
+        );
+        assert_eq!(first[0], 0);
+        let view = row.imp().view.borrow().clone().expect("in a scroll view");
+        view.hadjustment().set_value(40000.0);
+        wait(0.6);
+        let there = built_row(&row);
+        assert!(
+            there.len() < 30,
+            "still only the items near the view: {}",
+            there.len()
+        );
+        assert!(there[0] > 200, "scrolled from {}", there[0]);
+        items.set(Value::List((10..2000).map(entry).collect()));
+        wait(0.4);
+        assert_eq!(row.imp().keys.borrow().len(), 1990);
+        assert!(built_row(&row).len() < 30);
         scope.dispose();
         window.destroy();
     }

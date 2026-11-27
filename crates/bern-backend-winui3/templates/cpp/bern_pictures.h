@@ -87,12 +87,20 @@ enum class Reading {
     Refused,
 };
 
+enum class Priority : uint8_t {
+    Low = 0,
+    Normal = 1,
+    High = 2,
+};
+
 namespace detail {
 
 struct GateSignal {
     winrt::handle event{CreateEventW(nullptr, TRUE, FALSE, nullptr)};
     std::atomic<bool> granted{false};
     bool cancelled = false;
+    std::string url;
+    Priority priority = Priority::Normal;
 };
 
 struct CallerWait {
@@ -371,6 +379,7 @@ struct Inflight {
     };
 
     std::string url;
+    Priority priority = Priority::Normal;
     std::function<bool(Bytes const&)> accept;
     std::shared_ptr<Waiter> driver = std::make_shared<Waiter>();
     std::vector<Caller> callers;
@@ -695,15 +704,35 @@ inline double Jitter() {
     return std::uniform_real_distribution<double>(0.75, 1.25)(random);
 }
 
-inline void ReleaseGateSlotLocked(Shared& shared) {
-    while (!shared.gate_waiters.empty()) {
-        auto next = std::move(shared.gate_waiters.front());
-        shared.gate_waiters.pop_front();
-        if (next && !next->cancelled) {
-            next->granted.store(true);
-            SetEvent(next->event.get());
-            return;
+inline void PromoteGateWaitersLocked(Shared& shared, std::string_view url, Priority priority) {
+    for (auto const& sig : shared.gate_waiters) {
+        if (sig && !sig->cancelled && sig->url == url &&
+            static_cast<uint8_t>(priority) > static_cast<uint8_t>(sig->priority)) {
+            sig->priority = priority;
         }
+    }
+}
+
+inline void ReleaseGateSlotLocked(Shared& shared) {
+    auto best = shared.gate_waiters.end();
+    for (auto it = shared.gate_waiters.begin(); it != shared.gate_waiters.end();) {
+        auto const& sig = *it;
+        if (!sig || sig->cancelled) {
+            it = shared.gate_waiters.erase(it);
+            continue;
+        }
+        if (best == shared.gate_waiters.end() ||
+            static_cast<uint8_t>(sig->priority) > static_cast<uint8_t>((*best)->priority)) {
+            best = it;
+        }
+        ++it;
+    }
+    if (best != shared.gate_waiters.end()) {
+        auto next = std::move(*best);
+        shared.gate_waiters.erase(best);
+        next->granted.store(true);
+        SetEvent(next->event.get());
+        return;
     }
     if (shared.active_requests > 0) --shared.active_requests;
 }
@@ -738,7 +767,8 @@ private:
     bool acquired_ = false;
 };
 
-inline foundation::IAsyncOperation<bool> AcquireSlot(std::shared_ptr<Waiter> waiter) {
+inline foundation::IAsyncOperation<bool> AcquireSlot(std::shared_ptr<Waiter> waiter, std::string url = {},
+    Priority priority = Priority::Normal, std::shared_ptr<Inflight> task = nullptr) {
     auto& shared = Pictures();
     std::shared_ptr<GateSignal> sig;
     {
@@ -748,7 +778,12 @@ inline foundation::IAsyncOperation<bool> AcquireSlot(std::shared_ptr<Waiter> wai
             ++shared.active_requests;
             co_return true;
         }
+        if (task && static_cast<uint8_t>(task->priority) > static_cast<uint8_t>(priority)) {
+            priority = task->priority;
+        }
         sig = std::make_shared<GateSignal>();
+        sig->url = std::move(url);
+        sig->priority = priority;
         shared.gate_waiters.push_back(sig);
     }
     waiter->AttachGate(sig);
@@ -969,7 +1004,7 @@ inline winrt::fire_and_forget RunInflight(std::shared_ptr<Inflight> task) {
             use_isolated_http11 = false;
         }
 
-        SlotGuard slot(co_await AcquireSlot(task->driver));
+        SlotGuard slot(co_await AcquireSlot(task->driver, task->url, task->priority, task));
         if (!slot.Acquired()) continue;
 
         http::HttpClient shared_client = Client();
@@ -1034,7 +1069,8 @@ inline void Waiter::SyncTasks(std::vector<std::shared_ptr<detail::Inflight>> con
 
 /// The bytes at the http(s) address `url`, once they come and `accept`
 /// takes them for a picture; nothing once `waiter` ended.
-inline foundation::IAsyncOperation<Bytes> Until(std::string url, std::shared_ptr<Waiter> waiter, std::function<bool(Bytes const&)> accept) {
+inline foundation::IAsyncOperation<Bytes> Until(std::string url, std::shared_ptr<Waiter> waiter, std::function<bool(Bytes const&)> accept,
+    Priority priority = Priority::Normal) {
     if (!waiter || waiter->Ended()) co_return nullptr;
     if (auto cached = detail::MemoryFind(detail::UrlKey(url)); cached && !cached->empty()) {
         Bytes buf = detail::ToBuffer(*cached);
@@ -1051,9 +1087,14 @@ inline foundation::IAsyncOperation<Bytes> Until(std::string url, std::shared_ptr
             if (waiter->Ended()) co_return nullptr;
             if (auto it = shared.inflight.find(url); it != shared.inflight.end() && !it->second->completed && !it->second->dying) {
                 task = it->second;
+                if (static_cast<uint8_t>(priority) > static_cast<uint8_t>(task->priority)) {
+                    task->priority = priority;
+                    detail::PromoteGateWaitersLocked(shared, url, priority);
+                }
             } else {
                 task = std::make_shared<detail::Inflight>();
                 task->url = url;
+                task->priority = priority;
                 task->accept = accept;
                 shared.inflight[url] = task;
                 is_leader = true;

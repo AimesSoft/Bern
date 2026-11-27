@@ -121,7 +121,7 @@ impl Generator<'_> {
         ));
     }
 
-    pub(super) fn image(&self, out: &mut Out, element: &Element) {
+    pub(super) fn image(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         let length = |name| self.length(element, name).unwrap_or_else(|| "null".into());
         let fit = match element.keyword("fit") {
             Some("cover") => "ContentScale.Crop",
@@ -150,6 +150,18 @@ impl Generator<'_> {
         if let Some(cap) = bern_target_api::svg::decode_max_side(self.app, element) {
             extra.push_str(&format!(", maxSide = {}.dp", float(cap)));
         }
+        if bern_target_api::svg::static_preblur(element) {
+            let blur = match element.prop("blur") {
+                Some(Prop::Number { value }) => Some(float(*value)),
+                Some(Prop::Expr { expr }) => {
+                    Some(format!("({}).toFloat().coerceAtLeast(0f)", self.expr(expr)))
+                }
+                _ => None,
+            };
+            if let Some(blur) = blur {
+                extra.push_str(&format!(", blur = {blur}"));
+            }
+        }
         if let Some(saturation) = element.expr("saturation") {
             let value = format!("({}).toFloat()", self.expr(saturation));
             let animated = match element.keyword("animate") {
@@ -161,8 +173,9 @@ impl Generator<'_> {
             };
             extra.push_str(&format!(", saturation = {animated}"));
         }
+        let placeholder = element.content().next();
         // A picture the engine gives, read at run time.
-        if let Some(source) = element.expr("source") {
+        let call = if let Some(source) = element.expr("source") {
             if bern_target_api::svg::one_size(element) {
                 extra.push_str(", twice = true");
             }
@@ -171,30 +184,37 @@ impl Generator<'_> {
             } else {
                 format!("({}).url", self.expr(source))
             };
-            out.line(format!(
+            format!(
                 "BernImageURL({url}, {}, {}, {}, {fit}{extra})",
                 self.text_prop(element, "label")
                     .unwrap_or_else(|| "null".into()),
                 length("width"),
                 length("height"),
-            ));
-            return;
+            )
+        } else {
+            // The picture where it is dark, and double-sampling at one size.
+            if let Some(dark) = element.resource("dark_source") {
+                extra.push_str(&format!(", dark = {}", string(dark)));
+            }
+            if bern_target_api::svg::one_size(element) {
+                extra.push_str(", oneSize = true");
+            }
+            format!(
+                "BernImage({}, {}, {}, {}, {fit}{extra})",
+                string(element.resource("source").unwrap_or_default()),
+                self.text_prop(element, "label")
+                    .unwrap_or_else(|| "null".into()),
+                length("width"),
+                length("height"),
+            )
+        };
+        if let Some(placeholder) = placeholder {
+            out.open(format!("{call} {{"));
+            self.node(out, placeholder, &ctx.within(super::Scope::Other));
+            out.close("}");
+        } else {
+            out.line(call);
         }
-        // The picture where it is dark, and double-sampling at one size.
-        if let Some(dark) = element.resource("dark_source") {
-            extra.push_str(&format!(", dark = {}", string(dark)));
-        }
-        if bern_target_api::svg::one_size(element) {
-            extra.push_str(", oneSize = true");
-        }
-        out.line(format!(
-            "BernImage({}, {}, {}, {}, {fit}{extra})",
-            string(element.resource("source").unwrap_or_default()),
-            self.text_prop(element, "label")
-                .unwrap_or_else(|| "null".into()),
-            length("width"),
-            length("height"),
-        ));
     }
 
     pub(super) fn skeleton_view(&self, out: &mut Out, element: &Element) {

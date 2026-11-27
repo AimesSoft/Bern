@@ -884,6 +884,16 @@ button:disabled {
   min-width: 0;
 }
 
+.bern-lazy-row {
+  display: flex;
+  flex-direction: row;
+  min-width: 0;
+}
+
+.bern-lazy-row > .bern-stack {
+  flex: none;
+}
+
 .bern-lazy-space {
   flex: none;
   pointer-events: none;

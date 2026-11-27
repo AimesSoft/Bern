@@ -117,6 +117,9 @@ pub mod feature {
     /// `WheelUp` and `WheelDown`: actions for the turns of a mouse wheel
     /// or trackpad scrolling over an element; without it they never run.
     pub const WHEEL: &str = "wheel";
+    /// `Hover`: an action run when the pointer hovers over an element;
+    /// without it, it never runs.
+    pub const HOVER: &str = "hover";
     /// `Slider(hover:)`: where the pointer is along the track; without it
     /// the field stays `None`.
     pub const SLIDER_HOVER: &str = "slider_hover";

@@ -334,6 +334,9 @@ impl Generator<'_> {
                 Some("bottom") => "Alignment.Bottom",
                 _ => "Alignment.CenterVertically",
             };
+            if let Some(each) = bern_ir::lazy_row_items(element) {
+                return self.lazy_row(out, element, each, &gap_dp, alignment, &modifier, ctx);
+            }
             out.open(format!(
                 "BernRow({modifier}, gap = {gap_dp}, verticalAlignment = {alignment}) {{"
             ));
@@ -346,6 +349,58 @@ impl Generator<'_> {
             self.children(out, element, &row);
         }
         out.close("}");
+    }
+
+    /// A row of one `ForEach`, which in a horizontal scroll view composes
+    /// only the items near what is in sight (`BernLazyRow`).
+    #[allow(clippy::too_many_arguments)]
+    fn lazy_row(
+        &self,
+        out: &mut Out,
+        row: &Element,
+        each: &Element,
+        gap: &str,
+        alignment: &str,
+        modifier: &str,
+        ctx: &Ctx,
+    ) {
+        let (Some(items), Some(template), Some(Prop::Key { name, .. })) =
+            (each.expr("items"), &each.template, each.prop("key"))
+        else {
+            return;
+        };
+        let var = member(&template.var);
+        let key = format!("{var}.{}", member(name));
+        let mut inner = ctx.within(Scope::Other);
+        inner.key = Some(key.clone());
+        let stagger = each.number("stagger").or_else(|| row.number("stagger"));
+        if let Some(step) = stagger {
+            inner.stagger = true;
+            out.open(format!(
+                "BernStaggered(rememberBernStagger({})) {{",
+                double(step)
+            ));
+        }
+        out.open(format!(
+            "BernLazyRow({}, key = {{ {var} -> BernKey.of({key}) }}, gap = {gap}, verticalAlignment = {alignment}, modifier = {modifier}) {{ {var} ->",
+            self.expr(items)
+        ));
+        out.open(format!(
+            "CompositionLocalProvider(LocalBernItemKeys provides LocalBernItemKeys.current + \"[${{{key}}}]\") {{"
+        ));
+        if ctx.scroll_items {
+            inner.scroll_items = false;
+            out.open(format!("Box(Modifier.bernScrollItem({key})) {{"));
+            self.nodes(out, &each.children, &inner);
+            out.close("}");
+        } else {
+            self.nodes(out, &each.children, &inner);
+        }
+        out.close("}");
+        out.close("}");
+        if stagger.is_some() {
+            out.close("}");
+        }
     }
 
     /// The window room of a component's body, through the components and
@@ -1158,9 +1213,7 @@ impl Generator<'_> {
                 Scope::Column => "Modifier",
                 Scope::Other | Scope::Flow => "Modifier.bernFlexible(column = false)",
             };
-            out.open(format!(
-                "BernRow({flexible}.horizontalScroll({state}), gap = 8.dp) {{"
-            ));
+            out.open(format!("BernScrollRow({flexible}, {state}, gap = 8.dp) {{"));
             self.nodes(out, &element.children, &ctx.within(Scope::Row));
         } else {
             // In a stack it takes the stack's height, as a scroll view

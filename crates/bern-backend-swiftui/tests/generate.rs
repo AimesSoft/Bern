@@ -3691,3 +3691,222 @@ fn sidebar_label_adapts_icon_foreground_to_selection_prominence() {
         "BernSidebarLabel must switch icon to .primary on increased backgroundProminence:\n{section}"
     );
 }
+
+#[test]
+fn image_placeholder_hover_delay_and_lazy_row_typecheck() {
+    let protocol = r#"
+#[bern::protocol(namespace = "opt_proto", version = 1)]
+pub mod opt_proto {
+    use bern::prelude::*;
+
+    #[value]
+    pub struct CardItem {
+        pub id: String,
+        #[content]
+        pub title: String,
+    }
+
+    #[state]
+    pub struct State {
+        pub items: Vec<CardItem>,
+    }
+
+    #[commands]
+    pub trait Commands {
+        fn ping(&mut self) -> Result<(), CommandError>;
+    }
+}
+"#;
+    let ui = r#"
+use bern::prelude::*;
+use opt_proto::opt_proto;
+
+#[bern::value]
+pub enum Route {
+    Detail,
+}
+
+#[bern::session]
+pub struct Draft {
+    pub picture: MediaSource,
+    pub path: Vec<Route>,
+}
+
+#[component]
+pub fn app(app: opt_proto::Client, windows: AppWindows, #[session] draft: Draft) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Opt" }, initial: open) {
+                Navigation(path: draft.path) {
+                    Column(gap: 16) {
+                        Image(source: draft.picture, width: 120, height: 80, fit: cover) {
+                            Text(content: tr! { "en" => "Loading" })
+                        }
+                        Image(source: draft.picture, width: 64, height: 64, fit: contain)
+                        Stack {
+                            Text(content: tr! { "en" => "Hoverable" })
+                            Hover(delay: 0.15) => app.ping()
+                        }
+                        NavLink(id: open_detail, route: Route::Detail) {
+                            Text(content: tr! { "en" => "Details" })
+                            Hover => app.ping()
+                        }
+                        ScrollView(axis: horizontal) {
+                            Row(gap: 12) {
+                                ForEach(items: app.items, key: id) |item| {
+                                    Text(content: item.title)
+                                }
+                            }
+                        }
+                    }
+                    Destination |route| {
+                        match route {
+                            Route::Detail => {
+                                Text(content: tr! { "en" => "Detail" })
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+"#;
+    let root = workspace();
+    let dir = std::env::temp_dir().join(format!("bern-swiftui-opt-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    for (package, source) in [("opt-proto", protocol), ("opt-ui", ui), ("opt-core", "")] {
+        std::fs::create_dir_all(dir.join(package).join("src")).unwrap();
+        std::fs::write(
+            dir.join(package).join("Cargo.toml"),
+            format!("[package]\nname = \"{package}\"\n"),
+        )
+        .unwrap();
+        std::fs::write(dir.join(package).join("src/lib.rs"), source).unwrap();
+    }
+    std::fs::write(
+        dir.join("Bern.toml"),
+        "[app]\nid = \"opt\"\nbundle_id = \"dev.bern.opt\"\nversion = \"0.1.0\"\nname = { \"en\" = \"Opt\" }\n[languages]\nsupported = [\"en\"]\ndefault = \"en\"\n[protocol]\npackage = \"opt-proto\"\nsource = \"opt-proto/src/lib.rs\"\n[engine]\npackage = \"opt-core\"\ntype = \"opt_core::Engine\"\n[ui]\npackage = \"opt-ui\"\nsources = [\"opt-ui/src/lib.rs\"]\nroot = \"app\"\n[targets.macos]\nplatform = \"macos\"\n[targets.tvos]\nplatform = \"tvos\"\n",
+    )
+    .unwrap();
+    let config = bern_compiler::config::load(&dir.join("Bern.toml")).unwrap();
+    let compiled = bern_compiler::compile(&config).unwrap_or_else(|errors| {
+        panic!(
+            "{}",
+            errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    });
+
+    let macos_target = config
+        .targets
+        .iter()
+        .find(|t| t.name == "macos")
+        .unwrap()
+        .clone();
+    let app = bern_target_api::style::for_platforms(&compiled.app, &["macos"]);
+    let app = app.on_platform("macos");
+    let problems = SwiftUiMacos.check(&app, &macos_target);
+    assert!(
+        problems.iter().all(|d| !d.is_error()),
+        "macOS check failed: {problems:?}"
+    );
+    let output = dir.join("out-macos");
+    let context = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: output.clone(),
+        target: macos_target,
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    let files = SwiftUiMacos.generate(&app, &context).unwrap();
+    for file in &files {
+        let path = output.join(&file.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, &file.contents).unwrap();
+    }
+    let sources = output.join("Sources");
+    let generated = std::fs::read_to_string(sources.join("BernGenerated.swift")).unwrap();
+    assert!(
+        generated
+            .contains("width: 120.0, height: 80.0, fit: .cover, aspect: nil, oneSize: true) {"),
+        "expected trailing placeholder closure on Image:\n{generated}"
+    );
+    assert!(
+        generated
+            .contains("width: 64.0, height: 64.0, fit: .contain, aspect: nil, oneSize: true)\n"),
+        "expected no trailing closure on plain Image:\n{generated}"
+    );
+    assert!(
+        generated.contains("hoverDelay: 0.15, shaped: true)"),
+        "expected Hover(delay: 0.15) on Stack:\n{generated}"
+    );
+    assert!(
+        generated.contains("hoverDelay: 0.0, shaped: true)"),
+        "expected Hover without delay on NavLink:\n{generated}"
+    );
+    assert!(
+        generated.contains("SwiftUI.LazyHStack(alignment: .center, spacing: 12.0) {"),
+        "expected LazyHStack for horizontal lazy Row:\n{generated}"
+    );
+    assert!(!generated.contains("unsupported Hover"), "{generated}");
+
+    let tvos_target = config
+        .targets
+        .iter()
+        .find(|t| t.name == "tvos")
+        .unwrap()
+        .clone();
+    let tv_app = compiled.app.on_platform("tvos");
+    let tv_problems = bern_backend_swiftui::SwiftUiTvos.check(&tv_app, &tvos_target);
+    assert!(
+        tv_problems.iter().all(|d| !d.is_error()),
+        "tvOS check should only warn for Hover: {tv_problems:?}"
+    );
+    assert!(
+        tv_problems.iter().any(|d| d.message.contains("Hover")),
+        "expected Hover warning on tvOS: {tv_problems:?}"
+    );
+
+    #[cfg(target_os = "macos")]
+    {
+        let result = Command::new("xcrun")
+            .args([
+                "swiftc",
+                "-typecheck",
+                "-swift-version",
+                "6",
+                "-parse-as-library",
+            ])
+            .arg("-target")
+            .arg(format!("arm64-apple-macos{MINIMUM_MACOS}"))
+            .arg("-module-cache-path")
+            .arg(cache::module_cache(&root))
+            .arg("-import-objc-header")
+            .arg(sources.join("bern.h"))
+            .arg(sources.join("BernRuntime.swift"))
+            .arg(sources.join("BernMedia.swift"))
+            .arg(sources.join("BernStyle.swift"))
+            .arg(sources.join("BernAppKit.swift"))
+            .arg(sources.join("BernGenerated.swift"))
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "swiftc rejected generated code:\n{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

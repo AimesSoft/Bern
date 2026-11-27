@@ -1505,7 +1505,7 @@ const WHEEL_NOTCH = [100, 3, 1];
 /// `build` makes, attached to its nodes as they are, so it lays out as it
 /// would without them. A `Button` passes only its wheel; an element inside
 /// another takes an event first.
-export function PointerEvents(p, ctx, { doubleTap, label, menu, wheelUp, wheelDown, control }, build) {
+export function PointerEvents(p, ctx, { doubleTap, label, menu, wheelUp, wheelDown, hover, hoverDelay, control }, build) {
   const fragment = document.createDocumentFragment();
   build(fragment, ctx);
   for (const node of [...fragment.children]) {
@@ -1517,8 +1517,31 @@ export function PointerEvents(p, ctx, { doubleTap, label, menu, wheelUp, wheelDo
     if (doubleTap) doubleTapOn(node, doubleTap, inControl);
     if (menu) B.contextMenu(node, ctx, label ?? (() => null), menu);
     if (wheelUp || wheelDown) wheelOn(node, wheelUp, wheelDown);
+    if (hover) hoverOn(node, hover, hoverDelay);
   }
   p.append(fragment);
+}
+
+/// Runs `action` after the pointer rests over `node` for `delay` seconds,
+/// ignoring touch input and cancelling on leave, cancel, or unmount.
+function hoverOn(node, action, delay = 0) {
+  let timer = 0;
+  const cancel = () => {
+    if (!timer) return;
+    clearTimeout(timer);
+    timer = 0;
+  };
+  node.addEventListener("pointerenter", (event) => {
+    if (event.pointerType === "touch") return;
+    cancel();
+    timer = setTimeout(() => {
+      timer = 0;
+      action();
+    }, Math.max(0, Number(delay) || 0) * 1000);
+  });
+  node.addEventListener("pointerleave", cancel);
+  node.addEventListener("pointercancel", cancel);
+  onCleanup(cancel);
 }
 
 /// A double click, or two touch taps close in time and place, runs
@@ -2832,14 +2855,18 @@ function nudgeOnce(node, motion) {
 
 // MARK: - Pictures
 
+const loadedPictures = new Set();
+
 /// A picture from a declared resource or from a `MediaSource` the engine
 /// gives (a file the user chose, or an http(s) URL); with one side given,
 /// the other follows the picture. Where it is dark (the system's, the
 /// application's or its part's appearance) it shows `darkSource` when
 /// given. A picture larger than it shows is drawn down by the browser's
-/// own image filter.
-export function Image(p, ctx, { source, darkSource, url, label, width, height, fit, animate, corner, rendering, saturation, aspect, adaptive, covers }) {
+/// own image filter. When `placeholder` is given, it stays shown until the
+/// picture arrives (immediately if cached, otherwise with a 250ms fade-in).
+export function Image(p, ctx, { source, darkSource, url, label, width, height, fit, animate, corner, rendering, saturation, aspect, adaptive, covers }, placeholder) {
   const template = rendering === "template";
+  const hasPlaceholder = typeof placeholder === "function";
   const intrinsicRatio = cell(aspect ?? 1);
   // What tells of a template's picture, which as a mask tells nothing.
   const probe = template ? new globalThis.Image() : null;
@@ -2852,51 +2879,142 @@ export function Image(p, ctx, { source, darkSource, url, label, width, height, f
   const node = template ? el("span", { class: "bern-image bern-image-template" })
     : el("img", { class: "bern-image", alt: "", draggable: "false", decoding: "async" });
   node.style.objectFit = fit ?? "contain";
+  let wrap = null;
+  let slot = null;
+  if (hasPlaceholder) {
+    wrap = el("div", { class: "bern-image-wrap" });
+    wrap.style.position = "relative";
+    slot = el("div", { class: "bern-image-placeholder", "aria-hidden": "true" });
+    slot.style.position = "absolute";
+    slot.style.inset = "0";
+    slot.style.pointerEvents = "none";
+    placeholder(slot, { ...ctx, inGroup: false });
+    node.style.width = (width === undefined && height !== undefined && !aspect && !covers) ? "auto" : "100%";
+    node.style.height = (height === undefined && !aspect && !covers) ? "auto" : "100%";
+  }
+  const box = wrap ?? node;
   const mask = (value) => {
     node.style.maskImage = value ? `url(${JSON.stringify(value)})` : "none";
     node.style.webkitMaskImage = node.style.maskImage;
   };
+  let activeSource = null;
+  const syncHit = (resolved, target = node) => Boolean(
+    resolved && ((target.complete && target.naturalWidth > 0) || loadedPictures.has(resolved))
+  );
+  const showImmediate = (resolved) => {
+    if (resolved) loadedPictures.add(resolved);
+    node.classList.remove("bern-image-loading");
+    node.style.transition = "";
+    node.style.opacity = "1";
+    node.style.visibility = "";
+    if (slot) slot.hidden = true;
+  };
+  const showPending = () => {
+    node.classList.remove("bern-image-loading");
+    node.style.transition = "";
+    node.style.opacity = "0";
+    node.style.visibility = "";
+    if (slot) slot.hidden = false;
+  };
+  const revealLoaded = () => {
+    if (activeSource) loadedPictures.add(activeSource);
+    node.classList.remove("bern-image-loading");
+    node.style.visibility = "";
+    const isReduced = reduced || reduceQuery.matches;
+    node.style.transition = isReduced ? "" : "opacity 250ms ease-out";
+    node.style.opacity = "1";
+    if (slot) slot.hidden = true;
+  };
+  if (slot) showPending();
   let stopLoading = null;
   onCleanup(() => stopLoading?.());
+  if (!template) {
+    node.addEventListener("load", () => {
+      if (activeSource) loadedPictures.add(activeSource);
+      if (slot) {
+        revealLoaded();
+      } else if (url) {
+        node.classList.remove("bern-image-loading");
+        node.style.visibility = "";
+      }
+    });
+    node.addEventListener("error", () => {
+      if (slot) {
+        showPending();
+      } else if (url) {
+        node.classList.remove("bern-image-loading");
+        node.style.visibility = "hidden";
+      }
+    });
+  }
   const setSource = (value) => {
     stopLoading?.();
     stopLoading = null;
+    const resolved = value ? servedFile(value) : null;
+    activeSource = resolved;
     if (template) {
       mask(value);
       node.style.maskSize = fit === "cover" ? "cover" : fit === "fill" ? "100% 100%" : "contain";
       // A mask that failed stays failed until it is set again.
-      if (value) stopLoading = loadPicture(probe, value, (shown) => { probe.src = shown; }, { failed: () => mask(null), loaded: mask });
-    } else if (value) stopLoading = loadPicture(node, value, (shown) => { node.src = shown; });
-    else node.removeAttribute("src");
+      if (value) {
+        if (slot) {
+          if (syncHit(resolved, probe)) showImmediate(resolved);
+          else showPending();
+        }
+        stopLoading = loadPicture(probe, value, (shown) => { probe.src = shown; }, {
+          failed: () => { mask(null); if (slot) showPending(); },
+          loaded: (shown) => {
+            mask(shown);
+            if (shown) loadedPictures.add(shown);
+            if (slot) revealLoaded();
+          },
+        });
+        if (slot && syncHit(resolved, probe)) showImmediate(resolved);
+      } else if (slot) {
+        showPending();
+      }
+    } else if (value) {
+      if (slot) {
+        if (syncHit(resolved)) {
+          stopLoading = loadPicture(node, value, (shown) => { node.src = shown; });
+          showImmediate(resolved);
+        } else {
+          showPending();
+          stopLoading = loadPicture(node, value, (shown) => { node.src = shown; });
+          if (syncHit(resolved)) showImmediate(resolved);
+        }
+      } else {
+        stopLoading = loadPicture(node, value, (shown) => { node.src = shown; });
+      }
+    } else {
+      node.removeAttribute("src");
+      if (slot) showPending();
+    }
   };
   if (source && darkSource) {
     // Its appearance is known once it is laid out in the page: the
     // picture for it then, and again when the appearance changes.
     const placed = cell(false);
     const observer = new ResizeObserver(() => placed.set(true));
-    observer.observe(node);
+    observer.observe(box);
     onCleanup(() => observer.disconnect());
     effect(() => {
       themeTick.get();
-      if (placed.get()) setSource(resource(dark(node) ? darkSource : source));
+      if (placed.get()) setSource(resource(dark(box) ? darkSource : source));
     });
   } else if (source) setSource(resource(source));
   if (url) {
     // A new source shows a subtle pulsing placeholder until its picture has
     // come, never the stale picture before it.
-    if (!template) {
-      node.addEventListener("load", () => {
-        node.classList.remove("bern-image-loading");
-        node.style.visibility = "";
-      });
-      node.addEventListener("error", () => {
-        node.classList.remove("bern-image-loading");
-        node.style.visibility = "hidden";
-      });
-    }
     effect(() => {
       const value = url();
       const changing = !template && value && value !== node.getAttribute("src");
+      if (slot) {
+        if (changing) node.removeAttribute("src");
+        setSource(value);
+        node.hidden = !value;
+        return;
+      }
       if (changing) {
         node.removeAttribute("src");
         if (!covers) {
@@ -2916,14 +3034,14 @@ export function Image(p, ctx, { source, darkSource, url, label, width, height, f
       node.hidden = !value;
     });
   }
-  bindLength(node, "width", width, animate);
-  bindLength(node, "height", height, animate);
+  bindLength(box, "width", width, animate);
+  bindLength(box, "height", height, animate);
   if (template && width === undefined && height !== undefined) {
-    bindLength(node, "width", () => Number(typeof height === "function" ? height() : height) * intrinsicRatio.get(), animate);
+    bindLength(box, "width", () => Number(typeof height === "function" ? height() : height) * intrinsicRatio.get(), animate);
   } else if (template && height === undefined && width !== undefined) {
-    bindLength(node, "height", () => Number(typeof width === "function" ? width() : width) / intrinsicRatio.get(), animate);
+    bindLength(box, "height", () => Number(typeof width === "function" ? width() : width) / intrinsicRatio.get(), animate);
   }
-  bindLength(node, "borderRadius", corner, animate);
+  bindLength(box, "borderRadius", corner, animate);
   if (saturation !== undefined) {
     bindNumber(saturation, animate, (value) => {
       const clamped = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 1));
@@ -2931,20 +3049,25 @@ export function Image(p, ctx, { source, darkSource, url, label, width, height, f
       writeFilter(node);
     });
   }
-  if (aspect) node.style.aspectRatio = String(aspect);
+  if (aspect) box.style.aspectRatio = String(aspect);
   if (adaptive || (aspect && width === undefined)) {
-    node.classList.add("bern-fill-width");
-    node.style.width = "100%";
-    if (height === undefined) node.style.height = "auto";
+    box.classList.add("bern-fill-width");
+    box.style.width = "100%";
+    if (height === undefined) box.style.height = "auto";
   }
   // Without a size it covers the room its container gives, asking for none.
-  if (covers) node.classList.add("bern-image-cover");
+  if (covers) box.classList.add("bern-image-cover");
   if (template) {
     node.setAttribute("role", "img");
     if (label) B.bindAttr(node, "aria-label", label);
     else node.setAttribute("aria-hidden", "true");
   } else if (label) B.bindAttr(node, "alt", label);
-  p.append(ctx.inGroup ? el("div", { class: "bern-row bern-row-media" }, node) : node);
+  if (wrap) {
+    wrap.append(slot, node);
+    p.append(ctx.inGroup ? el("div", { class: "bern-row bern-row-media" }, wrap) : wrap);
+  } else {
+    p.append(ctx.inGroup ? el("div", { class: "bern-row bern-row-media" }, node) : node);
+  }
 }
 
 // MARK: - Theme chosen at run time

@@ -345,10 +345,27 @@ fn is_loopback(url: &str) -> bool {
     host.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback())
 }
 
+/// Download priority for bounding and ordering remote picture requests.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub(crate) enum Priority {
+    Low = 0,
+    #[default]
+    Normal = 1,
+    High = 2,
+}
+
+struct SemaphoreWaiter {
+    id: u64,
+    priority: Priority,
+    waker: Waker,
+    source: Option<glib::Source>,
+    granted: bool,
+}
+
 /// Asynchronous semaphore bounding concurrent remote HTTP downloads.
 struct SemaphoreState {
     available: usize,
-    waiters: VecDeque<(u64, Waker)>,
+    waiters: VecDeque<SemaphoreWaiter>,
     next_id: u64,
 }
 
@@ -360,6 +377,32 @@ impl SemaphoreState {
             next_id: 0,
         }
     }
+
+    fn prune_destroyed(&mut self) {
+        self.waiters
+            .retain(|w| w.source.as_ref().is_none_or(|s| !s.is_destroyed()));
+    }
+
+    /// Hand a permit directly to the highest-priority un-granted waiter
+    /// (FIFO on ties), or return it to `available`.
+    fn release_one(&mut self) -> Option<Waker> {
+        self.prune_destroyed();
+        let best_idx = self
+            .waiters
+            .iter()
+            .enumerate()
+            .filter(|(_, w)| !w.granted)
+            .max_by_key(|(idx, w)| (w.priority, std::cmp::Reverse(*idx)))
+            .map(|(idx, _)| idx);
+        if let Some(idx) = best_idx {
+            let waiter = &mut self.waiters[idx];
+            waiter.granted = true;
+            Some(waiter.waker.clone())
+        } else {
+            self.available += 1;
+            None
+        }
+    }
 }
 
 struct Permit {
@@ -368,11 +411,7 @@ struct Permit {
 
 impl Drop for Permit {
     fn drop(&mut self) {
-        let waker = {
-            let mut state = self.sem.borrow_mut();
-            state.available += 1;
-            state.waiters.pop_front().map(|(_, waker)| waker)
-        };
+        let waker = self.sem.borrow_mut().release_one();
         if let Some(waker) = waker {
             waker.wake();
         }
@@ -382,16 +421,27 @@ impl Drop for Permit {
 struct AcquireFuture {
     sem: Rc<RefCell<SemaphoreState>>,
     waiter_id: Option<u64>,
+    entry: Option<Rc<InFlightEntry>>,
 }
 
 impl Drop for AcquireFuture {
     fn drop(&mut self) {
         if let Some(id) = self.waiter_id.take() {
+            if let Some(entry) = &self.entry
+                && entry.sem_waiter_id.get() == Some(id)
+            {
+                entry.sem_waiter_id.set(None);
+            }
             let waker = {
                 let mut state = self.sem.borrow_mut();
-                state.waiters.retain(|(wid, _)| *wid != id);
-                if state.available > 0 {
-                    state.waiters.pop_front().map(|(_, waker)| waker)
+                let was_granted = state
+                    .waiters
+                    .iter()
+                    .position(|w| w.id == id)
+                    .and_then(|pos| state.waiters.remove(pos))
+                    .is_some_and(|w| w.granted);
+                if was_granted {
+                    state.release_one()
                 } else {
                     None
                 }
@@ -403,38 +453,78 @@ impl Drop for AcquireFuture {
     }
 }
 
-async fn acquire_download_permit() -> Permit {
+async fn acquire_download_permit(priority: Priority, entry: Option<Rc<InFlightEntry>>) -> Permit {
     let sem = DOWNLOAD_SEMAPHORE.with(Rc::clone);
     let mut future = AcquireFuture {
         sem,
         waiter_id: None,
+        entry,
     };
     poll_fn(|cx| {
         let mut state = future.sem.borrow_mut();
-        if state.available > 0 {
-            if let Some(id) = future.waiter_id.take() {
-                state.waiters.retain(|(wid, _)| *wid != id);
+        if let Some(id) = future.waiter_id
+            && let Some(pos) = state.waiters.iter().position(|w| w.id == id)
+        {
+            if state.waiters[pos].granted {
+                state.waiters.remove(pos);
+                future.waiter_id = None;
+                if let Some(entry) = &future.entry
+                    && entry.sem_waiter_id.get() == Some(id)
+                {
+                    entry.sem_waiter_id.set(None);
+                }
+                return Poll::Ready(Permit {
+                    sem: Rc::clone(&future.sem),
+                });
             }
+            if state.available > 0 {
+                state.waiters.remove(pos);
+                state.available -= 1;
+                future.waiter_id = None;
+                if let Some(entry) = &future.entry
+                    && entry.sem_waiter_id.get() == Some(id)
+                {
+                    entry.sem_waiter_id.set(None);
+                }
+                return Poll::Ready(Permit {
+                    sem: Rc::clone(&future.sem),
+                });
+            }
+            let waker = cx.waker().clone();
+            if !state.waiters[pos].waker.will_wake(&waker) {
+                state.waiters[pos].waker = waker;
+            }
+            if let Some(entry) = &future.entry {
+                let promoted = entry.priority.get();
+                if promoted > state.waiters[pos].priority {
+                    state.waiters[pos].priority = promoted;
+                }
+            }
+            return Poll::Pending;
+        }
+        if state.available > 0 {
             state.available -= 1;
             return Poll::Ready(Permit {
                 sem: Rc::clone(&future.sem),
             });
         }
-        let waker = cx.waker().clone();
-        if let Some(id) = future.waiter_id {
-            if let Some((_, existing)) = state.waiters.iter_mut().find(|(wid, _)| *wid == id) {
-                if !existing.will_wake(&waker) {
-                    *existing = waker;
-                }
-            } else {
-                state.waiters.push_back((id, waker));
-            }
-        } else {
-            state.next_id += 1;
-            let id = state.next_id;
-            future.waiter_id = Some(id);
-            state.waiters.push_back((id, waker));
+        state.next_id += 1;
+        let id = state.next_id;
+        future.waiter_id = Some(id);
+        if let Some(entry) = &future.entry {
+            entry.sem_waiter_id.set(Some(id));
         }
+        let eff_priority = future
+            .entry
+            .as_ref()
+            .map_or(priority, |e| priority.max(e.priority.get()));
+        state.waiters.push_back(SemaphoreWaiter {
+            id,
+            priority: eff_priority,
+            waker: cx.waker().clone(),
+            source: glib::main_current_source(),
+            granted: false,
+        });
         Poll::Pending
     })
     .await
@@ -455,10 +545,12 @@ struct InFlightState {
 struct InFlightEntry {
     state: RefCell<InFlightState>,
     leader: RefCell<Option<glib::JoinHandle<()>>>,
+    priority: Cell<Priority>,
+    sem_waiter_id: Cell<Option<u64>>,
 }
 
 impl InFlightEntry {
-    fn new() -> Self {
+    fn new(priority: Priority) -> Self {
         Self {
             state: RefCell::new(InFlightState {
                 waiters: Vec::new(),
@@ -466,6 +558,8 @@ impl InFlightEntry {
                 next_id: 0,
             }),
             leader: RefCell::new(None),
+            priority: Cell::new(priority),
+            sem_waiter_id: Cell::new(None),
         }
     }
 
@@ -476,6 +570,29 @@ impl InFlightEntry {
             .retain(|waiter| waiter.source.as_ref().is_none_or(|s| !s.is_destroyed()));
         !state.waiters.is_empty()
     }
+}
+
+/// Promote any active in-flight download (and its pending semaphore waiter)
+/// for `url` to at least `priority`.
+pub(crate) fn promote_download(url: &str, priority: Priority) {
+    IN_FLIGHT.with(|map| {
+        let map = map.borrow();
+        if let Some(entry) = map.get(url)
+            && priority > entry.priority.get()
+        {
+            entry.priority.set(priority);
+            if let Some(waiter_id) = entry.sem_waiter_id.get() {
+                DOWNLOAD_SEMAPHORE.with(|sem| {
+                    let mut state = sem.borrow_mut();
+                    if let Some(waiter) = state.waiters.iter_mut().find(|w| w.id == waiter_id)
+                        && priority > waiter.priority
+                    {
+                        waiter.priority = priority;
+                    }
+                });
+            }
+        }
+    });
 }
 
 struct WaiterGuard {
@@ -510,6 +627,25 @@ fn cancel_in_flight(url: &str, entry: &Rc<InFlightEntry>) {
             map.remove(url);
         }
     });
+    if let Some(id) = entry.sem_waiter_id.take() {
+        let waker = DOWNLOAD_SEMAPHORE.with(|sem| {
+            let mut state = sem.borrow_mut();
+            let was_granted = state
+                .waiters
+                .iter()
+                .position(|w| w.id == id)
+                .and_then(|pos| state.waiters.remove(pos))
+                .is_some_and(|w| w.granted);
+            if was_granted {
+                state.release_one()
+            } else {
+                None
+            }
+        });
+        if let Some(waker) = waker {
+            waker.wake();
+        }
+    }
     if let Some(handle) = entry.leader.borrow_mut().take() {
         handle.abort();
     }
@@ -544,7 +680,7 @@ fn remote(url: &str) -> bool {
 
 /// One try at the bytes at `url`: a `file://` URL or path, an http(s)
 /// address, or a URL the engine serves.
-async fn read(url: &str) -> Reading {
+async fn read(url: &str, entry: Option<Rc<InFlightEntry>>) -> Reading {
     if bern_ffi::files::served(url) {
         let address = url.to_string();
         let bytes = gio::spawn_blocking(move || bern_ffi::files::read_served(&address)).await;
@@ -564,15 +700,20 @@ async fn read(url: &str) -> Reading {
             Err(_) => Reading::Absent,
         };
     }
-    let _permit = acquire_download_permit().await;
+    let priority = entry
+        .as_ref()
+        .map_or(Priority::Normal, |e| e.priority.get());
+    let _permit = acquire_download_permit(priority, entry.clone()).await;
     let Ok(message) = soup::Message::new("GET", url) else {
         return Reading::Refused;
     };
+    let glib_priority = match entry.as_ref().map_or(priority, |e| e.priority.get()) {
+        Priority::High => glib::Priority::HIGH,
+        Priority::Normal => glib::Priority::DEFAULT,
+        Priority::Low => glib::Priority::LOW,
+    };
     let session = SESSION.with(soup::Session::clone);
-    match session
-        .send_and_read_future(&message, glib::Priority::DEFAULT)
-        .await
-    {
+    match session.send_and_read_future(&message, glib_priority).await {
         Ok(bytes) => match message.status_code() {
             200..=299 => Reading::Bytes(bytes),
             408 | 429 | 500.. => Reading::Unreachable,
@@ -645,7 +786,7 @@ async fn drive_in_flight(url: String, entry: Rc<InFlightEntry>, use_disk_cache: 
             finish_in_flight(&url, &entry, InFlightOutcome::Refused);
             return;
         }
-        match read(&url).await {
+        match read(&url, Some(Rc::clone(&entry))).await {
             Reading::Bytes(bytes) => {
                 finish_in_flight(
                     &url,
@@ -677,7 +818,7 @@ async fn drive_in_flight(url: String, entry: Rc<InFlightEntry>, use_disk_cache: 
     }
 }
 
-async fn fetch_in_flight(url: &str, use_disk_cache: bool) -> InFlightOutcome {
+async fn fetch_in_flight(url: &str, use_disk_cache: bool, priority: Priority) -> InFlightOutcome {
     let caller_source = glib::main_current_source();
     let (entry, guard) = IN_FLIGHT.with(|map| {
         let mut map = map.borrow_mut();
@@ -694,7 +835,7 @@ async fn fetch_in_flight(url: &str, use_disk_cache: bool) -> InFlightOutcome {
         let (entry, is_leader) = if let Some(existing) = existing {
             (existing, false)
         } else {
-            let created = Rc::new(InFlightEntry::new());
+            let created = Rc::new(InFlightEntry::new(priority));
             map.insert(url.to_string(), Rc::clone(&created));
             (created, true)
         };
@@ -725,6 +866,7 @@ async fn fetch_in_flight(url: &str, use_disk_cache: bool) -> InFlightOutcome {
         };
         (entry, guard)
     });
+    promote_download(url, priority);
 
     let outcome = poll_fn(|cx| {
         let mut state = entry.state.borrow_mut();
@@ -787,6 +929,15 @@ fn cache_evict(url: &str) {
 /// with the view, and a view that appears again starts over.
 pub(crate) async fn picture<T>(
     url: &str,
+    decode: impl AsyncFnMut(glib::Bytes) -> Option<T>,
+) -> Option<T> {
+    picture_with_priority(url, Priority::Normal, decode).await
+}
+
+/// Same as [`picture`], with an explicit download [`Priority`].
+pub(crate) async fn picture_with_priority<T>(
+    url: &str,
+    priority: Priority,
     mut decode: impl AsyncFnMut(glib::Bytes) -> Option<T>,
 ) -> Option<T> {
     listen();
@@ -808,7 +959,7 @@ pub(crate) async fn picture<T>(
             skip_cache = true;
             continue;
         }
-        match fetch_in_flight(url, !skip_cache).await {
+        match fetch_in_flight(url, !skip_cache, priority).await {
             InFlightOutcome::Bytes { bytes, from_cache } => {
                 if let Some(picture) = decode(bytes.clone()).await {
                     if !from_cache {
@@ -1169,5 +1320,135 @@ mod tests {
             let peak = max_active.load(Ordering::SeqCst);
             assert!(peak <= MAX_CONCURRENT_REQUESTS, "peak={peak}");
         });
+    }
+
+    #[test]
+    fn priority_semaphore_grants_highest_and_promotes_inflight() {
+        within(async {
+            // 1-slot local semaphore: test directed priority handoff & cancellation transfer.
+            let sem = Rc::new(RefCell::new(SemaphoreState::new(1)));
+            let order = Rc::new(RefCell::new(Vec::new()));
+
+            let p0 = Permit {
+                sem: Rc::clone(&sem),
+            };
+            sem.borrow_mut().available = 0;
+
+            let make_acquire = |prio: Priority, sem: &Rc<RefCell<SemaphoreState>>| {
+                let mut future = AcquireFuture {
+                    sem: Rc::clone(sem),
+                    waiter_id: None,
+                    entry: None,
+                };
+                Box::pin(async move {
+                    poll_fn(|cx| {
+                        let mut state = future.sem.borrow_mut();
+                        if let Some(id) = future.waiter_id
+                            && let Some(pos) = state.waiters.iter().position(|w| w.id == id)
+                        {
+                            if state.waiters[pos].granted {
+                                state.waiters.remove(pos);
+                                future.waiter_id = None;
+                                return Poll::Ready(Permit {
+                                    sem: Rc::clone(&future.sem),
+                                });
+                            }
+                            return Poll::Pending;
+                        }
+                        if state.available > 0 {
+                            state.available -= 1;
+                            return Poll::Ready(Permit {
+                                sem: Rc::clone(&future.sem),
+                            });
+                        }
+                        state.next_id += 1;
+                        let id = state.next_id;
+                        future.waiter_id = Some(id);
+                        state.waiters.push_back(SemaphoreWaiter {
+                            id,
+                            priority: prio,
+                            waker: cx.waker().clone(),
+                            source: None,
+                            granted: false,
+                        });
+                        Poll::Pending
+                    })
+                    .await
+                })
+            };
+
+            let spawn_waiter = |label: &'static str, prio: Priority| {
+                let mut fut = make_acquire(prio, &sem);
+                let order = Rc::clone(&order);
+                glib::spawn_future_local(async move {
+                    let _permit = fut.as_mut().await;
+                    order.borrow_mut().push(label);
+                })
+            };
+
+            let low = spawn_waiter("low", Priority::Low);
+            let normal = spawn_waiter("normal", Priority::Normal);
+            // Poll `high_cancelled` manually so dropping it deterministically runs AcquireFuture::drop.
+            let mut high_cancelled = make_acquire(Priority::High, &sem);
+            let noop = futures_task_noop_waker();
+            let mut cx = std::task::Context::from_waker(&noop);
+            assert!(high_cancelled.as_mut().poll(&mut cx).is_pending());
+            let high = spawn_waiter("high", Priority::High);
+            settle(5).await;
+
+            // Drop initial permit: `high_cancelled` is granted first; dropping it
+            // invokes AcquireFuture::drop and transfers the permit to `high`, then `normal`, then `low`.
+            drop(p0);
+            drop(high_cancelled);
+
+            glib::future_with_timeout(Duration::from_secs(2), async {
+                high.await.unwrap();
+                normal.await.unwrap();
+                low.await.unwrap();
+            })
+            .await
+            .expect("waiters did not complete in 2s");
+            assert_eq!(*order.borrow(), vec!["high", "normal", "low"]);
+            assert_eq!(sem.borrow().available, 1);
+
+            // Verify promote_download raises both InFlightEntry and queued semaphore waiter.
+            let url = "https://example.com/promote-test.png";
+            let entry = Rc::new(InFlightEntry::new(Priority::Normal));
+            IN_FLIGHT.with(|map| {
+                map.borrow_mut().insert(url.to_string(), Rc::clone(&entry));
+            });
+            DOWNLOAD_SEMAPHORE.with(|dsem| {
+                let mut state = dsem.borrow_mut();
+                state.next_id += 1;
+                let id = state.next_id;
+                entry.sem_waiter_id.set(Some(id));
+                state.waiters.push_back(SemaphoreWaiter {
+                    id,
+                    priority: Priority::Normal,
+                    waker: futures_task_noop_waker(),
+                    source: None,
+                    granted: false,
+                });
+            });
+            promote_download(url, Priority::High);
+            assert_eq!(entry.priority.get(), Priority::High);
+            DOWNLOAD_SEMAPHORE.with(|dsem| {
+                let id = entry.sem_waiter_id.get().unwrap();
+                let mut state = dsem.borrow_mut();
+                let w = state.waiters.iter().find(|w| w.id == id).unwrap();
+                assert_eq!(w.priority, Priority::High);
+                state.waiters.retain(|w| w.id != id);
+            });
+            IN_FLIGHT.with(|map| {
+                map.borrow_mut().remove(url);
+            });
+        });
+    }
+
+    fn futures_task_noop_waker() -> Waker {
+        use std::task::{RawWaker, RawWakerVTable};
+        const VTABLE: RawWakerVTable =
+            RawWakerVTable::new(|p| RawWaker::new(p, &VTABLE), |_| {}, |_| {}, |_| {});
+        unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &VTABLE)) }
     }
 }

@@ -148,6 +148,7 @@ Flow(gap: 10) {
 | `Image(aspect: 0.6666666667, fit: cover)` | Keeps 2:3 as the container width changes, so the frame does not jump before and after loading; the ratio must be positive |
 | `Image(corner:)` | Clips the image to rounded corners and can be bound to a length; a named corner radius from `style!` also works, for example `corner: poster` |
 | `Image(rendering: template)` | Renders a template image in the current foreground color; original color images use original |
+| `Image(...) { placeholder }` | Optional single placeholder child shown while an image is loading, with a smooth fade-in once the picture is ready; wrap multiple placeholder views in `Stack`, `Column` or `Row` |
 | `Grid(row_gap:)` | Sets the row spacing separately; when omitted, gap is used |
 | `Grid(min_width: 300, gap: 12, masonry: true)` | Masonry layout: cards of different heights each keep their own height and go into the currently shortest column; GTK and Windows lay them out row by row as an ordinary grid |
 | `Row { Text(…) Spacer Switch(…) }` | The leading text takes the place of the `Spacer` and wraps within the remaining width, while the switch keeps its own width, like a row in the system settings; SwiftUI and Compose lay it out this way |
@@ -374,6 +375,17 @@ Video(id: screen, player: players.main, controls: none, label: tr! { "zh-Hans" =
 ```
 
 On a `Button`, a pointer press waits to see whether a second one follows, and runs either the button's action or the `DoubleTap` action. On other elements single clicks still go to the controls inside.
+
+### Hover
+
+`Hover` runs an action when the pointer rests over its owning element (any pointer event owner, including containers, `Image`, `Button` and `NavLink`). Without `delay:`, it fires as soon as the pointer enters; with `delay: seconds` (a finite number `>= 0`), it fires after the pointer stays inside for that duration and cancels if the pointer leaves earlier. Targets without pointer hovering (such as watches or TVs) emit a non-blocking warning and never block the build:
+
+```rust
+Image(source: item.cover, aspect: 1.0, fit: cover, corner: 10) {
+    Skeleton(shape: rect, corner: 10, tone: media)
+    Hover(delay: 0.35) => app.prefetch_details(item.id)
+}
+```
 
 `Slider(hover: draft.at)` writes where the pointer is along the track while it is over the slider, from 0 at `min` to 1 at `max`, and `None` once it leaves; it does not change the value. Together with the player's state it can show the time under the pointer on a seek bar.
 

@@ -108,7 +108,15 @@ impl Generator<'_> {
         let double_tap = (!button).then(|| event("DoubleTap")).flatten();
         let menu = (!button).then(|| self.context_menu(element)).flatten();
         let (up, down) = (event("WheelUp"), event("WheelDown"));
-        if double_tap.is_none() && menu.is_none() && up.is_none() && down.is_none() {
+        let hover_el = element.pointer_event("Hover");
+        let hover = hover_el.map(|event| self.action_fn(event));
+        let hover_delay = hover_el.and_then(|event| event.number("delay")).map(number);
+        if double_tap.is_none()
+            && menu.is_none()
+            && up.is_none()
+            && down.is_none()
+            && hover.is_none()
+        {
             return None;
         }
         Some(Self::props(vec![
@@ -120,6 +128,8 @@ impl Generator<'_> {
             ("menu", menu),
             ("wheelUp", up),
             ("wheelDown", down),
+            ("hover", hover),
+            ("hoverDelay", hover_delay),
             // Presses on a slider are its own, not those of a control in it.
             (
                 "control",

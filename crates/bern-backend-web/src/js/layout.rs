@@ -70,6 +70,9 @@ impl Generator<'_> {
     }
 
     pub(super) fn column_or_row(&self, out: &mut Out, element: &Element) {
+        if let Some(each) = bern_ir::lazy_row_items(element) {
+            return self.lazy_row(out, element, each);
+        }
         let props = Self::props(vec![
             (
                 "axis",
@@ -99,6 +102,52 @@ impl Generator<'_> {
             &first,
             ");",
         );
+    }
+
+    /// A row of one `ForEach`, which in a horizontal scroll view builds
+    /// only the items near the view (`B.LazyRow`).
+    fn lazy_row(&self, out: &mut Out, element: &Element, each: &Element) {
+        let (Some(items), Some(template), Some(Prop::Key { name, .. })) =
+            (each.expr("items"), &each.template, each.prop("key"))
+        else {
+            return;
+        };
+        let inner = self.layout_lines(element, &[("gap", "gap")]);
+        let outer = self.layout_lines(
+            element,
+            &[
+                ("padding", "padding"),
+                ("padding_x", "paddingInline"),
+                ("padding_y", "paddingBlock"),
+                ("width", "width"),
+                ("height", "height"),
+            ],
+        );
+        let stagger = element.number("stagger").or_else(|| each.number("stagger"));
+        if let Some(step) = stagger {
+            out.open(format!("F.staggered({}, () => {{", number(step)));
+        }
+        let props = Self::props(vec![
+            ("align", Self::keyword(element, "align")),
+            ("items", Some(format!("() => {}", self.expr(items)))),
+            ("key", Some(format!("(v) => v.{name}"))),
+        ]);
+        out.open(format!("B.LazyRow(p, ctx, {props}, (p) => {{"));
+        for line in &inner {
+            out.line(line);
+        }
+        out.close("}, (p) => {");
+        out.indent += 1;
+        for line in &outer {
+            out.line(line);
+        }
+        out.close(format!("}}, (p, ctx, {}) => {{", local(&template.var)));
+        out.indent += 1;
+        self.nodes(out, &each.children);
+        out.close("});");
+        if stagger.is_some() {
+            out.close("});");
+        }
     }
 
     pub(super) fn grid(&self, out: &mut Out, element: &Element) {

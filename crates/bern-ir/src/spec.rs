@@ -229,6 +229,7 @@ impl ComponentSpec {
                 | "DoubleTap"
                 | "WheelUp"
                 | "WheelDown"
+                | "Hover"
                 | "OnCommit"
                 | "ScreenBrightness"
                 | "NativeValue"
@@ -246,16 +247,17 @@ impl ComponentSpec {
 pub use bern_protocol::shortcut::{SHORTCUT_KEYS, parse_shortcut};
 
 /// Pointer events an element declares as children: a double click or
-/// tap, a secondary-click menu and wheel turns. They are not visual
-/// content, and an element has at most one of each.
-pub const POINTER_EVENTS: &[&str] = &["DoubleTap", "ContextMenu", "WheelUp", "WheelDown"];
+/// tap, a secondary-click menu, wheel turns and pointer hover. They are
+/// not visual content, and an element has at most one of each.
+pub const POINTER_EVENTS: &[&str] = &["DoubleTap", "ContextMenu", "WheelUp", "WheelDown", "Hover"];
 
-/// The elements that take [`POINTER_EVENTS`]: a `Button`, the visual
-/// leaves and the layout containers. Menus, pickers, text input and
-/// structure keep their own pointer behaviour; wrap such content in a
+/// The elements that take [`POINTER_EVENTS`]: a `Button`, a `NavLink`,
+/// the visual leaves and the layout containers. Menus, pickers, text input
+/// and structure keep their own pointer behaviour; wrap such content in a
 /// `Stack` to give it events.
 pub const POINTER_OWNERS: &[&str] = &[
     "Button",
+    "NavLink",
     "Video",
     "NativeView",
     "Slider",
@@ -1381,6 +1383,16 @@ pub const COMPONENTS: &[ComponentSpec] = &[
     },
     ComponentSpec {
         action: ActionRule::Required,
+        placement: Placement::Within(POINTER_OWNERS),
+        ..spec(
+            "Hover",
+            &[opt("delay", PropKind::Number)],
+            Children::None,
+            "An action run when the pointer rests over the element it stands in, immediately or after `delay` seconds. It is not visual content",
+        )
+    },
+    ComponentSpec {
+        action: ActionRule::Required,
         placement: Placement::Within(&["Swipe"]),
         ..spec(
             "OnCommit",
@@ -1589,8 +1601,8 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             opt("aspect", PropKind::Number),
             opt("saturation", PropKind::NumberValue),
         ],
-        Children::None,
-        "Picture from a declared resource, sized by `width` and/or `height`, its corners rounded by `corner`; `rendering: template` uses its alpha as a mask for the inherited text color, otherwise it keeps its colors; `saturation` scales color saturation from 0 (grayscale) to 1 (full color); `label` describes it, without one it is decorative",
+        Children::Any,
+        "Picture from a declared resource, sized by `width` and/or `height`, its corners rounded by `corner`; an optional single child serves as placeholder while loading; `rendering: template` uses its alpha as a mask for the inherited text color, otherwise it keeps its colors; `saturation` scales color saturation from 0 (grayscale) to 1 (full color); `label` describes it, without one it is decorative",
     ),
     spec(
         "Progress",
@@ -1937,6 +1949,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 "ContextMenu",
                 "WheelUp",
                 "WheelDown",
+                "Hover",
             ]),
             "Platform-native UI view implemented in co-located native source files beside the declaring `.rs` file; its functional entries are declared here so Bern's CLI and feature contracts stay intact",
         )
@@ -2446,6 +2459,12 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
             .filter(|child| !matches!(child, ChildShape::Element(name) if POINTER_EVENTS.contains(name)))
             .count()
     });
+    if spec.name == "Image" && content.is_some_and(|count| count > 1) {
+        errors.push(ShapeError {
+            prop: None,
+            message: "an `Image` takes at most one placeholder child; put several in a `Stack`, `Column` or `Row`".into(),
+        });
+    }
     if spec.name == "Button" && content.is_some_and(|count| count > 0) {
         if content != Some(1) {
             errors.push(ShapeError {
@@ -3197,6 +3216,41 @@ mod tests {
         assert!(!check_shape(&item).is_empty());
         item.parent = Some("Section");
         assert!(check_shape(&item).is_empty());
+    }
+
+    #[test]
+    fn image_takes_at_most_one_placeholder_child_besides_pointer_events() {
+        let mut img = shape("Image", vec!["source", "aspect"], false);
+        assert!(check_shape(&img).is_empty());
+        img.children = Some(vec![
+            ChildShape::Element("Skeleton"),
+            ChildShape::Element("Hover"),
+        ]);
+        assert!(check_shape(&img).is_empty());
+        img.children = Some(vec![
+            ChildShape::Element("Skeleton"),
+            ChildShape::Element("Text"),
+        ]);
+        let errors = check_shape(&img);
+        assert!(errors.iter().any(|e| e.message.contains("Stack")));
+    }
+
+    #[test]
+    fn hover_requires_action_and_valid_owner() {
+        let mut hover = shape("Hover", vec!["delay"], true);
+        hover.parent = Some("Image");
+        assert!(check_shape(&hover).is_empty());
+        hover.parent = Some("NavLink");
+        assert!(check_shape(&hover).is_empty());
+        hover.parent = Some("Window");
+        assert!(!check_shape(&hover).is_empty());
+        hover.parent = Some("Image");
+        hover.has_action = false;
+        assert!(
+            check_shape(&hover)
+                .iter()
+                .any(|e| e.message.contains("B301"))
+        );
     }
 }
 

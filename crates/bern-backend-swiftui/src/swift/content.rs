@@ -250,7 +250,7 @@ impl Generator<'_> {
         }
     }
 
-    pub(super) fn image(&self, out: &mut Out, element: &Element) {
+    pub(super) fn image(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         let fit = match element.keyword("fit") {
             Some("cover") => ".cover",
             Some("fill") => ".fill",
@@ -310,8 +310,8 @@ impl Generator<'_> {
         } else {
             String::new()
         };
-        out.line(format!(
-            "BernImage({source}, label: {}, width: {}, height: {}, fit: {fit}{}, aspect: {}{hero}{one_size}{covers}{decode_max}{preblur})",
+        let args = format!(
+            "{source}, label: {}, width: {}, height: {}, fit: {fit}{}, aspect: {}{hero}{one_size}{covers}{decode_max}{preblur}",
             self.text_prop(element, "label")
                 .unwrap_or_else(|| "nil".into()),
             length("width"),
@@ -325,7 +325,16 @@ impl Generator<'_> {
                 .number("aspect")
                 .map(double)
                 .unwrap_or_else(|| "nil".into()),
-        ));
+        );
+        if element.has_content()
+            && let Some(placeholder) = element.content().next()
+        {
+            out.open(format!("BernImage({args}) {{"));
+            self.node(out, placeholder, ctx);
+            out.close("}");
+        } else {
+            out.line(format!("BernImage({args})"));
+        }
         if let Some(saturation) = element.expr("saturation") {
             let value = format!("min(max(Double({}), 0), 1)", self.expr(saturation));
             out.line(format!(".saturation({value})"));

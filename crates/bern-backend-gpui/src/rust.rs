@@ -95,6 +95,7 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "height",
             "align",
             "variant",
+            "lazy",
         ],
     ),
     ("Flow", &["gap", "align"]),
@@ -402,6 +403,7 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
     ("DoubleTap", &[]),
     ("WheelUp", &[]),
     ("WheelDown", &[]),
+    ("Hover", &["delay"]),
     ("OnCommit", &[]),
     (
         "NativeView",
@@ -795,6 +797,7 @@ pub const COMPONENT_NAMES: &[&str] = &[
     "DoubleTap",
     "WheelUp",
     "WheelDown",
+    "Hover",
     "OnCommit",
     "SplitButton",
     "PreviewList",
@@ -3025,6 +3028,42 @@ pub fn app() -> b::AppDef {{
         };
         Some(match element.kind.as_str() {
             "Column" | "Row" | "Flow" => {
+                if element.kind == "Row"
+                    && let Some(each) = bern_ir::lazy_row_items(element)
+                    && let (Some(items), Some(template), Some(Prop::Key { field, .. })) =
+                        (each.expr("items"), &each.template, each.prop("key"))
+                {
+                    let mut body = String::new();
+                    for node in &each.children {
+                        self.push(&mut body, node, Axis::Row);
+                    }
+                    let leaves = self.leaves(&each.children);
+                    let list = string(&each.path);
+                    let mut leaving = String::new();
+                    if leaves {
+                        self.push_leaving(&mut leaving, &each.children, Axis::Row);
+                    }
+                    let row = format!(
+                        "|c: &b::Ctx, item: &V, gone: bool| {{ let list = c; let key = rt::at(item.clone(), &[{field}]); let c = &c.with_local({}, item.clone()).with_item(&key); let mut v: Vec<b::El> = Vec::new(); if gone {{ b::left_row(list, {list}, &key, || {{ {leaving} }}); return v; }} b::scroll_items(c, key, |c| {{ let mut v: Vec<b::El> = Vec::new(); {body} v }}, &mut v); v }}",
+                        string(&template.var),
+                    );
+                    let lazy = format!(
+                        "b::lazy_row(c, {}, {}, b::rows(c, {list}, rt::as_list({}), {leaves}, |item| rt::at(item.clone(), &[{field}])), |item| rt::at(item.clone(), &[{field}]), {row})",
+                        string(&element.path),
+                        self.flex(element),
+                        self.expr(items, Some(&element.source)),
+                    );
+                    return Some(
+                        match each.number("stagger").or_else(|| element.number("stagger")) {
+                            Some(step) => format!(
+                                "b::staggered(c, {}, {}, || {lazy})",
+                                string(&format!("{}#stagger", element.path)),
+                                float(step)
+                            ),
+                            None => lazy,
+                        },
+                    );
+                }
                 let axis = if element.kind == "Column" {
                     Axis::Column
                 } else {
@@ -3237,7 +3276,7 @@ pub fn app() -> b::AppDef {{
                     field_ref(self.session_index(&available.session), available.field)
                 )
             }
-            "DoubleTap" | "WheelUp" | "WheelDown" | "OnCommit" => return None,
+            "DoubleTap" | "WheelUp" | "WheelDown" | "Hover" | "OnCommit" => return None,
             "NativeView" => return self.native_view_code(element),
             "Swipe" => {
                 let Some(field) = element.field("value") else {
@@ -3666,10 +3705,18 @@ pub fn app() -> b::AppDef {{
                 let covers = ["width", "height", "aspect"]
                     .iter()
                     .all(|name| element.prop(name).is_none());
+                let placeholder = if element.has_content() {
+                    format!(
+                        "Some(std::rc::Rc::new({{ let c = c.clone(); move || {{ let c = &c; {} }} }}))",
+                        self.children(&element.children, Axis::Column)
+                    )
+                } else {
+                    "None".into()
+                };
                 let Some(source) = element.resource("source") else {
                     let source = element.expr("source")?;
                     return Some(format!(
-                        "b::image_url(c, rt::url(&{}), {}, {}, {}, b::Fit::{fit}, {template}, {aspect}, {}, {covers})",
+                        "b::image_url(c, rt::url(&{}), {}, {}, {}, b::Fit::{fit}, {template}, {aspect}, {}, {covers}, {placeholder})",
                         self.expr(source, at),
                         self.optional_length(element, "width"),
                         self.optional_length(element, "height"),
@@ -3689,7 +3736,7 @@ pub fn app() -> b::AppDef {{
                     None => "None".into(),
                 };
                 format!(
-                    "b::image(c, {}, {}, {}, {}, {}, b::Fit::{fit}, {template}, {aspect}, {}, {spin}, {covers})",
+                    "b::image(c, {}, {}, {}, {}, {}, b::Fit::{fit}, {template}, {aspect}, {}, {spin}, {covers}, {placeholder})",
                     string(source),
                     match element.resource("dark_source") {
                         Some(dark) => format!("Some({})", string(dark)),
@@ -3809,7 +3856,7 @@ pub fn app() -> b::AppDef {{
                     .children
                     .iter()
                     .filter(|node| {
-                        !matches!(node, Node::Element(child) if matches!(child.kind.as_str(), "DoubleTap" | "WheelUp" | "WheelDown"))
+                        !matches!(node, Node::Element(child) if matches!(child.kind.as_str(), "DoubleTap" | "WheelUp" | "WheelDown" | "Hover"))
                     })
                     .cloned()
                     .partition(
@@ -5225,7 +5272,7 @@ pub fn app() -> b::AppDef {{
     }
 
     /// `code`, the expression of `element`, with the pointer events it
-    /// declares: on a `Button`, only its wheel turns.
+    /// declares: on a `Button`, only its wheel turns and hover.
     fn pointer_events(&self, element: &Element, code: String) -> String {
         let action = |kind: &str| {
             element
@@ -5245,14 +5292,22 @@ pub fn app() -> b::AppDef {{
             )
         };
         let (up, down) = (action("WheelUp"), action("WheelDown"));
-        if [&double_tap, &menu, &up, &down]
+        let hover = element
+            .pointer_event("Hover")
+            .and_then(|event| {
+                let act = self.action_fn(event)?;
+                let delay = event.number("delay").unwrap_or(0.0).max(0.0);
+                Some(format!("Some(({act}, {}))", float(delay)))
+            })
+            .unwrap_or_else(|| "None".into());
+        if [&double_tap, &menu, &up, &down, &hover]
             .iter()
             .all(|code| code.as_str() == "None")
         {
             return code;
         }
         format!(
-            "b::pointer_events(c, {}, b::PointerEvents {{ double_tap: {double_tap}, wheel_up: {up}, wheel_down: {down} }}, {menu}, {code})",
+            "b::pointer_events(c, {}, b::PointerEvents {{ double_tap: {double_tap}, wheel_up: {up}, wheel_down: {down}, hover: {hover} }}, {menu}, {code})",
             string(element.id.as_deref().unwrap_or(&element.path))
         )
     }
@@ -5813,20 +5868,24 @@ pub fn app() -> b::AppDef {{
         }
     }
 
+    /// An element's action closure (`b::act(...)`), then the draft it clears.
+    fn action_fn(&self, element: &Element) -> Option<String> {
+        let at = Some(&element.source);
+        let action = element.action.as_ref()?;
+        let clear = element
+            .clearing()
+            .map(|clear| format!("{};", self.action_body(&clear, at)))
+            .unwrap_or_default();
+        Some(format!(
+            "b::act(|c: &b::Ctx| {{ {}; {clear} }})",
+            self.action_body(action, at)
+        ))
+    }
+
     /// An element's action, then the draft it clears.
     fn action(&self, element: &Element) -> String {
-        let at = Some(&element.source);
-        match &element.action {
-            Some(action) => {
-                let clear = element
-                    .clearing()
-                    .map(|clear| format!("{};", self.action_body(&clear, at)))
-                    .unwrap_or_default();
-                format!(
-                    "Some(b::act(|c: &b::Ctx| {{ {}; {clear} }}))",
-                    self.action_body(action, at)
-                )
-            }
+        match self.action_fn(element) {
+            Some(act) => format!("Some({act})"),
             None => "None".into(),
         }
     }

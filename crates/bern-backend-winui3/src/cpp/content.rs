@@ -108,46 +108,59 @@ impl Generator<'_> {
 
     pub(super) fn image(&self, out: &mut Out, element: &Element) {
         let url = element.expr("source").map(|expr| self.getter(expr));
-        out.line(format!(
-            "B::Image(p, c, {});",
-            designated(&[
-                ("source", element.resource("source").map(string)),
-                ("darkSource", element.resource("dark_source").map(string)),
-                ("url", url),
-                ("label", self.text_prop(element, "label")),
-                ("width", self.len(element, "width")),
-                ("height", self.len(element, "height")),
-                ("fit", Self::keyword(element, "fit")),
-                ("animate", Self::animate(element)),
-                ("corner", self.len(element, "corner")),
-                (
-                    "templated",
-                    (element.keyword("rendering") == Some("template")).then(|| "true".to_string())
-                ),
-                ("aspect", Self::number(element, "aspect")),
-                (
-                    "flies",
+        let blur = bern_target_api::svg::static_preblur(element)
+            .then(|| {
+                element.number("blur").map(float).or_else(|| {
                     element
-                        .keyword("hero")
-                        .is_some()
-                        .then(|| "true".to_string())
-                ),
-                // Without a size it covers the room its container gives.
-                (
-                    "covers",
-                    ["width", "height", "aspect"]
-                        .iter()
-                        .all(|name| element.prop(name).is_none())
-                        .then(|| "true".to_string())
-                ),
-                (
-                    "decodeMax",
-                    bern_target_api::svg::decode_max_side(self.app, element)
-                        .map(|cap| format!("{cap:.1}"))
-                ),
-                ("saturation", self.len(element, "saturation")),
-            ])
-        ));
+                        .expr("blur")
+                        .map(|e| format!("R::AsDouble({})", self.expr(e)))
+                })
+            })
+            .flatten();
+        let props = designated(&[
+            ("source", element.resource("source").map(string)),
+            ("darkSource", element.resource("dark_source").map(string)),
+            ("url", url),
+            ("label", self.text_prop(element, "label")),
+            ("width", self.len(element, "width")),
+            ("height", self.len(element, "height")),
+            ("fit", Self::keyword(element, "fit")),
+            ("animate", Self::animate(element)),
+            ("corner", self.len(element, "corner")),
+            (
+                "templated",
+                (element.keyword("rendering") == Some("template")).then(|| "true".to_string()),
+            ),
+            ("aspect", Self::number(element, "aspect")),
+            (
+                "flies",
+                element
+                    .keyword("hero")
+                    .is_some()
+                    .then(|| "true".to_string()),
+            ),
+            // Without a size it covers the room its container gives.
+            (
+                "covers",
+                ["width", "height", "aspect"]
+                    .iter()
+                    .all(|name| element.prop(name).is_none())
+                    .then(|| "true".to_string()),
+            ),
+            (
+                "decodeMax",
+                bern_target_api::svg::decode_max_side(self.app, element)
+                    .map(|cap| format!("{cap:.1}")),
+            ),
+            ("saturation", self.len(element, "saturation")),
+            ("blur", blur),
+        ]);
+        let placeholder: Vec<Node> = element.content().take(1).cloned().collect();
+        if placeholder.is_empty() {
+            out.line(format!("B::Image(p, c, {props});"));
+        } else {
+            self.call(out, &format!("B::Image(p, c, {props}, "), &placeholder);
+        }
     }
 
     pub(super) fn skeleton(&self, out: &mut Out, element: &Element) {

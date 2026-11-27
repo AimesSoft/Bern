@@ -10,6 +10,7 @@ use crate::{Act, Build, Ctx, Parent};
 use gtk::prelude::*;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::Duration;
 
 type Run = Rc<dyn Fn()>;
 
@@ -24,6 +25,8 @@ pub struct PointerProps {
     pub menu: Vec<Option<MenuItem>>,
     pub wheel_up: Option<Act>,
     pub wheel_down: Option<Act>,
+    /// `Hover(delay:)`: action run after the pointer rests for `delay` seconds.
+    pub hover: Option<(Act, f64)>,
     /// The wheel reaches the element before its content, as a slider
     /// would otherwise scroll its value.
     pub capture_wheel: bool,
@@ -39,6 +42,11 @@ pub fn Pointer(p: &Parent, ctx: &Ctx, props: PointerProps, build: Build) {
     let double = bound_action(ctx, &props.double_tap);
     let up = bound_action(ctx, &props.wheel_up);
     let down = bound_action(ctx, &props.wheel_down);
+    let hover = props.hover.as_ref().map(|(act, delay)| {
+        let at = ctx.clone();
+        let act = Rc::clone(act);
+        (Rc::new(move || act(&at)) as Run, *delay)
+    });
     let mut menu = Some(props.menu).filter(|menu| !menu.is_empty());
     let wheels = up.is_some() || down.is_some();
     for widget in region.widgets() {
@@ -53,6 +61,9 @@ pub fn Pointer(p: &Parent, ctx: &Ctx, props: PointerProps, build: Build) {
         }
         if wheels {
             wheel(&widget, up.clone(), down.clone(), props.capture_wheel);
+        }
+        if let Some((run, delay)) = &hover {
+            self::hover(&widget, Rc::clone(run), *delay);
         }
     }
 }
@@ -201,4 +212,47 @@ fn wheel(widget: &gtk::Widget, up: Option<Run>, down: Option<Run>, capture: bool
         glib::Propagation::Stop
     });
     widget.add_controller(scroll);
+}
+
+/// Run `run` after the pointer rests over `widget` for `delay` seconds;
+/// leaving or unmapping cancels a pending timer.
+fn hover(widget: &gtk::Widget, run: Run, delay: f64) {
+    let motion = gtk::EventControllerMotion::new();
+    let pending: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
+    let cancel = |slot: &Rc<RefCell<Option<glib::SourceId>>>| {
+        if let Some(id) = slot.borrow_mut().take() {
+            id.remove();
+        }
+    };
+    {
+        let pending = Rc::clone(&pending);
+        let weak = widget.downgrade();
+        let wait = if delay.is_finite() && delay > 0.0 {
+            Duration::from_secs_f64(delay)
+        } else {
+            Duration::ZERO
+        };
+        motion.connect_enter(move |_, _, _| {
+            cancel(&pending);
+            let done = Rc::clone(&pending);
+            let run = Rc::clone(&run);
+            let weak = weak.clone();
+            *pending.borrow_mut() = Some(glib::timeout_add_local_once(wait, move || {
+                done.borrow_mut().take();
+                if weak.upgrade().is_some() {
+                    run();
+                }
+            }));
+        });
+    }
+    {
+        let pending = Rc::clone(&pending);
+        motion.connect_leave(move |_| cancel(&pending));
+    }
+    widget.add_controller(motion);
+    {
+        let pending = Rc::clone(&pending);
+        widget.connect_unmap(move |_| cancel(&pending));
+    }
+    on_cleanup(move || cancel(&pending));
 }

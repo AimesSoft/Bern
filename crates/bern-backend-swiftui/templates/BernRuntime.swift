@@ -2660,6 +2660,8 @@ struct BernImage: View {
     /// Static blur radius >= 4 baked into the downsampled bitmap instead of
     /// running a live full-viewport GPU blur every frame.
     var blur: Double = 0
+    private let hasPlaceholder: Bool
+    private let placeholder: () -> AnyView
     /// The picture loaded last, with what it was loaded for: once the
     /// source changes it is no longer shown, so the old picture does not
     /// stand in for the new one while that loads.
@@ -2667,9 +2669,90 @@ struct BernImage: View {
     /// The last URL request whose async fetch completed (whether it yielded
     /// an image or failed), so failed URLs do not pulse forever.
     @State private var finishedRequest: BernPictures.Request?
+    /// Tracks which async request missed synchronously and fades from 0 -> 1.
+    @State private var fadingRequest: BernPictures.Request?
+    @State private var fadeOpacity: Double = 1
     @Environment(\.colorScheme) private var scheme
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(BernWindowContext.self) private var window: BernWindowContext?
+
+    init<Placeholder: View>(
+        name: String? = nil,
+        url: String? = nil,
+        darkName: String? = nil,
+        label: String?,
+        width: CGFloat?,
+        height: CGFloat?,
+        fit: BernImageFit,
+        rendering: SwiftUI.Image.TemplateRenderingMode = .original,
+        aspect: CGFloat? = nil,
+        hero: String? = nil,
+        heroMotion: BernMotion = BernMotion(period: 0.48, damping: 0.86),
+        heroCorner: CGFloat = 0,
+        oneSize: Bool = false,
+        covers: Bool = false,
+        decodeMax: CGFloat? = nil,
+        blur: Double = 0,
+        @ViewBuilder placeholder: @escaping () -> Placeholder
+    ) {
+        self.name = name
+        self.url = url
+        self.darkName = darkName
+        self.label = label
+        self.width = width
+        self.height = height
+        self.fit = fit
+        self.rendering = rendering
+        self.aspect = aspect
+        self.hero = hero
+        self.heroMotion = heroMotion
+        self.heroCorner = heroCorner
+        self.oneSize = oneSize
+        self.covers = covers
+        self.decodeMax = decodeMax
+        self.blur = blur
+        self.hasPlaceholder = true
+        self.placeholder = { AnyView(placeholder()) }
+    }
+
+    init(
+        name: String? = nil,
+        url: String? = nil,
+        darkName: String? = nil,
+        label: String?,
+        width: CGFloat?,
+        height: CGFloat?,
+        fit: BernImageFit,
+        rendering: SwiftUI.Image.TemplateRenderingMode = .original,
+        aspect: CGFloat? = nil,
+        hero: String? = nil,
+        heroMotion: BernMotion = BernMotion(period: 0.48, damping: 0.86),
+        heroCorner: CGFloat = 0,
+        oneSize: Bool = false,
+        covers: Bool = false,
+        decodeMax: CGFloat? = nil,
+        blur: Double = 0
+    ) {
+        self.name = name
+        self.url = url
+        self.darkName = darkName
+        self.label = label
+        self.width = width
+        self.height = height
+        self.fit = fit
+        self.rendering = rendering
+        self.aspect = aspect
+        self.hero = hero
+        self.heroMotion = heroMotion
+        self.heroCorner = heroCorner
+        self.oneSize = oneSize
+        self.covers = covers
+        self.decodeMax = decodeMax
+        self.blur = blur
+        self.hasPlaceholder = false
+        self.placeholder = { AnyView(EmptyView()) }
+    }
 
     struct Picture: @unchecked Sendable {
         let image: CGImage
@@ -2857,7 +2940,7 @@ struct BernImage: View {
         return nil
     }
 
-    @ViewBuilder private func rendered(_ picture: Picture?, in boxSize: CGSize?, loading: Bool) -> some View {
+    @ViewBuilder private func rendered(_ picture: Picture?, in boxSize: CGSize?, loading: Bool, fading: Bool) -> some View {
         let resolved: Picture? = {
             guard let picture else { return nil }
             #if canImport(CoreImage)
@@ -2869,13 +2952,31 @@ struct BernImage: View {
         }()
         Group {
             if let resolved {
-                let image = SwiftUI.Image(decorative: resolved.image, scale: 1, orientation: resolved.orientation)
-                    .renderingMode(rendering)
-                switch fit {
-                case .contain: image.resizable().aspectRatio(contentMode: .fit)
-                case .cover: image.resizable().aspectRatio(contentMode: .fill)
-                case .fill: image.resizable()
+                Group {
+                    let image = SwiftUI.Image(decorative: resolved.image, scale: 1, orientation: resolved.orientation)
+                        .renderingMode(rendering)
+                    switch fit {
+                    case .contain: image.resizable().aspectRatio(contentMode: .fit)
+                    case .cover: image.resizable().aspectRatio(contentMode: .fill)
+                    case .fill: image.resizable()
+                    }
                 }
+                .opacity(fading && !reduceMotion ? fadeOpacity : 1)
+                .onAppear {
+                    if fading && fadeOpacity < 1 {
+                        if reduceMotion {
+                            fadeOpacity = 1
+                        } else {
+                            DispatchQueue.main.async {
+                                withAnimation(.easeOut(duration: 0.25)) {
+                                    fadeOpacity = 1
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if hasPlaceholder {
+                placeholder()
             } else if loading && !covers && blur == 0 {
                 Rectangle()
                     .fill(Color.primary)
@@ -2961,17 +3062,18 @@ struct BernImage: View {
         let isLoading = request.map { !$0.url.isEmpty } == true
             && picture == nil
             && finishedRequest != request
+        let fading = request != nil && fadingRequest == request
         let shown = Group {
             if covers {
                 Color.clear
                     .overlay {
                         if blur >= 4 {
                             GeometryReader { proxy in
-                                rendered(picture, in: proxy.size, loading: false)
+                                rendered(picture, in: proxy.size, loading: false, fading: fading)
                                     .frame(width: proxy.size.width, height: proxy.size.height)
                             }
                         } else {
-                            rendered(picture, in: nil, loading: false)
+                            rendered(picture, in: nil, loading: false, fading: fading)
                         }
                     }
                     .clipped()
@@ -2984,11 +3086,11 @@ struct BernImage: View {
                     .overlay {
                         if blur >= 4 {
                             GeometryReader { proxy in
-                                rendered(picture, in: proxy.size, loading: isLoading)
+                                rendered(picture, in: proxy.size, loading: isLoading, fading: fading)
                                     .frame(width: proxy.size.width, height: proxy.size.height)
                             }
                         } else {
-                            rendered(picture, in: nil, loading: isLoading)
+                            rendered(picture, in: nil, loading: isLoading, fading: fading)
                         }
                     }
                     .clipped()
@@ -2997,18 +3099,41 @@ struct BernImage: View {
                 let w = width ?? height.map { $0 * ratio }
                 let h = height ?? width.map { $0 / ratio }
                 let box = (w != nil && h != nil) ? CGSize(width: w!, height: h!) : nil
-                rendered(picture, in: box, loading: isLoading).frame(width: w, height: h).clipped()
+                rendered(picture, in: box, loading: isLoading, fading: fading).frame(width: w, height: h).clipped()
             }
         }
         .task(id: request) {
+            let wasMissing = picture == nil
             guard let request else {
                 finishedRequest = nil
+                fadingRequest = nil
+                fadeOpacity = 1
                 return
             }
-            let result = await BernPictures.shared.load(request)
+            if wasMissing && !reduceMotion {
+                fadingRequest = request
+                fadeOpacity = 0
+            } else {
+                if fadingRequest == request {
+                    fadingRequest = nil
+                }
+                fadeOpacity = 1
+            }
+            let priority: BernPictures.Priority = (hero != nil || covers || (width ?? 0) >= 180) ? .high : .normal
+            let result = await BernPictures.shared.load(request, priority: priority)
             if !Task.isCancelled {
-                fetched = result.map { (request, $0) }
-                finishedRequest = request
+                if let image = result, wasMissing && !reduceMotion {
+                    fadingRequest = request
+                    fetched = (request, image)
+                    finishedRequest = request
+                } else {
+                    if fadingRequest == request {
+                        fadingRequest = nil
+                    }
+                    fadeOpacity = 1
+                    fetched = result.map { (request, $0) }
+                    finishedRequest = request
+                }
             }
         }
         .modifier(BernPictureHero(id: hero, picture: picture, fit: fit, corner: heroCorner, motion: heroMotion))
@@ -3080,18 +3205,22 @@ final class BernPictures {
         case absent
     }
 
+    enum Priority: Int, Sendable {
+        case low = 0, normal = 1, high = 2
+    }
+
     /// Bounds concurrent remote HTTP downloads without blocking cooperative threads.
     private final class RemoteGate: @unchecked Sendable {
         private let limit: Int
         private let lock = NSLock()
         private var active = 0
-        private var waiters: [(id: UUID, continuation: CheckedContinuation<Bool, Never>)] = []
+        private var waiters: [(id: UUID, url: String, priority: Priority, continuation: CheckedContinuation<Bool, Never>)] = []
 
         init(limit: Int) {
             self.limit = limit
         }
 
-        func acquire() async -> Bool {
+        func acquire(url: String, priority: Priority) async -> Bool {
             let fast: Bool? = {
                 lock.lock()
                 defer { lock.unlock() }
@@ -3114,7 +3243,7 @@ final class BernPictures {
                             active += 1
                             return true
                         }
-                        waiters.append((id, continuation))
+                        waiters.append((id, url, priority, continuation))
                         return nil
                     }()
                     if let immediate {
@@ -3132,12 +3261,24 @@ final class BernPictures {
             }
         }
 
+        func promote(url: String, to priority: Priority) {
+            lock.lock()
+            defer { lock.unlock() }
+            for index in waiters.indices where waiters[index].url == url {
+                if priority.rawValue > waiters[index].priority.rawValue {
+                    waiters[index].priority = priority
+                }
+            }
+        }
+
         func release() {
             let next: CheckedContinuation<Bool, Never>? = {
                 lock.lock()
                 defer { lock.unlock() }
-                if !waiters.isEmpty {
-                    return waiters.removeFirst().continuation
+                for target in [Priority.high, .normal, .low] {
+                    if let index = waiters.firstIndex(where: { $0.priority == target }) {
+                        return waiters.remove(at: index).continuation
+                    }
                 }
                 active = max(0, active - 1)
                 return nil
@@ -3384,8 +3525,8 @@ final class BernPictures {
         return picture
     }
 
-    func load(_ url: String) async -> BernImage.Picture? {
-        await load(Request(url: url))
+    func load(_ url: String, priority: Priority = .normal) async -> BernImage.Picture? {
+        await load(Request(url: url), priority: priority)
     }
 
     private func releaseDownloadWaiter(url: String, id: UUID, task: Task<RawReading, Never>) {
@@ -3432,7 +3573,7 @@ final class BernPictures {
     /// The picture of `request`, when it has come; nil when there is no such
     /// file or the caller stopped waiting. A view's task ends with the view,
     /// and a view that appears again starts over.
-    func load(_ request: Request) async -> BernImage.Picture? {
+    func load(_ request: Request, priority: Priority = .normal) async -> BernImage.Picture? {
         var tries = 0
         while !Task.isCancelled {
             if let picture = pictures[request] {
@@ -3467,11 +3608,12 @@ final class BernPictures {
                 guard URL(string: request.url) != nil else { return nil }
                 let task: Task<RawReading, Never>
                 if let existing = downloading[request.url] {
+                    Self.remoteGate.promote(url: request.url, to: priority)
                     task = existing
                 } else {
                     let url = request.url
                     let created = Task.detached(priority: .userInitiated) {
-                        await Self.fetchRaw(url)
+                        await Self.fetchRaw(url, priority: priority)
                     }
                     downloading[url] = created
                     task = created
@@ -3608,7 +3750,7 @@ final class BernPictures {
     }
 
     /// Fetches raw image bytes from disk cache or network (gated to 8 concurrent remote requests).
-    private nonisolated static func fetchRaw(_ url: String) async -> RawReading {
+    private nonisolated static func fetchRaw(_ url: String, priority: Priority) async -> RawReading {
         let cacheable = diskCacheable(url)
         if cacheable, let diskData = await disk.read(for: url) {
             if isValidImageData(diskData) {
@@ -3616,7 +3758,7 @@ final class BernPictures {
             }
             disk.remove(for: url)
         }
-        guard await remoteGate.acquire() else { return .unreachable }
+        guard await remoteGate.acquire(url: url, priority: priority) else { return .unreachable }
         defer { remoteGate.release() }
         if Task.isCancelled { return .unreachable }
         guard let location = URL(string: url) else { return .absent }

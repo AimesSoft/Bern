@@ -257,11 +257,13 @@ fn gallery_generates_stagger_rails_popovers_and_four_sizes() {
     assert!(kotlin.contains("bernWindow.tv"));
     // The record in the about window turns.
     assert!(kotlin.contains(".bernSpin(true, 12.0)"), "{kotlin}");
-    // Its picture beneath, blurred and lit under the pointer.
+    // Its picture beneath, pre-blurred and lit under the pointer.
     assert!(
-        kotlin.contains("Box(Modifier.bernGlow(1f, 0.3f, 12f).bernBlur(16f.dp, 12f))"),
+        kotlin.contains("Box(Modifier.bernGlow(1f, 0.3f, 12f))"),
         "{kotlin}"
     );
+    assert!(kotlin.contains("blur = 16f, oneSize = true)"), "{kotlin}");
+    assert!(!kotlin.contains(".bernBlur(16f.dp, 12f)"), "{kotlin}");
     assert!(kotlin.contains("bernDefaultFocus()"));
     assert!(
         kotlin.contains("BernShortcut(\"escape\", { true }) {"),
@@ -2492,6 +2494,174 @@ fun CanvasNativeView(props: CanvasNativeProps, actions: CanvasNativeActions, the
         "Box(Modifier.fillMaxSize())",
     ] {
         assert!(kotlin.contains(expected), "missing `{expected}`:\n{kotlin}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn image_placeholder_preblur_hover_lazy_row_and_priority_gate() {
+    let dir = workspace().join("target/bern-test/compose-details-opt");
+    let ui = r#"
+use bern::prelude::*;
+use stage_protocol::stage::{self, Route};
+
+#[bern::session]
+pub struct Draft {
+    pub hovered: bool,
+    pub blurred: f64,
+    pub path: Vec<Route>,
+}
+
+#[component]
+pub fn app(app: stage::Client, windows: AppWindows, #[session] draft: Draft) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Details" }, initial: open) {
+                Navigation(id: nav, path: draft.path) {
+                    Column(gap: 8) {
+                        Image(source: app.poster, width: 180, height: 120, fit: cover) {
+                            Skeleton(corner: 8)
+                            Hover(delay: 0.25) => app.ping()
+                        }
+                        Image(source: app.poster, fit: cover, blur: 40)
+                        Image(source: app.poster, width: 80, height: 80, blur: draft.blurred, animate: smooth)
+                        NavLink(id: link, route: Route::Detail) {
+                            Text(content: tr! { "en" => "Link" })
+                            Hover => app.ping()
+                        }
+                        ScrollView(axis: horizontal) {
+                            Row(gap: 12) {
+                                ForEach(items: app.rows, key: id) |item| {
+                                    Image(source: item.poster, width: 140, height: 200, fit: cover)
+                                }
+                            }
+                        }
+                    }
+                    Destination |route| {
+                        Text(content: tr! { "en" => "Detail" })
+                    }
+                }
+            }
+        }
+    }
+}
+"#;
+    let protocol = r#"
+#[bern::protocol(namespace = "stage", version = 1)]
+pub mod stage {
+    #[value]
+    pub struct RowItem {
+        pub id: i64,
+        pub poster: MediaSource,
+    }
+    #[value]
+    pub enum Route {
+        Detail,
+    }
+    #[state]
+    pub struct State {
+        pub poster: MediaSource,
+        pub rows: Vec<RowItem>,
+    }
+    #[commands]
+    pub trait Commands {
+        fn ping(&mut self) -> Result<(), CommandError>;
+    }
+}
+"#;
+    let _ = std::fs::remove_dir_all(&dir);
+    for (package, source) in [
+        ("stage-protocol", protocol),
+        ("stage-ui", ui),
+        ("stage-core", ""),
+    ] {
+        std::fs::create_dir_all(dir.join(package).join("src")).unwrap();
+        std::fs::write(
+            dir.join(package).join("Cargo.toml"),
+            format!("[package]\nname = \"{package}\"\n"),
+        )
+        .unwrap();
+        std::fs::write(dir.join(package).join("src/lib.rs"), source).unwrap();
+    }
+    std::fs::write(
+        dir.join("Bern.toml"),
+        "[app]\nid = \"stage\"\nbundle_id = \"dev.bern.stage\"\nversion = \"0.1.0\"\nname = { \"en\" = \"Stage\" }\n[languages]\nsupported = [\"en\"]\ndefault = \"en\"\n[protocol]\npackage = \"stage-protocol\"\nsource = \"stage-protocol/src/lib.rs\"\n[engine]\npackage = \"stage-core\"\ntype = \"stage_core::Engine\"\n[ui]\npackage = \"stage-ui\"\nsources = [\"stage-ui/src/lib.rs\"]\nroot = \"app\"\n[targets.android]\nplatform = \"android\"\n",
+    )
+    .unwrap();
+    let config = bern_compiler::config::load(&dir.join("Bern.toml")).unwrap();
+    let compiled = bern_compiler::compile(&config).unwrap();
+    let problems = ComposeAndroid.check(&compiled.app, &android(&config));
+    assert!(
+        problems
+            .iter()
+            .all(|problem| problem.severity == bern_target_api::Severity::Warning),
+        "{problems:?}"
+    );
+    let styled = bern_target_api::style::for_platforms(&compiled.app, &["android"]);
+    let prepared = bern_target_api::svg::prepare(&styled, &android(&config));
+    let kotlin = bern_backend_compose::Generator::new(&prepared).generate("dev.bern.stage", 0);
+    // 1. Placeholder trailing lambda on Image.
+    assert!(
+        kotlin.contains("BernImageURL((BernEngine.poster).url, null, 180f.dp, 120f.dp, ContentScale.Crop, twice = true) {\n"),
+        "{kotlin}"
+    );
+    assert!(
+        kotlin.contains("BernSkeleton(corner = 8f.dp, baseOpacity = 0.07f)"),
+        "{kotlin}"
+    );
+    // 2. Static preblur skips Modifier.bernBlur and passes blur parameter; animated blur keeps Modifier.bernBlur.
+    assert!(kotlin.contains("blur = 40f)"), "{kotlin}");
+    assert!(!kotlin.contains(".bernBlur(40f.dp"), "{kotlin}");
+    assert!(
+        kotlin.contains(
+            ".bernBlur(bernLength((session_Draft.blurred).toFloat().coerceAtLeast(0f).dp"
+        ),
+        "{kotlin}"
+    );
+    // 3. Hover(delay:) generates onHover and hoverDelay; watch drops them.
+    assert!(
+        kotlin.contains("onHover = { BernEngine.ping(bernWindow) }, hoverDelay = 0.25) {"),
+        "{kotlin}"
+    );
+    assert!(
+        kotlin
+            .contains("BernPointerEvents(Modifier, onHover = { BernEngine.ping(bernWindow) }) {\n"),
+        "{kotlin}"
+    );
+    assert!(!kotlin.contains("unsupported Hover"), "{kotlin}");
+    let watch = bern_backend_compose::Generator::new(&compiled.app.on_watch())
+        .with_watch(true)
+        .generate("dev.bern.stage", 0);
+    assert!(!watch.contains("onHover ="), "{watch}");
+    assert!(!watch.contains("hoverDelay ="), "{watch}");
+    // 4. Horizontal scroll view emits BernScrollRow and lazy row emits BernLazyRow.
+    assert!(
+        kotlin.contains("BernScrollRow(Modifier, rememberScrollState(), gap = 8.dp) {"),
+        "{kotlin}"
+    );
+    assert!(
+        kotlin.contains(
+            "BernLazyRow(BernEngine.rows, key = { item -> BernKey.of(item.id) }, gap = 12f.dp"
+        ),
+        "{kotlin}"
+    );
+    // 5. Runtime templates implement fade-in, boxBlur3Pass, bernHover, BernLazyRow, PriorityGate.
+    let features = include_str!("../templates/BernFeatures.kt");
+    for symbol in [
+        "val wasCached = remember(url) { picture != null }",
+        "alpha.animateTo(1f, tween(250))",
+        "boxBlur3Pass(",
+        "fun Modifier.bernHover(",
+        "LocalBernHorizontalViewport",
+        "fun <T> BernLazyRow(",
+        "private class PriorityGate(",
+        "downloadGate.promote(url, priority)",
+        "BernPictures.Priority.HIGH",
+    ] {
+        assert!(
+            features.contains(symbol),
+            "BernFeatures.kt missing `{symbol}`"
+        );
     }
     let _ = std::fs::remove_dir_all(&dir);
 }

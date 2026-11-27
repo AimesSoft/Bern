@@ -102,9 +102,9 @@ pub use gpui;
 pub use host::{Done, WindowOp, dispatch, dispatch_with, window_command};
 pub use layout::{
     AccordionProps, Align, Flex, GridProps, Grow, Layers, Len, Pad, PreviewProps, Size, Style,
-    accordion, adaptive, column, cover, divider, flow, grid, idle_area, inspector, lazy_grid, list,
-    native_host, preview_list, reveal, row, scroll, spacer, stack, tab_selection, tabs,
-    window_buttons,
+    accordion, adaptive, column, cover, divider, flow, grid, idle_area, inspector, lazy_grid,
+    lazy_row, list, native_host, preview_list, reveal, row, scroll, spacer, stack, tab_selection,
+    tabs, window_buttons,
 };
 pub use look::{ControlSize, ControlStyle, Look, Shape};
 pub use media::{MediaOp, VideoProps, media, video};
