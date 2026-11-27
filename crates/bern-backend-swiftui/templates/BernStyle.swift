@@ -1410,8 +1410,24 @@ extension View {
     }
 }
 
+@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
+private struct BernSidebarIcon: View {
+    let systemImage: String
+    @Environment(\.bernAccent) private var accent
+    @Environment(\.backgroundProminence) private var prominence
+
+    var body: some View {
+        if prominence == .increased {
+            BernIcon(name: systemImage).foregroundStyle(.primary)
+        } else {
+            BernIcon(name: systemImage).foregroundStyle(accent ?? Color.accentColor)
+        }
+    }
+}
+
 /// A sidebar destination: its icon takes the application's accent, as the
-/// system's sidebars take the system's.
+/// system's sidebars take the system's, and switches to primary foreground
+/// when the row sits on an increased-prominence selection background.
 struct BernSidebarLabel: View {
     let title: String
     let systemImage: String
@@ -1421,7 +1437,11 @@ struct BernSidebarLabel: View {
         Label {
             Text(verbatim: title)
         } icon: {
-            BernIcon(name: systemImage).foregroundStyle(accent ?? Color.accentColor)
+            if #available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *) {
+                BernSidebarIcon(systemImage: systemImage)
+            } else {
+                BernIcon(name: systemImage).foregroundStyle(accent ?? Color.accentColor)
+            }
         }
     }
 }

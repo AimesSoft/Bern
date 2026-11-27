@@ -3672,3 +3672,22 @@ struct CanvasNativeView: View {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn sidebar_label_adapts_icon_foreground_to_selection_prominence() {
+    let style_swift = include_str!("../templates/BernStyle.swift");
+    let start = style_swift
+        .find("private struct BernSidebarIcon")
+        .expect("BernSidebarIcon must exist in BernStyle.swift");
+    let slice = &style_swift[start..];
+    let end = slice
+        .find("// MARK: - Theme")
+        .expect("Theme marker after BernSidebarLabel");
+    let section = &slice[..end];
+    assert!(
+        section.contains("backgroundProminence")
+            && section.contains("prominence == .increased")
+            && section.contains(".foregroundStyle(.primary)"),
+        "BernSidebarLabel must switch icon to .primary on increased backgroundProminence:\n{section}"
+    );
+}
