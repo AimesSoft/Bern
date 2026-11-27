@@ -1951,7 +1951,7 @@ struct ToastProps {
 
 /// A short notice that shows when it appears or `key` changes and hides
 /// itself after `duration` seconds, read out politely: a floating frosted
-/// acrylic capsule where it stands.
+/// acrylic notice where it stands.
 inline void Toast(Parent const& p, Ctx const& ctx, ToastProps props) {
     controls::Grid place;
     place.HorizontalAlignment(xaml::HorizontalAlignment::Center);
@@ -1988,8 +1988,9 @@ inline void Toast(Parent const& p, Ctx const& ctx, ToastProps props) {
                 uint32_t index;
                 if (place.Children().IndexOf(*shown, index)) place.Children().RemoveAt(index);
             }
+            constexpr double kToastCorner = kWinUI ? 8.0 : 4.0;
             controls::Border notice;
-            notice.CornerRadius(xaml::CornerRadius{20, 20, 20, 20});
+            notice.CornerRadius(xaml::CornerRadius{kToastCorner, kToastCorner, kToastCorner, kToastCorner});
             notice.Padding(xaml::Thickness{16, 10, 16, 10});
             notice.BorderThickness(xaml::Thickness{1, 1, 1, 1});
             notice.IsHitTestVisible(false);
@@ -2016,6 +2017,8 @@ inline void Toast(Parent const& p, Ctx const& ctx, ToastProps props) {
             label.VerticalAlignment(xaml::VerticalAlignment::Center);
             row.Children().Append(label);
             notice.Child(row);
+            notice.HorizontalAlignment(xaml::HorizontalAlignment::Center);
+            notice.VerticalAlignment(xaml::VerticalAlignment::Center);
             xaml::Automation::AutomationProperties::SetLiveSetting(notice, xaml::Automation::Peers::AutomationLiveSetting::Polite);
             xaml::Automation::AutomationProperties::SetName(notice, text);
             auto wrapper = Wrap(notice);
@@ -2024,22 +2027,28 @@ inline void Toast(Parent const& p, Ctx const& ctx, ToastProps props) {
             shadow->radius = 12;
             shadow->y = 4;
             shadow->opacity = 0.16;
-            shadow->corner = 20;
+            shadow->corner = kToastCorner;
             shadow->image.IsHitTestVisible(false);
             shadow->image.Stretch(media::Stretch::Fill);
-            wrapper.Children().InsertAt(0, shadow->image);
+            controls::Canvas shadowHost;
+            shadowHost.IsHitTestVisible(false);
+            shadowHost.Children().Append(shadow->image);
+            wrapper.Children().InsertAt(0, shadowHost);
             notice.SizeChanged([shadow, weak = winrt::make_weak(notice)](auto&&, xaml::SizeChangedEventArgs const& args) {
                 auto border = weak.get();
                 if (!border) return;
                 double w = args.NewSize().Width;
                 double h = args.NewSize().Height;
-                double r = (std::min)(w, h) * 0.5;
-                border.CornerRadius(xaml::CornerRadius{r, r, r, r});
+                double pad = shadow->Pad();
                 shadow->width = w;
                 shadow->height = h;
-                shadow->corner = r;
                 shadow->scale = ScaleOf(border);
                 shadow->Draw();
+                shadow->image.Margin(xaml::Thickness{0, 0, 0, 0});
+                shadow->image.Width(w + pad * 2);
+                shadow->image.Height(h + pad * 2);
+                controls::Canvas::SetLeft(shadow->image, -pad);
+                controls::Canvas::SetTop(shadow->image, -pad);
             });
             place.Children().Append(wrapper);
             *shown = wrapper;
