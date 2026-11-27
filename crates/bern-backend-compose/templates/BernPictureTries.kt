@@ -79,9 +79,11 @@ object BernPictureTries {
     }
 
     /// One try at the bytes of an http(s) address, on the caller's thread.
-    /// A connection that timed out is closed, so the next try has another.
+    /// A finished stream is closed so the connection pool can reuse it; a
+    /// cancelled or failed attempt disconnects the socket.
     fun download(url: String): BernTry<ByteArray> {
         var connection: HttpURLConnection? = null
+        var completed = false
         return try {
             val opened = URL(url).openConnection() as HttpURLConnection
             connection = opened
@@ -89,16 +91,28 @@ object BernPictureTries {
             opened.readTimeout = silence
             val status = opened.responseCode
             when {
-                status in 200..299 -> BernTry.Came(opened.inputStream.use { it.readBytes() })
-                status < 100 || status == 408 || status == 429 || status >= 500 -> BernTry.Unreachable
-                else -> BernTry.Refused
+                status in 200..299 -> {
+                    val bytes = opened.inputStream.use { it.readBytes() }
+                    completed = !Thread.currentThread().isInterrupted
+                    BernTry.Came(bytes)
+                }
+                status < 100 || status == 408 || status == 429 || status >= 500 -> {
+                    opened.errorStream?.close()
+                    completed = !Thread.currentThread().isInterrupted
+                    BernTry.Unreachable
+                }
+                else -> {
+                    opened.errorStream?.close()
+                    completed = !Thread.currentThread().isInterrupted
+                    BernTry.Refused
+                }
             }
         } catch (error: IOException) {
             if (lasting(error)) BernTry.Refused else BernTry.Unreachable
         } catch (_: IllegalArgumentException) {
             BernTry.Refused
         } finally {
-            connection?.disconnect()
+            if (!completed) connection?.disconnect()
         }
     }
 

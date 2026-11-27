@@ -2897,29 +2897,51 @@ struct BernImage: View {
         let viewportBound: (width: CGFloat, height: CGFloat)? = {
             guard width == nil, height == nil, decodeMax == nil, let size = viewportSize else { return nil }
             func bucket(_ x: CGFloat) -> CGFloat { ceil(max(64, x) / 64) * 64 }
+            func heroBucket(_ x: CGFloat) -> CGFloat { min(512, ceil(max(128, x) / 256) * 256) }
             if hero != nil {
-                return (bucket(size.width), bucket(size.height))
+                return (heroBucket(size.width), heroBucket(size.height))
             }
             if let aspect, aspect > 0 {
                 return (bucket(min(size.width, size.height * aspect)), bucket(min(size.height, size.width / aspect)))
             }
             return covers ? (bucket(size.width), bucket(size.height)) : nil
         }()
-        let samples = oneSize || decodeMax != nil || viewportBound != nil
-        let decodeScale = (oneSize || decodeMax != nil) ? displayScale : (viewportBound != nil ? displayScale * 0.5 : 0)
-        let decodeWidth: CGFloat? = switch (width, decodeMax, viewportBound) {
-        case let (w?, m?, _): min(w, m)
-        case let (w?, nil, _): oneSize ? w : nil
-        case let (nil, m?, _): m
-        case let (nil, nil, v?): v.width
-        case (nil, nil, nil): nil
+        let heroMax: CGFloat? = (hero != nil && !oneSize && decodeMax == nil && (width != nil || height != nil))
+            ? min(max(max(width ?? 0, height ?? 0) * 2.5, 512), 512)
+            : nil
+        let samples = oneSize || decodeMax != nil || heroMax != nil || viewportBound != nil
+        let decodeScale = (oneSize || decodeMax != nil || heroMax != nil) ? displayScale : (viewportBound != nil ? displayScale * 0.5 : 0)
+        let heroScaled: (width: CGFloat?, height: CGFloat?) = {
+            guard let heroMax else { return (nil, nil) }
+            switch (width, height) {
+            case let (w?, h?):
+                let longest = max(w, h)
+                guard longest > 0 else { return (heroMax, heroMax) }
+                let scale = heroMax / longest
+                return (w * scale, h * scale)
+            case (_?, nil):
+                return (heroMax, nil)
+            case (nil, _?):
+                return (nil, heroMax)
+            case (nil, nil):
+                return (nil, nil)
+            }
+        }()
+        let decodeWidth: CGFloat? = switch (width, decodeMax, heroMax, viewportBound) {
+        case let (w?, m?, _, _): min(w, m)
+        case (_, nil, _?, _): heroScaled.width
+        case let (w?, nil, nil, _): oneSize ? w : nil
+        case let (nil, m?, _, _): m
+        case let (nil, nil, nil, v?): v.width
+        case (nil, nil, nil, nil): nil
         }
-        let decodeHeight: CGFloat? = switch (height, decodeMax, viewportBound) {
-        case let (h?, m?, _): min(h, m)
-        case let (h?, nil, _): oneSize ? h : nil
-        case let (nil, m?, _): m
-        case let (nil, nil, v?): v.height
-        case (nil, nil, nil): nil
+        let decodeHeight: CGFloat? = switch (height, decodeMax, heroMax, viewportBound) {
+        case let (h?, m?, _, _): min(h, m)
+        case (_, nil, _?, _): heroScaled.height
+        case let (h?, nil, nil, _): oneSize ? h : nil
+        case let (nil, m?, _, _): m
+        case let (nil, nil, nil, v?): v.height
+        case (nil, nil, nil, nil): nil
         }
         let declared = resource.flatMap {
             samples ? Self.picture($0, width: decodeWidth, height: decodeHeight, fit: fit, scale: decodeScale) : Self.picture($0)
@@ -2931,7 +2953,7 @@ struct BernImage: View {
         }
         let picture = declared
             ?? request.flatMap { BernPictures.shared.cached($0) }
-            ?? fetched.flatMap { $0.request == request ? $0.picture : nil }
+            ?? request.flatMap { req in fetched.flatMap { $0.request.url == req.url ? $0.picture : nil } }
             // Its source changed: a file on this device is read at once, so
             // its place is not left empty for a frame in between.
             ?? (fetched != nil ? request.flatMap { BernPictures.shared.local($0) } : nil)
@@ -3040,26 +3062,224 @@ final class BernPictures {
         var scale: CGFloat = 0
     }
 
-    /// What one try at an address gave.
-    private enum Reading: Sendable {
-        case picture(BernImage.Picture)
-        /// The network failed, or the server could not answer now.
+    /// What one try at decoding a request gave.
+    private enum DecodeReading: Sendable {
+        case picture(BernImage.Picture, average: UInt32?)
         case unreachable
-        /// Nothing came for `silence` seconds.
-        case silent
-        /// The server answered, and not with a picture.
+        case silent(URLSession)
         case refused
-        /// No such file, or no address at all. Looking again costs nothing,
-        /// so nothing is remembered.
         case absent
     }
 
-    /// Decoded pixel cache cap (64 MiB), evicting least-recently-used entries.
-    private static let maxPictureBytes = 64 * 1024 * 1024
+    /// What one URL-level fetch gave.
+    private enum RawReading: Sendable {
+        case data(Data)
+        case unreachable
+        case silent(URLSession)
+        case refused
+        case absent
+    }
+
+    /// Bounds concurrent remote HTTP downloads without blocking cooperative threads.
+    private final class RemoteGate: @unchecked Sendable {
+        private let limit: Int
+        private let lock = NSLock()
+        private var active = 0
+        private var waiters: [(id: UUID, continuation: CheckedContinuation<Bool, Never>)] = []
+
+        init(limit: Int) {
+            self.limit = limit
+        }
+
+        func acquire() async -> Bool {
+            let fast: Bool? = {
+                lock.lock()
+                defer { lock.unlock() }
+                if Task.isCancelled { return false }
+                if active < limit {
+                    active += 1
+                    return true
+                }
+                return nil
+            }()
+            if let fast { return fast }
+            let id = UUID()
+            return await withTaskCancellationHandler {
+                await withCheckedContinuation { continuation in
+                    let immediate: Bool? = {
+                        lock.lock()
+                        defer { lock.unlock() }
+                        if Task.isCancelled { return false }
+                        if active < limit {
+                            active += 1
+                            return true
+                        }
+                        waiters.append((id, continuation))
+                        return nil
+                    }()
+                    if let immediate {
+                        continuation.resume(returning: immediate)
+                    }
+                }
+            } onCancel: {
+                let cancelled: CheckedContinuation<Bool, Never>? = {
+                    lock.lock()
+                    defer { lock.unlock() }
+                    guard let index = waiters.firstIndex(where: { $0.id == id }) else { return nil }
+                    return waiters.remove(at: index).continuation
+                }()
+                cancelled?.resume(returning: false)
+            }
+        }
+
+        func release() {
+            let next: CheckedContinuation<Bool, Never>? = {
+                lock.lock()
+                defer { lock.unlock() }
+                if !waiters.isEmpty {
+                    return waiters.removeFirst().continuation
+                }
+                active = max(0, active - 1)
+                return nil
+            }()
+            next?.resume(returning: true)
+        }
+    }
+
+    /// Persistent on-disk raw byte cache, written and evicted serially off MainActor.
+    private final class DiskCache: @unchecked Sendable {
+        private static let maxFileBytes = 16 * 1024 * 1024
+        private static let maxTotalBytes = 256 * 1024 * 1024
+        private static let targetTotalBytes = 192 * 1024 * 1024
+        private static let evictInterval = 16
+
+        private let directory: URL? = FileManager.default
+            .urls(for: .cachesDirectory, in: .userDomainMask)
+            .first?
+            .appendingPathComponent("BernPictures", isDirectory: true)
+        private let queue = DispatchQueue(label: "dev.bern.pictures.disk", qos: .utility)
+        private var writeCount = 0
+
+        /// Pure-Swift 128-bit dual FNV-1a key formatted as 32 lowercase hex digits.
+        private static func key(_ url: String) -> String {
+            let prime: UInt64 = 0x0000_0100_0000_01b3
+            var h1: UInt64 = 0xcbf2_9ce4_8422_2325
+            var h2: UInt64 = 0x6c62_272e_07bb_0142
+            for byte in url.utf8 {
+                h1 = (h1 ^ UInt64(byte)) &* prime
+            }
+            for byte in url.utf8.reversed() {
+                h2 = (h2 ^ UInt64(byte)) &* prime
+            }
+            let digits = Array("0123456789abcdef".utf8)
+            var out = [UInt8](repeating: 0, count: 32)
+            for i in 0..<16 {
+                out[15 - i] = digits[Int((h1 >> (i * 4)) & 0xf)]
+                out[31 - i] = digits[Int((h2 >> (i * 4)) & 0xf)]
+            }
+            return String(decoding: out, as: UTF8.self)
+        }
+
+        func read(for url: String) async -> Data? {
+            guard let dir = directory else { return nil }
+            let file = dir.appendingPathComponent("\(Self.key(url)).img")
+            return await withCheckedContinuation { continuation in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    guard let data = try? Data(contentsOf: file),
+                          !data.isEmpty,
+                          data.count <= Self.maxFileBytes
+                    else {
+                        continuation.resume(returning: nil)
+                        return
+                    }
+                    try? FileManager.default.setAttributes(
+                        [.modificationDate: Date()],
+                        ofItemAtPath: file.path
+                    )
+                    continuation.resume(returning: data)
+                }
+            }
+        }
+
+        func write(_ data: Data, for url: String) {
+            guard let dir = directory, !data.isEmpty, data.count <= Self.maxFileBytes else { return }
+            let fileName = "\(Self.key(url)).img"
+            queue.async {
+                let fm = FileManager.default
+                try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+                let dest = dir.appendingPathComponent(fileName)
+                let tmp = dir.appendingPathComponent(".tmp.\(UUID().uuidString)")
+                do {
+                    try data.write(to: tmp, options: [])
+                    if fm.fileExists(atPath: dest.path) {
+                        _ = try fm.replaceItemAt(dest, withItemAt: tmp)
+                    } else {
+                        try fm.moveItem(at: tmp, to: dest)
+                    }
+                } catch {
+                    try? fm.removeItem(at: tmp)
+                    return
+                }
+                self.writeCount += 1
+                if self.writeCount >= Self.evictInterval {
+                    self.writeCount = 0
+                    self.evictIfNeeded(in: dir, using: fm)
+                }
+            }
+        }
+
+        func remove(for url: String) {
+            guard let dir = directory else { return }
+            let dest = dir.appendingPathComponent("\(Self.key(url)).img")
+            queue.async {
+                try? FileManager.default.removeItem(at: dest)
+            }
+        }
+
+        private func evictIfNeeded(in dir: URL, using fm: FileManager) {
+            guard let entries = try? fm.contentsOfDirectory(
+                at: dir,
+                includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey],
+                options: [.skipsHiddenFiles]
+            ) else { return }
+            var items: [(url: URL, size: Int, mtime: Date)] = []
+            var totalBytes = 0
+            for entry in entries where entry.pathExtension == "img" {
+                guard let values = try? entry.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]),
+                      values.isRegularFile == true
+                else { continue }
+                let size = values.fileSize ?? 0
+                let mtime = values.contentModificationDate ?? .distantPast
+                items.append((entry, size, mtime))
+                totalBytes += size
+            }
+            guard totalBytes > Self.maxTotalBytes else { return }
+            items.sort { $0.mtime < $1.mtime }
+            for item in items {
+                guard totalBytes > Self.targetTotalBytes else { break }
+                if (try? fm.removeItem(at: item.url)) != nil {
+                    totalBytes -= item.size
+                }
+            }
+        }
+    }
+
+    /// Decoded pixel cache cap (96 MiB), evicting least-recently-used entries.
+    private static let maxPictureBytes = 96 * 1024 * 1024
+    /// In-memory encoded byte cache cap (32 MiB), evicting least-recently-used entries.
+    private static let maxRawBytes = 32 * 1024 * 1024
+    private nonisolated static let remoteGate = RemoteGate(limit: 8)
+    private nonisolated static let disk = DiskCache()
+
     @ObservationIgnored private var pictures: [Request: BernImage.Picture] = [:]
     @ObservationIgnored private var pictureOrder: [Request] = []
     @ObservationIgnored private var pictureBytes = 0
-    @ObservationIgnored private var loading: [Request: Task<Reading, Never>] = [:]
+    @ObservationIgnored private var rawBytes: [String: Data] = [:]
+    @ObservationIgnored private var rawByteOrder: [String] = []
+    @ObservationIgnored private var rawByteCount = 0
+    @ObservationIgnored private var loading: [Request: Task<DecodeReading, Never>] = [:]
+    @ObservationIgnored private var downloading: [String: Task<RawReading, Never>] = [:]
+    @ObservationIgnored private var downloadWaiters: [String: Set<UUID>] = [:]
     @ObservationIgnored private var session = BernPictures.newSession()
     /// Addresses the server refused on this network.
     @ObservationIgnored private var refused: Set<String> = []
@@ -3111,6 +3331,42 @@ final class BernPictures {
         }
     }
 
+    private func touchPicture(_ request: Request) {
+        guard pictureOrder.last != request else { return }
+        pictureOrder.removeAll { $0 == request }
+        pictureOrder.append(request)
+    }
+
+    private func rememberRawBytes(_ url: String, _ data: Data) {
+        guard data.count <= Self.maxRawBytes else { return }
+        if let existing = rawBytes.removeValue(forKey: url) {
+            rawByteCount -= existing.count
+            rawByteOrder.removeAll { $0 == url }
+        }
+        rawBytes[url] = data
+        rawByteOrder.append(url)
+        rawByteCount += data.count
+        while rawByteCount > Self.maxRawBytes && rawByteOrder.count > 1 {
+            let oldest = rawByteOrder.removeFirst()
+            if let evicted = rawBytes.removeValue(forKey: oldest) {
+                rawByteCount -= evicted.count
+            }
+        }
+    }
+
+    private func touchRawBytes(_ url: String) {
+        guard rawByteOrder.last != url else { return }
+        rawByteOrder.removeAll { $0 == url }
+        rawByteOrder.append(url)
+    }
+
+    private func forgetRawBytes(_ url: String) {
+        if let existing = rawBytes.removeValue(forKey: url) {
+            rawByteCount -= existing.count
+            rawByteOrder.removeAll { $0 == url }
+        }
+    }
+
     func cached(_ request: Request) -> BernImage.Picture? { pictures[request] }
 
     /// A picture from a file on this device of no more than 2 MB, read and
@@ -3132,30 +3388,137 @@ final class BernPictures {
         await load(Request(url: url))
     }
 
+    private func releaseDownloadWaiter(url: String, id: UUID, task: Task<RawReading, Never>) {
+        guard var waiters = downloadWaiters[url], waiters.remove(id) != nil else { return }
+        if waiters.isEmpty {
+            downloadWaiters.removeValue(forKey: url)
+            if downloading[url] == task {
+                downloading.removeValue(forKey: url)
+                task.cancel()
+            }
+        } else {
+            downloadWaiters[url] = waiters
+        }
+    }
+
+    private func finishDownload(url: String, id: UUID, task: Task<RawReading, Never>) {
+        if var waiters = downloadWaiters[url] {
+            waiters.remove(id)
+            if waiters.isEmpty {
+                downloadWaiters.removeValue(forKey: url)
+            } else {
+                downloadWaiters[url] = waiters
+            }
+        }
+        if downloading[url] == task {
+            downloading.removeValue(forKey: url)
+        }
+    }
+
+    /// Decodes `request` from in-memory bytes on a background task, deduplicating identical requests.
+    private func decodeFromBytes(_ data: Data, request: Request) async -> DecodeReading {
+        let needsAverage = averages[request.url] == nil
+        let task = loading[request] ?? Task.detached(priority: .userInitiated) {
+            Self.decodeData(data, request: request, computeAverage: needsAverage)
+        }
+        loading[request] = task
+        let reading = await task.value
+        if loading[request] == task {
+            loading.removeValue(forKey: request)
+        }
+        return reading
+    }
+
     /// The picture of `request`, when it has come; nil when there is no such
     /// file or the caller stopped waiting. A view's task ends with the view,
     /// and a view that appears again starts over.
     func load(_ request: Request) async -> BernImage.Picture? {
         var tries = 0
         while !Task.isCancelled {
-            if let picture = pictures[request] { return picture }
+            if let picture = pictures[request] {
+                touchPicture(request)
+                return picture
+            }
             if refused.contains(request.url) {
                 await pause(nil)
                 continue
             }
-            let used = session
-            let task = loading[request] ?? Task.detached(priority: .userInitiated) { await Self.read(request, through: used) }
-            loading[request] = task
-            let reading = await task.value
-            loading[request] = nil
+
+            let reading: DecodeReading
+            let isLocalSource = Self.served(request.url) || URL(string: request.url)?.isFileURL == true
+            if isLocalSource {
+                let needsAverage = averages[request.url] == nil
+                let task = loading[request] ?? Task.detached(priority: .userInitiated) {
+                    await Self.readLocal(request, computeAverage: needsAverage)
+                }
+                loading[request] = task
+                reading = await task.value
+                if loading[request] == task {
+                    loading.removeValue(forKey: request)
+                }
+            } else if let cachedBytes = rawBytes[request.url] {
+                touchRawBytes(request.url)
+                reading = await decodeFromBytes(cachedBytes, request: request)
+                if case .refused = reading {
+                    forgetRawBytes(request.url)
+                    Self.disk.remove(for: request.url)
+                }
+            } else {
+                guard URL(string: request.url) != nil else { return nil }
+                let task: Task<RawReading, Never>
+                if let existing = downloading[request.url] {
+                    task = existing
+                } else {
+                    let url = request.url
+                    let created = Task.detached(priority: .userInitiated) {
+                        await Self.fetchRaw(url)
+                    }
+                    downloading[url] = created
+                    task = created
+                }
+                let waiterID = UUID()
+                downloadWaiters[request.url, default: []].insert(waiterID)
+                let raw = await withTaskCancellationHandler {
+                    await task.value
+                } onCancel: {
+                    Task { @MainActor in
+                        BernPictures.shared.releaseDownloadWaiter(url: request.url, id: waiterID, task: task)
+                    }
+                }
+                finishDownload(url: request.url, id: waiterID, task: task)
+                if Task.isCancelled { return nil }
+
+                switch raw {
+                case let .data(bytes):
+                    if Self.diskCacheable(request.url) {
+                        rememberRawBytes(request.url, bytes)
+                    }
+                    let decoded = await decodeFromBytes(bytes, request: request)
+                    if case .refused = decoded {
+                        forgetRawBytes(request.url)
+                        Self.disk.remove(for: request.url)
+                    }
+                    reading = decoded
+                case .unreachable:
+                    reading = .unreachable
+                case let .silent(used):
+                    reading = .silent(used)
+                case .refused:
+                    reading = .refused
+                case .absent:
+                    reading = .absent
+                }
+            }
+
+            if Task.isCancelled { return nil }
             switch reading {
-            case let .picture(picture):
+            case let .picture(picture, average):
                 remember(request, picture)
-                if averages[request.url] == nil {
-                    averages[request.url] = Self.average(picture.image)
+                if averages[request.url] == nil, let average {
+                    averages[request.url] = average
                 }
                 return picture
-            case .silent:
+            case let .silent(used):
                 // Requests to one server share a connection, and the next
                 // try would join the one that stalled. A session shares
                 // nothing with another; the old one goes with its last task.
@@ -3184,6 +3547,26 @@ final class BernPictures {
         return URLSession(configuration: configuration)
     }
 
+    /// Whether `url` is a non-loopback http(s) URL eligible for on-disk caching.
+    private nonisolated static func diskCacheable(_ url: String) -> Bool {
+        guard !served(url),
+              let location = URL(string: url),
+              !location.isFileURL,
+              let scheme = location.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              let host = location.host?.lowercased(),
+              !host.isEmpty
+        else { return false }
+        return host != "127.0.0.1" && host != "localhost" && host != "::1" && host != "[::1]"
+    }
+
+    private nonisolated static func isValidImageData(_ data: Data) -> Bool {
+        guard !data.isEmpty else { return false }
+        let noCache = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithData(data as CFData, noCache) else { return false }
+        return CGImageSourceGetCount(source) > 0
+    }
+
     /// Whether the engine serves `url` (`bern::files::serve`).
     private nonisolated static func served(_ url: String) -> Bool {
         var address = url
@@ -3203,11 +3586,10 @@ final class BernPictures {
         }
     }
 
-    /// One try at `request`'s picture, off the interface thread.
-    private nonisolated static func read(_ request: Request, through session: URLSession) async -> Reading {
+    /// Reads and decodes a local `file://` or `served()` resource off the interface thread.
+    private nonisolated static func readLocal(_ request: Request, computeAverage: Bool) async -> DecodeReading {
         let noCache = [kCGImageSourceShouldCache: false] as CFDictionary
         let source: CGImageSource?
-        var remote = false
         if served(request.url) {
             guard let contents = await stream(request.url) else { return .absent }
             source = CGImageSourceCreateWithData(contents as CFData, noCache)
@@ -3215,27 +3597,58 @@ final class BernPictures {
             guard FileManager.default.fileExists(atPath: location.path) else { return .absent }
             source = CGImageSourceCreateWithURL(location as CFURL, noCache)
         } else {
-            guard let location = URL(string: request.url) else { return .absent }
-            remote = true
-            do {
-                let (contents, response) = try await session.data(from: location)
-                if let status = (response as? HTTPURLResponse)?.statusCode, !(200..<300).contains(status) {
-                    return status == 408 || status == 429 || status >= 500 ? .unreachable : .refused
-                }
-                source = CGImageSourceCreateWithData(contents as CFData, noCache)
-            } catch let error as URLError where lasting.contains(error.code) {
-                return .refused
-            } catch let error as URLError where error.code == .timedOut {
-                return .silent
-            } catch {
-                return .unreachable
-            }
+            return .absent
         }
         guard let source,
               let picture = BernImage.decode(source, pixels: BernImage.sampledPixels(
                 source, width: request.width, height: request.height, fit: request.fit, scale: request.scale))
-        else { return remote ? .refused : .absent }
-        return .picture(picture)
+        else { return .absent }
+        let avg = computeAverage ? average(picture.image) : nil
+        return .picture(picture, average: avg)
+    }
+
+    /// Fetches raw image bytes from disk cache or network (gated to 8 concurrent remote requests).
+    private nonisolated static func fetchRaw(_ url: String) async -> RawReading {
+        let cacheable = diskCacheable(url)
+        if cacheable, let diskData = await disk.read(for: url) {
+            if isValidImageData(diskData) {
+                return .data(diskData)
+            }
+            disk.remove(for: url)
+        }
+        guard await remoteGate.acquire() else { return .unreachable }
+        defer { remoteGate.release() }
+        if Task.isCancelled { return .unreachable }
+        guard let location = URL(string: url) else { return .absent }
+        let used = await MainActor.run { BernPictures.shared.session }
+        do {
+            let (contents, response) = try await used.data(from: location)
+            if let status = (response as? HTTPURLResponse)?.statusCode, !(200..<300).contains(status) {
+                return status == 408 || status == 429 || status >= 500 ? .unreachable : .refused
+            }
+            guard isValidImageData(contents) else { return .refused }
+            if cacheable, !Task.isCancelled {
+                disk.write(contents, for: url)
+            }
+            return .data(contents)
+        } catch let error as URLError where lasting.contains(error.code) {
+            return .refused
+        } catch let error as URLError where error.code == .timedOut {
+            return .silent(used)
+        } catch {
+            return .unreachable
+        }
+    }
+
+    /// Decodes `data` for `request` off the interface thread.
+    private nonisolated static func decodeData(_ data: Data, request: Request, computeAverage: Bool) -> DecodeReading {
+        let noCache = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithData(data as CFData, noCache),
+              let picture = BernImage.decode(source, pixels: BernImage.sampledPixels(
+                source, width: request.width, height: request.height, fit: request.fit, scale: request.scale))
+        else { return .refused }
+        let avg = computeAverage ? average(picture.image) : nil
+        return .picture(picture, average: avg)
     }
 
     /// Waits `seconds`, or with nil for as long as it takes, until the
@@ -3274,11 +3687,11 @@ final class BernPictures {
         tryAgain()
     }
 
-    /// The average color of `url`'s picture, loading it when needed.
+    /// The average color of `url`'s picture, loading a tiny thumbnail when needed.
     func average(_ url: String?) -> BernColor? {
         guard let url else { return nil }
         if let value = averages[url] { return .fixed(light: value, dark: value) }
-        let request = Request(url: url)
+        let request = Request(url: url, width: 32, height: 32, fit: .contain, scale: 1)
         if pictures[request] == nil, averaging.insert(url).inserted {
             Task {
                 _ = await load(request)
@@ -3289,7 +3702,7 @@ final class BernPictures {
     }
 
     /// The mean of the picture drawn down to one pixel.
-    private static func average(_ image: CGImage) -> UInt32 {
+    private nonisolated static func average(_ image: CGImage) -> UInt32 {
         var pixel = [UInt8](repeating: 0, count: 4)
         guard let context = CGContext(
             data: &pixel, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,

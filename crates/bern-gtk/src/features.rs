@@ -2450,6 +2450,10 @@ pub(crate) async fn load_avatar_texture(url: &str, size: f64) -> Option<gtk::gdk
 }
 
 async fn load_texture(url: &str, wanted: DecodeBox) -> Option<gtk::gdk::Texture> {
+    let key = (url.to_string(), wanted.key());
+    if let Some(texture) = cached_texture(&key) {
+        return Some(texture);
+    }
     let texture = crate::pictures::picture(url, async |bytes| {
         gio::spawn_blocking(move || decode_texture(&bytes, wanted))
             .await
@@ -2457,7 +2461,7 @@ async fn load_texture(url: &str, wanted: DecodeBox) -> Option<gtk::gdk::Texture>
             .flatten()
     })
     .await?;
-    cache_texture((url.to_string(), wanted.key()), &texture);
+    cache_texture(key, &texture);
     Some(texture)
 }
 

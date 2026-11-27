@@ -98,6 +98,9 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
@@ -1027,6 +1030,14 @@ fun BernSplitButton(
 /// pictures read are kept, so a picture shown again appears at once, and a
 /// read under way is shared. `BernPictureTries` says when to try again.
 object BernPictures {
+    private const val RAW_CACHE_LIMIT = 24 shl 20
+    private const val DISK_FILE_LIMIT = 16 shl 20
+    private const val DISK_CACHE_LIMIT = 256L shl 20
+    private const val DISK_TRIM_TARGET = 192L shl 20
+    private const val DISK_TRIM_INTERVAL = 16
+    private const val DISK_TOUCH_INTERVAL_MS = 60_000L
+    private const val DOWNLOAD_CONCURRENCY = 8
+
     /// A picture of `width` × `height` pixels, read at 1/`sample` of that.
     class Picture(val bitmap: ImageBitmap, val width: Int, val height: Int, val sample: Int) {
         val ratio: Float get() = width.toFloat() / maxOf(1, height)
@@ -1035,13 +1046,20 @@ object BernPictures {
     private val kept = object : LruCache<String, Picture>(64 shl 20) {
         override fun sizeOf(key: String, value: Picture) = value.bitmap.asAndroidBitmap().allocationByteCount
     }
-    private val reading = ConcurrentHashMap<String, Deferred<BernTry<Picture>>>()
+    private val rawBytes = object : LruCache<String, ByteArray>(RAW_CACHE_LIMIT) {
+        override fun sizeOf(key: String, value: ByteArray) = value.size
+    }
+    private val downloading = ConcurrentHashMap<String, Deferred<ByteArray?>>()
+    private val downloadWaiters = ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicInteger>()
+    private val downloadSemaphore = Semaphore(DOWNLOAD_CONCURRENCY)
     /// Each picture's proportion once known; 0 for a file that cannot be read.
     private val ratios = ConcurrentHashMap<String, Float>()
     private val averages = mutableStateMapOf<String, Long>()
     private val averaging = HashSet<String>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val listening = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val diskWrites = java.util.concurrent.atomic.AtomicInteger(0)
+    private val diskTrimming = java.util.concurrent.atomic.AtomicBoolean(false)
 
     /// Starts hearing of what is worth another try, for the first picture
     /// from the network: the network and the app coming to the front. An
@@ -1099,15 +1117,7 @@ object BernPictures {
         kept.get(key)?.let { return it }
         listen(context, url)
         val app = context.applicationContext
-        val picture = BernPictureTries.until(url) {
-            val read = reading[key] ?: scope.async {
-                attempt { decode(app, url, wide, tall, keep = false, twice = fit) }
-            }.also { read ->
-                reading[key] = read
-                read.invokeOnCompletion { reading.remove(key, read) }
-            }
-            read.await()
-        } ?: return null
+        val picture = loadPicture(app, url, wide, tall, keep = false, twice = fit) ?: return null
         kept.put(key, picture)
         return picture
     }
@@ -1118,29 +1128,14 @@ object BernPictures {
         picture.sample <= sample(picture.width, picture.height, wide, tall)
 
     /// The picture at `url` to be drawn `wide` × `tall` pixels: the one kept
-    /// when it is enough, else the read under way when that is, else a new
-    /// read. A read goes on when its caller leaves, and keeps what it read.
-    /// It comes when it comes: a failed try is tried again for as long as
-    /// the caller waits.
+    /// when it is enough, else fetched once per URL and decoded locally at the
+    /// needed sample size.
     suspend fun read(context: Context, url: String, wide: Int, tall: Int): Picture? {
         kept.get(url)?.takeIf { enough(it, wide, tall) }?.let { return it }
         listen(context, url)
         val app = context.applicationContext
-        return BernPictureTries.until(url) {
-            val running = reading[url]?.await()
-            if (running is BernTry.Failed || (running is BernTry.Came && enough(running.value, wide, tall))) {
-                return@until running
-            }
-            val read = scope.async { attempt { decode(app, url, wide, tall, keep = true) } }
-            reading[url] = read
-            read.invokeOnCompletion { reading.remove(url, read) }
-            read.await()
-        }
+        return loadPicture(app, url, wide, tall, keep = true)
     }
-
-    /// One try: whatever else went wrong, no picture.
-    private fun attempt(decoded: () -> BernTry<Picture>): BernTry<Picture> =
-        runCatching(decoded).getOrDefault(BernTry.Absent)
 
     fun average(context: Context, url: String?): BernColor? {
         if (url.isNullOrEmpty()) return null
@@ -1150,13 +1145,258 @@ object BernPictures {
             val app = context.applicationContext
             scope.launch {
                 val picture = kept.get(url)
-                    ?: BernPictureTries.until(url) { attempt { decode(app, url, 32, 32, keep = false) } }
+                    ?: loadPicture(app, url, 32, 32, keep = false)
                     ?: return@launch
                 val average = mean(picture.bitmap.asAndroidBitmap())
                 withContext(Dispatchers.Main) { averages[url] = average }
             }
         }
         return null
+    }
+
+    private fun isLoopback(url: String): Boolean {
+        val rawHost = Uri.parse(url).host?.lowercase() ?: return false
+        val host = rawHost.removePrefix("[").removeSuffix("]")
+        return host == "127.0.0.1" || host == "localhost" || host == "::1"
+    }
+
+    private fun diskKey(url: String): String {
+        val bytes = url.toByteArray(Charsets.UTF_8)
+        val prime = 0x100000001b3L
+        var h1 = -0x340d631b7bdddcdbL
+        var h2 = 0x517cc1b727220a95L
+        for (b in bytes) {
+            val v = b.toLong() and 0xFFL
+            h1 = (h1 xor v) * prime
+            h2 = (h2 xor (v + 1L)) * prime
+        }
+        h2 = (h2 xor h1) * prime
+        h1 = (h1 xor (h2 ushr 32)) * prime
+        val out = CharArray(32)
+        hex16(h1, out, 0)
+        hex16(h2, out, 16)
+        return String(out)
+    }
+
+    private fun hex16(value: Long, out: CharArray, offset: Int) {
+        val digits = "0123456789abcdef"
+        for (i in 0 until 16) {
+            out[offset + i] = digits[((value ushr ((15 - i) * 4)) and 0xFL).toInt()]
+        }
+    }
+
+    private fun diskDir(app: Context): File = File(app.cacheDir, "bern_pictures")
+
+    private fun diskFile(app: Context, url: String): File? {
+        val scheme = Uri.parse(url).scheme?.lowercase()
+        if ((scheme != "http" && scheme != "https") || isLoopback(url)) return null
+        return File(diskDir(app), diskKey(url))
+    }
+
+    private fun readDiskCache(app: Context, url: String): ByteArray? {
+        val file = diskFile(app, url) ?: return null
+        return runCatching {
+            if (!file.isFile) return null
+            val len = file.length()
+            if (len <= 0L || len > DISK_FILE_LIMIT) {
+                file.delete()
+                return null
+            }
+            val bytes = file.readBytes()
+            val now = System.currentTimeMillis()
+            if (now - file.lastModified() > DISK_TOUCH_INTERVAL_MS) {
+                file.setLastModified(now)
+            }
+            bytes
+        }.getOrNull()
+    }
+
+    private fun writeDiskCache(app: Context, url: String, bytes: ByteArray) {
+        if (bytes.isEmpty() || bytes.size > DISK_FILE_LIMIT) return
+        val target = diskFile(app, url) ?: return
+        val dir = target.parentFile ?: return
+        runCatching {
+            dir.mkdirs()
+            val suffix = (kotlin.random.Random.nextLong() ushr 1).toString(16)
+            val tmp = File(dir, "${target.name}.tmp.$suffix")
+            try {
+                tmp.writeBytes(bytes)
+                if (!tmp.renameTo(target)) {
+                    target.delete()
+                    if (!tmp.renameTo(target)) tmp.delete()
+                }
+            } catch (error: Throwable) {
+                tmp.delete()
+                throw error
+            }
+            if (diskWrites.incrementAndGet() % DISK_TRIM_INTERVAL == 0 && diskTrimming.compareAndSet(false, true)) {
+                scope.launch {
+                    try {
+                        trimDiskCache(dir)
+                    } finally {
+                        diskTrimming.set(false)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun trimDiskCache(dir: File) {
+        runCatching {
+            val entries = dir.listFiles() ?: return
+            val now = System.currentTimeMillis()
+            val cached = ArrayList<File>(entries.size)
+            var total = 0L
+            for (file in entries) {
+                if (!file.isFile) continue
+                if (".tmp." in file.name) {
+                    if (now - file.lastModified() > 600_000L) file.delete()
+                    continue
+                }
+                val len = file.length()
+                if (len > DISK_FILE_LIMIT) {
+                    file.delete()
+                    continue
+                }
+                total += len
+                cached.add(file)
+            }
+            if (total <= DISK_CACHE_LIMIT) return
+            cached.sortBy { it.lastModified() }
+            for (file in cached) {
+                if (total <= DISK_TRIM_TARGET) break
+                val len = file.length()
+                if (file.delete()) total -= len
+            }
+        }
+    }
+
+    private fun cacheRawBytes(url: String, bytes: ByteArray) {
+        if (bytes.size <= RAW_CACHE_LIMIT) {
+            rawBytes.put(url, bytes)
+        }
+    }
+
+    private fun invalidateBytes(app: Context, url: String) {
+        rawBytes.remove(url)
+        ratios.remove(url)
+        runCatching { diskFile(app, url)?.delete() }
+    }
+
+    private fun hasImageBounds(url: String, bytes: ByteArray): Boolean {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return false
+        ratios[url] = bounds.outWidth.toFloat() / bounds.outHeight
+        return true
+    }
+
+    /// Fetches raw encoded bytes for `url` (memory bytes cache -> disk cache
+    /// -> deduplicated network download gated by `downloadSemaphore`).
+    private suspend fun fetchBytes(app: Context, url: String): ByteArray? {
+        rawBytes.get(url)?.let { return it }
+        val scheme = Uri.parse(url).scheme?.lowercase()
+        if (scheme != "http" && scheme != "https") {
+            val bytes = withContext(Dispatchers.IO) {
+                runCatching { BernNative.filesRead(url.toByteArray()) }.getOrNull()
+            } ?: return null
+            cacheRawBytes(url, bytes)
+            return bytes
+        }
+        val deferred = synchronized(downloading) {
+            downloadWaiters.getOrPut(url) { java.util.concurrent.atomic.AtomicInteger(0) }.incrementAndGet()
+            val existing = downloading[url]
+            if (existing != null && !existing.isCancelled) {
+                existing
+            } else {
+                scope.async { loadNetworkBytes(app, url) }.also { created ->
+                    downloading[url] = created
+                    created.invokeOnCompletion {
+                        synchronized(downloading) {
+                            downloading.remove(url, created)
+                        }
+                    }
+                }
+            }
+        }
+        return try {
+            deferred.await()
+        } finally {
+            synchronized(downloading) {
+                val count = downloadWaiters[url]
+                if (count != null && count.decrementAndGet() <= 0) {
+                    downloadWaiters.remove(url)
+                    downloading.remove(url)?.cancel()
+                }
+            }
+        }
+    }
+
+    private suspend fun loadNetworkBytes(app: Context, url: String): ByteArray? {
+        rawBytes.get(url)?.let { return it }
+        readDiskCache(app, url)?.let { cached ->
+            if (hasImageBounds(url, cached)) {
+                cacheRawBytes(url, cached)
+                return cached
+            }
+            invalidateBytes(app, url)
+        }
+        val fetched = BernPictureTries.until(url) {
+            downloadSemaphore.withPermit {
+                runInterruptible(Dispatchers.IO) {
+                    when (val read = BernPictureTries.download(url)) {
+                        is BernTry.Came -> {
+                            val bytes = read.value
+                            if (hasImageBounds(url, bytes)) {
+                                BernTry.Came(bytes)
+                            } else {
+                                invalidateBytes(app, url)
+                                BernTry.Refused
+                            }
+                        }
+                        is BernTry.Failed -> read
+                    }
+                }
+            }
+        } ?: return null
+        cacheRawBytes(url, fetched)
+        writeDiskCache(app, url, fetched)
+        return fetched
+    }
+
+    private suspend fun loadPicture(
+        app: Context,
+        url: String,
+        wide: Int,
+        tall: Int,
+        keep: Boolean,
+        twice: ContentScale? = null,
+    ): Picture? {
+        val uri = Uri.parse(url)
+        val scheme = uri.scheme?.lowercase()
+        if (scheme == "file" || scheme == "content") {
+            return withContext(Dispatchers.IO) {
+                runCatching { decodeLocal(app, uri, url, scheme, wide, tall, keep, twice) }.getOrNull()
+            }
+        }
+        while (true) {
+            val bytes = fetchBytes(app, url) ?: return null
+            val picture = withContext(Dispatchers.Default) {
+                runCatching { decodeBytes(url, bytes, wide, tall, keep, twice) }.getOrNull()
+            }
+            if (picture != null) return picture
+            invalidateBytes(app, url)
+            if (scheme != "http" && scheme != "https") return null
+            var refusedOnce = false
+            BernPictureTries.until(url) {
+                if (!refusedOnce) {
+                    refusedOnce = true
+                    BernTry.Refused
+                } else {
+                    BernTry.Came(Unit)
+                }
+            } ?: return null
+        }
     }
 
     /// The largest power of two `width` × `height` can be divided by and
@@ -1209,37 +1449,23 @@ object BernPictures {
         return maxOf(1, kotlin.math.ceil(w * factor).toInt()) to maxOf(1, kotlin.math.ceil(h * factor).toInt())
     }
 
-    /// Reads the size first, then the pixels at the sample that covers
-    /// `wide` × `tall`; a download is fetched once for both. With `twice`,
-    /// the fit of a double-sampled picture, at exactly twice the pixels it
-    /// covers: the sample that covers that, drawn down to it.
-    private fun decode(context: Context, url: String, wide: Int, tall: Int, keep: Boolean, twice: ContentScale? = null): BernTry<Picture> {
-        val uri = Uri.parse(url)
-        val scheme = uri.scheme?.lowercase()
-        val bytes = when (scheme) {
-            "http", "https" -> when (val read = BernPictureTries.download(url)) {
-                is BernTry.Came -> read.value
-                is BernTry.Failed -> return read
-            }
-            "file", "content" -> null
-            // A scheme the engine serves: its stream, decoded in memory.
-            else -> BernNative.filesRead(url.toByteArray()) ?: return BernTry.Absent
-        }
-        val unreadable = if (scheme == "http" || scheme == "https") BernTry.Refused else BernTry.Absent
-        fun pixels(options: BitmapFactory.Options): Bitmap? = when {
-            bytes != null -> BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
-            scheme == "file" -> BitmapFactory.decodeFile(uri.path, options)
-            else -> context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
-        }
+    private fun decodeWith(
+        url: String,
+        wide: Int,
+        tall: Int,
+        keep: Boolean,
+        twice: ContentScale?,
+        pixels: (BitmapFactory.Options) -> Bitmap?,
+    ): Picture? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         pixels(bounds)
         val width = bounds.outWidth
         val height = bounds.outHeight
-        if (width <= 0 || height <= 0) return unreadable
+        if (width <= 0 || height <= 0) return null
         ratios[url] = width.toFloat() / height
         val target = twice?.let { twiceCovered(width, height, wide, tall, it) }
         val sample = if (target != null) sample(width, height, target.first, target.second) else sample(width, height, wide, tall)
-        var bitmap = pixels(BitmapFactory.Options().apply { inSampleSize = sample }) ?: return unreadable
+        var bitmap = pixels(BitmapFactory.Options().apply { inSampleSize = sample }) ?: return null
         if (target != null && (bitmap.width > target.first || bitmap.height > target.second)) {
             bitmap = Bitmap.createScaledBitmap(bitmap, target.first, target.second, true)
         }
@@ -1251,7 +1477,35 @@ object BernPictures {
                 if (kept.get(url)?.let { it.sample < sample } != true) kept.put(url, picture)
             }
         }
-        return BernTry.Came(picture)
+        return picture
+    }
+
+    private fun decodeBytes(
+        url: String,
+        bytes: ByteArray,
+        wide: Int,
+        tall: Int,
+        keep: Boolean,
+        twice: ContentScale? = null,
+    ): Picture? = decodeWith(url, wide, tall, keep, twice) { options ->
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+    }
+
+    private fun decodeLocal(
+        context: Context,
+        uri: Uri,
+        url: String,
+        scheme: String,
+        wide: Int,
+        tall: Int,
+        keep: Boolean,
+        twice: ContentScale? = null,
+    ): Picture? = decodeWith(url, wide, tall, keep, twice) { options ->
+        if (scheme == "file") {
+            BitmapFactory.decodeFile(uri.path, options)
+        } else {
+            context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
+        }
     }
 }
 
@@ -1300,15 +1554,17 @@ fun BernImageURL(
     })
     val doubleSample = twice || maxSide != null
     // Double-sampled (`twice`), it is read for the size it is drawn at.
+    // Key state by `url` only so resizing the same URL keeps the previous
+    // frame on screen until the newly sampled bitmap finishes decoding.
     val key = if (doubleSample && url != null) BernPictures.twiceKey(url, wide, tall) else url
-    var picture by remember(key) { mutableStateOf(key?.let(BernPictures::cached)) }
-    var finished by remember(key) { mutableStateOf(picture != null) }
+    var picture by remember(url) { mutableStateOf(key?.let(BernPictures::cached)) }
+    var finished by remember(url) { mutableStateOf(picture != null) }
     val proportion = aspect ?: picture?.ratio ?: ratio ?: url?.let(BernPictures::known)
     val frame = bernPictureFrame(width, height, proportion, corner, covers)
     val modifier = if (fills) frame.onSizeChanged { laid = it.width } else frame
     if (url != null) {
         val context = LocalContext.current
-        LaunchedEffect(url, wide, tall) {
+        LaunchedEffect(url, wide, tall, doubleSample) {
             if (fills && wide == 0) return@LaunchedEffect
             if (doubleSample) {
                 BernPictures.twice(context, url, wide, tall, fit)?.let { picture = it }
